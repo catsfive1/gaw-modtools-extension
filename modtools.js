@@ -1059,8 +1059,11 @@
     autoDetectHideUi: false,
     isLeadMod: false,
     leadModToken: '',
-    // v5.2.1: hide GAW's right sidebar on all pages (for mod focus)
-    hideSidebar: false,
+    // v5.2.1: hide GAW's right sidebar on all pages (for mod focus).
+    // v8.2.2: default ON per Commander -- mods don't need the community
+    // sidebar cluttering the moderation view. Toggle off via Settings if
+    // an individual mod wants it back.
+    hideSidebar: true,
     // v5.2.1: compact icon-only status bar (hide text labels)
     statusBarCompact: true,
     // v5.2.2: Mod Console dock position. 'modal' (center overlay, default),
@@ -3764,7 +3767,7 @@
   }
 
   // ── T11: Schema version + migration registry ─────────────────────
-  const SCHEMA_VERSION = 1;
+  const SCHEMA_VERSION = 2;
   const K_SCHEMA = 'gam_schema_version';
   function runMigrations(){
     let current = 0;
@@ -3784,6 +3787,17 @@
           console.log('[ModTools] migrated', touched, 'roster entries: pending -> new');
         }
       } catch(e){ console.warn('[ModTools] migration 1 failed', e); }
+    }
+
+    // Migration 2 (v8.2.2): flip hideSidebar default ON for everyone.
+    // Commander's explicit intent: sidebar stays hidden at all times on
+    // the mod team. If a mod wants it back, Settings -> Hide Sidebar OFF,
+    // and this migration doesn't re-fire (it's one-shot, schema-gated).
+    if (current < 2){
+      try {
+        setSetting('hideSidebar', true);
+        console.log('[ModTools] migration 2: hideSidebar forced ON (v8.2.2 default)');
+      } catch(e){ console.warn('[ModTools] migration 2 failed', e); }
     }
 
     // Future migrations go here (increment SCHEMA_VERSION + add block)
@@ -13011,7 +13025,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   function applySidebarMode(){
     try {
       if (!document.body) return;
-      document.body.classList.toggle('gam-hide-sidebar', !!getSetting('hideSidebar', false));
+      document.body.classList.toggle('gam-hide-sidebar', !!getSetting('hideSidebar', true));
     } catch(e){}
   }
   try { applySidebarMode(); } catch(e){}
