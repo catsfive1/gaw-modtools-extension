@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.0.0';
+  const VERSION = 'v8.2.0';
   const C = {
     BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
     BORDER:'#2a2f38', BORDER2:'#3a3f48',
@@ -1130,7 +1130,13 @@
     // (except globally-applied contrast variable bumps; see GIGA Decision #3).
     // v8.1 requires platformHardening=true (inherited dependency for el()
     // discipline and Escape delegate). See GIGA-V8.1-UX-POLISH.md.
-    'features.uxPolish': false
+    'features.uxPolish': false,
+    // v8.2 Mod Chat: direct mod-to-mod messaging via status-bar icon + right-
+    // docked panel. Default ON -- this is a must-have mod feature, not polish.
+    // Can still be flipped off from Settings if anything misbehaves in the
+    // field. Independent of teamBoost / platformHardening; the status-bar
+    // button polls a lightweight unread-count endpoint when logged in.
+    'features.modChat': true
   };
   // v5.2.0 H1: secret keys never touch page localStorage - chrome.storage.local ONLY.
   // v6.3.0: xaiApiKey removed (CWS CRIT-01); Grok key now lives server-side only.
@@ -5471,6 +5477,11 @@
   async function pullPatternsFromCloud(){
     if (!getModToken()) return false;
     try {
+      // v8.1.6 fix: bypass the 6-hour getCloudProfiles cache. Pattern sync
+      // MUST propagate within the 5-minute pull interval; stale cache was
+      // letting new rules sit up to 6h before other mods saw them.
+      _cloudProfilesCache = null;
+      _cloudProfilesFetchedAt = 0;
       const profiles = await getCloudProfiles();
       const payload = profiles && profiles[PATTERN_SYNC_KEY];
       if (!payload) return false;
@@ -5510,11 +5521,22 @@
       updatedBy: me,
     };
     try {
-      await workerCall('/profiles/write', { username: PATTERN_SYNC_KEY, profile });
-      // Invalidate local cache so the next pull definitely sees our write
+      const r = await workerCall('/profiles/write', { username: PATTERN_SYNC_KEY, profile });
+      // v8.1.6 fix: surface push failures. Previously any error was silently
+      // swallowed by `catch(e){}`, so a failed push left local-only rules
+      // that never reached other mods. Log + toast so Commander notices.
+      if (!r || !r.ok) {
+        console.warn('[pattern-sync] push FAILED:', r?.status, r?.data?.error || r?.error || 'unknown');
+        try { snack('\u26A0 Auto-DR rule sync failed -- other mods may not see your change yet', 'warn'); } catch(e){}
+      } else {
+        console.log('[pattern-sync] push OK -- DR:', profile.autoDeathRowRules.length, 'Tard:', profile.autoTardRules.length);
+      }
       _cloudProfilesCache = null;
       _cloudProfilesFetchedAt = 0;
-    } catch(e){}
+    } catch(e){
+      console.error('[pattern-sync] push EXCEPTION:', e);
+      try { snack('\u26A0 Auto-DR rule sync exception: ' + String(e).slice(0, 80), 'warn'); } catch(_){}
+    }
   }
 
   // Kick off initial pull + periodic refresh.  Fire-and-forget; no UI gating.
@@ -7823,6 +7845,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       'v7.1 claim/draft/propose/veto team coordination layer. Master flag; when off, every v7.1 entry is a no-op.');
     addFeatureToggle('Audible Alerts', 'features.audibleAlerts', true,
       'Chime on new proposals and team alerts. Respects tab-hidden + master Super-Mod flag.');
+    addFeatureToggle('Mod Chat', 'features.modChat', true,
+      'v8.2 mod-to-mod messaging: status-bar \u{1F4AC} icon + right-docked chat panel. Polls unread-count every 30s when closed, inbox every 10s when open, pauses on hidden tabs.');
     addFeatureToggle('Daily AI Scan', 'features.ai', false,
       'Run Workers AI username scoring daily on new /users arrivals.');
     addFeatureToggle('Passive Crawler', 'features.crawler', false,
@@ -11141,6 +11165,693 @@ Analyze this comment against the community rules. Then write a brief, profession
     applyUpvoteAgeFilter();
   }, 1000);
 
+  // ╔══════════════════════════════════════════════════════════════════╗
+  // ║  v8.2 MOD CHAT -- mod-to-mod direct messaging                    ║
+  // ╚══════════════════════════════════════════════════════════════════╝
+  // Right-docked chat panel, 420px wide, triggered by a 💬 button in the
+  // status bar. Conversations are grouped by the "other party" (recipient
+  // for messages I sent, sender for messages to me). Broadcast channel
+  // 'ALL' is pinned at the top.
+  //
+  // Polling rules:
+  //   - panel CLOSED   -> /mod/message/unread-count every 30s (badge only)
+  //   - panel OPEN     -> /mod/message/inbox every 10s (incremental via
+  //                        ?since=<latest_created_at>)
+  //   - tab HIDDEN     -> all timers paused; resumed on visibility change
+  //
+  // XSS contract: every sender name, message body, timestamp, and tooltip
+  // is rendered via textContent. No innerHTML for fetched data anywhere.
+  const ModChat = (function(){
+    const STATE = {
+      inited: false,
+      messages: [],           // all known messages, newest-first at index 0
+      msgById: new Map(),     // id -> message
+      selectedConv: null,     // 'ALL' or a mod username
+      unread: 0,
+      lastCreatedAt: 0,       // for ?since= incremental pulls
+      modsList: [],           // [{ mod_username, is_lead }]
+      modsListFetchedAt: 0,
+      panelEl: null,
+      badgeBtn: null,
+      badgeSpan: null,
+      listEl: null,
+      threadEl: null,
+      composerEl: null,
+      recipientSel: null,
+      textarea: null,
+      sendBtn: null,
+      pollClosedTimer: null,
+      pollOpenTimer: null,
+      sending: false,
+      clientSendTimestamps: []  // client-side 30/min gate (belt + suspenders)
+    };
+
+    const POLL_CLOSED_MS = 30_000;
+    const POLL_OPEN_MS   = 10_000;
+    const MODS_LIST_TTL_MS = 5 * 60_000;
+    const CLIENT_RATE_PER_MIN = 30;
+    const MAX_LEN = 2000;
+
+    function isEnabled(){
+      return getSetting('features.modChat', true) !== false;
+    }
+
+    function myName(){
+      try { return (me() || '').toString(); } catch(e){ return ''; }
+    }
+
+    function fmtTime(ms){
+      if (!ms) return '';
+      const d = new Date(ms);
+      const now = Date.now();
+      const diff = now - ms;
+      if (diff < 60_000) return 'just now';
+      if (diff < 3_600_000) return Math.floor(diff / 60_000) + 'm ago';
+      if (diff < 86_400_000) {
+        const h = d.getHours().toString().padStart(2,'0');
+        const m = d.getMinutes().toString().padStart(2,'0');
+        return `${h}:${m}`;
+      }
+      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+    }
+
+    // "Other party" key for a message from the caller's POV.
+    function otherParty(msg, meName){
+      if (msg.to_mod === 'ALL') return 'ALL';
+      if (msg.from_mod === meName) return msg.to_mod;
+      return msg.from_mod;
+    }
+
+    function groupConversations(){
+      const meName = myName();
+      const groups = new Map(); // key -> { key, lastTs, unread, msgs: [] }
+      // Ensure ALL pseudo-conv exists even if no messages yet.
+      groups.set('ALL', { key:'ALL', lastTs:0, unread:0, msgs:[] });
+      for (const msg of STATE.messages){
+        const k = otherParty(msg, meName);
+        let g = groups.get(k);
+        if (!g){ g = { key:k, lastTs:0, unread:0, msgs:[] }; groups.set(k, g); }
+        g.msgs.push(msg);
+        if (msg.created_at > g.lastTs) g.lastTs = msg.created_at;
+        // Count unread: messages directed to me (or ALL) that are still unread
+        // and NOT sent by me.
+        if ((msg.to_mod === meName || msg.to_mod === 'ALL')
+            && msg.from_mod !== meName
+            && msg.read_at == null){
+          g.unread++;
+        }
+      }
+      // Return sorted: ALL pinned first, then by most recent activity.
+      const arr = Array.from(groups.values());
+      arr.sort((a,b)=>{
+        if (a.key === 'ALL' && b.key !== 'ALL') return -1;
+        if (b.key === 'ALL' && a.key !== 'ALL') return 1;
+        return b.lastTs - a.lastTs;
+      });
+      return arr;
+    }
+
+    function injectStyles(){
+      if (document.getElementById('gam-mc-styles')) return;
+      const s = document.createElement('style');
+      s.id = 'gam-mc-styles';
+      s.textContent = `
+#gam-mc-badge{position:relative}
+#gam-mc-badge-count{position:absolute;top:-4px;right:-4px;background:${C.RED};color:#fff;border-radius:8px;padding:0 4px;font-size:9px;font-weight:700;line-height:13px;min-width:13px;height:13px;text-align:center;box-shadow:0 0 0 1.5px ${C.BG};display:none}
+#gam-mc-badge-count.gam-mc-show{display:inline-block}
+#gam-mc-panel{position:fixed;top:0;right:0;bottom:0;width:420px;max-width:95vw;background:${C.BG};border-left:1px solid ${C.BORDER2};z-index:9999988;display:flex;flex-direction:column;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};box-shadow:-8px 0 30px rgba(0,0,0,.55);transform:translateX(100%);transition:transform .2s ease-out}
+#gam-mc-panel.gam-mc-open{transform:translateX(0)}
+.gam-mc-head{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid ${C.BORDER};background:${C.BG2};min-height:44px;box-sizing:border-box}
+.gam-mc-title{font-weight:700;font-size:14px;color:${C.ACCENT};letter-spacing:.2px}
+.gam-mc-close{background:none;border:none;color:${C.TEXT3};font-size:20px;cursor:pointer;padding:2px 8px;line-height:1;border-radius:4px;transition:color .1s,background .1s}
+.gam-mc-close:hover{color:${C.TEXT};background:rgba(255,255,255,.06)}
+.gam-mc-body{flex:1;display:flex;overflow:hidden;min-height:0}
+.gam-mc-list{width:140px;border-right:1px solid ${C.BORDER};background:${C.BG};overflow-y:auto;flex-shrink:0}
+.gam-mc-conv{display:flex;flex-direction:column;gap:2px;padding:10px 10px;border-bottom:1px solid ${C.BORDER};cursor:pointer;transition:background .1s}
+.gam-mc-conv:hover{background:${C.BG2}}
+.gam-mc-conv.gam-mc-sel{background:${C.BG3};border-left:3px solid ${C.ACCENT};padding-left:7px}
+.gam-mc-conv-head{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.gam-mc-conv-name{font-weight:600;color:${C.TEXT};font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gam-mc-conv-name.gam-mc-all{color:${C.PURPLE}}
+.gam-mc-conv-name.gam-mc-lead{color:${C.YELLOW}}
+.gam-mc-conv-unread{background:${C.RED};color:#fff;border-radius:8px;padding:0 5px;font-size:9px;font-weight:700;line-height:14px;min-width:14px;text-align:center}
+.gam-mc-conv-preview{color:${C.TEXT3};font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gam-mc-main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.gam-mc-thread{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px;background:${C.BG}}
+.gam-mc-empty{color:${C.TEXT3};font-style:italic;font-size:12px;padding:20px 0;text-align:center}
+.gam-mc-msg{display:flex;flex-direction:column;gap:2px;max-width:85%;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:8px;padding:7px 10px;word-wrap:break-word;overflow-wrap:anywhere}
+.gam-mc-msg.gam-mc-mine{align-self:flex-end;background:rgba(74,158,255,.15);border-color:rgba(74,158,255,.35)}
+.gam-mc-msg.gam-mc-broadcast{border-left:3px solid ${C.PURPLE}}
+.gam-mc-msg.gam-mc-sending{opacity:.55;font-style:italic}
+.gam-mc-msg-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:10px}
+.gam-mc-msg-from{font-weight:700;color:${C.ACCENT}}
+.gam-mc-msg.gam-mc-mine .gam-mc-msg-from{color:${C.GREEN}}
+.gam-mc-msg-to-all{color:${C.PURPLE};font-weight:600}
+.gam-mc-msg-time{color:${C.TEXT3};font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:9px}
+.gam-mc-msg-body{color:${C.TEXT};font-size:12.5px;line-height:1.45;white-space:pre-wrap}
+.gam-mc-composer{border-top:1px solid ${C.BORDER};padding:10px 12px;background:${C.BG2};display:flex;flex-direction:column;gap:6px}
+.gam-mc-composer-row{display:flex;align-items:center;gap:6px}
+.gam-mc-composer-row label{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:${C.TEXT2};font-weight:600;width:50px;flex-shrink:0}
+.gam-mc-recipient{flex:1;background:${C.BG3};color:${C.TEXT};border:1px solid ${C.BORDER};border-radius:4px;padding:5px 8px;font:inherit;font-size:12px;outline:none}
+.gam-mc-recipient:focus{border-color:${C.ACCENT}}
+.gam-mc-textarea{flex:1;background:${C.BG3};color:${C.TEXT};border:1px solid ${C.BORDER};border-radius:4px;padding:6px 8px;font:inherit;font-size:13px;resize:vertical;min-height:52px;max-height:140px;outline:none;box-sizing:border-box;width:100%}
+.gam-mc-textarea:focus{border-color:${C.ACCENT}}
+.gam-mc-send-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.gam-mc-hint{color:${C.TEXT3};font-size:10px}
+.gam-mc-send-btn{background:${C.ACCENT};color:#fff;border:none;border-radius:4px;padding:6px 16px;font:inherit;font-weight:600;cursor:pointer;transition:opacity .1s}
+.gam-mc-send-btn:disabled{opacity:.5;cursor:not-allowed}
+.gam-mc-send-btn:hover:not(:disabled){opacity:.9}
+.gam-mc-charcount{color:${C.TEXT3};font-size:10px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.gam-mc-charcount.gam-mc-over{color:${C.RED}}
+@media (max-width: 720px){
+  #gam-mc-panel{width:100vw}
+  .gam-mc-list{width:110px}
+}
+      `;
+      document.head.appendChild(s);
+    }
+
+    async function call(path, body){
+      try { return await workerCall(path, body, false); }
+      catch(e){ return { ok:false, status:0, error:String(e && e.message || e) }; }
+    }
+
+    function ingestMessages(rows){
+      if (!Array.isArray(rows) || !rows.length) return 0;
+      let added = 0;
+      for (const m of rows){
+        if (!m || typeof m.id !== 'number') continue;
+        const existing = STATE.msgById.get(m.id);
+        if (existing){
+          // Update read_at if the server has a fresher value.
+          if (m.read_at != null && existing.read_at == null){
+            existing.read_at = m.read_at;
+          }
+          continue;
+        }
+        STATE.msgById.set(m.id, m);
+        added++;
+        if (m.created_at > STATE.lastCreatedAt) STATE.lastCreatedAt = m.created_at;
+      }
+      // Rebuild sorted array only when we actually added something.
+      if (added){
+        STATE.messages = Array.from(STATE.msgById.values())
+          .sort((a,b)=> b.created_at - a.created_at);
+      }
+      return added;
+    }
+
+    function computeUnread(){
+      const meName = myName();
+      let n = 0;
+      for (const msg of STATE.messages){
+        if ((msg.to_mod === meName || msg.to_mod === 'ALL')
+            && msg.from_mod !== meName
+            && msg.read_at == null){
+          n++;
+        }
+      }
+      STATE.unread = n;
+      return n;
+    }
+
+    function updateBadge(){
+      if (!STATE.badgeSpan) return;
+      const n = STATE.unread;
+      if (n > 0){
+        STATE.badgeSpan.textContent = n > 99 ? '99+' : String(n);
+        STATE.badgeSpan.classList.add('gam-mc-show');
+        if (STATE.badgeBtn) STATE.badgeBtn.title = `Mod Chat (${n} unread)`;
+      } else {
+        STATE.badgeSpan.textContent = '';
+        STATE.badgeSpan.classList.remove('gam-mc-show');
+        if (STATE.badgeBtn) STATE.badgeBtn.title = 'Mod Chat';
+      }
+    }
+
+    async function pollUnreadOnce(){
+      if (!isEnabled()) return;
+      if (document.visibilityState === 'hidden') return;
+      const r = await call('/mod/message/unread-count');
+      if (r && r.ok && r.data && typeof r.data.unread === 'number'){
+        STATE.unread = r.data.unread;
+        updateBadge();
+      }
+    }
+
+    async function pollInboxOnce(){
+      if (!isEnabled()) return;
+      if (document.visibilityState === 'hidden') return;
+      // Incremental: only pull rows created after our newest known.
+      const since = STATE.lastCreatedAt || 0;
+      const path = since ? `/mod/message/inbox?since=${since}` : '/mod/message/inbox';
+      const r = await call(path);
+      if (r && r.ok && r.data && Array.isArray(r.data.data)){
+        const added = ingestMessages(r.data.data);
+        if (added > 0){
+          renderConvList();
+          if (STATE.selectedConv) renderThread();
+        }
+        computeUnread();
+        updateBadge();
+      }
+    }
+
+    function startClosedPolling(){
+      stopAllPolling();
+      if (!isEnabled()) return;
+      pollUnreadOnce();
+      STATE.pollClosedTimer = setInterval(pollUnreadOnce, POLL_CLOSED_MS);
+    }
+
+    function startOpenPolling(){
+      stopAllPolling();
+      if (!isEnabled()) return;
+      pollInboxOnce();
+      STATE.pollOpenTimer = setInterval(pollInboxOnce, POLL_OPEN_MS);
+    }
+
+    function stopAllPolling(){
+      if (STATE.pollClosedTimer){ clearInterval(STATE.pollClosedTimer); STATE.pollClosedTimer = null; }
+      if (STATE.pollOpenTimer){ clearInterval(STATE.pollOpenTimer); STATE.pollOpenTimer = null; }
+    }
+
+    function onVisibilityChange(){
+      if (document.visibilityState === 'hidden'){
+        stopAllPolling();
+        return;
+      }
+      // Visible again: resume the appropriate poller.
+      if (isPanelOpen()) startOpenPolling();
+      else startClosedPolling();
+    }
+
+    function isPanelOpen(){
+      return !!(STATE.panelEl && STATE.panelEl.classList.contains('gam-mc-open'));
+    }
+
+    async function refreshModsList(force){
+      const now = Date.now();
+      if (!force && STATE.modsList.length && (now - STATE.modsListFetchedAt) < MODS_LIST_TTL_MS) return;
+      const r = await call('/mod/message/mods-list');
+      if (r && r.ok && r.data && Array.isArray(r.data.data)){
+        STATE.modsList = r.data.data;
+        STATE.modsListFetchedAt = now;
+        renderRecipientOptions();
+      }
+    }
+
+    function renderRecipientOptions(){
+      if (!STATE.recipientSel) return;
+      const current = STATE.recipientSel.value || '';
+      // Clear existing options.
+      while (STATE.recipientSel.firstChild) STATE.recipientSel.removeChild(STATE.recipientSel.firstChild);
+      const addOpt = (value, label, leadClass) => {
+        const o = document.createElement('option');
+        o.value = value;
+        o.textContent = label;
+        if (leadClass) o.className = leadClass;
+        STATE.recipientSel.appendChild(o);
+      };
+      addOpt('ALL', '\u{1F4E2} ALL (broadcast)');
+      for (const m of STATE.modsList){
+        const lead = !!m.is_lead;
+        const label = lead ? `\u2B50 ${m.mod_username} (lead)` : m.mod_username;
+        addOpt(m.mod_username, label);
+      }
+      // Restore prior selection if still valid; else match selectedConv; else ALL.
+      const desired = current && (current === 'ALL' || STATE.modsList.some(m => m.mod_username === current))
+        ? current
+        : (STATE.selectedConv && (STATE.selectedConv === 'ALL' || STATE.modsList.some(m => m.mod_username === STATE.selectedConv))
+            ? STATE.selectedConv
+            : 'ALL');
+      STATE.recipientSel.value = desired;
+    }
+
+    function renderConvList(){
+      if (!STATE.listEl) return;
+      const groups = groupConversations();
+      // Clear.
+      while (STATE.listEl.firstChild) STATE.listEl.removeChild(STATE.listEl.firstChild);
+      for (const g of groups){
+        const isAll = g.key === 'ALL';
+        const isLead = !isAll && STATE.modsList.some(m => m.mod_username === g.key && m.is_lead);
+        const row = el('div', {
+          cls: 'gam-mc-conv' + (STATE.selectedConv === g.key ? ' gam-mc-sel' : '')
+        });
+        const head = el('div', { cls:'gam-mc-conv-head' });
+        const nameSpan = el('span', {
+          cls:'gam-mc-conv-name' + (isAll ? ' gam-mc-all' : isLead ? ' gam-mc-lead' : '')
+        });
+        nameSpan.textContent = isAll ? '\u{1F4E2} ALL' : g.key;
+        head.appendChild(nameSpan);
+        if (g.unread > 0){
+          const ub = el('span', { cls:'gam-mc-conv-unread' });
+          ub.textContent = g.unread > 99 ? '99+' : String(g.unread);
+          head.appendChild(ub);
+        }
+        row.appendChild(head);
+        const preview = el('div', { cls:'gam-mc-conv-preview' });
+        if (g.msgs.length){
+          const latest = g.msgs[0].created_at > g.msgs[g.msgs.length-1].created_at ? g.msgs[0] : g.msgs[g.msgs.length-1];
+          // Groups are built from STATE.messages which is newest-first, so
+          // g.msgs[0] IS the most recent for this conversation.
+          const m = g.msgs[0];
+          const prefix = m.from_mod === myName() ? 'you: ' : '';
+          preview.textContent = prefix + String(m.content || '').slice(0, 60);
+        } else {
+          preview.textContent = isAll ? 'Team-wide broadcasts' : 'No messages yet';
+        }
+        row.appendChild(preview);
+        row.addEventListener('click', ()=> selectConv(g.key));
+        STATE.listEl.appendChild(row);
+      }
+    }
+
+    function renderThread(){
+      if (!STATE.threadEl) return;
+      while (STATE.threadEl.firstChild) STATE.threadEl.removeChild(STATE.threadEl.firstChild);
+      const key = STATE.selectedConv;
+      if (!key){
+        const empty = el('div', { cls:'gam-mc-empty' });
+        empty.textContent = 'Select a conversation to view messages.';
+        STATE.threadEl.appendChild(empty);
+        return;
+      }
+      const meName = myName();
+      const rows = STATE.messages.filter(m => otherParty(m, meName) === key);
+      if (!rows.length){
+        const empty = el('div', { cls:'gam-mc-empty' });
+        empty.textContent = key === 'ALL'
+          ? 'No broadcasts yet. Say hi to the team!'
+          : `No messages with ${key} yet.`;
+        STATE.threadEl.appendChild(empty);
+        return;
+      }
+      // Render oldest-first, newest at bottom.
+      rows.slice().reverse().forEach(m => {
+        const isMine = m.from_mod === meName;
+        const isBroadcast = m.to_mod === 'ALL';
+        let cls = 'gam-mc-msg';
+        if (isMine) cls += ' gam-mc-mine';
+        if (isBroadcast) cls += ' gam-mc-broadcast';
+        if (m.__sending) cls += ' gam-mc-sending';
+        const box = el('div', { cls });
+        const head = el('div', { cls:'gam-mc-msg-head' });
+        const from = el('span', { cls:'gam-mc-msg-from' });
+        from.textContent = isMine ? 'you' : m.from_mod;
+        head.appendChild(from);
+        if (isBroadcast){
+          const tag = el('span', { cls:'gam-mc-msg-to-all' });
+          tag.textContent = '\u2192 ALL';
+          head.appendChild(tag);
+        }
+        const time = el('span', { cls:'gam-mc-msg-time' });
+        time.textContent = m.__sending ? 'sending\u2026' : fmtTime(m.created_at);
+        head.appendChild(time);
+        box.appendChild(head);
+        const body = el('div', { cls:'gam-mc-msg-body' });
+        body.textContent = String(m.content || '');
+        box.appendChild(body);
+        STATE.threadEl.appendChild(box);
+      });
+      // Auto-scroll newest-bottom.
+      STATE.threadEl.scrollTop = STATE.threadEl.scrollHeight;
+      // Mark visible, unread-to-me messages as read.
+      markVisibleRead(rows);
+    }
+
+    async function markVisibleRead(rows){
+      const meName = myName();
+      const ids = [];
+      for (const m of rows){
+        if ((m.to_mod === meName || m.to_mod === 'ALL')
+            && m.from_mod !== meName
+            && m.read_at == null
+            && typeof m.id === 'number'){
+          ids.push(m.id);
+        }
+      }
+      if (!ids.length) return;
+      const r = await call('/mod/message/mark-read', { ids });
+      if (r && r.ok){
+        const now = Date.now();
+        for (const id of ids){
+          const m = STATE.msgById.get(id);
+          if (m && m.read_at == null) m.read_at = now;
+        }
+        computeUnread();
+        updateBadge();
+        renderConvList();
+      }
+    }
+
+    function selectConv(key){
+      STATE.selectedConv = key;
+      if (STATE.recipientSel){
+        // Follow selection in composer unless the user manually changed it.
+        const ok = key === 'ALL' || STATE.modsList.some(m => m.mod_username === key);
+        if (ok) STATE.recipientSel.value = key;
+      }
+      renderConvList();
+      renderThread();
+    }
+
+    function clientRateOk(){
+      const now = Date.now();
+      STATE.clientSendTimestamps = STATE.clientSendTimestamps.filter(t => now - t < 60_000);
+      if (STATE.clientSendTimestamps.length >= CLIENT_RATE_PER_MIN) return false;
+      STATE.clientSendTimestamps.push(now);
+      return true;
+    }
+
+    async function sendCurrent(){
+      if (STATE.sending) return;
+      const content = (STATE.textarea.value || '').trim();
+      if (!content) return;
+      if (content.length > MAX_LEN){
+        try { snack(`Message too long (${content.length}/${MAX_LEN})`, 'warn'); } catch(e){}
+        return;
+      }
+      const to = STATE.recipientSel.value || 'ALL';
+      if (!clientRateOk()){
+        try { snack('Slow down -- 30 messages/minute cap', 'warn'); } catch(e){}
+        return;
+      }
+      STATE.sending = true;
+      STATE.sendBtn.disabled = true;
+      // Optimistic render.
+      const tempId = -Math.floor(Math.random() * 1e9);
+      const optimistic = {
+        id: tempId,
+        from_mod: myName(),
+        to_mod: to,
+        content,
+        created_at: Date.now(),
+        read_at: null,
+        __sending: true
+      };
+      STATE.msgById.set(tempId, optimistic);
+      STATE.messages = Array.from(STATE.msgById.values()).sort((a,b)=> b.created_at - a.created_at);
+      // Keep view on the same conversation.
+      if (!STATE.selectedConv) STATE.selectedConv = to;
+      renderConvList();
+      renderThread();
+      STATE.textarea.value = '';
+      updateCharCount();
+      try {
+        const r = await call('/mod/message/send', { to, content });
+        if (r && r.ok && r.data && r.data.ok && typeof r.data.id === 'number'){
+          // Replace optimistic with real row.
+          STATE.msgById.delete(tempId);
+          const real = {
+            id: r.data.id,
+            from_mod: optimistic.from_mod,
+            to_mod: optimistic.to_mod,
+            content: optimistic.content,
+            created_at: optimistic.created_at,
+            read_at: null
+          };
+          STATE.msgById.set(real.id, real);
+          STATE.messages = Array.from(STATE.msgById.values()).sort((a,b)=> b.created_at - a.created_at);
+          if (real.created_at > STATE.lastCreatedAt) STATE.lastCreatedAt = real.created_at;
+          renderConvList();
+          renderThread();
+        } else {
+          // Rollback optimistic, surface error.
+          STATE.msgById.delete(tempId);
+          STATE.messages = Array.from(STATE.msgById.values()).sort((a,b)=> b.created_at - a.created_at);
+          renderConvList();
+          renderThread();
+          const errText = (r && r.data && r.data.error) || (r && r.error) || `HTTP ${r && r.status || '?'}`;
+          try { snack(`Send failed: ${errText}`, 'error'); } catch(e){}
+        }
+      } finally {
+        STATE.sending = false;
+        STATE.sendBtn.disabled = false;
+        try { STATE.textarea.focus(); } catch(e){}
+      }
+    }
+
+    function updateCharCount(){
+      if (!STATE.textarea) return;
+      const cc = document.getElementById('gam-mc-charcount');
+      if (!cc) return;
+      const n = (STATE.textarea.value || '').length;
+      cc.textContent = `${n}/${MAX_LEN}`;
+      if (n > MAX_LEN) cc.classList.add('gam-mc-over');
+      else cc.classList.remove('gam-mc-over');
+    }
+
+    function buildPanel(){
+      if (STATE.panelEl) return STATE.panelEl;
+      const panel = el('div', { id:'gam-mc-panel', role:'dialog', 'aria-label':'Mod Chat' });
+      const head = el('div', { cls:'gam-mc-head' });
+      const title = el('span', { cls:'gam-mc-title' });
+      title.textContent = '\u{1F4AC} Mod Chat';
+      head.appendChild(title);
+      const closeBtn = el('button', { cls:'gam-mc-close', title:'Close' });
+      closeBtn.textContent = '\u00D7';
+      closeBtn.addEventListener('click', closePanel);
+      head.appendChild(closeBtn);
+      panel.appendChild(head);
+
+      const body = el('div', { cls:'gam-mc-body' });
+      const list = el('div', { cls:'gam-mc-list' });
+      STATE.listEl = list;
+      body.appendChild(list);
+
+      const main = el('div', { cls:'gam-mc-main' });
+      const thread = el('div', { cls:'gam-mc-thread' });
+      STATE.threadEl = thread;
+      main.appendChild(thread);
+
+      const composer = el('div', { cls:'gam-mc-composer' });
+      const toRow = el('div', { cls:'gam-mc-composer-row' });
+      const toLabel = el('label', { for:'gam-mc-recipient' });
+      toLabel.textContent = 'To';
+      const recipient = el('select', { cls:'gam-mc-recipient', id:'gam-mc-recipient' });
+      STATE.recipientSel = recipient;
+      toRow.appendChild(toLabel);
+      toRow.appendChild(recipient);
+      composer.appendChild(toRow);
+
+      const ta = el('textarea', {
+        cls:'gam-mc-textarea',
+        placeholder:'Type your message\u2026 (Ctrl+Enter to send)',
+        maxlength: String(MAX_LEN + 200), // soft cap; server also enforces
+        rows:'2'
+      });
+      STATE.textarea = ta;
+      ta.addEventListener('input', updateCharCount);
+      ta.addEventListener('keydown', (e)=>{
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter'){
+          e.preventDefault();
+          sendCurrent();
+        }
+      });
+      composer.appendChild(ta);
+
+      const sendRow = el('div', { cls:'gam-mc-send-row' });
+      const cc = el('span', { cls:'gam-mc-charcount', id:'gam-mc-charcount' });
+      cc.textContent = `0/${MAX_LEN}`;
+      sendRow.appendChild(cc);
+      const sendBtn = el('button', { cls:'gam-mc-send-btn' });
+      sendBtn.textContent = 'Send';
+      sendBtn.addEventListener('click', sendCurrent);
+      STATE.sendBtn = sendBtn;
+      sendRow.appendChild(sendBtn);
+      composer.appendChild(sendRow);
+
+      main.appendChild(composer);
+      body.appendChild(main);
+      panel.appendChild(body);
+
+      // ESC closes.
+      panel.addEventListener('keydown', (e)=>{
+        if (e.key === 'Escape' || e.key === 'Esc'){
+          e.stopPropagation();
+          closePanel();
+        }
+      });
+
+      document.body.appendChild(panel);
+      STATE.panelEl = panel;
+      renderRecipientOptions();
+      return panel;
+    }
+
+    async function openPanel(){
+      if (!isEnabled()){
+        try { snack('Mod Chat is disabled in Settings', 'warn'); } catch(e){}
+        return;
+      }
+      injectStyles();
+      const panel = buildPanel();
+      requestAnimationFrame(()=> panel.classList.add('gam-mc-open'));
+      // Default to ALL on first open.
+      if (!STATE.selectedConv) STATE.selectedConv = 'ALL';
+      // Refresh mods list (composer) + full inbox sync on open.
+      refreshModsList();
+      const r = await call('/mod/message/inbox');
+      if (r && r.ok && r.data && Array.isArray(r.data.data)){
+        ingestMessages(r.data.data);
+      }
+      computeUnread();
+      updateBadge();
+      renderConvList();
+      renderThread();
+      startOpenPolling();
+      try { STATE.textarea && STATE.textarea.focus(); } catch(e){}
+    }
+
+    function closePanel(){
+      if (!STATE.panelEl) return;
+      STATE.panelEl.classList.remove('gam-mc-open');
+      stopAllPolling();
+      startClosedPolling();
+    }
+
+    function togglePanel(){
+      if (isPanelOpen()) closePanel();
+      else openPanel();
+    }
+
+    function createStatusBarButton(){
+      if (!isEnabled()) return null;
+      const btn = el('button', { cls:'gam-bar-icon', id:'gam-mc-badge', title:'Mod Chat' }, '\u{1F4AC}');
+      const badge = el('span', { id:'gam-mc-badge-count' });
+      btn.appendChild(badge);
+      btn.addEventListener('click', togglePanel);
+      STATE.badgeBtn = btn;
+      STATE.badgeSpan = badge;
+      return btn;
+    }
+
+    function init(){
+      if (STATE.inited) return;
+      STATE.inited = true;
+      if (!isEnabled()) return;
+      if (!getModToken()){
+        // No token -> cannot poll. ModChat is dormant until a token is saved;
+        // the onboarding modal's post-save init() re-entry wakes it up.
+        return;
+      }
+      injectStyles();
+      document.addEventListener('visibilitychange', onVisibilityChange);
+      // Kick off closed-poll cadence so the badge populates.
+      startClosedPolling();
+    }
+
+    return {
+      init,
+      createStatusBarButton,
+      openPanel,
+      closePanel,
+      togglePanel
+    };
+  })();
+
   function buildStatusBar(){
     // v5.2.1: icon-only compact bar. Text labels gone; native `title` gives tooltips.
     // Session = plain colored dot. Fallback = lock icon (closed/open). DR = skull + number.
@@ -11216,6 +11927,9 @@ Analyze this comment against the community rules. Then write a brief, profession
       el('button',{ cls:'gam-bar-icon', onclick:downloadDebugSnapshot, title:'Debug snapshot (redacted export)' }, '\u{1F41E}'),
       // v7.1.2: team-sharable bug report (distinct from 🐞 local export above).
       el('button',{ cls:'gam-bar-icon', onclick:openBugReportModal, title:'Report a bug (sends to team)' }, '\u{1F41B}'),
+      // v8.2: Mod Chat launcher. Shows 💬 with a red unread badge when the
+      // inbox has unseen messages. Gated on features.modChat (default ON).
+      ModChat.createStatusBarButton(),
       // v5.4.0: Clean UI broom — hides share/hide/block/set context from action rows
       el('button',{ id:'gam-clean-broom', cls:'gam-bar-icon' + (getSetting('cleanUi', false) ? ' gam-on' : ''), onclick:toggleCleanUi, title:'Clean UI (hide share/hide/block/set context)' }, '\uD83E\uDDF9'),
       // v5.4.0: Lock button — only on single post pages (/p/<id>). Inline regex so we never
@@ -13764,6 +14478,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     }
 
     buildStatusBar();
+    // v8.2: Mod Chat -- start unread-count poller + wire visibility hook.
+    // No-op if features.modChat=false or the mod has no token.
+    try { ModChat.init(); } catch(e){ console.error('[modchat] init', e); }
     setTimeout(initEasterEggs, 1000);
 
     // v5.1.8/9: auto-detect mod status. DEFAULT OFF (user prefers full UI always).

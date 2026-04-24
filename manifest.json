@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "GAW ModTools",
-  "version": "8.1.5",
-  "description": "Professional moderator toolkit for greatawakening.win: unified Mod Console, shared team flags, audit log, and Death Row queue.",
+  "version": "8.2.0",
+  "description": "Professional moderator toolkit for greatawakening.win: unified Mod Console, shared team flags, audit log, Death Row queue, and direct mod-to-mod messaging.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
