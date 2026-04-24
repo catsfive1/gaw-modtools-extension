@@ -1,0 +1,32 @@
+# Tokens / secrets — MUST NEVER be committed
+*.token
+*.key
+*-token-*.txt
+*_token.txt
+mod-token-*.txt
+lead-token-*.txt
+
+# Backup files
+*.bak
+*.bak.*
+
+# Build artifacts
+dist/
+*.zip
+
+# Node / wrangler
+node_modules/
+.wrangler/
+.dev.vars
+
+# OS
+Thumbs.db
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <!-- v5.8.1 security fix (LOW-3): strict CSP. Blocks inline scripts,
+       eval, and any remote script origin. If popup.js ever leaks XSS,
+       the payload cannot load remote code or execute inline handlers.
+       connect-src pinned to the Cloudflare Worker + xAI API only. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none';
+                 script-src 'self';
+                 style-src 'self' 'unsafe-inline';
+                 img-src 'self' data:;
+                 connect-src https://gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev;
+                 form-action 'none';
+                 base-uri 'none';
+                 frame-ancestors 'none'">
+  <title>GAW ModTools</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="pop-header">
+    <span class="pop-brand">&#x1F6E1; ModTools</span>
+    <span class="pop-ver" id="ver">v5.2.8</span>
+  </div>
+
+  <div class="pop-stats">
+    <div class="pop-stat">
+      <div class="pop-stat-val" id="s-pending">&mdash;</div>
+      <div class="pop-stat-label">Pending</div>
+    </div>
+    <div class="pop-stat">
+      <div class="pop-stat-val" id="s-dr" style="color:#a78bfa">&mdash;</div>
+      <div class="pop-stat-label">Death Row</div>
+    </div>
+    <div class="pop-stat">
+      <div class="pop-stat-val" id="s-banned" style="color:#f04040">&mdash;</div>
+      <div class="pop-stat-label">Banned</div>
+    </div>
+    <div class="pop-stat">
+      <div class="pop-stat-val" id="s-today" style="color:#4A9EFF">&mdash;</div>
+      <div class="pop-stat-label">Bans / 24h</div>
+    </div>
+    <div class="pop-stat">
+      <div class="pop-stat-val" id="s-msgs" style="color:#3dd68c">&mdash;</div>
+      <div class="pop-stat-label">Msgs / 24h</div>
+    </div>
+    <div class="pop-stat">
+      <div class="pop-stat-val" id="s-notes" style="color:#f0a040">&mdash;</div>
+      <div class="pop-stat-label">Notes / 24h</div>
+    </div>
+  </div>
+
+  <div class="pop-alert" id="dr-alert" style="display:none"></div>
+
+  <div class="pop-actions">
+    <a href="https://greatawakening.win/users" target="_blank" class="pop-btn pop-btn-primary">
+      &#x1F4CA; Open Triage Console
+    </a>
+    <a href="https://greatawakening.win/queue" target="_blank" class="pop-btn">
+      &#x1F4CB; Open /queue
+    </a>
+    <a href="https://greatawakening.win/ban" target="_blank" class="pop-btn">
+      &#x1F528; Open /ban
+    </a>
+    <a href="https://greatawakening.win" target="_blank" class="pop-btn">
+      &#x1F3E0; Open GAW
+    </a>
+  </div>
+
+  <div class="pop-tools">
+    <button id="debugBtn" class="pop-btn pop-btn-ghost">&#x1F9EA; Debug snapshot</button>
+    <button id="dashBtn" class="pop-btn pop-btn-ghost">&#x1F4CA; Dashboard</button>
+  </div>
+
+  <div class="pop-tools">
+    <button class="pop-btn pop-btn-ghost crawl-btn" data-section="users" data-pages="10">&#x1F578; Crawl /users (10)</button>
+    <button class="pop-btn pop-btn-ghost crawl-btn" data-section="users" data-pages="30">&#x1F578; Crawl /users (30)</button>
+    <button class="pop-btn pop-btn-ghost crawl-btn" data-section="queue" data-pages="5">&#x1F578; Crawl /queue (5)</button>
+  </div>
+  <div id="crawlStatus" class="pop-token-status"></div>
+
+  <div class="pop-token">
+    <label for="tokenInput">&#x1F511; Team Mod Token</label>
+    <input id="tokenInput" type="password" placeholder="paste once \u2014 stored locally">
+    <button id="tokenSave" class="pop-btn pop-btn-ghost">Save</button>
+    <div id="tokenStatus" class="pop-token-status"></div>
+  </div>
+
+  <div class="pop-token" id="leadSection" style="display:none">
+    <label for="leadInput">&#x1F451; Lead Mod Token</label>
+    <input id="leadInput" type="password" placeholder="lead-mod token &mdash; enables HUD + invites">
+    <button id="leadSave" class="pop-btn pop-btn-ghost">Save</button>
+    <div id="leadStatus" class="pop-token-status"></div>
+    <div class="pop-tools" style="margin-top:8px">
+      <button id="inviteBtn" class="pop-btn pop-btn-ghost">&#x1F4E8; Generate invite link</button>
+    </div>
+    <div id="inviteResult" class="pop-token-status"></div>
+  </div>
+
+  <!-- v7.2 Platform Hardening: Claim invite button. When platformHardening is
+       on, URL-detected invite codes are staged into chrome.storage.session by
+       the content script and ONLY committed after this button + confirm. -->
+  <div class="pop-tools" id="claimInviteWrap" style="display:none">
+    <button id="claimInviteBtn" class="pop-btn pop-btn-ghost">&#x1F4E8; Claim invite</button>
+    <div id="claimInviteStatus" class="pop-token-status"></div>
+  </div>
+
+  <div class="pop-footer">
+    <button id="exportBtn" class="pop-link">Export log</button>
+    <span class="pop-sep">&middot;</span>
+    <button id="clearBtn" class="pop-link pop-link-danger">Clear all</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
