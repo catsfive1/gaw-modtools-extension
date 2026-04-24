@@ -13244,6 +13244,29 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   function showTokenOnboardingModal(reason){
     if (_tokenOnboardingOpen) return;
     if (!document || !document.body) return;
+
+    // v8.2.4: LAST-LINE-OF-DEFENSE kill switch. If window.__GAM_KILL_MODAL is
+    // true OR settings flag `features.suppressTokenModal` is true, bail BEFORE
+    // rendering. Also do one synchronous cache check (in addition to the
+    // async gates at call sites) -- if getModToken() returns non-empty, we
+    // already have a valid-looking token; don't pester. Commander can paste
+    // `window.__GAM_KILL_MODAL = true` in any console to muzzle this modal
+    // for the rest of the page lifetime, instantly.
+    try {
+      if (typeof window !== 'undefined' && window.__GAM_KILL_MODAL === true) {
+        console.log('[modtools] modal suppressed: __GAM_KILL_MODAL=true');
+        return;
+      }
+      if (getSetting('features.suppressTokenModal', false) === true) {
+        console.log('[modtools] modal suppressed: features.suppressTokenModal=true');
+        return;
+      }
+      if (getModToken && getModToken()) {
+        console.log('[modtools] modal suppressed: cache has token');
+        return;
+      }
+    } catch(e) { /* fall through to original behavior if checks blow up */ }
+
     _tokenOnboardingOpen = true;
 
     const backdrop = document.createElement('div');
