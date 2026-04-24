@@ -851,7 +851,63 @@
       // v5.2.0 H2: sniff log excluded from snapshot by default (may contain auth tokens / moderation payloads).
       // Include only when the user explicitly opts in via debug settings.
       sniffLog: getSetting('includeSniffInDebug', false) ? lsGet(K_SNIFF, []) : '[redacted - opt in via settings.includeSniffInDebug]',
-      schemaVersion: (function(){ try { return parseInt(localStorage.getItem(K_SCHEMA)||'0'); } catch(e){ return 0; } })()
+      schemaVersion: (function(){ try { return parseInt(localStorage.getItem(K_SCHEMA)||'0'); } catch(e){ return 0; } })(),
+
+      // v8.2.6: network + firehose diagnostics for remote debugging.
+      // -----------------------------------------------------------------
+      // Last 50 worker calls. No request bodies; no tokens; just path,
+      // method, HTTP status, latency, ok flag, and trimmed error strings.
+      networkLog: (function(){
+        try { return _netLog ? _netLog.slice() : []; } catch(e){ return []; }
+      })(),
+      // Firehose live state: active flag, pages crawled this session,
+      // posts pushed, error count. Useful when mods report "firehose
+      // isn't ingesting" or "crawler is stuck".
+      firehoseState: (function(){
+        try {
+          if (typeof _firehoseState === 'object' && _firehoseState) {
+            return {
+              active: !!_firehoseState.active,
+              aborted: !!_firehoseState.abort,
+              pagesCrawled: _firehoseState.pagesCrawled || 0,
+              postsQueued: _firehoseState.postsQueued || 0,
+              errors: _firehoseState.errors || 0
+            };
+          }
+        } catch(e){}
+        return { available: false };
+      })(),
+      // Token onboarding breadcrumbs: when did the modal successfully run
+      // /mod/whoami and stamp the one-shot flag? Helps identify the
+      // "still getting asked for token" class of issues.
+      auth: (function(){
+        try {
+          const s = _allSettings() || {};
+          return {
+            onboardedOnce: !!s.tokenOnboardedOnce,
+            onboardedAs: s.tokenOnboardedAs || null,
+            onboardedAt: s.tokenOnboardedAt ? new Date(s.tokenOnboardedAt).toISOString() : null,
+            suppressModal: !!s['features.suppressTokenModal']
+          };
+        } catch(e){ return { available: false }; }
+      })(),
+      // Cross-mod pattern sync: when did pushPatternsToCloud last run?
+      // Is the cloud cache populated? Useful for "auto-DR rules didn't
+      // propagate to other mods" class of issues.
+      patternSync: (function(){
+        try {
+          return {
+            lastPushMs: (typeof _lastPatternPush === 'number' && _lastPatternPush > 0)
+              ? new Date(_lastPatternPush).toISOString()
+              : 'never',
+            cloudCacheFetchedAt: (typeof _cloudProfilesFetchedAt === 'number' && _cloudProfilesFetchedAt > 0)
+              ? new Date(_cloudProfilesFetchedAt).toISOString()
+              : 'never',
+            localDrCount: (getSetting('autoDeathRowRules', []) || []).length,
+            localTardCount: (getSetting('autoTardRules', []) || []).length
+          };
+        } catch(e){ return { available: false }; }
+      })()
     };
     // localStorage key sizes (not values, for privacy)
     for (const k of Object.values(K)){
@@ -13143,6 +13199,26 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // v8.2.1: consecutive-401 counter so the onboarding modal only re-triggers
   // after 3 sequential 401s (not on every transient auth hiccup).
   let _consecutive401 = 0;
+  // v8.2.6: rolling 50-entry ring buffer of worker calls. Feeds the debug
+  // snapshot so Commander can diagnose network + auth issues (incl. firehose)
+  // without guessing what went wrong. Records: ts, path, method, status,
+  // latency_ms, ok, and a trimmed error string. No request bodies, no tokens.
+  const _netLog = [];
+  const NET_LOG_MAX = 50;
+  function _recordNetCall(entry){
+    try {
+      _netLog.push({
+        ts: new Date().toISOString(),
+        path: String(entry.path || '').slice(0, 120),
+        method: String(entry.method || 'GET'),
+        status: entry.status == null ? 0 : entry.status,
+        latency_ms: entry.latency_ms != null ? entry.latency_ms : null,
+        ok: !!entry.ok,
+        error: entry.error ? String(entry.error).slice(0, 200) : undefined
+      });
+      while (_netLog.length > NET_LOG_MAX) _netLog.shift();
+    } catch(e){}
+  }
   // v7.2: legacy direct-fetch workerCall. Attaches 'X-Mod-Token' and
   // 'X-Lead-Token' headers from in-page settings -- used ONLY when the
   // platformHardening flag is OFF. Flag-on path routes through the
@@ -13192,6 +13268,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         try { extSignal.addEventListener('abort', extOnAbort, { once: true }); } catch(e){}
       }
     }
+    const _netT0 = Date.now();
     try {
       const headers = { 'X-Mod-Token': token };
       if (asLead){
@@ -13199,12 +13276,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         if (lt) headers['X-Lead-Token'] = lt;
       }
       if (body !== undefined) headers['Content-Type'] = 'application/json';
+      const _method = body === undefined ? 'GET' : 'POST';
       const r = await fetch(`${WORKER_BASE}${path}`, {
-        method: body === undefined ? 'GET' : 'POST',
+        method: _method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: ctl ? ctl.signal : undefined
       });
+      // v8.2.6: record the call for the debug snapshot.
+      try { _recordNetCall({ path, method: _method, status: r.status, latency_ms: Date.now() - _netT0, ok: r.ok }); } catch(e){}
       const text = await r.text();
       let data = null; try { data = JSON.parse(text); } catch(e){}
       // v8.2.1: debounced rejection modal. A single 401 no longer triggers
@@ -13233,7 +13313,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       return { ok: r.ok, status: r.status, data, text };
     } catch(e) {
       const aborted = e && e.name === 'AbortError';
-      return { ok:false, error: aborted ? 'timeout after 15s' : String(e), timeout: !!aborted };
+      const errMsg = aborted ? 'timeout after 15s' : String(e);
+      // v8.2.6: also record failed calls (exceptions / aborts) so the debug
+      // snapshot shows them next to the 200s.
+      try { _recordNetCall({ path, method: body === undefined ? 'GET' : 'POST', status: 0, latency_ms: Date.now() - _netT0, ok: false, error: errMsg }); } catch(ee){}
+      return { ok:false, error: errMsg, timeout: !!aborted };
     } finally {
       if (timer) clearTimeout(timer);
       if (extOnAbort && extSignal) {
