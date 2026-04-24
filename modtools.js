@@ -13157,6 +13157,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       // v8.2.1: storage-authoritative gate. Do one async read before showing
       // the modal; if storage has the token, hydrate cache and return a fake
       // 'try again' signal instead of bothering the user.
+      // v8.2.5: ALSO check tokenOnboardedOnce -- if true, this is a transient
+      // auth miss for an already-onboarded user; don't open the modal.
       try {
         if (chrome?.storage?.local) {
           const rr = await chrome.storage.local.get(K_SETTINGS);
@@ -13165,6 +13167,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
             _secretsCache['workerModToken'] = st.workerModToken;
             if (st.leadModToken) _secretsCache['leadModToken'] = st.leadModToken;
             return { ok:false, error:'token was cached-stale; retry', retryable:true };
+          }
+          if (st && st.tokenOnboardedOnce){
+            // User has onboarded before but token is missing now. Do NOT
+            // show the modal; just return an error that surfaces in the
+            // caller's UI. Mod can re-enter via popup if they really need.
+            return { ok:false, error:'mod token missing (previously onboarded)' };
           }
         }
       } catch(e){}
@@ -13245,13 +13253,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     if (_tokenOnboardingOpen) return;
     if (!document || !document.body) return;
 
-    // v8.2.4: LAST-LINE-OF-DEFENSE kill switch. If window.__GAM_KILL_MODAL is
-    // true OR settings flag `features.suppressTokenModal` is true, bail BEFORE
-    // rendering. Also do one synchronous cache check (in addition to the
-    // async gates at call sites) -- if getModToken() returns non-empty, we
-    // already have a valid-looking token; don't pester. Commander can paste
-    // `window.__GAM_KILL_MODAL = true` in any console to muzzle this modal
-    // for the rest of the page lifetime, instantly.
+    // v8.2.4/v8.2.5: LAST-LINE-OF-DEFENSE kill switch, with 4 bail conditions.
+    // The modal will NOT render if ANY of these is true:
+    //   1. window.__GAM_KILL_MODAL === true (one-line console muzzle)
+    //   2. features.suppressTokenModal === true (persistent settings flag)
+    //   3. getModToken() returns non-empty (cache has a valid token)
+    //   4. getSetting('tokenOnboardedOnce') === true (user has onboarded
+    //      at least once; 8.2.5 fix for missing check in this function)
     try {
       if (typeof window !== 'undefined' && window.__GAM_KILL_MODAL === true) {
         console.log('[modtools] modal suppressed: __GAM_KILL_MODAL=true');
@@ -13263,6 +13271,14 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       }
       if (getModToken && getModToken()) {
         console.log('[modtools] modal suppressed: cache has token');
+        return;
+      }
+      // v8.2.5: respect the "has this user ever onboarded" flag inside the
+      // modal function itself. Previously only upstream gates checked it,
+      // leaving a hole if getModToken() returned empty AND upstream gates
+      // were bypassed for any reason.
+      if (getSetting('tokenOnboardedOnce', false) === true) {
+        console.log('[modtools] modal suppressed: tokenOnboardedOnce=true');
         return;
       }
     } catch(e) { /* fall through to original behavior if checks blow up */ }
