@@ -14885,15 +14885,31 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
 
   async function pushPostsBatch(posts) {
-    const token = getModToken();
-    if (!token) throw new Error('no mod token');
-    const r = await fetch(`${WORKER_BASE}/gaw/posts/ingest`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-mod-token': token },
-      body: JSON.stringify({ posts, mod: await firehoseGetMyUsername().catch(() => null), source: 'client-firehose' }),
-    });
-    if (!r.ok) throw new Error(`ingest ${r.status}`);
-    return r.json();
+    // v8.2.7 fix: the storage key is 'workerModToken', NOT 'modToken'. This
+    // mismatch caused every firehose push to throw 'no mod token' -- that's
+    // why tester reports were showing 2566 pages crawled / 0 posts saved /
+    // 3115 errors. getModToken() reads the correct cached key.
+    const token = (typeof getModToken === 'function' ? getModToken() : '') || '';
+    if (!token) throw new Error('no mod token (workerModToken empty)');
+    const t0 = Date.now();
+    const method = 'POST';
+    const path = '/gaw/posts/ingest';
+    try {
+      const r = await fetch(`${WORKER_BASE}${path}`, {
+        method,
+        headers: { 'content-type': 'application/json', 'x-mod-token': token },
+        body: JSON.stringify({ posts, mod: await firehoseGetMyUsername().catch(() => null), source: 'client-firehose' }),
+      });
+      try { _recordNetCall({ path, method, status: r.status, latency_ms: Date.now() - t0, ok: r.ok }); } catch(e){}
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        throw new Error(`ingest ${r.status}: ${body.slice(0, 120)}`);
+      }
+      return r.json();
+    } catch(e) {
+      try { _recordNetCall({ path, method, status: 0, latency_ms: Date.now() - t0, ok: false, error: String(e) }); } catch(ee){}
+      throw e;
+    }
   }
 
   async function firehoseStart() {
