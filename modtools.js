@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.3.0';
+  const VERSION = 'v8.3.1';
   const C = {
     BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
     BORDER:'#2a2f38', BORDER2:'#3a3f48',
@@ -13279,7 +13279,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           }
         }
       } catch(e){}
-      try { showTokenOnboardingModal('missing'); } catch(e){}
+      // v8.3.1: NO LONGER auto-shows the modal. Modal is reachable only via
+      // an explicit user click in the popup. Returning the error lets the
+      // caller surface a snack/inline message; the user opens the popup to
+      // set their token if needed.
+      console.warn('[modtools] worker call attempted with no mod token; returning error');
       return { ok:false, error:'no mod token configured' };
     }
     // v5.2.0 H6: 15s timeout with AbortController.
@@ -13314,22 +13318,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       try { _recordNetCall({ path, method: _method, status: r.status, latency_ms: Date.now() - _netT0, ok: r.ok }); } catch(e){}
       const text = await r.text();
       let data = null; try { data = JSON.parse(text); } catch(e){}
-      // v8.2.1: debounced rejection modal. A single 401 no longer triggers
-      // the modal -- we only show it after >=3 consecutive 401s AND confirm
-      // storage ACTUALLY has no valid-looking token. Eliminates the "modal
-      // pops up on every rare 401 spike" rage pattern.
+      // v8.3.1: 401 no longer triggers the modal at all. We only track the
+      // counter for diagnostic purposes (visible in the debug snapshot's
+      // network log). The user surfaces a token problem by opening the
+      // popup, which is always available.
       if (r.status === 401){
         _consecutive401 = (_consecutive401 || 0) + 1;
-        if (_consecutive401 >= 3) {
-          try {
-            if (chrome?.storage?.local) {
-              const rr = await chrome.storage.local.get(K_SETTINGS);
-              const st = rr && rr[K_SETTINGS];
-              if (!st || !st.workerModToken) {
-                try { showTokenOnboardingModal('rejected'); } catch(e){}
-              }
-            }
-          } catch(e){}
+        if (_consecutive401 === 3) {
+          // One-shot inline nudge after 3 401s, no modal:
+          try { snack('Auth failing -- open popup to re-enter your mod token.', 'warn'); } catch(e){}
         }
       } else if (r.status >= 200 && r.status < 400) {
         _consecutive401 = 0;
@@ -13550,20 +13547,14 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       });
     } catch(e){}
     // Surface onboarding modal when the worker rejects the token via the
-    // relay path too -- keeps parity with __legacyWorkerCall's 401 branch.
-    // v8.2.1: same debounce + storage-check as the legacy path.
+    // v8.3.1: 401 no longer auto-opens the modal. Single inline nudge
+    // after 3 consecutive 401s, then silence. The popup is always reachable
+    // for token re-entry; the auto-modal was annoying mods who ALREADY had
+    // valid tokens.
     if (r && r.status === 401){
       _consecutive401 = (_consecutive401 || 0) + 1;
-      if (_consecutive401 >= 3) {
-        try {
-          if (chrome?.storage?.local) {
-            const rr = await chrome.storage.local.get(K_SETTINGS);
-            const st = rr && rr[K_SETTINGS];
-            if (!st || !st.workerModToken) {
-              try { showTokenOnboardingModal('rejected'); } catch(e){}
-            }
-          }
-        } catch(e){}
+      if (_consecutive401 === 3) {
+        try { snack('Auth failing (relay) -- open popup to re-enter your mod token.', 'warn'); } catch(e){}
       }
     } else if (r && r.status >= 200 && r.status < 400) {
       _consecutive401 = 0;
@@ -14710,28 +14701,35 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       setTimeout(startPresencePings, 3000);
     }
 
-    // Onboarding: if this browser is a mod but has never been issued a token,
-    // prompt them to paste one. Lead mints the token via provision-mod-token.ps1
-    // and DMs it to the mod; the mod pastes into this modal on first boot.
-    // v8.2.1: storage-authoritative gate (hydrate cache if storage has token).
+    // v8.3.1: NO MORE AUTO-OPENING TOKEN MODAL. Period.
+    //
+    // Init still tries to hydrate the cache from chrome.storage.local in
+    // case _secretsCache is empty (race with preloadSecrets), but if the
+    // mod genuinely has no token, we surface a SINGLE passive snack and
+    // stop. The popup remains the canonical place to set the token.
+    //
+    // Why this is the right call: every previous "fix" (v8.2.1 storage-
+    // authoritative gate, v8.2.3 onboardedOnce flag, v8.2.4 nuclear kill
+    // switch, v8.2.5 4-condition bail) tried to keep the modal but make it
+    // smarter. Each cycle, an edge case got missed. The modal kept firing.
+    // The simplest fix for "modal won't stop appearing" is: don't make the
+    // modal appear automatically. Ever. Only on explicit user action.
     if (isMod && !getModToken()){
       setTimeout(async () => {
         try {
           if (chrome?.storage?.local) {
             const r = await chrome.storage.local.get(K_SETTINGS);
             const stored = r && r[K_SETTINGS];
-            if (stored && typeof stored === 'object'){
-              // Path 1: storage has a token -- hydrate cache, skip modal.
-              if (stored.workerModToken){
-                _secretsCache['workerModToken'] = stored.workerModToken;
-                if (stored.leadModToken) _secretsCache['leadModToken'] = stored.leadModToken;
-                console.log('[modtools] v8.2.3 modal-suppress: token found in storage');
-                return;
-              }
+            if (stored && typeof stored === 'object' && stored.workerModToken){
+              _secretsCache['workerModToken'] = stored.workerModToken;
+              if (stored.leadModToken) _secretsCache['leadModToken'] = stored.leadModToken;
+              console.log('[modtools] v8.3.1: cache rehydrated from storage');
+              return;
             }
           }
-        } catch(e){ console.warn('[modtools] storage check failed before modal:', e); }
-        try { showTokenOnboardingModal('missing'); } catch(e){}
+        } catch(e){ console.warn('[modtools] storage check failed:', e); }
+        // No token anywhere. Single passive snack, NEVER a modal.
+        try { snack('No mod token configured. Open the extension popup to set one.', 'warn'); } catch(e){}
       }, 1500);
     }
 
