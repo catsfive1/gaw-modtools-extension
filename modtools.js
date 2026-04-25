@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.3.1';
+  const VERSION = 'v8.3.2';
   const C = {
     BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
     BORDER:'#2a2f38', BORDER2:'#3a3f48',
