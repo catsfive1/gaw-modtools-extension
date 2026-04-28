@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.3.2';
+  const VERSION = 'v8.3.3';
   const C = {
     BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
     BORDER:'#2a2f38', BORDER2:'#3a3f48',
@@ -1986,10 +1986,13 @@
   }
 
   // --- CHUNK 12: Death Row idempotency ------------------------------------
-  // In-flight Set keyed by lowercased username. `markDrInFlight` returns
-  // false if the user is already executing (caller should bail). The
-  // finally-block in the call site must call `clearDrInFlight`. Flag-gated
-  // on every consumer; Session-1 callers NEVER touched this.
+  // v8.3.3: dedup is now UNCONDITIONAL (was flag-gated behind
+  // platformHardening). The original guard only ran for opted-in users,
+  // which left default-config users vulnerable to N-tab N-fire duplicate
+  // bans (Commander hit this — same user banned 4x in one minute when 4
+  // GAW tabs were open). All callers now invoke markDrInFlight without a
+  // flag check; same-tab races are blocked by the in-memory Set; cross-tab
+  // races are blocked by `acquireDrLock` (chrome.storage.local with TTL).
   const __drExecuting = new Set();
   function __drKey(u){ return String(u == null ? '' : u).toLowerCase().replace(/^@+/, ''); }
   function markDrInFlight(u){
@@ -2002,6 +2005,38 @@
   function clearDrInFlight(u){
     const k = __drKey(u);
     if (k) __drExecuting.delete(k);
+  }
+  // v8.3.3: cross-tab Death Row mutex. First tab to claim wins; others
+  // skip. 5-min TTL covers the entire DR fire+verify+audit cycle. Uses
+  // chrome.storage.local since extension storage writes are serialized
+  // at the browser level (no real race except optimistic-CAS verify).
+  const DR_LOCK_TTL_MS = 5 * 60 * 1000;
+  async function acquireDrLock(username){
+    const k = __drKey(username);
+    if (!k || !chrome?.storage?.local) return true; // fail-open
+    const storeKey = `gam_dr_lock_${k}`;
+    try {
+      const r = await chrome.storage.local.get(storeKey);
+      const now = Date.now();
+      const existing = r[storeKey];
+      if (existing && existing.expiresAt > now) {
+        console.info('[DR cross-tab lock] held for', k, 'until', new Date(existing.expiresAt).toISOString());
+        return false;
+      }
+      const myStamp = now + Math.random();
+      await chrome.storage.local.set({ [storeKey]: { acquiredAt: myStamp, expiresAt: now + DR_LOCK_TTL_MS } });
+      // CAS verify: re-read and confirm we own it. If another tab raced
+      // and won, our acquiredAt won't match.
+      const r2 = await chrome.storage.local.get(storeKey);
+      if (r2[storeKey] && r2[storeKey].acquiredAt === myStamp) return true;
+      console.info('[DR cross-tab lock] CAS lost for', k);
+      return false;
+    } catch(e){ console.warn('[DR cross-tab lock] error:', e); return true; /* fail-open */ }
+  }
+  async function releaseDrLock(username){
+    const k = __drKey(username);
+    if (!k || !chrome?.storage?.local) return;
+    try { await chrome.storage.local.remove(`gam_dr_lock_${k}`); } catch(e){}
   }
 
   // --- CHUNK 13: askTextModal ---------------------------------------------
@@ -5812,12 +5847,17 @@
     if(ready.length===0) return;
     console.log(`[DeathRow] ${ready.length} inmate(s) ready`);
     for(const inmate of ready){
-      // v7.2 CHUNK 12: idempotency guard. Flag-on path refuses to double-fire
-      // an execution for a username already in-flight in this tab. Flag-off
-      // keeps v7.1.2 byte-for-byte behavior.
-      const __drGate = __hardeningOn();
-      if (__drGate && !markDrInFlight(inmate.username)){
-        console.info('[DR] already executing', inmate.username);
+      // v8.3.3: unconditional same-tab + cross-tab dedup (was flag-gated
+      // behind platformHardening, which left default-config users with N
+      // duplicate bans when N tabs were open).
+      if (!markDrInFlight(inmate.username)){
+        console.info('[DR] same-tab already executing', inmate.username);
+        continue;
+      }
+      const _crossTabLockOk = await acquireDrLock(inmate.username);
+      if (!_crossTabLockOk){
+        clearDrInFlight(inmate.username);
+        console.info('[DR] cross-tab lock held by another tab; skipping', inmate.username);
         continue;
       }
       try {
@@ -5828,28 +5868,25 @@
           rosterSetStatus(inmate.username, 'banned');
           if (v !== null) markVerified(inmate.username, v);
           logAction({type:'ban', user:inmate.username, violation:'username', duration:-1, reason:inmate.reason, source:'death-row', verified:v, delayHours:Math.round((inmate.executeAt-inmate.queuedAt)/3600000)});
-          // v7.2 CHUNK 12: populate dr_scheduled_at so the partial unique
-          // index on (target_user, dr_scheduled_at) catches duplicates.
-          if (__drGate){
-            try {
-              const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
-              workerCall('/audit/log', {
-                mod: me,
-                action: 'ban_deathrow',
-                user: inmate.username,
-                target_user: inmate.username,
-                dr_scheduled_at: Number(inmate.executeAt) || Date.now(),
-                details: { reason: inmate.reason, source: 'death-row', verified: v }
-              }).catch(function(){});
-            } catch(e){}
-          }
+          try {
+            const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
+            workerCall('/audit/log', {
+              mod: me,
+              action: 'ban_deathrow',
+              user: inmate.username,
+              target_user: inmate.username,
+              dr_scheduled_at: Number(inmate.executeAt) || Date.now(),
+              details: { reason: inmate.reason, source: 'death-row', verified: v }
+            }).catch(function(){});
+          } catch(e){}
           snack(`\u{1F480} EXECUTED: ${inmate.username}${v===true?' (VERIFIED)':''}`, 'success');
         } else {
           snack(`\u{26A0}\u{FE0F} Death Row FAILED: ${inmate.username} -- will retry next visit`, 'error');
         }
       } catch(err){ console.error('[DeathRow]', inmate.username, err); }
       finally {
-        if (__drGate) clearDrInFlight(inmate.username);
+        clearDrInFlight(inmate.username);
+        await releaseDrLock(inmate.username);
       }
       await new Promise(r=>setTimeout(r, 2000));
     }
@@ -9815,11 +9852,15 @@ Analyze this comment against the community rules. Then write a brief, profession
         flushBtn.textContent = '\u{1F525} Flushing...';
         let ok = 0, fail = 0;
         for (const inmate of pending){
-          // v7.2 CHUNK 12: idempotency. Flag-on skips already-in-flight
-          // targets; flag-off path stays identical to v7.1.2.
-          const __drGate = __hardeningOn();
-          if (__drGate && !markDrInFlight(inmate.username)){
-            console.info('[DR] already executing', inmate.username);
+          // v8.3.3: unconditional same-tab + cross-tab dedup.
+          if (!markDrInFlight(inmate.username)){
+            console.info('[DR flush] same-tab already executing', inmate.username);
+            continue;
+          }
+          const _crossTabLockOk = await acquireDrLock(inmate.username);
+          if (!_crossTabLockOk){
+            clearDrInFlight(inmate.username);
+            console.info('[DR flush] cross-tab lock held; skipping', inmate.username);
             continue;
           }
           try {
@@ -9831,24 +9872,23 @@ Analyze this comment against the community rules. Then write a brief, profession
                 if (v !== null) markVerified(inmate.username, v);
               });
               logAction({type:'ban', user:inmate.username, violation:'username', duration:-1, reason:inmate.reason, source:'dr-flush', delayHours:Math.round((inmate.executeAt-inmate.queuedAt)/3600000)});
-              if (__drGate){
-                try {
-                  const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
-                  workerCall('/audit/log', {
-                    mod: me,
-                    action: 'ban_deathrow',
-                    user: inmate.username,
-                    target_user: inmate.username,
-                    dr_scheduled_at: Number(inmate.executeAt) || Date.now(),
-                    details: { reason: inmate.reason, source: 'dr-flush' }
-                  }).catch(function(){});
-                } catch(e){}
-              }
+              try {
+                const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
+                workerCall('/audit/log', {
+                  mod: me,
+                  action: 'ban_deathrow',
+                  user: inmate.username,
+                  target_user: inmate.username,
+                  dr_scheduled_at: Number(inmate.executeAt) || Date.now(),
+                  details: { reason: inmate.reason, source: 'dr-flush' }
+                }).catch(function(){});
+              } catch(e){}
               ok++;
             } else { fail++; }
           } catch(e){ fail++; }
           finally {
-            if (__drGate) clearDrInFlight(inmate.username);
+            clearDrInFlight(inmate.username);
+            await releaseDrLock(inmate.username);
           }
           await new Promise(r=>setTimeout(r, 1500));
         }
