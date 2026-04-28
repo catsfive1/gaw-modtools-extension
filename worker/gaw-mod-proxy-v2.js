@@ -788,7 +788,7 @@ async function handleAiScore(request, env) {
               'content-type': 'application/json'
             },
             body: JSON.stringify({
-              model: 'claude-3-5-haiku-latest',
+              model: 'claude-haiku-4-5',
               max_tokens: 1024,
               system: systemPrompt,
               messages: [{ role: 'user', content: userPrompt }]
@@ -799,7 +799,7 @@ async function handleAiScore(request, env) {
           const content = (data && data.content && data.content[0] && data.content[0].text) || '[]';
           const m = content.match(/\[\s*\{[\s\S]*\}\s*\]/);
           let parsed; try { parsed = m ? JSON.parse(m[0]) : []; } catch { parsed = []; }
-          return { ok: true, scores: parsed, model: 'claude-3-5-haiku', cost: 0 };
+          return { ok: true, scores: parsed, model: 'claude-haiku-4-5', cost: 0 };
         }
         return { ok: false, error: 'unknown provider' };
       });
@@ -882,7 +882,7 @@ async function handleAiGrokChat(request, env) {
               'content-type': 'application/json'
             },
             body: JSON.stringify({
-              model: 'claude-3-5-haiku-latest',
+              model: 'claude-haiku-4-5',
               max_tokens: maxTokens,
               messages: [{ role: 'user', content: prompt.slice(0, 8000) }]
             })
@@ -890,7 +890,7 @@ async function handleAiGrokChat(request, env) {
           if (!aResp.ok) return { ok: false, error: 'anthropic ' + aResp.status };
           const data = await aResp.json();
           const text = ((data && data.content && data.content[0] && data.content[0].text) || '').trim();
-          return { ok: true, text, model: 'claude-3-5-haiku' };
+          return { ok: true, text, model: 'claude-haiku-4-5' };
         }
         if (provider === 'workers-ai') {
           if (!env.AI) return { ok: false, error: 'env.AI binding undefined' };
@@ -992,7 +992,7 @@ async function handleAiBanSuggest(request, env) {
               'content-type': 'application/json'
             },
             body: JSON.stringify({
-              model: 'claude-3-5-haiku-latest',
+              model: 'claude-haiku-4-5',
               max_tokens: 400,
               system: sys,
               messages: [{ role: 'user', content: prompt.slice(0, 8000) }]
@@ -1002,7 +1002,7 @@ async function handleAiBanSuggest(request, env) {
           const data = await aResp.json();
           const text = ((data && data.content && data.content[0] && data.content[0].text) || '').trim();
           if (!text) return { ok: false, error: 'empty anthropic response' };
-          return { ok: true, text, model: 'claude-3-5-haiku', cost: 0 };
+          return { ok: true, text, model: 'claude-haiku-4-5', cost: 0 };
         }
         return { ok: false, error: 'unknown provider' };
       });
