@@ -1,6 +1,12 @@
-# GAW ModTools — One-Shot Build Prompt
+# GAW ModTools — One-Shot Build Prompt (v9.1)
 
-A single self-contained brief to rebuild the entire system from scratch. Distilled from 10 versions of pain, 8 GIGAs, and 200+ commits.
+A single self-contained brief to rebuild the entire system from scratch. Distilled from 12 versions of pain (v1 → v8.3.4), 8 GIGAs, and 250+ commits.
+
+**v9.1 additions over v9.0** (lessons paid for in the v8.3.x cycle):
+- The "modal won't auto-fire" rule was wrong — modal MUST fire on first boot when storage is truly empty. v8.3.1 nuclear-removal broke new-mod onboarding; v8.3.4 restored the storage-gated trigger. The right rule is: **storage-gated modal trigger** — fires only when both cache AND `chrome.storage.local` lack a token. No flag-checks, no debounces, no kill switches; just one synchronous-feeling check.
+- **Worker secrets must be set via tempfile pipe, not interactive paste.** Windows PowerShell mangled `wrangler secret put ANTHROPIC_API_KEY` paste into a single `` (SYN control char) — invalid key, every Claude call returned empty 400. Always: `$key | Out-File -Encoding ASCII -NoNewline $env:TEMP\k.txt; Get-Content $env:TEMP\k.txt -Raw | npx wrangler secret put SECRET_NAME; Remove-Item $env:TEMP\k.txt`.
+- **Cross-tab dedup MUST be designed-in, not retrofitted.** Death Row in v7.2 had same-tab in-flight Set, which was insufficient — multiple browser tabs caused N-fold ban duplication. v8.3.3 added `chrome.storage.local`-backed cross-tab mutex with optimistic CAS verify. Build it in from day one.
+- **Firehose ingest must be matched by a client UI from day one** — shipping the worker without the consumer is shipping a buried treasure no mod uses.
 
 ---
 
@@ -83,11 +89,13 @@ Build a Chrome extension + Cloudflare Worker that is the moderation console for 
 - Multi-step D1 writes: `env.AUDIT_DB.batch([stmt1, stmt2])` for atomicity.
 - Failed Discord posts: enqueue to `discord_retry_queue`, drain via cron with exponential backoff, abandon at 6 attempts.
 - Strict-prefer AI fallback: `caller's prefer → other paid provider → Workers AI Llama → 503`.
+- **Cross-tab mutex on every "fire-once" client action** (Death Row bans, scheduled posts, anything with side effects). Pattern: `chrome.storage.local.get(lockKey)` → if expired or missing, write `{acquiredAt: stamp, expiresAt: now+TTL}`, re-read to verify own stamp (CAS), proceed only on match. Same-tab in-flight `Set` is a complement, not a replacement.
 
-### Token onboarding modal — KEY LESSON
-- **The modal NEVER auto-triggers.** Not on init. Not on 401. Not on cache-miss. Reachable ONLY from an explicit popup button click.
-- "No token configured" UI = passive snack toast: *"Open the popup to set your token."* That's it.
-- This rule exists because every "smart" auto-trigger gating logic shipped between v8.2.1–v8.2.5 missed an edge case and the modal kept ambushing already-onboarded mods. The simplest fix is to remove the auto-trigger entirely.
+### Token onboarding modal — KEY LESSON (v9.1 corrected)
+- **Modal fires ONLY when both cache AND chrome.storage.local lack a token.** First-boot UX is non-negotiable; new mods need the welcome modal. (v8.3.1 over-removed it; v8.3.4 restored.)
+- The check is async: `await chrome.storage.local.get(K_SETTINGS)` — if `stored.workerModToken` exists, hydrate cache and skip modal. If neither has it, show modal once.
+- 401 spike behavior: 3 consecutive 401s + storage ALSO empty → modal. 3 consecutive 401s + storage HAS token → snack ("token rejected, open popup to re-enter") not modal.
+- Don't add `tokenOnboardedOnce` flags, kill switches, or `__GAM_KILL_MODAL` window globals. Those are smell signals that the gate logic is wrong. Storage state is the source of truth — full stop.
 
 ### AI safety (CRITICAL — audit-blocking)
 - No AI verdict commits an action without TWO human keystrokes (Space to expand evidence, Enter to commit). The AI never finalizes a ban / remove / watchlist write on its own.
@@ -202,6 +210,16 @@ Execute these phases sequentially. Each phase ends with a green smoke test from 
 7. Cron drainer for retry queue (25/tick, exp backoff, abandon at 6).
 8. Body-size caps via `safeJson()` on all write endpoints.
 
+### Phase 9.5 — Firehose UI (NEW, ~3 hr)
+
+The worker side of firehose (ingest + FTS5 search + per-user timeline endpoints) is in Phases 1-2. The CLIENT side that actually surfaces it has been the perpetual gap. Build at least these in v1:
+
+1. **Activity Timeline panel in Intel Drawer** — calls `/gaw/user/<u>/timeline`, renders the user's last 50 posts + 100 comments inline. Single biggest mod-productivity win.
+2. **Search panel** in Mod Console — query input, scope toggle (posts / comments / both), date range, click-through to GAW URLs.
+3. **Removal time-machine** — when GAW shows `[removed]`, ModTools enhancer fetches the captured `body_md` and shows a "View captured content" expand link.
+
+See `docs/FIREHOSE.md` for the full 10-feature roadmap. Ship at least the first 3 alongside the ingest, or you'll have a buried treasure no mod uses.
+
 ### Phase 10 — Onboarding + ops (1 hr)
 1. PowerShell scripts (BOM+ASCII, dual-engine parse-clean, 4-step ending):
    - `scripts/provision-mod-token.ps1` — single mod
@@ -230,18 +248,23 @@ Execute these phases sequentially. Each phase ends with a green smoke test from 
 
 ## ANTI-PATTERNS (DO NOT DO)
 
-- ❌ Auto-triggered token modal — every smart-gate logic shipped missed an edge case
-- ❌ Multiple storage keys for the same concept
+- ❌ "Smart" gate logic on the token modal (v8.2.1 → v8.2.5 → v8.3.1 → v8.3.4 saga). **The right design is one storage check, one decision; no flags, no kill switches, no debounces.**
+- ❌ Auto-trigger removal as a fix (v8.3.1 broke first-boot UX for new mods)
+- ❌ Multiple storage keys for the same concept (`modToken` vs `workerModToken` cost an entire firehose)
 - ❌ Silent `catch(e){}` on push paths (always log; consider snack)
 - ❌ Reading user identity from DOM (use `lookupModFromToken`)
 - ❌ Direct external API calls from extension (always proxy via worker)
-- ❌ `'\\path\\to'` route patterns (forward slashes only)
+- ❌ `'\\path\\to'` route patterns (forward slashes only — backslashes silently strip in JS string literals)
 - ❌ Bare `setInterval` in feature code (use MasterHeartbeat orchestrator)
-- ❌ `jsonResponse({}, 204)` for OPTIONS (forbidden body; use `new Response(null, ...)`)
+- ❌ `jsonResponse({}, 204)` for OPTIONS (forbidden body; use `new Response(null, ...)` — this caused error-1101 across the worker for a day)
+- ❌ Same-tab-only dedup on fire-once actions (Death Row N-fold ban duplication when N tabs open)
 - ❌ Including secrets in any debug snapshot, log, or telemetry payload
-- ❌ Bumping `manifest.json` without bumping `const VERSION` in modtools.js
+- ❌ Bumping `manifest.json` without bumping `const VERSION` in modtools.js (debug snapshot version field lies)
+- ❌ Interactive `wrangler secret put` paste in PowerShell (clipped to 1 char of garbage on Windows; always tempfile-pipe)
+- ❌ Shipping firehose ingest without firehose UI (data goes nowhere mods can use)
 - ❌ Single CWS account if multiple devs (Group Publisher tarpit — wait until needed)
 - ❌ Asking the user to verify what curl/wrangler can verify from your side
+- ❌ Going nuclear when targeted is enough (v8.3.1 deleted four trigger sites when only one needed surgery)
 
 ## REPORTING DURING BUILD
 
