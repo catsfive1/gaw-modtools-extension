@@ -260,10 +260,14 @@ async function runAiProvider(env, provider, fn) {
       return { ...out, provider };
     }
     await circuitBreakerRecord(env, provider, false);
-    return { ok: false, provider, error: (out && out.error) || 'unknown' };
+    const errMsg = (out && out.error) || 'unknown';
+    console.warn(`[v8.3 ai] ${provider} fail:`, errMsg);
+    return { ok: false, provider, error: errMsg };
   } catch (e) {
     await circuitBreakerRecord(env, provider, false);
-    return { ok: false, provider, error: String(e).slice(0, 300) };
+    const errMsg = String(e).slice(0, 300);
+    console.warn(`[v8.3 ai] ${provider} threw:`, errMsg);
+    return { ok: false, provider, error: errMsg };
   }
 }
 
@@ -794,7 +798,7 @@ async function handleAiScore(request, env) {
               messages: [{ role: 'user', content: userPrompt }]
             })
           });
-          if (!aResp.ok) return { ok: false, error: 'anthropic ' + aResp.status };
+          if (!aResp.ok) { const eb = await aResp.text().catch(()=>'(no body)'); return { ok: false, error: 'anthropic ' + aResp.status + ': ' + eb.slice(0, 400) }; }
           const data = await aResp.json();
           const content = (data && data.content && data.content[0] && data.content[0].text) || '[]';
           const m = content.match(/\[\s*\{[\s\S]*\}\s*\]/);
@@ -887,7 +891,7 @@ async function handleAiGrokChat(request, env) {
               messages: [{ role: 'user', content: prompt.slice(0, 8000) }]
             })
           });
-          if (!aResp.ok) return { ok: false, error: 'anthropic ' + aResp.status };
+          if (!aResp.ok) { const eb = await aResp.text().catch(()=>'(no body)'); console.warn('[v8.3 anthropic] error body:', JSON.stringify(eb)); return { ok: false, error: 'anthropic ' + aResp.status + ': ' + (eb || '(empty)') }; }
           const data = await aResp.json();
           const text = ((data && data.content && data.content[0] && data.content[0].text) || '').trim();
           return { ok: true, text, model: 'claude-haiku-4-5' };
@@ -998,7 +1002,7 @@ async function handleAiBanSuggest(request, env) {
               messages: [{ role: 'user', content: prompt.slice(0, 8000) }]
             })
           });
-          if (!aResp.ok) return { ok: false, error: 'anthropic ' + aResp.status };
+          if (!aResp.ok) { const eb = await aResp.text().catch(()=>'(no body)'); return { ok: false, error: 'anthropic ' + aResp.status + ': ' + eb.slice(0, 400) }; }
           const data = await aResp.json();
           const text = ((data && data.content && data.content[0] && data.content[0].text) || '').trim();
           if (!text) return { ok: false, error: 'empty anthropic response' };
