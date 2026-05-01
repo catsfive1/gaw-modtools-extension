@@ -651,133 +651,324 @@ $('leadSave').addEventListener('click', saveLead);
 $('leadInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') saveLead(); });
 $('inviteBtn').addEventListener('click', generateInvite);
 
-// v8.5.1: lead-only one-click rotation invite issuer.
-// Asks for a mod username, POSTs to /admin/mod/rotation-invite with the
-// stored lead token, copies the resulting code to clipboard, shows DM-ready
-// text. The lead never sees the token that the mod will end up with -- only
-// this single-use invite code that the mod redeems on their end.
-async function issueRotationInvite() {
-  const resultEl = $('rotateInviteResult');
-  if (!resultEl) return;
-  resultEl.className = 'pop-token-status';
-  try {
-    const { gam_settings } = await chrome.storage.local.get('gam_settings');
-    const s = gam_settings || {};
-    const tok = s.workerModToken || '';
-    const lead = s.leadModToken || '';
-    if (!tok || !lead) {
-      resultEl.className = 'pop-token-status err';
-      resultEl.textContent = 'need both team + lead token first';
-      return;
-    }
+// =========================================================================
+// v8.5.2: Mod rotation roster (lead-only).
+// =========================================================================
+// One button -> inline panel that:
+//   - lists every mod with their rotation status (rotated_at, active invites)
+//   - has a 🚀 "Issue all unrotated" button at the top for initial rollout
+//   - has a per-row "Issue" / "Re-issue" button for ongoing per-mod use
+// After issue, the code lands in a monospace row inline with copy buttons
+// (code only OR full Discord DM template). No typing of usernames anywhere.
+//
+// Backend: GET /admin/mod/list, POST /admin/mod/rotation-invite,
+// POST /admin/mod/rotation-invite-bulk.
 
-    const username = await __popupAskText({
-      title: 'Issue rotation invite',
-      label: 'GAW username of the mod (must already exist in mod_tokens)',
-      placeholder: 'e.g. bubble_bursts',
-      max: 32,
-      validate: function (v) {
-        if (!v) return 'username required';
-        return /^[A-Za-z0-9_-]{2,32}$/.test(v) ? '' : 'invalid username (2-32 chars, alphanumeric + _-)';
-      }
-    });
-    if (!username) { resultEl.textContent = 'cancelled'; return; }
+function __dmTemplate(username, code, ttlHours) {
+  return 'Hey ' + username + ', here is your rotation invite for ModTools.\n\n' +
+    'Open the ModTools popup, click "I have a rotation invite", enter your GAW ' +
+    'username (' + username + '), then paste this code:\n\n' +
+    code + '\n\n' +
+    'Expires in ' + (ttlHours || 72) + 'h and is single-use. Once you claim it, ' +
+    'your token will be one ONLY YOU know.';
+}
 
-    resultEl.textContent = 'issuing...';
-    const resp = await fetch(WORKER_BASE_POPUP + '/admin/mod/rotation-invite', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Mod-Token': tok,
-        'X-Lead-Token': lead
-      },
-      body: JSON.stringify({ username: username })
-    });
-    if (!resp.ok) {
-      resultEl.className = 'pop-token-status err';
-      let msg = 'rejected (HTTP ' + resp.status + ')';
-      try {
-        const j = await resp.json();
-        if (j && j.error) msg += ' -- ' + j.error;
-      } catch (_) {}
-      resultEl.textContent = msg;
-      return;
-    }
-    const data = await resp.json();
-    if (!data || !data.ok || !data.code) {
-      resultEl.className = 'pop-token-status err';
-      resultEl.textContent = 'malformed response';
-      return;
-    }
-
-    // DOM-render the result. Code is shown in a monospace box with an explicit
-    // "Copy code" button + a "Copy DM template" button that puts a ready-to-paste
-    // Discord message on the clipboard.
-    resultEl.className = 'pop-token-status ok';
-    resultEl.textContent = '';
-
-    const heading = document.createElement('div');
-    heading.style.cssText = 'font-weight:700;color:#3dd68c;margin-bottom:6px';
-    heading.textContent = '✓ invite issued for ' + data.username;
-    resultEl.appendChild(heading);
-
-    const expiry = document.createElement('div');
-    expiry.style.cssText = 'font-size:11px;color:#888;margin-bottom:6px';
-    const exp = new Date(data.expires_at);
-    expiry.textContent = 'Expires ' + exp.toLocaleString() + ' (' + (data.ttl_hours || 24) + 'h)';
-    resultEl.appendChild(expiry);
-
-    const codeBox = document.createElement('div');
-    codeBox.style.cssText = 'background:#0f1114;border:1px solid #2a2a2a;border-radius:4px;padding:6px 8px;font-family:ui-monospace,monospace;font-size:11px;word-break:break-all;margin-bottom:6px;color:#e4e4e4';
-    codeBox.textContent = data.code;
-    resultEl.appendChild(codeBox);
-
-    const dmTemplate =
-      'Hey ' + data.username + ', here is your rotation invite for ModTools.\n\n' +
-      'In the ModTools popup, click "I have a rotation invite", enter your GAW username (' + data.username + '), then paste this code:\n\n' +
-      data.code + '\n\n' +
-      'It expires in 24 hours and is single-use. Once you claim it, your token will be one only YOU know.';
-
-    const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
-    function makeBtn(label, payload) {
-      const b = document.createElement('button');
-      b.className = 'pop-btn pop-btn-ghost';
-      b.style.cssText = 'flex:1;min-width:120px;padding:4px 8px;font-size:11px';
-      b.textContent = label;
-      b.addEventListener('click', async function () {
-        try {
-          await navigator.clipboard.writeText(payload);
-          const orig = b.textContent;
-          b.textContent = '✓ copied';
-          setTimeout(function () { b.textContent = orig; }, 1500);
-        } catch (e) {
-          b.textContent = 'copy failed';
-        }
-      });
-      return b;
-    }
-    btnRow.appendChild(makeBtn('Copy code', data.code));
-    btnRow.appendChild(makeBtn('Copy Discord DM template', dmTemplate));
-    resultEl.appendChild(btnRow);
-
-    // Auto-copy the code on first open (saves a click).
+function __makeCopyBtn(label, payload, parentBtn) {
+  const b = document.createElement('button');
+  b.className = 'pop-btn pop-btn-ghost';
+  b.style.cssText = 'font-size:10px;padding:2px 6px;margin-right:4px';
+  b.textContent = label;
+  b.addEventListener('click', async function () {
     try {
-      await navigator.clipboard.writeText(data.code);
-      const note = document.createElement('div');
-      note.style.cssText = 'font-size:10px;color:#888;margin-top:4px;font-style:italic';
-      note.textContent = 'code auto-copied to clipboard';
-      resultEl.appendChild(note);
-    } catch (e) { /* user can still click the buttons */ }
-  } catch (e) {
-    resultEl.className = 'pop-token-status err';
-    resultEl.textContent = 'error: ' + (e && e.message || e);
+      await navigator.clipboard.writeText(payload);
+      const orig = b.textContent;
+      b.textContent = '✓ copied';
+      setTimeout(function () { b.textContent = orig; }, 1500);
+    } catch (e) {
+      b.textContent = 'copy failed';
+    }
+  });
+  return b;
+}
+
+function __renderInviteResult(container, invite, ttlHours) {
+  // Replace existing result block for this mod
+  const existing = container.querySelector('.gam-roster-invite-result');
+  if (existing) existing.remove();
+
+  const block = document.createElement('div');
+  block.className = 'gam-roster-invite-result';
+  block.style.cssText = 'background:#0f1114;border:1px solid #2a2a2a;border-radius:4px;padding:6px;margin-top:4px';
+
+  const codeRow = document.createElement('div');
+  codeRow.style.cssText = 'font-family:ui-monospace,monospace;font-size:10px;word-break:break-all;color:#e4e4e4;margin-bottom:4px';
+  codeRow.textContent = invite.code;
+  block.appendChild(codeRow);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap';
+  btnRow.appendChild(__makeCopyBtn('Copy code', invite.code));
+  btnRow.appendChild(__makeCopyBtn('Copy DM', __dmTemplate(invite.username, invite.code, ttlHours)));
+  block.appendChild(btnRow);
+
+  container.appendChild(block);
+
+  // Auto-copy the code so the lead can paste straight into Discord.
+  try { navigator.clipboard.writeText(invite.code); } catch (e) {}
+}
+
+async function __issueSingleFromRoster(username, rowEl, tokens) {
+  const resp = await fetch(WORKER_BASE_POPUP + '/admin/mod/rotation-invite', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Mod-Token': tokens.team,
+      'X-Lead-Token': tokens.lead
+    },
+    body: JSON.stringify({ username: username })
+  });
+  if (!resp.ok) {
+    const err = document.createElement('div');
+    err.style.cssText = 'color:#ff7a7a;font-size:10px;margin-top:2px';
+    let msg = 'rejected HTTP ' + resp.status;
+    try { const j = await resp.json(); if (j && j.error) msg += ' -- ' + j.error; } catch (_) {}
+    err.textContent = msg;
+    rowEl.appendChild(err);
+    return;
+  }
+  const data = await resp.json();
+  if (!data || !data.ok) return;
+  __renderInviteResult(rowEl, { username: data.username, code: data.code }, data.ttl_hours);
+}
+
+async function __issueBulkFromRoster(panel, tokens) {
+  const ok = await __popupConfirm({
+    title: 'Issue invites for ALL unrotated mods?',
+    body: 'This will generate a 72h rotation invite for every mod who has not ' +
+          'yet rotated. Lead mods are skipped. After this, you will have a list ' +
+          'of codes to DM each mod individually via Discord.\n\nProceed?',
+    okLabel: 'Issue all',
+    cancelLabel: 'Cancel'
+  });
+  if (!ok) return;
+
+  const status = document.createElement('div');
+  status.style.cssText = 'color:#4A9EFF;font-size:11px;margin:6px 0';
+  status.textContent = 'issuing...';
+  panel.appendChild(status);
+
+  const resp = await fetch(WORKER_BASE_POPUP + '/admin/mod/rotation-invite-bulk', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Mod-Token': tokens.team,
+      'X-Lead-Token': tokens.lead
+    },
+    body: '{}'
+  });
+  status.remove();
+
+  if (!resp.ok) {
+    const err = document.createElement('div');
+    err.style.cssText = 'color:#ff7a7a;font-size:11px;margin:6px 0';
+    err.textContent = 'bulk issue rejected (HTTP ' + resp.status + ')';
+    panel.appendChild(err);
+    return;
+  }
+  const data = await resp.json();
+  const invites = (data && data.invites) || [];
+  if (invites.length === 0) {
+    const note = document.createElement('div');
+    note.style.cssText = 'color:#888;font-size:11px;margin:6px 0';
+    note.textContent = data.note || 'no eligible mods';
+    panel.appendChild(note);
+    return;
+  }
+
+  // Drop a "Copy ALL DM templates" button at top of results.
+  const allDms = invites
+    .filter(i => i.code)
+    .map(i => __dmTemplate(i.username, i.code, data.ttl_hours))
+    .join('\n\n----\n\n');
+  const allCodesTable = invites
+    .filter(i => i.code)
+    .map(i => i.username + '\t' + i.code)
+    .join('\n');
+
+  const summary = document.createElement('div');
+  summary.style.cssText = 'background:#0f1114;border:1px solid #3dd68c;border-radius:4px;padding:8px;margin:6px 0';
+  const sumTitle = document.createElement('div');
+  sumTitle.style.cssText = 'color:#3dd68c;font-weight:700;font-size:12px;margin-bottom:6px';
+  sumTitle.textContent = '✓ ' + (data.issued || 0) + ' invites issued (72h, single-use)';
+  summary.appendChild(sumTitle);
+
+  const bulkBtns = document.createElement('div');
+  bulkBtns.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap';
+  bulkBtns.appendChild(__makeCopyBtn('Copy ALL as username\\tcode', allCodesTable));
+  bulkBtns.appendChild(__makeCopyBtn('Copy ALL DM templates', allDms));
+  summary.appendChild(bulkBtns);
+
+  panel.appendChild(summary);
+
+  // Per-row results inside the existing roster rows.
+  for (const inv of invites) {
+    if (!inv.code) continue;
+    const row = panel.querySelector('[data-roster-mod="' + CSS.escape(inv.username) + '"]');
+    if (row) __renderInviteResult(row, inv, data.ttl_hours);
   }
 }
 
-(function wireIssueRotation() {
-  const b = $('rotateInviteBtn');
-  if (b) b.addEventListener('click', issueRotationInvite);
+function __buildRosterRow(m, tokens) {
+  const row = document.createElement('div');
+  row.dataset.rosterMod = m.mod_username;
+  row.style.cssText = 'padding:6px;border-bottom:1px solid #1a1c20';
+
+  const top = document.createElement('div');
+  top.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:6px';
+
+  const info = document.createElement('div');
+  info.style.cssText = 'flex:1;min-width:0';
+
+  const name = document.createElement('div');
+  name.style.cssText = 'color:#e4e4e4;font-weight:600;font-size:12px';
+  name.textContent = m.mod_username + (m.is_lead ? ' 👑' : '');
+  info.appendChild(name);
+
+  const status = document.createElement('div');
+  status.style.cssText = 'font-size:10px';
+  if (m.rotated_at) {
+    status.style.color = '#3dd68c';
+    status.textContent = '✓ rotated ' + new Date(m.rotated_at).toLocaleDateString() +
+      (m.rotation_count > 1 ? ' (' + m.rotation_count + 'x)' : '');
+  } else {
+    status.style.color = '#f0a040';
+    status.textContent = '⚠ never rotated -- lead can still impersonate';
+  }
+  if (m.active_invites > 0) {
+    status.textContent += ' · ' + m.active_invites + ' active invite(s)';
+  }
+  info.appendChild(status);
+
+  top.appendChild(info);
+
+  if (!m.is_lead) {
+    const btn = document.createElement('button');
+    btn.className = 'pop-btn pop-btn-ghost';
+    btn.style.cssText = 'font-size:10px;padding:3px 8px;flex-shrink:0';
+    btn.textContent = m.rotated_at ? 'Re-issue' : 'Issue';
+    btn.addEventListener('click', async function () {
+      btn.disabled = true;
+      btn.textContent = 'issuing...';
+      try {
+        await __issueSingleFromRoster(m.mod_username, row, tokens);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Re-issue';
+      }
+    });
+    top.appendChild(btn);
+  }
+
+  row.appendChild(top);
+  return row;
+}
+
+async function openRotationRoster() {
+  const panel = $('rotateRosterPanel');
+  const result = $('rotateInviteResult');
+  if (!panel) return;
+
+  // Toggle: clicking again closes
+  if (panel.style.display === 'block') {
+    panel.style.display = 'none';
+    panel.replaceChildren();
+    if (result) { result.textContent = ''; result.className = 'pop-token-status'; }
+    return;
+  }
+
+  if (result) {
+    result.className = 'pop-token-status';
+    result.textContent = 'loading roster...';
+  }
+
+  try {
+    const { gam_settings } = await chrome.storage.local.get('gam_settings');
+    const s = gam_settings || {};
+    const team = s.workerModToken || '';
+    const lead = s.leadModToken || '';
+    if (!team || !lead) {
+      if (result) {
+        result.className = 'pop-token-status err';
+        result.textContent = 'need both team + lead token first';
+      }
+      return;
+    }
+    const tokens = { team: team, lead: lead };
+
+    const resp = await fetch(WORKER_BASE_POPUP + '/admin/mod/list', {
+      headers: { 'X-Mod-Token': team, 'X-Lead-Token': lead }
+    });
+    if (!resp.ok) {
+      if (result) {
+        result.className = 'pop-token-status err';
+        result.textContent = 'roster fetch rejected (HTTP ' + resp.status + ')';
+      }
+      return;
+    }
+    const data = await resp.json();
+    const mods = (data && data.mods) || [];
+    const ttlHours = Math.round((data.ttl_ms || 72 * 3600000) / 3600000);
+
+    // Build panel
+    panel.replaceChildren();
+    panel.style.cssText = 'display:block;max-height:380px;overflow-y:auto;background:#0f1114;border:1px solid #2a2a2a;border-radius:6px;padding:8px;margin-top:8px';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #2a2a2a';
+
+    const headerLeft = document.createElement('div');
+    const headerTitle = document.createElement('div');
+    headerTitle.style.cssText = 'font-weight:700;color:#4A9EFF;font-size:12px';
+    const unrotatedNonLead = mods.filter(m => !m.rotated_at && !m.is_lead);
+    headerTitle.textContent = mods.length + ' mods · ' + unrotatedNonLead.length + ' unrotated';
+    headerLeft.appendChild(headerTitle);
+    const headerSub = document.createElement('div');
+    headerSub.style.cssText = 'font-size:10px;color:#888';
+    headerSub.textContent = 'invites valid for ' + ttlHours + 'h, single-use';
+    headerLeft.appendChild(headerSub);
+    header.appendChild(headerLeft);
+
+    const bulkBtn = document.createElement('button');
+    bulkBtn.className = 'pop-btn pop-btn-ghost';
+    bulkBtn.style.cssText = 'font-size:11px;padding:4px 10px;flex-shrink:0';
+    if (unrotatedNonLead.length > 0) {
+      bulkBtn.textContent = '🚀 Issue all (' + unrotatedNonLead.length + ')';
+      bulkBtn.addEventListener('click', () => __issueBulkFromRoster(panel, tokens));
+    } else {
+      bulkBtn.textContent = '✓ all rotated';
+      bulkBtn.disabled = true;
+      bulkBtn.style.opacity = '0.5';
+    }
+    header.appendChild(bulkBtn);
+
+    panel.appendChild(header);
+
+    for (const m of mods) {
+      panel.appendChild(__buildRosterRow(m, tokens));
+    }
+
+    if (result) result.textContent = '';
+  } catch (e) {
+    if (result) {
+      result.className = 'pop-token-status err';
+      result.textContent = 'roster error: ' + (e && e.message || e);
+    }
+  }
+}
+
+(function wireRoster() {
+  const b = $('rotateRosterBtn');
+  if (b) b.addEventListener('click', openRotationRoster);
 })();
 
 // =========================================================================

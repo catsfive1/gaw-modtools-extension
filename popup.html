@@ -103,13 +103,15 @@
       <button id="inviteBtn" class="pop-btn pop-btn-ghost">&#x1F4E8; Generate invite link</button>
     </div>
     <div id="inviteResult" class="pop-token-status"></div>
-    <!-- v8.5.1: lead-only one-click rotation invite issuer. Asks for the
-         mod's GAW username, calls /admin/mod/rotation-invite, copies the
-         code to clipboard, shows DM-ready text. -->
+    <!-- v8.5.2: lead-only mod rotation roster. Replaces the v8.5.1
+         single-issue button with a roster view: see every mod, their
+         rotation status, click to issue per-mod, OR one button to issue
+         for all unrotated at once. -->
     <div class="pop-tools" style="margin-top:8px">
-      <button id="rotateInviteBtn" class="pop-btn pop-btn-ghost">&#x1F504; Issue rotation invite (24h, single-use)</button>
+      <button id="rotateRosterBtn" class="pop-btn pop-btn-ghost">&#x1F465; Mod rotation roster</button>
     </div>
     <div id="rotateInviteResult" class="pop-token-status"></div>
+    <div id="rotateRosterPanel" style="display:none"></div>
   </div>
 
   <!-- v7.2 Platform Hardening: Claim invite button. When platformHardening is

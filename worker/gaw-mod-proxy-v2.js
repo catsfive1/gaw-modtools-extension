@@ -1583,7 +1583,7 @@ async function handleInviteClaim(request, env) {
 //     for the mod's row, marks invite used. Returns the new plaintext
 //     token to the caller. Lead is not in the trust path.
 
-const ROTATION_INVITE_TTL_MS = 24 * 60 * 60 * 1000;
+const ROTATION_INVITE_TTL_MS = 72 * 60 * 60 * 1000; // v8.5.2: 72h (was 24h)
 
 async function handleModTokenRotate(request, env) {
   if (!env.AUDIT_DB) return jsonResponse({ ok: false, error: 'D1 not bound' }, 503);
@@ -1682,6 +1682,113 @@ async function handleAdminRotationInvite(request, env) {
       expires_at: expiresAt,
       ttl_hours: Math.round(ROTATION_INVITE_TTL_MS / 3600000),
       hint: 'Deliver this code to the mod via Discord DM. They paste it into the Claim button in their popup.'
+    });
+  } catch (e) {
+    return jsonResponse({ ok: false, error: String(e && e.message || e) }, 500);
+  }
+}
+
+// v8.5.2: lead-only roster view -- list every mod with rotation status and
+// any outstanding invite. Powers the popup roster panel so the lead never
+// has to type a username again.
+async function handleAdminModList(request, env) {
+  const lead = checkLeadToken(request, env); if (lead) return lead;
+  if (!env.AUDIT_DB) return jsonResponse({ ok: false, error: 'D1 not bound' }, 503);
+  try {
+    const now = Date.now();
+    const rs = await env.AUDIT_DB.prepare(`
+      SELECT m.mod_username, m.is_lead, m.created_at, m.last_used_at,
+             m.rotated_at, m.rotation_count, m.rotated_by,
+             (
+               SELECT COUNT(*) FROM token_invites ti
+                WHERE ti.mod_username = m.mod_username
+                  AND ti.used_at IS NULL
+                  AND ti.expires_at > ?
+             ) AS active_invites
+        FROM mod_tokens m
+       ORDER BY m.is_lead DESC, m.mod_username COLLATE NOCASE
+    `).bind(now).all();
+    const mods = (rs && rs.results) || [];
+    return jsonResponse({ ok: true, mods, now, ttl_ms: ROTATION_INVITE_TTL_MS });
+  } catch (e) {
+    return jsonResponse({ ok: false, error: String(e && e.message || e) }, 500);
+  }
+}
+
+// v8.5.2: bulk rotation invite issuer. By default, issues an invite for
+// every non-lead mod that has not yet rotated. Pass { include_rotated: true }
+// to issue for every mod (e.g. periodic full-team rotation drill).
+async function handleAdminRotationInviteBulk(request, env) {
+  const lead = checkLeadToken(request, env); if (lead) return lead;
+  if (!env.AUDIT_DB) return jsonResponse({ ok: false, error: 'D1 not bound' }, 503);
+  try {
+    let body = {};
+    try { body = await request.json(); } catch (_) {}
+    const includeRotated = !!body.include_rotated;
+    const includeLeads = !!body.include_leads;
+
+    let sql = 'SELECT mod_username FROM mod_tokens WHERE 1=1';
+    if (!includeRotated) sql += ' AND rotated_at IS NULL';
+    if (!includeLeads)   sql += ' AND is_lead = 0';
+    sql += ' ORDER BY mod_username COLLATE NOCASE';
+
+    const targetsRs = await env.AUDIT_DB.prepare(sql).all();
+    const targets = (targetsRs && targetsRs.results) || [];
+    if (targets.length === 0) {
+      return jsonResponse({
+        ok: true,
+        invites: [],
+        note: includeRotated
+          ? 'no eligible mods (table empty?)'
+          : 'no unrotated non-lead mods -- everyone has already rotated. Pass include_rotated:true to force re-issue.'
+      });
+    }
+
+    const now = Date.now();
+    const expiresAt = now + ROTATION_INVITE_TTL_MS;
+    const invites = [];
+
+    for (const t of targets) {
+      const username = t.mod_username;
+      const code = randomToken(48);
+      const codeHash = await sha256Hex(code);
+      try {
+        await env.AUDIT_DB.prepare(`
+          INSERT INTO token_invites (code_hash, mod_username, created_at, expires_at, created_by)
+          VALUES (?, ?, ?, ?, 'lead-bulk')
+        `).bind(codeHash, username, now, expiresAt).run();
+        invites.push({ username, code, expires_at: expiresAt });
+      } catch (e) {
+        // Continue past per-row failures; report at the end.
+        invites.push({ username, error: String(e && e.message || e) });
+      }
+    }
+
+    // Single audit row summarising the bulk issue (one chain link, not 14).
+    try {
+      await appendAuditAction(env, {
+        ts: new Date().toISOString(),
+        mod: 'lead',
+        action: 'token.rotation_invite_bulk',
+        target_user: '',
+        details: JSON.stringify({
+          count: invites.filter(i => i.code).length,
+          errors: invites.filter(i => i.error).length,
+          include_rotated: includeRotated,
+          include_leads: includeLeads
+        }),
+        page_url: '',
+        is_test: 0
+      });
+    } catch (e) { /* non-fatal */ }
+
+    return jsonResponse({
+      ok: true,
+      invites,
+      issued: invites.filter(i => i.code).length,
+      errors: invites.filter(i => i.error).length,
+      expires_at: expiresAt,
+      ttl_hours: Math.round(ROTATION_INVITE_TTL_MS / 3600000)
     });
   } catch (e) {
     return jsonResponse({ ok: false, error: String(e && e.message || e) }, 500);
@@ -7726,9 +7833,11 @@ export default {
         case '/invite/create':   return await handleInviteCreate(request, env);
         case '/invite/claim':    return await handleInviteClaim(request, env);
         // v8.5.0: per-mod token sovereignty (rotate / lead-issue-invite / claim).
-        case '/mod/token/rotate':         return await handleModTokenRotate(request, env);
-        case '/admin/mod/rotation-invite':return await handleAdminRotationInvite(request, env);
-        case '/mod/token/claim-rotation': return await handleModTokenClaimRotation(request, env);
+        case '/mod/token/rotate':              return await handleModTokenRotate(request, env);
+        case '/admin/mod/rotation-invite':     return await handleAdminRotationInvite(request, env);
+        case '/admin/mod/rotation-invite-bulk':return await handleAdminRotationInviteBulk(request, env); // v8.5.2
+        case '/admin/mod/list':                return await handleAdminModList(request, env);            // v8.5.2
+        case '/mod/token/claim-rotation':      return await handleModTokenClaimRotation(request, env);
         case '/discord/post':           return await handleDiscordPost(request, env);
         case '/discord/retry/drain':    return await handleDiscordRetryDrain(request, env);
         case '/abuse/check':     return await handleAbuseCheck(request, env);
