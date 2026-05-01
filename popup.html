@@ -85,6 +85,13 @@
     <input id="tokenInput" type="password" placeholder="paste once \u2014 stored locally">
     <button id="tokenSave" class="pop-btn pop-btn-ghost">Save</button>
     <div id="tokenStatus" class="pop-token-status"></div>
+    <!-- v8.5.0: per-mod token sovereignty. Rotate generates a new token only
+         the mod knows -- lead can no longer authenticate as them after this. -->
+    <div class="pop-tools" style="margin-top:8px">
+      <button id="rotateBtn" class="pop-btn pop-btn-ghost">&#x1F504; Rotate my token (lead loses access)</button>
+      <button id="claimRotateBtn" class="pop-btn pop-btn-ghost">&#x1F4E5; I have a rotation invite</button>
+    </div>
+    <div id="rotateStatus" class="pop-token-status"></div>
   </div>
 
   <div class="pop-token" id="leadSection" style="display:none">

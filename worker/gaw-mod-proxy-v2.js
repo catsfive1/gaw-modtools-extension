@@ -745,19 +745,41 @@ async function lookupModFromToken(env, request) {
   const token = request.headers.get('x-mod-token') || request.headers.get('x-lead-token');
   if (!token) return null;
   try {
-    const row = await env.AUDIT_DB.prepare(
-      'SELECT mod_username, is_lead FROM mod_tokens WHERE token = ? LIMIT 1'
-    ).bind(token).first();
+    // v8.5.0: dual-mode lookup. Rotated tokens live as SHA-256 hash in
+    // token_hash; legacy provisioned tokens still in the plaintext `token`
+    // column. Try hash first (the rotated path), fall back to plaintext.
+    const tokenHash = await sha256Hex(token);
+    let row = await env.AUDIT_DB.prepare(
+      'SELECT mod_username, is_lead, token, token_hash FROM mod_tokens WHERE token_hash = ? LIMIT 1'
+    ).bind(tokenHash).first();
+    let matchedBy = 'hash';
+    if (!row) {
+      row = await env.AUDIT_DB.prepare(
+        'SELECT mod_username, is_lead, token, token_hash FROM mod_tokens WHERE token = ? LIMIT 1'
+      ).bind(token).first();
+      matchedBy = row ? 'plaintext' : null;
+    }
     if (!row) return null;
+
     // Debounced last_used_at update: only write if our last update was >60s ago.
     const now = Date.now();
     const prev = _v72LastUsedCache.get(token) || 0;
     if (now - prev > 60_000) {
       _v72LastUsedCache.set(token, now);
       try {
-        await env.AUDIT_DB.prepare(
-          'UPDATE mod_tokens SET last_used_at = ? WHERE token = ?'
-        ).bind(now, token).run();
+        if (matchedBy === 'plaintext' && !row.token_hash) {
+          // Lazy-migrate: populate token_hash so subsequent lookups go through
+          // the hash path. Keep the plaintext `token` so we don't break any
+          // unrotated session in flight elsewhere -- /mod/token/rotate clears
+          // it explicitly when the mod takes ownership.
+          await env.AUDIT_DB.prepare(
+            'UPDATE mod_tokens SET last_used_at = ?, token_hash = ? WHERE token = ?'
+          ).bind(now, tokenHash, token).run();
+        } else {
+          await env.AUDIT_DB.prepare(
+            'UPDATE mod_tokens SET last_used_at = ? WHERE mod_username = ?'
+          ).bind(now, row.mod_username).run();
+        }
       } catch (e) { /* non-fatal */ }
     }
     return { mod_username: row.mod_username, is_lead: !!row.is_lead };
@@ -1535,6 +1557,207 @@ async function handleInviteClaim(request, env) {
     await env.MOD_KV.put('invite:' + code, JSON.stringify(inv), { expirationTtl: 7*24*3600 });
     return jsonResponse({ ok: true, modToken: env.MOD_TOKEN });
   } catch (e) { return jsonResponse({ error: String(e) }, 500); }
+}
+
+// ============================================================================
+// v8.5.0 Per-mod token sovereignty -- rotate, lead-issue-invite, claim-invite
+// ============================================================================
+// Three endpoints implement the design where a mod can hold a token only THEY
+// know:
+//
+//   POST /mod/token/rotate           auth: x-mod-token (current)
+//     Generates a fresh random token, hashes it, replaces the row's
+//     token_hash + nullifies the plaintext token. Returns the new plaintext
+//     to the caller. The lead is now unable to authenticate as this mod.
+//     Audit row: action='token.rotate'.
+//
+//   POST /admin/mod/rotation-invite  auth: x-lead-token + body { username }
+//     Generates a 48-char random invite code, stores SHA-256 hash in
+//     token_invites with 24h expiry. Returns the plaintext code so the lead
+//     can hand it OOB (Discord DM) to the mod. The lead never sees the
+//     resulting token -- only this transient invite.
+//
+//   POST /mod/token/claim-rotation   auth: none (the code IS the auth)
+//     Body: { code, username }. Worker validates the code (hash match,
+//     not expired, not used, username matches), generates a fresh token
+//     for the mod's row, marks invite used. Returns the new plaintext
+//     token to the caller. Lead is not in the trust path.
+
+const ROTATION_INVITE_TTL_MS = 24 * 60 * 60 * 1000;
+
+async function handleModTokenRotate(request, env) {
+  if (!env.AUDIT_DB) return jsonResponse({ ok: false, error: 'D1 not bound' }, 503);
+  try {
+    const ident = await lookupModFromToken(env, request);
+    if (!ident || !ident.mod_username) {
+      return jsonResponse({ ok: false, error: 'invalid token' }, 401);
+    }
+    const currentToken = request.headers.get('x-mod-token') || request.headers.get('x-lead-token') || '';
+    const currentHash = await sha256Hex(currentToken);
+
+    const newPlain = randomToken(48);
+    const newHash = await sha256Hex(newPlain);
+    const now = Date.now();
+
+    // Update by EITHER hash or plaintext, depending on whether this row was
+    // already lazy-migrated. After rotation, plaintext column is NULL so the
+    // lead has no path to read the new value via D1 SELECT.
+    const upd = await env.AUDIT_DB.prepare(`
+      UPDATE mod_tokens
+         SET token_hash = ?,
+             token = NULL,
+             rotated_at = ?,
+             rotated_by = 'self',
+             rotation_count = COALESCE(rotation_count, 0) + 1,
+             last_used_at = ?
+       WHERE mod_username = ?
+         AND (token_hash = ? OR token = ?)
+    `).bind(newHash, now, now, ident.mod_username, currentHash, currentToken).run();
+
+    const changes = (upd && upd.meta && upd.meta.changes) || 0;
+    if (changes < 1) {
+      return jsonResponse({ ok: false, error: 'rotate failed (token row not updated)' }, 500);
+    }
+
+    // Audit via Merkle helper
+    try {
+      await appendAuditAction(env, {
+        ts: new Date().toISOString(),
+        mod: ident.mod_username,
+        action: 'token.rotate',
+        target_user: ident.mod_username,
+        details: JSON.stringify({ rotated_by: 'self' }),
+        page_url: '',
+        is_test: 0
+      });
+    } catch (e) { /* non-fatal */ }
+
+    return jsonResponse({ ok: true, new_token: newPlain, mod_username: ident.mod_username });
+  } catch (e) {
+    return jsonResponse({ ok: false, error: String(e && e.message || e) }, 500);
+  }
+}
+
+async function handleAdminRotationInvite(request, env) {
+  const lead = checkLeadToken(request, env); if (lead) return lead;
+  if (!env.AUDIT_DB) return jsonResponse({ ok: false, error: 'D1 not bound' }, 503);
+  try {
+    const body = await request.json();
+    const username = String(body && body.username || '').trim();
+    if (!username) return jsonResponse({ ok: false, error: 'missing username' }, 400);
+    if (!/^[A-Za-z0-9_-]{2,32}$/.test(username)) {
+      return jsonResponse({ ok: false, error: 'invalid username shape' }, 400);
+    }
+    const existing = await env.AUDIT_DB.prepare(
+      'SELECT mod_username FROM mod_tokens WHERE mod_username = ? LIMIT 1'
+    ).bind(username).first();
+    if (!existing) return jsonResponse({ ok: false, error: 'unknown mod -- provision a token first' }, 404);
+
+    const code = randomToken(48);
+    const codeHash = await sha256Hex(code);
+    const now = Date.now();
+    const expiresAt = now + ROTATION_INVITE_TTL_MS;
+
+    await env.AUDIT_DB.prepare(`
+      INSERT INTO token_invites (code_hash, mod_username, created_at, expires_at, created_by)
+      VALUES (?, ?, ?, ?, 'lead')
+    `).bind(codeHash, username, now, expiresAt).run();
+
+    try {
+      await appendAuditAction(env, {
+        ts: new Date().toISOString(),
+        mod: 'lead',
+        action: 'token.rotation_invite_issued',
+        target_user: username,
+        details: JSON.stringify({ expires_at: expiresAt }),
+        page_url: '',
+        is_test: 0
+      });
+    } catch (e) { /* non-fatal */ }
+
+    return jsonResponse({
+      ok: true,
+      code,
+      username,
+      expires_at: expiresAt,
+      ttl_hours: Math.round(ROTATION_INVITE_TTL_MS / 3600000),
+      hint: 'Deliver this code to the mod via Discord DM. They paste it into the Claim button in their popup.'
+    });
+  } catch (e) {
+    return jsonResponse({ ok: false, error: String(e && e.message || e) }, 500);
+  }
+}
+
+async function handleModTokenClaimRotation(request, env) {
+  // PUBLIC endpoint -- the invite code IS the auth. No x-mod-token required.
+  if (!env.AUDIT_DB) return jsonResponse({ ok: false, error: 'D1 not bound' }, 503);
+  try {
+    const body = await request.json();
+    const code = String(body && body.code || '').trim();
+    const username = String(body && body.username || '').trim();
+    if (!code || !username) {
+      return jsonResponse({ ok: false, error: 'missing code or username' }, 400);
+    }
+    if (!/^[A-Za-z0-9_-]{2,32}$/.test(username)) {
+      return jsonResponse({ ok: false, error: 'invalid username shape' }, 400);
+    }
+    const codeHash = await sha256Hex(code);
+    const now = Date.now();
+
+    const inv = await env.AUDIT_DB.prepare(`
+      SELECT mod_username, expires_at, used_at
+        FROM token_invites
+       WHERE code_hash = ?
+       LIMIT 1
+    `).bind(codeHash).first();
+    if (!inv)                      return jsonResponse({ ok: false, error: 'invalid code' }, 404);
+    if (inv.used_at)               return jsonResponse({ ok: false, error: 'code already used' }, 409);
+    if (inv.expires_at < now)      return jsonResponse({ ok: false, error: 'code expired' }, 410);
+    if (inv.mod_username !== username) {
+      return jsonResponse({ ok: false, error: 'username does not match invite' }, 403);
+    }
+
+    const newPlain = randomToken(48);
+    const newHash = await sha256Hex(newPlain);
+
+    // Replace the mod's row with the new hash. Plaintext column nulled so a
+    // SELECT on mod_tokens reveals nothing useful.
+    const upd = await env.AUDIT_DB.prepare(`
+      UPDATE mod_tokens
+         SET token_hash = ?,
+             token = NULL,
+             rotated_at = ?,
+             rotated_by = 'invite',
+             rotation_count = COALESCE(rotation_count, 0) + 1,
+             last_used_at = ?
+       WHERE mod_username = ?
+    `).bind(newHash, now, now, username).run();
+
+    if (((upd && upd.meta && upd.meta.changes) || 0) < 1) {
+      return jsonResponse({ ok: false, error: 'mod row not updated' }, 500);
+    }
+
+    // Mark invite consumed.
+    await env.AUDIT_DB.prepare(
+      'UPDATE token_invites SET used_at = ? WHERE code_hash = ?'
+    ).bind(now, codeHash).run();
+
+    try {
+      await appendAuditAction(env, {
+        ts: new Date().toISOString(),
+        mod: username,
+        action: 'token.rotation_claimed',
+        target_user: username,
+        details: '',
+        page_url: '',
+        is_test: 0
+      });
+    } catch (e) { /* non-fatal */ }
+
+    return jsonResponse({ ok: true, new_token: newPlain, mod_username: username });
+  } catch (e) {
+    return jsonResponse({ ok: false, error: String(e && e.message || e) }, 500);
+  }
 }
 
 // ---- v2: Discord webhook forwarder ----
@@ -7502,6 +7725,10 @@ export default {
         case '/presence/online': return await handlePresenceOnline(request, env);
         case '/invite/create':   return await handleInviteCreate(request, env);
         case '/invite/claim':    return await handleInviteClaim(request, env);
+        // v8.5.0: per-mod token sovereignty (rotate / lead-issue-invite / claim).
+        case '/mod/token/rotate':         return await handleModTokenRotate(request, env);
+        case '/admin/mod/rotation-invite':return await handleAdminRotationInvite(request, env);
+        case '/mod/token/claim-rotation': return await handleModTokenClaimRotation(request, env);
         case '/discord/post':           return await handleDiscordPost(request, env);
         case '/discord/retry/drain':    return await handleDiscordRetryDrain(request, env);
         case '/abuse/check':     return await handleAbuseCheck(request, env);

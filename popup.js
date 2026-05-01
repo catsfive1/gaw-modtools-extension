@@ -651,6 +651,141 @@ $('leadSave').addEventListener('click', saveLead);
 $('leadInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') saveLead(); });
 $('inviteBtn').addEventListener('click', generateInvite);
 
+// =========================================================================
+// v8.5.0: Per-mod token sovereignty.
+// =========================================================================
+// Rotate: swap current token for a fresh random one only this mod knows.
+// Claim: redeem a lead-issued rotation invite for a fresh random token.
+async function rotateToken() {
+  const status = $('rotateStatus');
+  if (!status) return;
+  status.className = 'pop-token-status';
+  try {
+    const ok = await __popupConfirm({
+      title: 'Rotate your token?',
+      body: 'This generates a fresh random token that ONLY YOU will know.\n\n' +
+            'After rotation:\n' +
+            '  - Your current token is invalid\n' +
+            '  - The new token is auto-saved to this browser\n' +
+            '  - The lead mod loses the ability to authenticate as you\n\n' +
+            'You can rotate again any time.',
+      okLabel: 'Rotate now',
+      cancelLabel: 'Cancel'
+    });
+    if (!ok) { status.textContent = 'cancelled'; return; }
+
+    status.textContent = 'rotating...';
+    const { gam_settings } = await chrome.storage.local.get('gam_settings');
+    const tok = (gam_settings || {}).workerModToken || '';
+    if (!tok) {
+      status.className = 'pop-token-status err';
+      status.textContent = 'no current token -- nothing to rotate';
+      return;
+    }
+    const resp = await fetch(WORKER_BASE_POPUP + '/mod/token/rotate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Mod-Token': tok }
+    });
+    if (!resp.ok) {
+      status.className = 'pop-token-status err';
+      status.textContent = 'rotate rejected (HTTP ' + resp.status + ')';
+      return;
+    }
+    const data = await resp.json();
+    if (!data || !data.ok || !__isTokenShape(data.new_token)) {
+      status.className = 'pop-token-status err';
+      status.textContent = 'malformed rotate response -- refused to save';
+      return;
+    }
+    // Persist via the secure path (background relay if hardening on).
+    const save = await saveTokensSecurely({ workerModToken: data.new_token });
+    if (!save || !save.ok) {
+      status.className = 'pop-token-status err';
+      status.textContent = 'save failed: ' + ((save && save.error) || 'unknown');
+      return;
+    }
+    status.className = 'pop-token-status ok';
+    status.textContent = '✓ rotated -- lead no longer has access';
+    try { await loadToken(); } catch (e) {}
+  } catch (e) {
+    status.className = 'pop-token-status err';
+    status.textContent = 'rotate failed: ' + (e && e.message || e);
+  }
+}
+
+async function claimRotationInvite() {
+  const status = $('rotateStatus');
+  if (!status) return;
+  status.className = 'pop-token-status';
+  try {
+    const username = await __popupAskText({
+      title: 'Claim rotation invite',
+      label: 'Your GAW username (must match the invite)',
+      placeholder: 'username',
+      max: 32,
+      validate: function (v) {
+        if (!v) return 'username required';
+        return /^[A-Za-z0-9_-]{2,32}$/.test(v) ? '' : 'invalid username shape';
+      }
+    });
+    if (!username) { status.textContent = 'cancelled'; return; }
+
+    const code = await __popupAskText({
+      title: 'Invite code',
+      label: 'Paste the rotation invite code from the lead mod',
+      placeholder: 'invite code',
+      max: 96,
+      validate: function (v) {
+        if (!v) return 'code required';
+        return /^[A-Za-z0-9_-]{16,96}$/.test(v) ? '' : 'malformed code';
+      }
+    });
+    if (!code) { status.textContent = 'cancelled'; return; }
+
+    status.textContent = 'claiming...';
+    const resp = await fetch(WORKER_BASE_POPUP + '/mod/token/claim-rotation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: code, username: username })
+    });
+    if (!resp.ok) {
+      status.className = 'pop-token-status err';
+      let msg = 'claim rejected (HTTP ' + resp.status + ')';
+      try {
+        const j = await resp.json();
+        if (j && j.error) msg += ' -- ' + j.error;
+      } catch (_) {}
+      status.textContent = msg;
+      return;
+    }
+    const data = await resp.json();
+    if (!data || !data.ok || !__isTokenShape(data.new_token)) {
+      status.className = 'pop-token-status err';
+      status.textContent = 'malformed claim response -- refused to save';
+      return;
+    }
+    const save = await saveTokensSecurely({ workerModToken: data.new_token });
+    if (!save || !save.ok) {
+      status.className = 'pop-token-status err';
+      status.textContent = 'save failed: ' + ((save && save.error) || 'unknown');
+      return;
+    }
+    status.className = 'pop-token-status ok';
+    status.textContent = '✓ claimed -- you are now ' + data.mod_username;
+    try { await loadToken(); } catch (e) {}
+  } catch (e) {
+    status.className = 'pop-token-status err';
+    status.textContent = 'claim failed: ' + (e && e.message || e);
+  }
+}
+
+(function wireRotation() {
+  const r = $('rotateBtn');
+  if (r) r.addEventListener('click', rotateToken);
+  const c = $('claimRotateBtn');
+  if (c) c.addEventListener('click', claimRotationInvite);
+})();
+
 // v5.1.11: Manual crawler buttons + dashboard opener
 async function sendToActiveGawTab(msg) {
   const tabs = await chrome.tabs.query({ url: GAW_TAB_PATTERNS, active: true, currentWindow: true });
