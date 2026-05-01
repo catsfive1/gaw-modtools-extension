@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.3.4';
+  const VERSION = 'v8.4.0';
   const C = {
     BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
     BORDER:'#2a2f38', BORDER2:'#3a3f48',
@@ -1096,6 +1096,7 @@
     autoUnstickyMaxHours: 12,
     autoUnstickyUpvoteThreshold: 100,
     autoUnstickyUpvoteHours: 8,
+    quickStickyKeysEnabled: true,        // v8.4.0: hover post + S/U to (un)sticky (FOXY-style)
     sniffEnabled: false,                 // E7: endpoint sniffer off by default
     defaultDeathRowHours: 72,            // v5.1.3: 1-click DR duration
     upvoteAgeFilter: 'off',              // v5.1.3 F4: 'off' | '4h' | '8h' | '12h'
@@ -14454,6 +14455,118 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       await new Promise(r=>setTimeout(r, 1500));
     }
   }
+
+  // QUICK STICKY KEYS (v8.4.0) -- FOXY-style hover-and-press.
+  // Hover any post and press:
+  //   S  -> sticky it    (only if not currently sticky)
+  //   U  -> unsticky it  (only if currently sticky)
+  // /sticky is a server-side toggle so no native confirm dialog
+  // is shown -- "auto-press YES" requirement is satisfied by
+  // bypassing the GAW UI entirely.
+  (function initQuickStickyKeys(){
+    // Inject hover-highlight CSS (idempotent).
+    try {
+      if (!document.getElementById('gam-qsk-style')){
+        const st = document.createElement('style');
+        st.id = 'gam-qsk-style';
+        st.textContent = ''+
+          '.gam-qsk-hover{outline:2px solid '+C.ACCENT+';outline-offset:2px;border-radius:4px;transition:outline-color .12s ease}'+
+          '.gam-qsk-hover.stickied,.gam-qsk-hover.sticky{outline-color:'+C.WARN+'}'+
+          '.gam-qsk-busy{outline-color:'+C.GREEN+' !important;outline-style:dashed !important}';
+        document.head.appendChild(st);
+      }
+    } catch(_){}
+
+    let _hoveredPost = null;
+    let _inFlight = false;
+
+    function _enabled(){
+      // Only active when (a) feature flag on AND (b) we believe this browser is a mod.
+      return getSetting('quickStickyKeysEnabled', true) && getSetting('isModBrowser', false);
+    }
+
+    document.addEventListener('mouseover', (e)=>{
+      if (!_enabled()) return;
+      const p = e.target.closest('.post');
+      if (p && p !== _hoveredPost){
+        if (_hoveredPost) _hoveredPost.classList.remove('gam-qsk-hover');
+        _hoveredPost = p;
+        p.classList.add('gam-qsk-hover');
+      }
+    }, true);
+
+    document.addEventListener('mouseout', (e)=>{
+      const p = e.target.closest('.post');
+      if (!p || p !== _hoveredPost) return;
+      // mouseout fires for child transitions too; only clear when actually leaving the post
+      const to = e.relatedTarget;
+      if (to && p.contains(to)) return;
+      p.classList.remove('gam-qsk-hover');
+      if (p === _hoveredPost) _hoveredPost = null;
+    }, true);
+
+    document.addEventListener('keydown', async (e)=>{
+      if (!_enabled()) return;
+      const k = (e.key || '').toLowerCase();
+      if (k !== 's' && k !== 'u') return;
+      // Skip if any modifier held (don't hijack browser/site shortcuts)
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      // Skip if user is typing somewhere
+      const ae = document.activeElement;
+      if (ae){
+        const tag = ae.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || ae.isContentEditable) return;
+      }
+      if (!_hoveredPost) return;
+      const id = _hoveredPost.getAttribute('data-id');
+      if (!id) return;
+      if (_inFlight) return;
+
+      const isSticky = _hoveredPost.matches('.stickied, .sticky') ||
+                       _hoveredPost.hasAttribute('data-stickied') ||
+                       !!_hoveredPost.querySelector('.stickied');
+      const wantSticky = (k === 's');
+
+      // Refuse no-ops so we never accidentally toggle the wrong direction
+      if (wantSticky && isSticky){
+        try { snack('#'+id+' is already sticky', 'info'); } catch(_){}
+        return;
+      }
+      if (!wantSticky && !isSticky){
+        try { snack('#'+id+' is not sticky', 'info'); } catch(_){}
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+      _inFlight = true;
+      _hoveredPost.classList.add('gam-qsk-busy');
+      try {
+        const r = wantSticky ? await apiSticky(id) : await apiUnsticky(id);
+        if (r && r.ok){
+          // Optimistically reflect new state in DOM so the next S/U press is correct
+          if (wantSticky){
+            _hoveredPost.classList.add('stickied');
+          } else {
+            _hoveredPost.classList.remove('stickied');
+            _hoveredPost.classList.remove('sticky');
+            _hoveredPost.removeAttribute('data-stickied');
+          }
+          try { snack((wantSticky?'\u{1F4CC} stuck':'\u{1F4CC} unstuck')+' #'+id, 'success'); } catch(_){}
+          try { logAction({ type: wantSticky?'sticky':'unsticky', contentId:id, source:'qsk' }); } catch(_){}
+        } else {
+          const code = r && r.status ? r.status : '?';
+          try { snack('Sticky toggle failed (HTTP '+code+')', 'error'); } catch(_){}
+        }
+      } catch(err){
+        try { snack('Sticky toggle error: '+(err && err.message || err), 'error'); } catch(_){}
+        console.error('[qsk]', err);
+      } finally {
+        _inFlight = false;
+        if (_hoveredPost) _hoveredPost.classList.remove('gam-qsk-busy');
+      }
+    }, true);
+  })();
 
   // ╔══════════════════════════════════════════════════════════════════╗
   // ║  AUTO-REFRESH (v5.1.2) - unfocused OR focused+idle \u2265 interval.  ║
