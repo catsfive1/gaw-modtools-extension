@@ -469,6 +469,158 @@ function checkLeadToken(request, env) {
   return null;
 }
 
+// ============================================================================
+// v8.4.0 Encryption + Merkle audit chain helpers
+// ============================================================================
+// AES-GCM-256 field encryption for mod_messages.content and (future) other
+// sensitive fields. Wire format: 'v1:' + base64(iv || ciphertext+tag).
+// Plaintext-prefixed reads (no 'v1:' prefix) are returned as-is so existing
+// rows from before the migration keep working -- lazy migration as new writes
+// land. The MOD_DATA_KEY secret holds the 32-byte AES key, base64-encoded.
+//
+// Merkle audit chain: every INSERT INTO actions runs through appendAuditAction
+// which (a) reads the previous row's entry_hash, (b) inserts the new row with
+// prev_hash set to that, (c) computes entry_hash = SHA256(canonical row JSON),
+// (d) writes entry_hash back via UPDATE. Test rows (is_test=1) are excluded
+// from the chain since seed data is non-durable. Verifier walks the chain in
+// id order and surfaces the first row where the hash relationship breaks.
+
+let _modDataKeyCache = null;
+async function getModDataKey(env) {
+  if (_modDataKeyCache) return _modDataKeyCache;
+  if (!env || !env.MOD_DATA_KEY) {
+    throw new Error('MOD_DATA_KEY not configured -- set it via wrangler secret put MOD_DATA_KEY');
+  }
+  const raw = atob(String(env.MOD_DATA_KEY).trim());
+  if (raw.length !== 32) {
+    throw new Error('MOD_DATA_KEY must be base64-encoded 32 bytes (got ' + raw.length + ')');
+  }
+  const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
+  _modDataKeyCache = await crypto.subtle.importKey(
+    'raw', bytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']
+  );
+  return _modDataKeyCache;
+}
+
+async function encField(plaintext, env) {
+  if (plaintext == null) return plaintext;
+  const s = String(plaintext);
+  if (s.length === 0) return s;
+  const key = await getModDataKey(env);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ctBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(s));
+  const ct = new Uint8Array(ctBuf);
+  const out = new Uint8Array(iv.length + ct.length);
+  out.set(iv, 0);
+  out.set(ct, iv.length);
+  let bin = '';
+  for (let i = 0; i < out.length; i++) bin += String.fromCharCode(out[i]);
+  return 'v1:' + btoa(bin);
+}
+
+async function decField(wire, env) {
+  if (wire == null) return wire;
+  if (typeof wire !== 'string') return wire;
+  if (!wire.startsWith('v1:')) return wire; // legacy plaintext, return as-is
+  try {
+    const key = await getModDataKey(env);
+    const bin = atob(wire.slice(3));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const iv = bytes.slice(0, 12);
+    const ct = bytes.slice(12);
+    const ptBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+    return new TextDecoder().decode(ptBuf);
+  } catch (e) {
+    // Decrypt failure -- key rotated, corrupted ciphertext, etc.
+    // Return a placeholder so the row is still listable, log to console.
+    try { console.warn('[decField] decrypt failed:', e && e.message); } catch (_) {}
+    return '[decrypt failed]';
+  }
+}
+
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(str)));
+  const arr = new Uint8Array(buf);
+  let out = '';
+  for (let i = 0; i < arr.length; i++) out += arr[i].toString(16).padStart(2, '0');
+  return out;
+}
+
+// Canonical serialization for the Merkle hash. Stable key order, no extra
+// whitespace. If a column is later encrypted, the ciphertext goes into the
+// hash -- the chain doesn't care, it just hashes whatever's stored.
+function _canonAuditPayload(row) {
+  return JSON.stringify({
+    id: row.id,
+    ts: row.ts || '',
+    mod: row.mod || '',
+    action: row.action || '',
+    target_user: row.target_user || '',
+    details: row.details || '',
+    page_url: row.page_url || '',
+    is_test: row.is_test ? 1 : 0,
+    dr_scheduled_at: row.dr_scheduled_at == null ? null : Number(row.dr_scheduled_at),
+    prev_hash: row.prev_hash || ''
+  });
+}
+
+// Single helper for every "INSERT INTO actions" path. Skips the chain for
+// test rows (is_test=1) since they're seed data, not real audit history.
+// Returns { id, prev_hash, entry_hash } on success.
+async function appendAuditAction(env, row) {
+  if (!env || !env.AUDIT_DB) throw new Error('AUDIT_DB not bound');
+  const isTest = row.is_test ? 1 : 0;
+
+  if (isTest) {
+    // Skip chain: just insert the test row.
+    const r = await env.AUDIT_DB.prepare(
+      'INSERT INTO actions (ts, mod, action, target_user, details, page_url, is_test, dr_scheduled_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)'
+    ).bind(
+      row.ts, row.mod || 'unknown', row.action || 'unknown',
+      row.target_user || '', row.details || '', row.page_url || '',
+      row.dr_scheduled_at == null ? null : Number(row.dr_scheduled_at)
+    ).run();
+    return { id: (r && r.meta && r.meta.last_row_id) || null, is_test: 1 };
+  }
+
+  // 1. Get previous chain head (most recent non-test row WITH a hash set).
+  const last = await env.AUDIT_DB.prepare(
+    'SELECT entry_hash FROM actions WHERE is_test = 0 AND entry_hash IS NOT NULL ORDER BY id DESC LIMIT 1'
+  ).first();
+  const prev = (last && last.entry_hash) || '';
+
+  // 2. Insert with prev_hash set; entry_hash filled in step 4.
+  const ins = await env.AUDIT_DB.prepare(
+    'INSERT INTO actions (ts, mod, action, target_user, details, page_url, is_test, dr_scheduled_at, prev_hash) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)'
+  ).bind(
+    row.ts, row.mod || 'unknown', row.action || 'unknown',
+    row.target_user || '', row.details || '', row.page_url || '',
+    row.dr_scheduled_at == null ? null : Number(row.dr_scheduled_at),
+    prev
+  ).run();
+  const id = (ins && ins.meta && ins.meta.last_row_id) || null;
+  if (!id) throw new Error('appendAuditAction: insert returned no last_row_id');
+
+  // 3. Compute entry_hash from the canonical serialization.
+  const eh = await sha256Hex(_canonAuditPayload({
+    id,
+    ts: row.ts,
+    mod: row.mod || 'unknown',
+    action: row.action || 'unknown',
+    target_user: row.target_user || '',
+    details: row.details || '',
+    page_url: row.page_url || '',
+    is_test: 0,
+    dr_scheduled_at: row.dr_scheduled_at == null ? null : Number(row.dr_scheduled_at),
+    prev_hash: prev
+  }));
+
+  // 4. Write entry_hash back.
+  await env.AUDIT_DB.prepare('UPDATE actions SET entry_hash = ? WHERE id = ?').bind(eh, id).run();
+  return { id, prev_hash: prev, entry_hash: eh };
+}
+
 // ---- v7.2 Platform Hardening: server-verified identity ----
 // Reads x-mod-token (or x-lead-token) from the request, looks up the bound
 // mod_username in the mod_tokens D1 table, and returns {mod_username, is_lead}
@@ -1034,10 +1186,17 @@ async function handleAuditLog(request, env) {
     const body = await safeJson(request);
     if (body instanceof Response) return body;
     const { mod, action, user, details, pageUrl } = body;
-    await env.AUDIT_DB.prepare(
-      'INSERT INTO actions (ts, mod, action, target_user, details, page_url) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(new Date().toISOString(), mod||'unknown', action||'unknown', user||'', JSON.stringify(details||{}), pageUrl||'').run();
-    return jsonResponse({ ok: true });
+    // v8.4.0: route through Merkle chain helper -- sets prev_hash + entry_hash.
+    const chained = await appendAuditAction(env, {
+      ts: new Date().toISOString(),
+      mod: mod || 'unknown',
+      action: action || 'unknown',
+      target_user: user || '',
+      details: JSON.stringify(details || {}),
+      page_url: pageUrl || '',
+      is_test: 0
+    });
+    return jsonResponse({ ok: true, id: chained.id, entry_hash: chained.entry_hash });
   } catch (e) { return jsonResponse({ error: String(e) }, 500); }
 }
 async function handleAuditQuery(request, env) {
@@ -1055,6 +1214,78 @@ async function handleAuditQuery(request, env) {
     const rs = await env.AUDIT_DB.prepare(sql).bind(...params).all();
     return jsonResponse({ ok: true, rows: rs.results });
   } catch (e) { return jsonResponse({ error: String(e) }, 500); }
+}
+
+// v8.4.0: walk the Merkle audit chain and report the first row where the
+// hash relationship breaks. Lead-only -- this surfaces tamper evidence.
+//
+// Query params:
+//   limit  max rows to walk (default 5000, max 50000)
+//   from   start at this id (default first chained row)
+//
+// Response:
+//   { ok, checked, last_id, first_break|null, chain_head }
+async function handleAuditVerify(request, env) {
+  const lead = checkLeadToken(request, env); if (lead) return lead;
+  if (!env.AUDIT_DB) return jsonResponse({ ok: false, error: 'D1 not bound' }, 503);
+  try {
+    const url = new URL(request.url);
+    const limit = Math.min(50000, Math.max(1, parseInt(url.searchParams.get('limit') || '5000', 10) || 5000));
+    const from = Math.max(0, parseInt(url.searchParams.get('from') || '0', 10) || 0);
+    // Only chained (non-test, hash-set) rows participate.
+    const rs = await env.AUDIT_DB.prepare(
+      `SELECT id, ts, mod, action, target_user, details, page_url, is_test, dr_scheduled_at, prev_hash, entry_hash
+         FROM actions
+        WHERE is_test = 0 AND entry_hash IS NOT NULL AND id > ?
+        ORDER BY id ASC
+        LIMIT ?`
+    ).bind(from, limit).all();
+    const rows = (rs && rs.results) || [];
+    let lastHash = '';
+    if (from > 0) {
+      // Pick up the chain at the row just before `from`.
+      const prior = await env.AUDIT_DB.prepare(
+        'SELECT entry_hash FROM actions WHERE is_test = 0 AND entry_hash IS NOT NULL AND id <= ? ORDER BY id DESC LIMIT 1'
+      ).bind(from).first();
+      if (prior && prior.entry_hash) lastHash = prior.entry_hash;
+    }
+    let firstBreak = null;
+    let checked = 0;
+    let lastId = from;
+    for (const r of rows) {
+      lastId = r.id;
+      if ((r.prev_hash || '') !== lastHash) {
+        firstBreak = {
+          id: r.id,
+          reason: 'prev_hash_mismatch',
+          expected: lastHash,
+          got: r.prev_hash || ''
+        };
+        break;
+      }
+      const computed = await sha256Hex(_canonAuditPayload(r));
+      if (computed !== r.entry_hash) {
+        firstBreak = {
+          id: r.id,
+          reason: 'entry_hash_mismatch',
+          expected: computed,
+          got: r.entry_hash
+        };
+        break;
+      }
+      lastHash = r.entry_hash;
+      checked++;
+    }
+    return jsonResponse({
+      ok: !firstBreak,
+      checked,
+      last_id: lastId,
+      chain_head: lastHash,
+      first_break: firstBreak
+    });
+  } catch (e) {
+    return jsonResponse({ ok: false, error: String(e && e.message || e) }, 500);
+  }
 }
 
 // ---- v2: KV cache ----
@@ -6069,10 +6300,13 @@ async function handleModMessageSend(request, env) {
       return jsonResponse({ ok: false, error: 'sender identity not resolved' }, 401);
     }
     const now = Date.now();
+    // v8.4.0: encrypt body at rest. Field is read back through decField on
+    // inbox fetch. Wire format is 'v1:' + base64(iv || ciphertext+tag).
+    const encContent = await encField(content, env);
     const res = await env.AUDIT_DB.prepare(
       `INSERT INTO mod_messages (from_mod, to_mod, content, created_at)
        VALUES (?, ?, ?, ?)`
-    ).bind(from, resolvedTo, content, now).run();
+    ).bind(from, resolvedTo, encContent, now).run();
     const newId = (res && res.meta && res.meta.last_row_id) || null;
     v80LogEvent(request, { level: 'info', event: 'mod_msg.send', path: '/mod/message/send', status: 200, latency_ms: Date.now() - t0, mod: from, extra: { id: newId, to: resolvedTo, len: content.length } });
     return jsonResponse({ ok: true, id: newId });
@@ -6102,7 +6336,13 @@ async function handleModMessageInbox(request, env) {
         ORDER BY created_at DESC
         LIMIT ?`
     ).bind(me, since, MOD_MSG_INBOX_LIMIT).all();
-    const data = (rs && rs.results) || [];
+    const rawRows = (rs && rs.results) || [];
+    // v8.4.0: decrypt at-rest content. Legacy plaintext rows (no 'v1:'
+    // prefix) pass through untouched -- decField handles both forms.
+    const data = await Promise.all(rawRows.map(async (r) => {
+      const c = await decField(r.content, env);
+      return { ...r, content: c };
+    }));
     v80LogEvent(request, { level: 'info', event: 'mod_msg.inbox', path: '/mod/message/inbox', status: 200, latency_ms: Date.now() - t0, mod: me, extra: { n: data.length, since } });
     return jsonResponse({ ok: true, data });
   } catch(e) {
@@ -7072,6 +7312,7 @@ export default {
         case '/ai/ban-suggest':  return await handleAiBanSuggest(request, env); // v8.1.5: Custom AI Reply endpoint
         case '/audit/log':       return await handleAuditLog(request, env);
         case '/audit/query':     return await handleAuditQuery(request, env);
+        case '/admin/audit/verify': return await handleAuditVerify(request, env); // v8.4.0: Merkle chain verifier (lead-only)
         case '/cache/get':       return await handleCacheGet(request, env);
         case '/cache/set':       return await handleCacheSet(request, env);
         case '/evidence/upload': return await handleEvidenceUpload(request, env);
