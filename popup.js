@@ -651,6 +651,135 @@ $('leadSave').addEventListener('click', saveLead);
 $('leadInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') saveLead(); });
 $('inviteBtn').addEventListener('click', generateInvite);
 
+// v8.5.1: lead-only one-click rotation invite issuer.
+// Asks for a mod username, POSTs to /admin/mod/rotation-invite with the
+// stored lead token, copies the resulting code to clipboard, shows DM-ready
+// text. The lead never sees the token that the mod will end up with -- only
+// this single-use invite code that the mod redeems on their end.
+async function issueRotationInvite() {
+  const resultEl = $('rotateInviteResult');
+  if (!resultEl) return;
+  resultEl.className = 'pop-token-status';
+  try {
+    const { gam_settings } = await chrome.storage.local.get('gam_settings');
+    const s = gam_settings || {};
+    const tok = s.workerModToken || '';
+    const lead = s.leadModToken || '';
+    if (!tok || !lead) {
+      resultEl.className = 'pop-token-status err';
+      resultEl.textContent = 'need both team + lead token first';
+      return;
+    }
+
+    const username = await __popupAskText({
+      title: 'Issue rotation invite',
+      label: 'GAW username of the mod (must already exist in mod_tokens)',
+      placeholder: 'e.g. bubble_bursts',
+      max: 32,
+      validate: function (v) {
+        if (!v) return 'username required';
+        return /^[A-Za-z0-9_-]{2,32}$/.test(v) ? '' : 'invalid username (2-32 chars, alphanumeric + _-)';
+      }
+    });
+    if (!username) { resultEl.textContent = 'cancelled'; return; }
+
+    resultEl.textContent = 'issuing...';
+    const resp = await fetch(WORKER_BASE_POPUP + '/admin/mod/rotation-invite', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Mod-Token': tok,
+        'X-Lead-Token': lead
+      },
+      body: JSON.stringify({ username: username })
+    });
+    if (!resp.ok) {
+      resultEl.className = 'pop-token-status err';
+      let msg = 'rejected (HTTP ' + resp.status + ')';
+      try {
+        const j = await resp.json();
+        if (j && j.error) msg += ' -- ' + j.error;
+      } catch (_) {}
+      resultEl.textContent = msg;
+      return;
+    }
+    const data = await resp.json();
+    if (!data || !data.ok || !data.code) {
+      resultEl.className = 'pop-token-status err';
+      resultEl.textContent = 'malformed response';
+      return;
+    }
+
+    // DOM-render the result. Code is shown in a monospace box with an explicit
+    // "Copy code" button + a "Copy DM template" button that puts a ready-to-paste
+    // Discord message on the clipboard.
+    resultEl.className = 'pop-token-status ok';
+    resultEl.textContent = '';
+
+    const heading = document.createElement('div');
+    heading.style.cssText = 'font-weight:700;color:#3dd68c;margin-bottom:6px';
+    heading.textContent = '✓ invite issued for ' + data.username;
+    resultEl.appendChild(heading);
+
+    const expiry = document.createElement('div');
+    expiry.style.cssText = 'font-size:11px;color:#888;margin-bottom:6px';
+    const exp = new Date(data.expires_at);
+    expiry.textContent = 'Expires ' + exp.toLocaleString() + ' (' + (data.ttl_hours || 24) + 'h)';
+    resultEl.appendChild(expiry);
+
+    const codeBox = document.createElement('div');
+    codeBox.style.cssText = 'background:#0f1114;border:1px solid #2a2a2a;border-radius:4px;padding:6px 8px;font-family:ui-monospace,monospace;font-size:11px;word-break:break-all;margin-bottom:6px;color:#e4e4e4';
+    codeBox.textContent = data.code;
+    resultEl.appendChild(codeBox);
+
+    const dmTemplate =
+      'Hey ' + data.username + ', here is your rotation invite for ModTools.\n\n' +
+      'In the ModTools popup, click "I have a rotation invite", enter your GAW username (' + data.username + '), then paste this code:\n\n' +
+      data.code + '\n\n' +
+      'It expires in 24 hours and is single-use. Once you claim it, your token will be one only YOU know.';
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
+    function makeBtn(label, payload) {
+      const b = document.createElement('button');
+      b.className = 'pop-btn pop-btn-ghost';
+      b.style.cssText = 'flex:1;min-width:120px;padding:4px 8px;font-size:11px';
+      b.textContent = label;
+      b.addEventListener('click', async function () {
+        try {
+          await navigator.clipboard.writeText(payload);
+          const orig = b.textContent;
+          b.textContent = '✓ copied';
+          setTimeout(function () { b.textContent = orig; }, 1500);
+        } catch (e) {
+          b.textContent = 'copy failed';
+        }
+      });
+      return b;
+    }
+    btnRow.appendChild(makeBtn('Copy code', data.code));
+    btnRow.appendChild(makeBtn('Copy Discord DM template', dmTemplate));
+    resultEl.appendChild(btnRow);
+
+    // Auto-copy the code on first open (saves a click).
+    try {
+      await navigator.clipboard.writeText(data.code);
+      const note = document.createElement('div');
+      note.style.cssText = 'font-size:10px;color:#888;margin-top:4px;font-style:italic';
+      note.textContent = 'code auto-copied to clipboard';
+      resultEl.appendChild(note);
+    } catch (e) { /* user can still click the buttons */ }
+  } catch (e) {
+    resultEl.className = 'pop-token-status err';
+    resultEl.textContent = 'error: ' + (e && e.message || e);
+  }
+}
+
+(function wireIssueRotation() {
+  const b = $('rotateInviteBtn');
+  if (b) b.addEventListener('click', issueRotationInvite);
+})();
+
 // =========================================================================
 // v8.5.0: Per-mod token sovereignty.
 // =========================================================================
