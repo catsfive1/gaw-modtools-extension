@@ -1,0 +1,44 @@
+# Dependabot configuration for gaw-modtools-extension.
+#
+# This is a Chrome MV3 extension + a Cloudflare Worker. Neither has a
+# package.json with runtime dependencies (the worker uses only built-in
+# Web APIs; the extension is a single content script). The one thing
+# Dependabot can usefully scan here is GitHub Actions workflows -- if/when
+# we add CI -- and the wrangler CLI version pinned in any tooling.
+#
+# Scope: weekly check for actions + npm root (no-op until package.json
+# lands). The schedule runs Monday 09:00 Malta time so PRs land at the
+# start of the work week, not over a weekend.
+#
+# Refs:
+#   https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Malta"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # No-op until a package.json lands. Harmless to leave here; Dependabot
+  # silently skips ecosystems with no manifest.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Malta"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "npm"

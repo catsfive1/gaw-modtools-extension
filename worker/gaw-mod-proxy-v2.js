@@ -7240,6 +7240,76 @@ async function handlePrivacy(request, env) {
   });
 }
 
+// ============================================================================
+// v8.4.0 Data retention: purge old firehose content
+// ============================================================================
+// Runs on every cron tick (*/5 min) but the actual DELETE work is gated on a
+// KV "last_retention_run" key with a 23h TTL -- so each UTC day fires roughly
+// one full purge. Defaults: 90 days for gaw_posts/gaw_comments. Audit log is
+// NEVER touched (deletion would break the Merkle chain on subsequent rows).
+// Mod messages and other operational tables are not purged in v1; revisit if
+// they grow past concern.
+//
+// Override the TTL by setting the KV key 'retention_days_gaw_content' to an
+// integer string (e.g. '180' for 6 months). Default 90.
+const RETENTION_KV_LAST = 'retention_last_run';
+const RETENTION_KV_DAYS = 'retention_days_gaw_content';
+const RETENTION_DEFAULT_DAYS = 90;
+const RETENTION_BATCH_SIZE = 1000;
+
+async function retentionPurgeTick(env) {
+  if (!env || !env.MOD_KV || !env.AUDIT_DB) return;
+  // Day-rate-limit. The KV key has a 23h TTL so it auto-expires.
+  const last = await env.MOD_KV.get(RETENTION_KV_LAST);
+  if (last) return;
+  // Mark immediately to prevent overlapping runs.
+  await env.MOD_KV.put(RETENTION_KV_LAST, new Date().toISOString(), { expirationTtl: 23 * 3600 });
+
+  const daysRaw = await env.MOD_KV.get(RETENTION_KV_DAYS);
+  const days = (daysRaw && parseInt(daysRaw, 10)) || RETENTION_DEFAULT_DAYS;
+  const cutoffMs = Date.now() - (days * 24 * 3600 * 1000);
+  const cutoffSec = Math.floor(cutoffMs / 1000);
+
+  const summary = { days, cutoffMs, posts: 0, comments: 0, errors: [] };
+
+  // gaw_posts: captured_at is unix-sec per migration 004
+  try {
+    let total = 0;
+    while (true) {
+      const r = await env.AUDIT_DB.prepare(
+        'DELETE FROM gaw_posts WHERE id IN (SELECT id FROM gaw_posts WHERE captured_at < ? LIMIT ?)'
+      ).bind(cutoffSec, RETENTION_BATCH_SIZE).run();
+      const n = (r && r.meta && r.meta.changes) || 0;
+      total += n;
+      if (n < RETENTION_BATCH_SIZE) break;
+      // Yield briefly between batches to share CPU with other cron tasks.
+      await new Promise(res => setTimeout(res, 50));
+    }
+    summary.posts = total;
+  } catch (e) {
+    summary.errors.push('gaw_posts: ' + (e && e.message || e));
+  }
+
+  // gaw_comments: same shape
+  try {
+    let total = 0;
+    while (true) {
+      const r = await env.AUDIT_DB.prepare(
+        'DELETE FROM gaw_comments WHERE id IN (SELECT id FROM gaw_comments WHERE captured_at < ? LIMIT ?)'
+      ).bind(cutoffSec, RETENTION_BATCH_SIZE).run();
+      const n = (r && r.meta && r.meta.changes) || 0;
+      total += n;
+      if (n < RETENTION_BATCH_SIZE) break;
+      await new Promise(res => setTimeout(res, 50));
+    }
+    summary.comments = total;
+  } catch (e) {
+    summary.errors.push('gaw_comments: ' + (e && e.message || e));
+  }
+
+  console.log('[retention]', JSON.stringify(summary));
+}
+
 // ---- router ----
 
 export default {
@@ -7418,6 +7488,10 @@ export default {
     ctx.waitUntil(botCronTick(env).catch(e => console.error('[cron] botCronTick', e)));
     ctx.waitUntil(enrichmentDrainTick(env).catch(e => console.error('[cron] enrichmentDrainTick', e)));
     ctx.waitUntil(gawCrawlTick(env).catch(e => console.error('[cron] gawCrawlTick', e)));
+    // v8.4.0: data retention -- purge old firehose content. Day-rate-limited
+    // via KV so the */5min cron only does real work once per UTC day.
+    // Audit log is NEVER purged (would break Merkle chain).
+    ctx.waitUntil(retentionPurgeTick(env).catch(e => console.error('[cron] retentionPurgeTick', e)));
     // v7.1 Super-Mod Foundation: auto-escalate + 4h expiry + draft/claim purge.
     ctx.waitUntil(superModCronTick(env, ctx).catch(e => console.error('[cron] superModCronTick', e)));
     // v8.0 Team Productivity: 7d shadow-decision purge + 30d resolved-park purge.
