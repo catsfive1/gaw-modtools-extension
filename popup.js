@@ -21,6 +21,20 @@ const GAW_TAB_PATTERNS = ['*://greatawakening.win/*', '*://*.greatawakening.win/
 
 function $(id) { return document.getElementById(id); }
 
+// v8.5.3: disable a button for the duration of an async op, restore on finish.
+async function withLoading(btn, label, fn) {
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = label || orig;
+  btn.classList.add('loading');
+  try { return await fn(); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+    btn.classList.remove('loading');
+  }
+}
+
 async function loadStats() {
   try {
     const data = await chrome.storage.local.get([K.LOG, K.ROSTER, K.DR]);
@@ -436,7 +450,7 @@ async function saveToken() {
     });
     if (!resp.ok) {
       statusEl.className = 'pop-token-status err';
-      statusEl.textContent = 'rejected by worker (HTTP ' + resp.status + ') \u2014 token wrong?';
+      statusEl.textContent = 'rejected (HTTP ' + resp.status + ') \u2014 check token matches what the lead gave you';
       return;
     }
     const data = await resp.json();
@@ -459,8 +473,8 @@ async function saveToken() {
   }
 }
 
-$('tokenSave').addEventListener('click', saveToken);
-$('tokenInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') saveToken(); });
+$('tokenSave').addEventListener('click', function () { withLoading($('tokenSave'), 'saving…', saveToken); });
+$('tokenInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') withLoading($('tokenSave'), 'saving…', saveToken); });
 
 // v5.1.10: Lead-mod controls (shown when token is stored)
 async function loadLead() {
@@ -557,12 +571,12 @@ async function saveLead() {
     });
     if (resp.status === 403){
       statusEl.className = 'pop-token-status err';
-      statusEl.textContent = 'rejected: not a lead-mod token';
+      statusEl.textContent = 'rejected: not a lead-mod token — paste the lead token above, not the team token';
       return;
     }
     if (!resp.ok){
       statusEl.className = 'pop-token-status err';
-      statusEl.textContent = 'worker error (' + resp.status + ')';
+      statusEl.textContent = 'worker error (HTTP ' + resp.status + ') — check CF dashboard if this persists';
       return;
     }
     s.leadModToken = token;
@@ -647,9 +661,9 @@ async function generateInvite() {
   }
 }
 
-$('leadSave').addEventListener('click', saveLead);
-$('leadInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') saveLead(); });
-$('inviteBtn').addEventListener('click', generateInvite);
+$('leadSave').addEventListener('click', function () { withLoading($('leadSave'), 'saving…', saveLead); });
+$('leadInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') withLoading($('leadSave'), 'saving…', saveLead); });
+$('inviteBtn').addEventListener('click', function () { withLoading($('inviteBtn'), 'requesting…', generateInvite); });
 
 // =========================================================================
 // v8.5.2: Mod rotation roster (lead-only).
@@ -911,7 +925,7 @@ async function openRotationRoster() {
     if (!resp.ok) {
       if (result) {
         result.className = 'pop-token-status err';
-        result.textContent = 'roster fetch rejected (HTTP ' + resp.status + ')';
+        result.textContent = 'roster fetch rejected (HTTP ' + resp.status + ')' + (resp.status === 403 ? ' — lead token required' : ' — check your tokens');
       }
       return;
     }
@@ -951,6 +965,19 @@ async function openRotationRoster() {
     }
     header.appendChild(bulkBtn);
 
+    // v8.5.3: explicit close button — panel can be 380px tall, scrolled away from toggle
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'pop-btn pop-btn-ghost';
+    closeBtn.style.cssText = 'font-size:11px;padding:4px 8px;flex-shrink:0;margin-left:4px;color:#888';
+    closeBtn.textContent = '✕';
+    closeBtn.title = 'Close roster';
+    closeBtn.addEventListener('click', function () {
+      panel.style.display = 'none';
+      panel.replaceChildren();
+      if (result) { result.textContent = ''; result.className = 'pop-token-status'; }
+    });
+    header.appendChild(closeBtn);
+
     panel.appendChild(header);
 
     for (const m of mods) {
@@ -968,7 +995,7 @@ async function openRotationRoster() {
 
 (function wireRoster() {
   const b = $('rotateRosterBtn');
-  if (b) b.addEventListener('click', openRotationRoster);
+  if (b) b.addEventListener('click', function () { withLoading(b, 'loading…', openRotationRoster); });
 })();
 
 // =========================================================================
@@ -1008,7 +1035,7 @@ async function rotateToken() {
     });
     if (!resp.ok) {
       status.className = 'pop-token-status err';
-      status.textContent = 'rotate rejected (HTTP ' + resp.status + ')';
+      status.textContent = 'rotate rejected (HTTP ' + resp.status + ') — your current token may be invalid; re-save it first';
       return;
     }
     const data = await resp.json();
@@ -1101,9 +1128,9 @@ async function claimRotationInvite() {
 
 (function wireRotation() {
   const r = $('rotateBtn');
-  if (r) r.addEventListener('click', rotateToken);
+  if (r) r.addEventListener('click', function () { withLoading(r, 'rotating…', rotateToken); });
   const c = $('claimRotateBtn');
-  if (c) c.addEventListener('click', claimRotationInvite);
+  if (c) c.addEventListener('click', function () { withLoading(c, 'claiming…', claimRotationInvite); });
 })();
 
 // v5.1.11: Manual crawler buttons + dashboard opener
@@ -1121,25 +1148,27 @@ async function sendToActiveGawTab(msg) {
 document.querySelectorAll('.crawl-btn').forEach(btn => {
   btn.addEventListener('click', async () => {
     const statusEl = $('crawlStatus');
-    statusEl.className = 'pop-token-status';
-    statusEl.textContent = `crawling ${btn.dataset.section} (${btn.dataset.pages} pages)...`;
-    try {
-      const r = await sendToActiveGawTab({
-        type: 'manualCrawl',
-        section: btn.dataset.section,
-        pages: parseInt(btn.dataset.pages, 10)
-      });
-      if (r && r.ok){
-        statusEl.className = 'pop-token-status ok';
-        statusEl.textContent = `\u2713 ${r.result.pages} pages, ${r.result.users} users harvested`;
-      } else {
+    await withLoading(btn, 'crawling\u2026', async () => {
+      statusEl.className = 'pop-token-status';
+      statusEl.textContent = 'crawling ' + btn.dataset.section + ' (' + btn.dataset.pages + ' pages)...';
+      try {
+        const r = await sendToActiveGawTab({
+          type: 'manualCrawl',
+          section: btn.dataset.section,
+          pages: parseInt(btn.dataset.pages, 10)
+        });
+        if (r && r.ok){
+          statusEl.className = 'pop-token-status ok';
+          statusEl.textContent = '\u2713 ' + r.result.pages + ' pages, ' + r.result.users + ' users harvested';
+        } else {
+          statusEl.className = 'pop-token-status err';
+          statusEl.textContent = 'crawl failed: ' + (r && r.error || 'unknown');
+        }
+      } catch (e) {
         statusEl.className = 'pop-token-status err';
-        statusEl.textContent = 'crawl failed: ' + (r && r.error || 'unknown');
+        statusEl.textContent = 'open greatawakening.win in a tab first — ' + e.message;
       }
-    } catch (e) {
-      statusEl.className = 'pop-token-status err';
-      statusEl.textContent = 'need an open GAW tab: ' + e.message;
-    }
+    });
   });
 });
 

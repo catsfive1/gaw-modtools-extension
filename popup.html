@@ -68,20 +68,23 @@
     </a>
   </div>
 
+  <div class="pop-section-label">Diagnostics</div>
   <div class="pop-tools">
     <button id="debugBtn" class="pop-btn pop-btn-ghost">&#x1F9EA; Debug snapshot</button>
     <button id="dashBtn" class="pop-btn pop-btn-ghost">&#x1F4CA; Dashboard</button>
   </div>
 
+  <div class="pop-section-label">Data harvest</div>
   <div class="pop-tools">
     <button class="pop-btn pop-btn-ghost crawl-btn" data-section="users" data-pages="10">&#x1F578; Crawl /users (10)</button>
     <button class="pop-btn pop-btn-ghost crawl-btn" data-section="users" data-pages="30">&#x1F578; Crawl /users (30)</button>
     <button class="pop-btn pop-btn-ghost crawl-btn" data-section="queue" data-pages="5">&#x1F578; Crawl /queue (5)</button>
   </div>
-  <div id="crawlStatus" class="pop-token-status"></div>
+  <div id="crawlStatus" class="pop-token-status" style="padding: 0 14px 6px;"></div>
 
   <div class="pop-token">
     <label for="tokenInput">&#x1F511; Team Mod Token</label>
+    <div class="pop-token-hint">Required for all mod actions (crawl, ban, notes, cross-mod sync)</div>
     <input id="tokenInput" type="password" placeholder="paste once \u2014 stored locally">
     <button id="tokenSave" class="pop-btn pop-btn-ghost">Save</button>
     <div id="tokenStatus" class="pop-token-status"></div>
@@ -96,7 +99,8 @@
 
   <div class="pop-token" id="leadSection" style="display:none">
     <label for="leadInput">&#x1F451; Lead Mod Token</label>
-    <input id="leadInput" type="password" placeholder="lead-mod token &mdash; enables HUD + invites">
+    <div class="pop-token-hint">Lead-only: rotation roster, invite generation, mod HUD</div>
+    <input id="leadInput" type="password" placeholder="lead-mod token — enables HUD + invites">
     <button id="leadSave" class="pop-btn pop-btn-ghost">Save</button>
     <div id="leadStatus" class="pop-token-status"></div>
     <div class="pop-tools" style="margin-top:8px">

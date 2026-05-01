@@ -137,11 +137,21 @@ html, body {
 .pop-link-danger:hover { color: #f04040; }
 .pop-sep { color: #5c6370; font-size: 11px; }
 
+/* v8.5.3: section label above tool rows */
+.pop-section-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: #3a4050;
+  padding: 8px 14px 0;
+}
+
 /* v5.1.2 tools row (Debug snapshot + Sniffer toggle) */
 .pop-tools {
   display: flex;
   gap: 5px;
-  padding: 8px 14px;
+  padding: 6px 14px 8px;
   border-top: 1px solid #1f2430;
 }
 .pop-btn-ghost {
@@ -167,6 +177,19 @@ html, body {
   background: rgba(240, 64, 64, 0.12);
   border-color: #f04040;
   color: #f04040;
+}
+/* v8.5.3: in-flight state — prevents double-submit and shows action is running */
+.pop-btn-ghost:disabled,
+.pop-btn-ghost.loading {
+  cursor: not-allowed;
+  opacity: 0.5;
+  pointer-events: none;
+}
+.pop-btn:disabled,
+.pop-btn.loading {
+  cursor: not-allowed;
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 /* v5.1.6: team mod token input */
@@ -206,3 +229,18 @@ html, body {
 }
 .pop-token-status.ok { color: #3dd68c; }
 .pop-token-status.err { color: #f04040; }
+
+/* v8.5.3: one-line capability hint — sits on its own row spanning all columns */
+.pop-token-hint {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  font-size: 9px;
+  color: #3a4050;
+  margin-bottom: 2px;
+  line-height: 1.4;
+}
+/* Explicitly anchor input+button to row 1 so they share row with label,
+   and hint gets row 2, and status/tools continue naturally on rows 3+. */
+.pop-token label   { grid-column: 1; grid-row: 1; }
+.pop-token input   { grid-column: 2; grid-row: 1; }
+.pop-token > button { grid-column: 3; grid-row: 1; }
