@@ -16,7 +16,11 @@
   helper degrades gracefully when the secret is absent.
 #>
 [CmdletBinding()]
-param([switch]$NoPause)
+param(
+  [string]$Dsn,
+  [switch]$FromClipboard,
+  [switch]$NoPause
+)
 
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
@@ -38,15 +42,38 @@ try {
   Log 'DSN format: https://<key>@<host>/<projectId>' 'DarkGray'
   Log '' 'Gray'
 
-  $secure = Read-Host 'Paste Sentry DSN (hidden; only one * shows on paste -- that is normal)' -AsSecureString
-  $dsn = [System.Net.NetworkCredential]::new('', $secure).Password
-  if (-not $dsn) { throw 'no DSN entered' }
-  $dsn = $dsn.Trim()
+  if ($FromClipboard) {
+    Log 'Reading DSN from clipboard...' 'Cyan'
+    $dsn = (Get-Clipboard -Raw)
+    if (-not $dsn) { throw 'clipboard is empty -- copy the DSN first, then re-run' }
+    $dsn = $dsn.Trim()
+  } elseif ($Dsn) {
+    Log 'DSN provided via -Dsn parameter (skipping Read-Host)' 'DarkGray'
+    $dsn = $Dsn.Trim()
+  } else {
+    Log 'Tip: easiest path is to copy the DSN to clipboard and run with -FromClipboard' 'DarkGray'
+    Log '' 'Gray'
+    $secure = Read-Host 'Paste Sentry DSN (hidden; only one * shows on paste -- that is normal)' -AsSecureString
+    $dsn = [System.Net.NetworkCredential]::new('', $secure).Password
+    if (-not $dsn) { throw 'no DSN entered' }
+    $dsn = $dsn.Trim()
+  }
+
+  Log ('  captured length: ' + $dsn.Length + ' chars') 'DarkGray'
+  if ($dsn.Length -lt 30) {
+    Log ('  raw value: ' + $dsn) 'Yellow'
+  } else {
+    # Redact-friendly preview: first 12 + last 8, dots between
+    $preview = $dsn.Substring(0, [Math]::Min(12, $dsn.Length)) + '...' + $dsn.Substring([Math]::Max(0, $dsn.Length - 8))
+    Log ('  preview: ' + $preview) 'DarkGray'
+  }
 
   # Validate shape
   try {
     $uri = [Uri]$dsn
-    if (-not $uri.UserInfo) { throw 'DSN missing key (no user-info segment)' }
+    if (-not $uri.UserInfo) {
+      throw "DSN missing key (no user-info segment). Got scheme='$($uri.Scheme)' host='$($uri.Host)' path='$($uri.AbsolutePath)'. Expected shape: https://<key>@<host>/<projectId>"
+    }
     if (-not $uri.Host)     { throw 'DSN missing host' }
     $project = ($uri.AbsolutePath -replace '^/', '').TrimEnd('/').Split('/')[-1]
     if (-not $project) { throw 'DSN missing project id' }
