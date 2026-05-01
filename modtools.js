@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.5.3';
+  const VERSION = 'v8.5.4';
   const C = {
     BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
     BORDER:'#2a2f38', BORDER2:'#3a3f48',
@@ -13397,18 +13397,26 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // calling /mod/whoami, which the worker serves from the mod_tokens D1 table.
   // --------------------------------------------------------------------------
   let _tokenOnboardingOpen = false;
-  function showTokenOnboardingModal(reason){
+  // v8.5.4: durable throttle. The v8.4.1 throttle relied on the legacy
+  // setSetting/getSetting path which routes through page localStorage. That
+  // failed in production (page localStorage gets cleared by GAW or browser
+  // policy) so the modal kept reappearing every page load. v8.5.4 reads and
+  // writes lastTokenPromptAt DIRECTLY to chrome.storage.local, the only
+  // durable extension-scope storage. The function is now async; callers
+  // already fire-and-forget so the change is transparent at call sites.
+  async function showTokenOnboardingModal(reason){
     if (_tokenOnboardingOpen) return;
     if (!document || !document.body) return;
 
-    // v8.2.4/v8.2.5: LAST-LINE-OF-DEFENSE kill switch, with 3 bail conditions.
-    // v8.4.1: added a 4th bail -- weekly throttle. Even if all other guards fail
-    // (e.g. cache hasn't hydrated from storage yet on a flaky page-load), the
-    // modal will not re-appear more than once per 7 days. Resets to 0 on a
-    // successful token save so genuine recovery flows aren't blocked.
+    // 5 bail conditions. Modal will NOT render if ANY is true:
+    //   1. window.__GAM_KILL_MODAL === true (one-line console muzzle)
+    //   2. features.suppressTokenModal === true (settings flag)
+    //   3. getModToken() returns non-empty (cache has token)
+    //   4. chrome.storage.local has a token (durable check)
+    //   5. lastTokenPromptAt is within the past 7 days (throttle)
     //
-    // Console rescue: paste `window.__GAM_RESET_TOKEN_THROTTLE = true` if you
-    // need to force-show the modal once before the 7-day window elapses.
+    // Console rescue: paste `window.__GAM_RESET_TOKEN_THROTTLE = true` to
+    // force-show the modal once before the 7-day window elapses.
     try {
       if (typeof window !== 'undefined' && window.__GAM_KILL_MODAL === true) {
         console.log('[modtools] modal suppressed: __GAM_KILL_MODAL=true');
@@ -13422,24 +13430,56 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         console.log('[modtools] modal suppressed: cache has token');
         return;
       }
-      // v8.4.1: 7-day throttle. The user explicitly stated "weekly is fine".
-      const lastPrompt = Number(getSetting('lastTokenPromptAt', 0)) || 0;
-      const sevenDaysMs = 7 * 24 * 3600 * 1000;
-      const force = (typeof window !== 'undefined' && window.__GAM_RESET_TOKEN_THROTTLE === true);
-      if (!force && lastPrompt && (Date.now() - lastPrompt) < sevenDaysMs) {
-        const hoursAgo = Math.round((Date.now() - lastPrompt) / 3600000);
-        console.log('[modtools] modal suppressed: throttled (last shown ' + hoursAgo + 'h ago, weekly window)');
-        return;
+
+      // v8.5.4: read directly from chrome.storage.local. This is the only
+      // storage that survives page reloads, GAW localStorage clears, and
+      // browser cache flushes. If chrome.storage.local has a token but the
+      // in-memory cache doesn't, hydrate the cache and bail -- the modal
+      // would be a false-alarm.
+      if (chrome?.storage?.local) {
+        const stored = await chrome.storage.local.get(K_SETTINGS);
+        const st = stored && stored[K_SETTINGS];
+
+        if (st && typeof st.workerModToken === 'string' && st.workerModToken.length > 8) {
+          console.log('[modtools] modal suppressed: chrome.storage.local has token, hydrating cache');
+          try { _secretsCache['workerModToken'] = st.workerModToken; } catch(_){}
+          if (st.leadModToken) try { _secretsCache['leadModToken'] = st.leadModToken; } catch(_){}
+          return;
+        }
+
+        // 7-day throttle, durable read.
+        const lastPrompt = (st && Number(st.lastTokenPromptAt)) || 0;
+        const sevenDaysMs = 7 * 24 * 3600 * 1000;
+        const force = (typeof window !== 'undefined' && window.__GAM_RESET_TOKEN_THROTTLE === true);
+        if (!force && lastPrompt && (Date.now() - lastPrompt) < sevenDaysMs) {
+          const hoursAgo = Math.round((Date.now() - lastPrompt) / 3600000);
+          console.log('[modtools] modal suppressed: throttled (last shown ' + hoursAgo + 'h ago, weekly window via chrome.storage.local)');
+          return;
+        }
+        if (force) {
+          try { window.__GAM_RESET_TOKEN_THROTTLE = false; } catch(_){}
+        }
       }
-      if (force) {
-        try { window.__GAM_RESET_TOKEN_THROTTLE = false; } catch(_){}
-      }
-    } catch(e) { /* fall through to original behavior if checks blow up */ }
+    } catch(e) {
+      console.warn('[modtools] modal-bail check threw:', e && e.message || e);
+      // Fall through -- if storage is unreachable the modal still shows.
+    }
 
     _tokenOnboardingOpen = true;
-    // Stamp the prompt time -- prevents re-showing within 7 days even if
-    // the user dismisses without saving (ESC).
-    try { setSetting('lastTokenPromptAt', Date.now()); } catch(e){}
+    // v8.5.4: stamp the throttle DIRECTLY to chrome.storage.local. Awaited so
+    // the write is durable before the modal even renders -- prevents the
+    // "modal flashes, user dismisses, no stamp written, modal re-appears next
+    // load" race.
+    try {
+      if (chrome?.storage?.local) {
+        const r = await chrome.storage.local.get(K_SETTINGS);
+        const merged = { ...(r[K_SETTINGS] || {}), lastTokenPromptAt: Date.now() };
+        await chrome.storage.local.set({ [K_SETTINGS]: merged });
+        console.log('[modtools] modal-throttle stamped (' + new Date().toISOString() + ') -- next show after 7 days');
+      }
+    } catch(e) {
+      console.warn('[modtools] failed to stamp throttle:', e && e.message || e);
+    }
 
     const backdrop = document.createElement('div');
     backdrop.id = 'gam-token-onboard-backdrop';
@@ -13538,9 +13578,16 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           try { _secretsCache['workerModToken'] = pasted; } catch(e){}
           try { await setSetting('workerModToken', pasted); } catch(e){}
           try { await setSetting('tokenOnboardedOnce', true); } catch(e){}
-          // v8.4.1: clear the weekly throttle so future legit recovery flows
-          // (token revoked, mod re-onboarded) aren't artificially blocked.
-          try { await setSetting('lastTokenPromptAt', 0); } catch(e){}
+          // v8.5.4: clear the weekly throttle DIRECTLY in chrome.storage.local so
+          // future legit recovery flows aren't artificially blocked. The earlier
+          // setSetting('lastTokenPromptAt', 0) path didn't durably persist.
+          try {
+            if (chrome?.storage?.local) {
+              const r = await chrome.storage.local.get(K_SETTINGS);
+              const merged = { ...(r[K_SETTINGS] || {}), lastTokenPromptAt: 0 };
+              await chrome.storage.local.set({ [K_SETTINGS]: merged });
+            }
+          } catch(e){}
           try { await syncSecretsToBackgroundVault(); } catch(e){}
           close();
           try { snack(`Welcome, ${data.username}`, 'success'); } catch(e){}
