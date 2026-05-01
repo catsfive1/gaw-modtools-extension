@@ -470,6 +470,118 @@ function checkLeadToken(request, env) {
 }
 
 // ============================================================================
+// v8.4.1 Sentry minimal client
+// ============================================================================
+// We don't bundle the full @sentry/cloudflare SDK -- this worker is shipped
+// as a single hand-edited file via wrangler. Instead we POST directly to
+// Sentry's envelope intake endpoint (https://docs.sentry.io/api/envelopes/).
+//
+// The DSN is parsed once and cached. If env.SENTRY_DSN is unset, all capture
+// calls become no-ops -- safe to call captureSentry() before the secret is
+// configured. To enable: run scripts/set-sentry-dsn.ps1 with your DSN.
+//
+// Calls are fire-and-forget via ctx.waitUntil so request latency is not
+// affected. Failures to reach Sentry are logged once and otherwise silent.
+
+let _sentryParsed = null;
+let _sentryParseAttempted = false;
+function _parseSentryDsn(dsn) {
+  // DSN shape: https://<key>@<host>/<project_id>
+  try {
+    const u = new URL(dsn);
+    const key = u.username;
+    const host = u.host;
+    const projectId = u.pathname.replace(/^\//, '').split('/').pop();
+    if (!key || !host || !projectId) return null;
+    return {
+      key,
+      host,
+      projectId,
+      envelopeUrl: 'https://' + host + '/api/' + projectId + '/envelope/?sentry_key=' + encodeURIComponent(key) + '&sentry_version=7',
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function _getSentry(env) {
+  if (_sentryParseAttempted) return _sentryParsed;
+  _sentryParseAttempted = true;
+  if (!env || !env.SENTRY_DSN) return null;
+  _sentryParsed = _parseSentryDsn(String(env.SENTRY_DSN).trim());
+  if (!_sentryParsed) console.warn('[sentry] SENTRY_DSN set but unparseable -- capture disabled');
+  return _sentryParsed;
+}
+
+function _sentryEventId() {
+  // 32 hex chars (UUID v4 minus dashes) as required by Sentry envelope spec.
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += bytes[i].toString(16).padStart(2, '0');
+  return s;
+}
+
+// captureSentry(env, err, context) -- best-effort error capture.
+//   err     Error, string, or any value
+//   context optional { request_id, path, mod, status, extra } object
+// Returns a Promise that resolves to true on success, false otherwise.
+// Always wrapped in ctx.waitUntil at the call site so the request doesn't wait.
+async function captureSentry(env, err, context) {
+  const sn = _getSentry(env);
+  if (!sn) return false;
+  try {
+    const eventId = _sentryEventId();
+    const ts = new Date().toISOString();
+    const ctx = context || {};
+    const errStr = (err && err.stack) ? err.stack : String(err && err.message || err);
+    const errType = (err && err.name) || 'Error';
+    const errMsg = (err && err.message) || String(err);
+
+    const event = {
+      event_id: eventId,
+      timestamp: ts,
+      platform: 'javascript',
+      level: 'error',
+      logger: 'gaw-mod-proxy',
+      release: 'gaw-mod-proxy@v8.4.1',
+      environment: 'production',
+      server_name: 'cloudflare-worker',
+      tags: {
+        path: ctx.path || 'unknown',
+        status: String(ctx.status || ''),
+        request_id: ctx.request_id || ''
+      },
+      user: ctx.mod ? { username: ctx.mod } : undefined,
+      exception: {
+        values: [{
+          type: errType,
+          value: errMsg,
+          stacktrace: errStr ? { frames: [{ filename: 'gaw-mod-proxy-v2.js', context_line: errStr.slice(0, 1000) }] } : undefined
+        }]
+      },
+      extra: ctx.extra || undefined
+    };
+
+    const envelope = [
+      JSON.stringify({ event_id: eventId, sent_at: ts }),
+      JSON.stringify({ type: 'event' }),
+      JSON.stringify(event)
+    ].join('\n');
+
+    const r = await fetch(sn.envelopeUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-sentry-envelope' },
+      body: envelope,
+      signal: AbortSignal.timeout(3000)
+    });
+    return r.ok;
+  } catch (e) {
+    try { console.warn('[sentry] capture failed:', e && e.message); } catch (_) {}
+    return false;
+  }
+}
+
+// ============================================================================
 // v8.4.0 Encryption + Merkle audit chain helpers
 // ============================================================================
 // AES-GCM-256 field encryption for mod_messages.content and (future) other
@@ -7479,15 +7591,31 @@ export default {
         case '/mod/whoami':                  return await handleModWhoami(request, env);
         default:                 return jsonResponse({ error: 'unknown endpoint', path: url.pathname }, 404);
       }
-    } catch (e) { return jsonResponse({ error: String(e) }, 500); }
+    } catch (e) {
+      // v8.4.1: top-level error capture. Fire-and-forget Sentry POST so the
+      // 500 response isn't slowed by network. Safely no-ops if SENTRY_DSN unset.
+      try {
+        ctx.waitUntil(captureSentry(env, e, {
+          path: url.pathname,
+          status: 500,
+          extra: { method: request.method }
+        }));
+      } catch (_) {}
+      return jsonResponse({ error: String(e) }, 500);
+    }
   },
 
   // Cron handler - runs every 5 min.
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(sniperTick(env).catch(e => console.error('[cron] sniperTick', e)));
-    ctx.waitUntil(botCronTick(env).catch(e => console.error('[cron] botCronTick', e)));
-    ctx.waitUntil(enrichmentDrainTick(env).catch(e => console.error('[cron] enrichmentDrainTick', e)));
-    ctx.waitUntil(gawCrawlTick(env).catch(e => console.error('[cron] gawCrawlTick', e)));
+    // v8.4.1: cron errors now also flow to Sentry (in addition to console).
+    const cronCatch = (taskName) => (e) => {
+      console.error('[cron] ' + taskName, e);
+      try { ctx.waitUntil(captureSentry(env, e, { path: 'cron:' + taskName, extra: { task: taskName } })); } catch (_) {}
+    };
+    ctx.waitUntil(sniperTick(env).catch(cronCatch('sniperTick')));
+    ctx.waitUntil(botCronTick(env).catch(cronCatch('botCronTick')));
+    ctx.waitUntil(enrichmentDrainTick(env).catch(cronCatch('enrichmentDrainTick')));
+    ctx.waitUntil(gawCrawlTick(env).catch(cronCatch('gawCrawlTick')));
     // v8.4.0: data retention -- purge old firehose content. Day-rate-limited
     // via KV so the */5min cron only does real work once per UTC day.
     // Audit log is NEVER purged (would break Merkle chain).

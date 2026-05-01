@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.4.0';
+  const VERSION = 'v8.4.1';
   const C = {
     BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
     BORDER:'#2a2f38', BORDER2:'#3a3f48',
@@ -1097,6 +1097,7 @@
     autoUnstickyUpvoteThreshold: 100,
     autoUnstickyUpvoteHours: 8,
     quickStickyKeysEnabled: true,        // v8.4.0: hover post + S/U to (un)sticky (FOXY-style)
+    lastTokenPromptAt: 0,                // v8.4.1: weekly debounce on token onboarding modal (unix-ms)
     sniffEnabled: false,                 // E7: endpoint sniffer off by default
     defaultDeathRowHours: 72,            // v5.1.3: 1-click DR duration
     upvoteAgeFilter: 'off',              // v5.1.3 F4: 'off' | '4h' | '8h' | '12h'
@@ -13401,10 +13402,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     if (!document || !document.body) return;
 
     // v8.2.4/v8.2.5: LAST-LINE-OF-DEFENSE kill switch, with 3 bail conditions.
-    // The modal will NOT render if ANY of these is true:
-    //   1. window.__GAM_KILL_MODAL === true (one-line console muzzle)
-    //   2. features.suppressTokenModal === true (persistent settings flag)
-    //   3. getModToken() returns non-empty (cache has a valid token)
+    // v8.4.1: added a 4th bail -- weekly throttle. Even if all other guards fail
+    // (e.g. cache hasn't hydrated from storage yet on a flaky page-load), the
+    // modal will not re-appear more than once per 7 days. Resets to 0 on a
+    // successful token save so genuine recovery flows aren't blocked.
+    //
+    // Console rescue: paste `window.__GAM_RESET_TOKEN_THROTTLE = true` if you
+    // need to force-show the modal once before the 7-day window elapses.
     try {
       if (typeof window !== 'undefined' && window.__GAM_KILL_MODAL === true) {
         console.log('[modtools] modal suppressed: __GAM_KILL_MODAL=true');
@@ -13418,9 +13422,24 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         console.log('[modtools] modal suppressed: cache has token');
         return;
       }
+      // v8.4.1: 7-day throttle. The user explicitly stated "weekly is fine".
+      const lastPrompt = Number(getSetting('lastTokenPromptAt', 0)) || 0;
+      const sevenDaysMs = 7 * 24 * 3600 * 1000;
+      const force = (typeof window !== 'undefined' && window.__GAM_RESET_TOKEN_THROTTLE === true);
+      if (!force && lastPrompt && (Date.now() - lastPrompt) < sevenDaysMs) {
+        const hoursAgo = Math.round((Date.now() - lastPrompt) / 3600000);
+        console.log('[modtools] modal suppressed: throttled (last shown ' + hoursAgo + 'h ago, weekly window)');
+        return;
+      }
+      if (force) {
+        try { window.__GAM_RESET_TOKEN_THROTTLE = false; } catch(_){}
+      }
     } catch(e) { /* fall through to original behavior if checks blow up */ }
 
     _tokenOnboardingOpen = true;
+    // Stamp the prompt time -- prevents re-showing within 7 days even if
+    // the user dismisses without saving (ESC).
+    try { setSetting('lastTokenPromptAt', Date.now()); } catch(e){}
 
     const backdrop = document.createElement('div');
     backdrop.id = 'gam-token-onboard-backdrop';
@@ -13519,6 +13538,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           try { _secretsCache['workerModToken'] = pasted; } catch(e){}
           try { await setSetting('workerModToken', pasted); } catch(e){}
           try { await setSetting('tokenOnboardedOnce', true); } catch(e){}
+          // v8.4.1: clear the weekly throttle so future legit recovery flows
+          // (token revoked, mod re-onboarded) aren't artificially blocked.
+          try { await setSetting('lastTokenPromptAt', 0); } catch(e){}
           try { await syncSecretsToBackgroundVault(); } catch(e){}
           close();
           try { snack(`Welcome, ${data.username}`, 'success'); } catch(e){}
