@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.6.0';
+  const VERSION = 'v8.6.1';
   const C = {
     BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
     BORDER:'#2a2f38', BORDER2:'#3a3f48',
@@ -5394,16 +5394,17 @@
       .catch(()=>{ snack(fb,'warn'); console.log('[ModTools]',t); });
   }
   function closeAllPanels(){
-    ['gam-ban-panel','gam-reply-panel','gam-user-panel','gam-log-panel','gam-help-panel','gam-mc-panel','gam-backdrop']
-      .forEach(id=>{
-        const e=document.getElementById(id);
-        if(e){
-          // v8.1 ux: run focus-trap cleanup if installed before removing DOM.
-          // Flag-off: _gamFocusCleanup is never set, branch is no-op.
-          try { if (e._gamFocusCleanup) { e._gamFocusCleanup(); e._gamFocusCleanup = null; } } catch(err){}
-          e.remove();
-        }
-      });
+    // v8.6.1: removes EVERY .gam-modal plus the backdrop, not just a
+    // hard-coded ID list. Pre-fix, settings and bug-report panels were
+    // not in the list and survived close-all calls -- their backdrops
+    // lingered, blurring any modal opened on top (ban, note). One bug
+    // expressing as three symptoms (settings won't close, ESC ignored,
+    // ban/note interface blurred behind dead backdrop).
+    document.querySelectorAll('.gam-modal, #gam-backdrop').forEach(e => {
+      try { if (e._gamFocusCleanup) { e._gamFocusCleanup(); e._gamFocusCleanup = null; } } catch(err){}
+      try { if (e._gamEscHandler) { document.removeEventListener('keydown', e._gamEscHandler, true); e._gamEscHandler = null; } } catch(err){}
+      e.remove();
+    });
     panelOpen=null;
   }
   function snack(msg, type='info'){
@@ -5477,6 +5478,21 @@
     } else {
       requestAnimationFrame(()=>{ p.style.opacity='1'; p.style.transform='translate(-50%,-50%) scale(1)'; });
     }
+    // v8.6.1: ESC closes the modal. Capture-phase so it wins against any
+    // lower-level keydown handler that might stopPropagation. Cleanup is
+    // tracked on the panel element so closeAllPanels can detach it.
+    const escHandler = (e) => {
+      if (e.key === 'Escape' || e.key === 'Esc') {
+        // If a text-modal sub-panel is open on top of us (gam-v72-asktext),
+        // let that handle ESC first. We only handle if no inner modal is up.
+        if (document.querySelector('.gam-v72-asktext')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeAllPanels();
+      }
+    };
+    document.addEventListener('keydown', escHandler, true);
+    p._gamEscHandler = escHandler;
     return p;
   }
   function strip(html){
