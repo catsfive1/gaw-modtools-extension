@@ -202,6 +202,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg && msg.type === 'workerFetch') {
     const path = msg.path || '';
+    // v8.6.0 / v5.0-Phase-1: legacy generic relay. Every call here is a
+    // pre-v5.0 call site that has not yet been migrated to a named RPC.
+    // Logged so the v8.6.x sweep can find them.
+    try {
+      console.warn('[v5.0/Phase-1 deprecated] workerFetch path=' + path + ' -- migrate to a named rpc handler in background.js (RPC_HANDLERS map)');
+    } catch (e) {}
     if (!pathAllowed(path)) {
       sendResponse({ ok: false, status: 0, error: 'endpoint not allowed' });
       return; // no async work -> no true return
@@ -239,5 +245,221 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   }
+
+  // --- v8.6.0 / v5.0-Phase-1: Named RPC dispatcher ---
+  if (msg && msg.type === 'rpc') {
+    (async () => {
+      const out = await _dispatchRpc(msg.name, msg.args, sender);
+      sendResponse(out);
+    })();
+    return true;
+  }
   // --- v7.2 Platform Hardening END ---
 });
+
+// =========================================================================
+// v8.6.0 / v5.0-Phase-1: Named RPC framework
+// =========================================================================
+// The legacy `workerFetch(path, asLead)` is a generic privileged relay --
+// content scripts can ask the background to call any allowlisted endpoint
+// with attached secrets. The v5.0 spec explicitly removes that pattern in
+// favor of explicit, named RPCs that are fixed at the background layer.
+//
+// Each RPC handler:
+//   - is keyed by a name that maps 1:1 to a specific worker operation
+//   - validates its caller context (which extension surface invoked it)
+//   - reads tokens from the background's secret cache, never echoing them
+//   - returns only the operation result, never the token material
+//
+// During Phase 1 we co-exist with workerFetch -- the legacy path keeps
+// working but emits a console warning per call so we can find every
+// remaining call site for the v8.6.x migration sweep. Phase 2 (short-lived
+// sessions) and Phase 3 (device enrollment) replace the underlying token
+// model; this framework is the boundary that lets that swap happen without
+// touching every content-script call site again.
+
+const RPC_CALLER_CONTENT  = 'content';
+const RPC_CALLER_POPUP    = 'popup';
+
+function _classifyCaller(sender) {
+  if (!sender) return null;
+  if (sender.tab && sender.tab.id != null) return RPC_CALLER_CONTENT;
+  return RPC_CALLER_POPUP;
+}
+
+async function _rpcWorkerCall(method, path, body, opts) {
+  const o = opts || {};
+  if (!secretCache.workerModToken && !secretCache.leadModToken) {
+    try { await loadSecrets(); } catch (e) {}
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, o.timeoutMs || 20000);
+  try {
+    const headers = new Headers();
+    if (secretCache.workerModToken) headers.set('X-Mod-Token', secretCache.workerModToken);
+    if (o.asLead && secretCache.leadModToken) headers.set('X-Lead-Token', secretCache.leadModToken);
+    if (body !== undefined && body !== null) headers.set('Content-Type', 'application/json');
+    const r = await fetch(WORKER_BASE + path, {
+      method: method || (body === undefined ? 'GET' : 'POST'),
+      headers: headers,
+      body: (body === undefined || body === null) ? undefined : JSON.stringify(body),
+      signal: ctrl.signal
+    });
+    const text = await r.text();
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch (e) {}
+    return { ok: r.ok, status: r.status, data: parsed, text: text };
+  } catch (e) {
+    return {
+      ok: false, status: 0,
+      error: String(e && e.message || e),
+      timeout: !!(e && e.name === 'AbortError')
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const RPC_HANDLERS = {
+  // ---- modXxx: callable from content script + popup ---------------------
+  modAuditLog: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/audit/log', {
+        mod: args && args.mod || 'unknown',
+        action: args && args.action || 'unknown',
+        user: args && args.user || '',
+        details: args && args.details || {},
+        pageUrl: args && args.pageUrl || ''
+      });
+    }
+  },
+  modWhoami: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('POST', '/mod/whoami', null); }
+  },
+  modSearch: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const q = encodeURIComponent(String(args && args.q || ''));
+      const scope = encodeURIComponent(String(args && args.scope || 'both'));
+      const limit = Math.min(200, Math.max(1, parseInt(args && args.limit, 10) || 50));
+      return await _rpcWorkerCall('GET', '/gaw/search?q=' + q + '&scope=' + scope + '&limit=' + limit, undefined);
+    }
+  },
+  modPresencePing: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) { return await _rpcWorkerCall('POST', '/presence/ping', args || {}); }
+  },
+
+  // ---- authXxx: popup-only, mod's own token management ------------------
+  authRotateSelf: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler() {
+      const r = await _rpcWorkerCall('POST', '/mod/token/rotate', null);
+      if (r.ok && r.data && typeof r.data.new_token === 'string') {
+        secretCache.workerModToken = r.data.new_token;
+        try {
+          if (chrome.storage && chrome.storage.session) {
+            await chrome.storage.session.set({ gam_settings: secretCache });
+          }
+          if (chrome.storage && chrome.storage.local) {
+            const cur = await chrome.storage.local.get('gam_settings');
+            const merged = { ...((cur && cur.gam_settings) || {}), workerModToken: r.data.new_token };
+            await chrome.storage.local.set({ gam_settings: merged });
+          }
+        } catch (e) {}
+        return { ok: true, status: r.status, data: { ok: true, mod_username: r.data.mod_username, rotated: true } };
+      }
+      return r;
+    }
+  },
+  authClaimInvite: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const r = await _rpcWorkerCall('POST', '/mod/token/claim-rotation', {
+        code: args && args.code,
+        username: args && args.username
+      });
+      if (r.ok && r.data && typeof r.data.new_token === 'string') {
+        secretCache.workerModToken = r.data.new_token;
+        try {
+          if (chrome.storage && chrome.storage.session) {
+            await chrome.storage.session.set({ gam_settings: secretCache });
+          }
+          if (chrome.storage && chrome.storage.local) {
+            const cur = await chrome.storage.local.get('gam_settings');
+            const merged = { ...((cur && cur.gam_settings) || {}), workerModToken: r.data.new_token };
+            await chrome.storage.local.set({ gam_settings: merged });
+          }
+        } catch (e) {}
+        return { ok: true, status: r.status, data: { ok: true, mod_username: r.data.mod_username, claimed: true } };
+      }
+      return r;
+    }
+  },
+  authGetMyDevices: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler() {
+      return { ok: true, status: 200, data: { devices: [], stub: 'phase-3-pending' } };
+    }
+  },
+  authRevokeMyDevice: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler() {
+      return { ok: false, status: 501, error: 'phase-3-pending: device revocation lands with mod_devices schema' };
+    }
+  },
+
+  // ---- adminXxx: popup-only, must be lead-stepped-up (Phase 4 will gate) -
+  adminListMods: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('GET', '/admin/mod/list', undefined, { asLead: true }); }
+  },
+  adminIssueInvite: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/admin/mod/rotation-invite', {
+        username: args && args.username
+      }, { asLead: true });
+    }
+  },
+  adminBulkInvite: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) { return await _rpcWorkerCall('POST', '/admin/mod/rotation-invite-bulk', args || {}, { asLead: true }); }
+  },
+  adminAuditVerify: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const limit = Math.min(50000, Math.max(1, parseInt(args && args.limit, 10) || 5000));
+      const from = Math.max(0, parseInt(args && args.from, 10) || 0);
+      return await _rpcWorkerCall('GET', '/admin/audit/verify?limit=' + limit + '&from=' + from, undefined, { asLead: true });
+    }
+  },
+  adminDisableMod: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler() {
+      return { ok: false, status: 501, error: 'phase-2-pending: epoch-bump lands with mods table' };
+    }
+  },
+  adminEpochBump: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler() {
+      return { ok: false, status: 501, error: 'phase-2-pending: auth_epoch lands with mods table' };
+    }
+  }
+};
+
+async function _dispatchRpc(name, args, sender) {
+  const def = RPC_HANDLERS[String(name || '')];
+  if (!def) return { ok: false, status: 0, error: 'unknown rpc: ' + String(name) };
+  const callerCtx = _classifyCaller(sender);
+  if (!def.allowed_callers.includes(callerCtx)) {
+    return { ok: false, status: 0, error: 'rpc ' + name + ' refused for caller-context ' + String(callerCtx) };
+  }
+  try {
+    return await def.handler(args || {}, { caller: callerCtx });
+  } catch (e) {
+    return { ok: false, status: 0, error: String(e && e.message || e) };
+  }
+}

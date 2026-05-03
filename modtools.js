@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.5.4';
+  const VERSION = 'v8.6.0';
   const C = {
     BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
     BORDER:'#2a2f38', BORDER2:'#3a3f48',
@@ -3966,7 +3966,7 @@
     try {
       const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
       if (getModToken()) {
-        workerCall('/audit/log', {
+        rpcCall('modAuditLog', {
           mod: me,
           action: entry.type || 'unknown',
           user: entry.user || '',
@@ -5872,7 +5872,7 @@
           logAction({type:'ban', user:inmate.username, violation:'username', duration:-1, reason:inmate.reason, source:'death-row', verified:v, delayHours:Math.round((inmate.executeAt-inmate.queuedAt)/3600000)});
           try {
             const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
-            workerCall('/audit/log', {
+            rpcCall('modAuditLog', {
               mod: me,
               action: 'ban_deathrow',
               user: inmate.username,
@@ -9876,7 +9876,7 @@ Analyze this comment against the community rules. Then write a brief, profession
               logAction({type:'ban', user:inmate.username, violation:'username', duration:-1, reason:inmate.reason, source:'dr-flush', delayHours:Math.round((inmate.executeAt-inmate.queuedAt)/3600000)});
               try {
                 const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
-                workerCall('/audit/log', {
+                rpcCall('modAuditLog', {
                   mod: me,
                   action: 'ban_deathrow',
                   user: inmate.username,
@@ -13612,6 +13612,22 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       if (ev.key === 'Enter'){ ev.preventDefault(); doSave(); }
     });
     setTimeout(() => { try { input.focus(); } catch(e){} }, 50);
+  }
+
+  // v8.6.0 / v5.0-Phase-1: named RPC dispatcher. Replaces the generic
+  // workerFetch relay. Each `name` resolves to a fixed handler in
+  // background.js's RPC_HANDLERS map -- the content script cannot supply
+  // a path. Returns the same { ok, status, data, text, error } shape as
+  // workerCall so call sites can swap with minimal churn.
+  async function rpcCall(name, args){
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: 'rpc', name: name, args: args || {} });
+      if (!resp) return { ok: false, status: 0, error: 'no response from background' };
+      // Background returns { ok, status, data, text, error, timeout } already.
+      return resp;
+    } catch (e) {
+      return { ok: false, status: 0, error: String(e && e.message || e) };
+    }
   }
 
   // v7.2: dispatching workerCall. Flag OFF -> delegates to __legacyWorkerCall
