@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.6.1';
+  const VERSION = 'v8.6.2';
   const C = {
     BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
     BORDER:'#2a2f38', BORDER2:'#3a3f48',
@@ -14610,8 +14610,14 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       if (!_enabled()) return;
       const k = (e.key || '').toLowerCase();
       if (k !== 's' && k !== 'u') return;
-      // Skip if any modifier held (don't hijack browser/site shortcuts)
-      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      // v8.6.2: REQUIRE shift modifier. The original v8.4.0 design used bare
+      // S / U which fired on any accidental keypress while hovering a post --
+      // produced a saga of phantom sticky/unsticky actions in catsfive's mod
+      // log over multiple hours. Shift+S / Shift+U raises the deliberate-
+      // action bar without sacrificing the FOXY hover-and-press flow.
+      if (!e.shiftKey) return;
+      // Other modifiers still bail (don't hijack browser shortcuts).
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       // Skip if user is typing somewhere
       const ae = document.activeElement;
       if (ae){
