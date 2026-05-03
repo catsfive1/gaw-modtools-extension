@@ -91,31 +91,31 @@ function pathAllowed(path) {
 }
 // --- v7.2 Platform Hardening END ---
 
-chrome.runtime.onInstalled.addListener((details) => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('[ModTools] Installed:', details.reason);
-  // v7.2: removed the storage-inventory console.log call from onInstalled
-  // (previously dumped every key in chrome.storage.local -- now gone).
   // (Re)create the recurring update-check alarm on install/update
   try {
     chrome.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
   } catch (e) { console.warn('[ModTools] alarm create failed', e); }
-  // v7.2: warm the secret cache on install/update.
-  try { loadSecrets(); } catch (e) {}
-  // v7.2 CHUNK 14: open session storage to content scripts.
-  try { __ensureSessionAccess(); } catch (e) {}
+  // v8.6.9: AWAIT __ensureSessionAccess so subsequent storage calls don't
+  // fire before the session-area access level is set. Pre-fix race: the
+  // setAccessLevel call was async-fired but not awaited; consumers that
+  // hit chrome.storage.session immediately after install could fail.
+  try { await __ensureSessionAccess(); } catch (e) {}
+  try { await loadSecrets(); } catch (e) {}
 });
 
 // Also ensure the alarm is alive on service-worker wake-up
-chrome.runtime.onStartup?.addListener(() => {
+chrome.runtime.onStartup?.addListener(async () => {
   try {
     chrome.alarms.get(ALARM_NAME, (a) => {
       if (!a) chrome.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
     });
   } catch (e) {}
-  // v7.2: warm the secret cache on each cold start.
-  try { loadSecrets(); } catch (e) {}
-  // v7.2 CHUNK 14: re-arm session access after SW eviction.
-  try { __ensureSessionAccess(); } catch (e) {}
+  // v8.6.9: AWAIT both bootstrap calls so the SW is fully ready before
+  // any incoming RPC handler fires.
+  try { await __ensureSessionAccess(); } catch (e) {}
+  try { await loadSecrets(); } catch (e) {}
 });
 
 // v7.2 CHUNK 14: also arm on module load so a freshly-reloaded SW never
@@ -450,12 +450,55 @@ const RPC_HANDLERS = {
   }
 };
 
+// v8.6.9: arg payload size cap. Prevents a compromised content script
+// from DoSing the worker via a 10MB details object on modAuditLog or
+// similar. 256KB is well above any legitimate RPC arg shape (~1KB
+// average) and well below the worker's 1MB body cap. Stringify cost is
+// bounded since we only do it on the size check, not on the wire.
+const _RPC_MAX_ARG_BYTES = 256 * 1024;
+
+// v8.6.9: defense-in-depth origin check. The chrome.runtime.id guard at
+// the top of the message listener already rejects cross-extension
+// senders. This is for content-script-context RPCs: confirm the page
+// origin is one we expect (greatawakening.win) before letting modXxx
+// run. Popup/options-page senders have no sender.tab so they pass
+// through untouched -- the lead-token gate handles those.
+const _ALLOWED_CONTENT_ORIGINS = [
+  'https://greatawakening.win',
+  'http://greatawakening.win'
+];
+
+function _validateRpcSenderOrigin(callerCtx, sender) {
+  if (callerCtx !== 'content') return true; // popup/options: no tab origin
+  const url = sender && sender.url ? String(sender.url) : '';
+  for (const o of _ALLOWED_CONTENT_ORIGINS) {
+    if (url.indexOf(o) === 0) return true;
+  }
+  return false;
+}
+
 async function _dispatchRpc(name, args, sender) {
   const def = RPC_HANDLERS[String(name || '')];
   if (!def) return { ok: false, status: 0, error: 'unknown rpc: ' + String(name) };
   const callerCtx = _classifyCaller(sender);
   if (!def.allowed_callers.includes(callerCtx)) {
     return { ok: false, status: 0, error: 'rpc ' + name + ' refused for caller-context ' + String(callerCtx) };
+  }
+  // v8.6.9: origin guard for content-script RPCs.
+  if (!_validateRpcSenderOrigin(callerCtx, sender)) {
+    console.warn('[rpc] origin rejected: ' + (sender && sender.url));
+    return { ok: false, status: 0, error: 'rpc ' + name + ' refused: sender origin not allow-listed' };
+  }
+  // v8.6.9: arg size cap.
+  try {
+    if (args != null) {
+      const argSize = JSON.stringify(args).length;
+      if (argSize > _RPC_MAX_ARG_BYTES) {
+        return { ok: false, status: 0, error: 'rpc ' + name + ' refused: args too large (' + argSize + ' bytes > ' + _RPC_MAX_ARG_BYTES + ')' };
+      }
+    }
+  } catch (sizeErr) {
+    return { ok: false, status: 0, error: 'rpc ' + name + ' refused: args not serializable' };
   }
   try {
     return await def.handler(args || {}, { caller: callerCtx });
