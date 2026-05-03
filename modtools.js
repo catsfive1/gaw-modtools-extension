@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.6.7';
+  const VERSION = 'v8.6.8';
 
   // ============================================================================
   // v8.6.5: diagnostic ring buffer for hard-to-reproduce bugs
@@ -9575,6 +9575,38 @@ Analyze this comment against the community rules. Then write a brief, profession
     return ipMap;
   }
 
+  // v8.6.8: silent auto-fetch of /users page so new registrations append
+  // without requiring the lead to refresh. Uses the same scrapeCurrentPage
+  // logic but against a fetched copy of the page HTML, then re-renders the
+  // triage console if anything new landed.
+  async function fetchAndIngestUsersPage() {
+    if (!IS_USERS_PAGE) return 0;
+    try {
+      const r = await fetch(location.href, { credentials: 'include', cache: 'no-store' });
+      if (!r.ok) return 0;
+      const html = await r.text();
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const logs = doc.querySelectorAll('.log');
+      let added = 0;
+      const newUsernames = [];
+      logs.forEach(log => {
+        const spans = log.querySelectorAll('span');
+        if (spans.length < 2) return;
+        const u = spans[0].textContent.trim();
+        const j = spans[1] ? spans[1].textContent.trim() : '';
+        const ip = spans[2] ? spans[2].textContent.trim() : '';
+        if (u && rosterAdd(u, j, ip)) { added++; newUsernames.push(u); }
+      });
+      if (newUsernames.length > 0) {
+        try { applyAutoDeathRowRules(newUsernames); } catch(e){}
+      }
+      return added;
+    } catch (e) {
+      console.warn('[users-autorefresh] fetch failed:', e && e.message || e);
+      return 0;
+    }
+  }
+
   function refreshTriageConsole(){
     const container=document.getElementById('gam-triage');
     if(!container) return;
@@ -9584,6 +9616,54 @@ Analyze this comment against the community rules. Then write a brief, profession
     renderTriageToolbar(container, users);
     renderTriageBatchBar(container);
     renderTriageList(container, users);
+
+    // v8.6.8: wire the 90s auto-refresh once. Subsequent refreshTriageConsole
+    // calls are no-ops on this branch. Tab visibility-aware: skip the fetch
+    // when the tab is hidden, but keep the interval armed so it fires the
+    // next time the user comes back.
+    if (IS_USERS_PAGE && !window.__gam_users_autorefresh_started) {
+      window.__gam_users_autorefresh_started = true;
+      console.log('[modtools] /users auto-refresh armed (90s cadence)');
+      setInterval(async () => {
+        if (document.hidden) return;
+        try {
+          const added = await fetchAndIngestUsersPage();
+          if (added > 0) {
+            console.log('[modtools] /users +' + added + ' new registrations');
+            try { refreshTriageConsole(); } catch(e){}
+          }
+        } catch(e){}
+      }, 90 * 1000);
+    }
+
+    // v8.6.8: 4h periodic DR rule sweep against the entire roster (not just
+    // newly-scraped users). Catches accounts that were created when no mod
+    // happened to be on /users. Newly-matched usernames flow through the
+    // standard addToDeathRow path -- inheriting the 72h soft-stop window
+    // and showing up in the Tards / Death Row sections per existing rules.
+    if (IS_USERS_PAGE && !window.__gam_dr_sweep_started) {
+      window.__gam_dr_sweep_started = true;
+      console.log('[modtools] DR rule sweep armed (4h cadence)');
+      const sweepFn = function(){
+        try {
+          const roster = lsGet(K.ROSTER, {}) || {};
+          const candidates = Object.values(roster)
+            .filter(function(r){ return r && r.name && r.status !== 'deathrow' && r.status !== 'banned'; })
+            .map(function(r){ return r.name; });
+          if (candidates.length > 0) {
+            const drBefore = (lsGet(K.DR, []) || []).length;
+            try { applyAutoDeathRowRules(candidates); } catch(e){}
+            const drAfter = (lsGet(K.DR, []) || []).length;
+            if (drAfter > drBefore) {
+              console.log('[modtools] DR sweep queued ' + (drAfter - drBefore) + ' new (scanned ' + candidates.length + ')');
+              try { refreshTriageConsole(); } catch(e){}
+            }
+          }
+        } catch (e) { console.warn('[dr-sweep]', e); }
+      };
+      setTimeout(sweepFn, 30 * 1000);          // first sweep 30s after console init
+      setInterval(sweepFn, 4 * 3600 * 1000);    // every 4h thereafter
+    }
   }
 
   function renderTriageStats(container, users){
@@ -10177,6 +10257,35 @@ Analyze this comment against the community rules. Then write a brief, profession
         const sec = buildCollapsibleSection('tards',
           `<span class="gam-t-section-dot" style="background:${C.RED}"></span> \u{1F9E8} Possible Tards (${tards.length}) <span class="gam-t-section-why">flagged by regex / cluster / prior bans / watchlist</span>`,
           'gam-t-section-tards');
+
+        // v8.6.8: APPLY TO ALL bulk action -- queues every visible Tard to
+        // Death Row with 72h delay. Confirm dialog before firing.
+        const bulkBar = document.createElement('div');
+        bulkBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;margin:0 0 6px 0;background:rgba(240,64,64,0.08);border:1px solid rgba(240,64,64,0.35);border-radius:4px';
+        const bulkLbl = document.createElement('span');
+        bulkLbl.style.cssText = 'font-size:11px;color:' + C.TEXT2;
+        bulkLbl.textContent = 'Bulk action: queue every Tard listed below to Death Row (72h delay).';
+        const bulkBtn = document.createElement('button');
+        bulkBtn.style.cssText = 'background:' + C.RED + ';color:#fff;border:none;border-radius:4px;padding:5px 14px;font:600 11px -apple-system,system-ui,sans-serif;letter-spacing:0.5px;cursor:pointer;flex-shrink:0';
+        bulkBtn.textContent = 'APPLY TO ALL (' + tards.length + ')';
+        bulkBtn.addEventListener('click', async function(){
+          const ok = window.confirm('Queue ALL ' + tards.length + ' users above to Death Row (72h soft-stop)?\n\nYou can still remove false positives from the DR queue before they execute.');
+          if (!ok) return;
+          bulkBtn.disabled = true;
+          bulkBtn.textContent = 'queueing…';
+          let added = 0;
+          for (const u of tards) {
+            try {
+              if (typeof addToDeathRow === 'function' && addToDeathRow(u.username, 72 * 3600 * 1000, 'bulk APPLY TO ALL from Tards section')) added++;
+            } catch(e){}
+          }
+          try { snack('\u{1F480} Queued ' + added + ' to Death Row', 'success'); } catch(e){}
+          try { refreshTriageConsole(); } catch(e){}
+        });
+        bulkBar.appendChild(bulkLbl);
+        bulkBar.appendChild(bulkBtn);
+        sec.body.appendChild(bulkBar);
+
         tards.forEach(u=>sec.body.appendChild(buildUserRow(u, { tard: true })));
         listEl.appendChild(sec.wrap);
       }
@@ -10190,7 +10299,45 @@ Analyze this comment against the community rules. Then write a brief, profession
         if (items.length === 0) return;
         const sec = buildCollapsibleSection(s,
           `<span class="gam-t-section-dot" style="background:${sectionColors[s]}"></span> ${sectionLabels[s]} (${items.length})`);
-        items.forEach(u=>sec.body.appendChild(buildUserRow(u)));
+
+        // v8.6.8: 24h divider in the Unreviewed section. Items are sorted
+        // joinedAt-desc (newest first); insert the divider after the last
+        // user whose joinedAt is within the past 24h.
+        if (s === 'new') {
+          const cutoff = Date.now() - 24 * 3600 * 1000;
+          const _ts = function(j){
+            if (!j) return 0;
+            if (j instanceof Date) return j.getTime();
+            if (typeof j === 'number') return j;
+            const p = Date.parse(String(j));
+            return isNaN(p) ? 0 : p;
+          };
+          let lastNewIdx = -1;
+          for (let i = 0; i < items.length; i++) {
+            if (_ts(items[i].joinedAt) >= cutoff) lastNewIdx = i;
+            else break; // sorted desc -- everything after is older
+          }
+          items.forEach(function(u, i){
+            sec.body.appendChild(buildUserRow(u));
+            if (i === lastNewIdx && lastNewIdx < items.length - 1) {
+              const divider = document.createElement('div');
+              divider.className = 'gam-t-24h-divider';
+              divider.style.cssText = 'display:flex;align-items:center;gap:10px;margin:8px 4px;color:' + C.GREEN + ';font:600 10px/1 -apple-system,system-ui,sans-serif;letter-spacing:1.5px;opacity:0.85';
+              const lineL = document.createElement('span');
+              lineL.style.cssText = 'flex:1;height:2px;background:' + C.GREEN + ';opacity:0.55;border-radius:1px';
+              const lbl = document.createElement('span');
+              lbl.textContent = '24H';
+              const lineR = document.createElement('span');
+              lineR.style.cssText = 'flex:1;height:2px;background:' + C.GREEN + ';opacity:0.55;border-radius:1px';
+              divider.appendChild(lineL);
+              divider.appendChild(lbl);
+              divider.appendChild(lineR);
+              sec.body.appendChild(divider);
+            }
+          });
+        } else {
+          items.forEach(u=>sec.body.appendChild(buildUserRow(u)));
+        }
         listEl.appendChild(sec.wrap);
       });
     } else {
