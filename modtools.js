@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.6.6';
+  const VERSION = 'v8.6.7';
 
   // ============================================================================
   // v8.6.5: diagnostic ring buffer for hard-to-reproduce bugs
@@ -5953,10 +5953,18 @@
       try {
         const ok=await executeBan(inmate.username, inmate.reason, 0);
         if(ok){
-          const v=await verifyBan(inmate.username);
+          // v8.6.7: mark executed BEFORE any other awaitable so a verifyBan
+          // throw can't strand the inmate on the ready list. Pre-fix: if
+          // verifyBan threw, markDeathRowExecuted never ran, the lock was
+          // released in finally{}, and the next 5-min cron cycle re-fired
+          // the ban. catsfive's mod log showed 5x same-user duplicate
+          // bans within an hour from this exact race.
           markDeathRowExecuted(inmate.username);
           rosterSetStatus(inmate.username, 'banned');
-          if (v !== null) markVerified(inmate.username, v);
+          let v = null;
+          try { v = await verifyBan(inmate.username); }
+          catch (verr) { console.warn('[DR] verifyBan threw (non-fatal, ban already marked executed):', verr); }
+          if (v !== null) try { markVerified(inmate.username, v); } catch(_){}
           logAction({type:'ban', user:inmate.username, violation:'username', duration:-1, reason:inmate.reason, source:'death-row', verified:v, delayHours:Math.round((inmate.executeAt-inmate.queuedAt)/3600000)});
           try {
             const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
