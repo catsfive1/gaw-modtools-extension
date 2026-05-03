@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.6.3';
+  const VERSION = 'v8.6.4';
   const C = {
     BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
     BORDER:'#2a2f38', BORDER2:'#3a3f48',
@@ -1092,7 +1092,7 @@
     mailHoverHighlight: false,           // E2: off by default
     autoRefreshEnabled: true,            // E4: on by default
     autoRefreshIntervalMin: 60,          // refresh unfocused/idle pages every N min
-    autoUnstickyEnabled: true,           // v5.1.4: ON by default (endpoint confirmed via Sniffer)
+    autoUnstickyEnabled: false,          // v5.1.4: ON by default. v8.6.3: feature disabled because /sticky is a toggle endpoint that fires the wrong way against stale DOM. v8.6.4: default flipped to false so the dead toggle doesn't show as "active" in settings.
     autoUnstickyMaxHours: 12,
     autoUnstickyUpvoteThreshold: 100,
     autoUnstickyUpvoteHours: 8,
@@ -13225,6 +13225,31 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   try { applyCleanUiMode(); } catch(e){}
 
   // v5.4.0: Lock / Unlock current post via /lock endpoint. Same endpoint toggles state.
+  // v8.6.4: derive current lock state from the page DOM, not from local
+  // memory. GAW's /lock endpoint is a TOGGLE -- if our local belief drifts
+  // from server reality (another mod locked/unlocked the post elsewhere),
+  // the toggle fires the wrong way. Same class of bug as auto-unsticky
+  // pre-v8.6.3. Best-effort detection: scan several known GAW lock
+  // indicators; if none found, confirm-before-act with explicit belief.
+  function _detectPostLockState(id){
+    try {
+      const post = document.querySelector('[data-id="' + id + '"]') || document.querySelector('.post');
+      if (post){
+        if (post.classList.contains('locked')) return true;
+        if (post.hasAttribute('data-locked')) return true;
+        if (post.querySelector('.locked')) return true;
+      }
+      // GAW typically renders a banner or icon when a post is locked.
+      // Match common phrasing/markup as a fallback.
+      const bodyTxt = document.body.innerText || '';
+      if (/post locked by|this post is locked|comments locked/i.test(bodyTxt)) return true;
+      // Reply forms get disabled on locked posts -- another reliable hint.
+      const replyDisabled = document.querySelector('.comment-form[disabled], textarea[name="raw_body"][disabled]');
+      if (replyDisabled) return true;
+      return false; // tentative -- could be wrong if GAW markup changes
+    } catch(_) { return null; } // null = could not determine
+  }
+
   async function togglePostLock(){
     let id = (location.pathname.match(/\/p\/([a-zA-Z0-9]+)/) || [])[1] || null;
     if (!id){
@@ -13232,6 +13257,45 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       if (native) id = native.getAttribute('data-id');
     }
     if (!id){ snack('Could not find post ID on this page', 'warn'); return; }
+
+    // v8.6.4: detect actual server state from page DOM at click time.
+    const serverLocked = _detectPostLockState(id);
+    const localBelief = !!getSetting('lockState_' + id, false);
+
+    let actingFrom;          // best guess of actual current state
+    let needsConfirm = false;
+    let confirmMsg = null;
+
+    if (serverLocked === null) {
+      // Could not determine state. Trust local belief but warn.
+      actingFrom = localBelief;
+      needsConfirm = true;
+      confirmMsg = 'Could not verify lock state from page DOM. Local memory says the post is currently ' +
+        (localBelief ? 'LOCKED' : 'UNLOCKED') + ' so this click will ' +
+        (localBelief ? 'UNLOCK' : 'LOCK') + ' it.\n\nContinue? (Cancel and refresh the page if uncertain.)';
+    } else if (serverLocked !== localBelief) {
+      // Drift between page and local. Trust the page, update local, confirm.
+      console.warn('[modtools] lockState_' + id + ' drift detected: local=' + localBelief + ' dom=' + serverLocked + ' -- syncing to dom');
+      setSetting('lockState_' + id, serverLocked);
+      actingFrom = serverLocked;
+      needsConfirm = true;
+      confirmMsg = 'Lock state drifted (someone else may have changed it). Page shows the post is currently ' +
+        (serverLocked ? 'LOCKED' : 'UNLOCKED') + '.\n\nClick OK to ' +
+        (serverLocked ? 'UNLOCK' : 'LOCK') + ' it. Cancel to abort.';
+    } else {
+      actingFrom = localBelief;
+      // No drift, no confirm needed -- belief and DOM agree.
+    }
+
+    if (needsConfirm){
+      try {
+        if (!window.confirm(confirmMsg)) {
+          snack('Lock/unlock cancelled', 'info');
+          return;
+        }
+      } catch(_){ /* if confirm itself blows up, skip and proceed */ }
+    }
+
     const community = 'GreatAwakening';
     try {
       const body = `id=${encodeURIComponent(id)}&community=${encodeURIComponent(community)}`;
@@ -13247,12 +13311,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         body
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const cur = !!getSetting('lockState_' + id, false);
-      setSetting('lockState_' + id, !cur);
+      // Local state should now flip from actingFrom to !actingFrom.
+      const newState = !actingFrom;
+      setSetting('lockState_' + id, newState);
       const btn = document.getElementById('gam-lock-btn');
-      if (btn) btn.classList.toggle('gam-on', !cur);
-      logAction({ type: cur ? 'unlock' : 'lock', postId:id, source:'status-bar' });
-      snack(cur ? `\uD83D\uDD13 Post unlocked` : `\uD83D\uDD12 Post locked`, 'success');
+      if (btn) btn.classList.toggle('gam-on', newState);
+      logAction({ type: newState ? 'lock' : 'unlock', postId:id, source:'status-bar' });
+      snack(newState ? '\uD83D\uDD12 Post locked' : '\uD83D\uDD13 Post unlocked', 'success');
     } catch(e){
       snack(`Lock/unlock failed: ${e.message}`, 'error');
     }
@@ -15064,8 +15129,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 
     setTimeout(()=>processDeathRow(), 5000);
     // v5.1.2: E8 auto-unsticky (scaffolded, runs every 5min on feed pages)
-    setTimeout(()=>autoUnstickyTick(), 10000);
-    setInterval(autoUnstickyTick, 5 * 60 * 1000);
+    // v8.6.4: function-level kill-switch in v8.6.3 made these no-ops, but the
+    // setInterval still fires every 5 min and walks the dispatch into a
+    // returned function. Removed entirely until the feature is rebuilt
+    // (requires server-side state read or non-toggle worker shim).
+    // setTimeout(()=>autoUnstickyTick(), 10000);
+    // setInterval(autoUnstickyTick, 5 * 60 * 1000);
 
     // v5.3.0: DOM health check — warn if expected site elements are missing
     setTimeout(runDomHealthCheck, 1500);

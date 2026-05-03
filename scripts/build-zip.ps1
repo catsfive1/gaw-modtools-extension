@@ -64,8 +64,14 @@ try {
 
   $iconsSrc = Join-Path $RepoRoot 'icons'
   if (Test-Path $iconsSrc) {
-    Copy-Item $iconsSrc -Destination $stage -Recurse -Force
-    $iconCount = (Get-ChildItem (Join-Path $stage 'icons') -File).Count
+    # v8.6.4: filter out .bak / .prev.bak / *~ junk so old icon snapshots
+    # don't bloat the Chrome Web Store package. Only ship real icon files.
+    $iconsDst = Join-Path $stage 'icons'
+    New-Item -ItemType Directory -Path $iconsDst | Out-Null
+    Get-ChildItem $iconsSrc -File |
+      Where-Object { $_.Extension -in '.png','.jpg','.jpeg','.svg','.webp','.ico' } |
+      ForEach-Object { Copy-Item $_.FullName (Join-Path $iconsDst $_.Name) -Force }
+    $iconCount = (Get-ChildItem $iconsDst -File).Count
     Log "staged icons: $iconCount" 'Cyan'
   }
 
