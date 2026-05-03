@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.6.2';
+  const VERSION = 'v8.6.3';
   const C = {
     BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
     BORDER:'#2a2f38', BORDER2:'#3a3f48',
@@ -14523,6 +14523,36 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     return out;
   }
   async function autoUnstickyTick(){
+    // v8.6.3 EMERGENCY DISABLE.
+    //
+    // GAW's /sticky endpoint is a TOGGLE: server flips whatever the current
+    // state is, regardless of caller intent. apiSticky() and apiUnsticky()
+    // are literally identical functions -- both POST /sticky, both rely on
+    // server-side state to know which direction to flip.
+    //
+    // autoUnstickyTick reads DOM (.stickied class) to decide which posts
+    // are "currently stuck and old enough to unstick". If DOM is stale --
+    // user just unstickied via QSK / action modal but the page hasn't
+    // re-rendered yet, OR a different tab toggled the state -- the cron
+    // tick sees `.stickied` in DOM and calls apiUnsticky. apiUnsticky
+    // POSTs /sticky. Server toggles. Server's actual state was UN-stuck.
+    // Server flips to STUCK. Audit log records "stickied".
+    //
+    // catsfive's 2026-05-03 mod log showed this loop: every ~5 min the
+    // tick re-stickied posts that had just been unstickied, attributing
+    // each toggle to the lead's identity (correct, since the server
+    // derives identity from the auth token).
+    //
+    // Reactivating this feature requires either:
+    //   (a) a non-toggle "set sticky=true/false" worker endpoint, OR
+    //   (b) a server-side state read before each call (POST GET pattern), OR
+    //   (c) durable client-side dedupe (chrome.storage.local) per post id
+    //       with a multi-hour cooldown that survives page reloads.
+    //
+    // Until one of those lands, this function is a no-op.
+    return;
+    // ----- legacy body kept below for reactivation; do not delete -----
+    /* eslint-disable no-unreachable */
     if (!getSetting('autoUnstickyEnabled', false)) return;
     // v5.9.2 (QA): NEVER run on a user profile page. Stickies shown on
     // /u/<name> are that user's own posts which were pinned in some
