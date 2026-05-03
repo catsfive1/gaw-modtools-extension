@@ -31,7 +31,48 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.6.4';
+  const VERSION = 'v8.6.5';
+
+  // ============================================================================
+  // v8.6.5: diagnostic ring buffer for hard-to-reproduce bugs
+  // ============================================================================
+  // Captures every sticky API call (with stack trace), every token-modal bail
+  // decision, every storage read/write of the throttle key. In-memory hot
+  // copy + persistent chrome.storage.local mirror. Surfaced in
+  // downloadDebugSnapshot so users can paste the log back.
+  let _diagBuffer = [];
+  const _DIAG_KEY = 'gam_diag_log';
+  const _DIAG_MAX = 500;
+
+  function _diagLog(category, message, extra) {
+    let stack = null;
+    if (category === 'sticky' || category === 'auth-modal' || category === 'modPost') {
+      try { stack = (new Error()).stack; } catch (_){}
+    }
+    const entry = {
+      ts: Date.now(),
+      iso: new Date().toISOString(),
+      cat: category,
+      msg: String(message || ''),
+      extra: extra || null,
+      stack: stack ? stack.split('\n').slice(2, 8).join('\n').replace(/https?:\/\/[^/]+/g, '') : null,
+      v: typeof VERSION !== 'undefined' ? VERSION : '?'
+    };
+    _diagBuffer.push(entry);
+    if (_diagBuffer.length > _DIAG_MAX) _diagBuffer.shift();
+    try { console.log('[gam-diag][' + category + ']', message, extra || ''); } catch (_){}
+    // Fire-and-forget persist
+    try {
+      if (chrome && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(_DIAG_KEY).then(function(r){
+          const log = (r[_DIAG_KEY] || []).slice(-(_DIAG_MAX - 1));
+          log.push(entry);
+          chrome.storage.local.set({ [_DIAG_KEY]: log }).catch(function(){});
+        }).catch(function(){});
+      }
+    } catch (_){}
+  }
+  // ============================================================================
   const C = {
     BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
     BORDER:'#2a2f38', BORDER2:'#3a3f48',
@@ -344,6 +385,12 @@
   // the response body is a login/auth-failure page. Callers should treat it
   // as a hard failure with a distinct UX hint.
   async function modPost(url, fields, withCsrf) {
+    // v8.6.5: log every /sticky modPost regardless of caller. Catches paths
+    // that bypass apiSticky/apiUnsticky -- if the auto-sticky cycle is still
+    // happening on v8.6.5, this will name the actual culprit in the diag log.
+    if (url === '/sticky' || (typeof url === 'string' && url.startsWith('/sticky'))) {
+      try { _diagLog('modPost', 'modPost(/sticky) -- INSTRUMENTATION', { url: url, fieldsId: fields && fields.id, withCsrf: withCsrf }); } catch(_){}
+    }
     const _csrfTok = withCsrf === false ? null : csrf();
     const body = new URLSearchParams(
       withCsrf === false ? fields : { ...fields, _csrf: _csrfTok }
@@ -859,6 +906,14 @@
       // method, HTTP status, latency, ok flag, and trimmed error strings.
       networkLog: (function(){
         try { return _netLog ? _netLog.slice() : []; } catch(e){ return []; }
+      })(),
+      // v8.6.5: diagnostic ring buffer. In-memory hot copy. Captures every
+      // sticky API call (with stack trace), every token-modal bail decision,
+      // every storage read/write of the throttle key. Persistent mirror is
+      // in chrome.storage.local under 'gam_diag_log' for cross-session
+      // analysis.
+      diagLog: (function(){
+        try { return _diagBuffer ? _diagBuffer.slice() : []; } catch(e){ return []; }
       })(),
       // Firehose live state: active flag, pages crawled this session,
       // posts pushed, error count. Useful when mods report "firehose
@@ -13498,17 +13553,21 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     //
     // Console rescue: paste `window.__GAM_RESET_TOKEN_THROTTLE = true` to
     // force-show the modal once before the 7-day window elapses.
+    try { _diagLog('auth-modal', 'showTokenOnboardingModal entered', { reason: reason }); } catch(_){}
     try {
       if (typeof window !== 'undefined' && window.__GAM_KILL_MODAL === true) {
         console.log('[modtools] modal suppressed: __GAM_KILL_MODAL=true');
+        try { _diagLog('auth-modal', 'BAIL: __GAM_KILL_MODAL=true'); } catch(_){}
         return;
       }
       if (getSetting('features.suppressTokenModal', false) === true) {
         console.log('[modtools] modal suppressed: features.suppressTokenModal=true');
+        try { _diagLog('auth-modal', 'BAIL: features.suppressTokenModal=true'); } catch(_){}
         return;
       }
       if (getModToken && getModToken()) {
         console.log('[modtools] modal suppressed: cache has token');
+        try { _diagLog('auth-modal', 'BAIL: cache has token'); } catch(_){}
         return;
       }
 
@@ -13521,8 +13580,20 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         const stored = await chrome.storage.local.get(K_SETTINGS);
         const st = stored && stored[K_SETTINGS];
 
+        try {
+          _diagLog('auth-modal', 'storage state probed', {
+            has_st: !!st,
+            workerModToken_len: (st && typeof st.workerModToken === 'string') ? st.workerModToken.length : 0,
+            leadModToken_len: (st && typeof st.leadModToken === 'string') ? st.leadModToken.length : 0,
+            lastTokenPromptAt: (st && st.lastTokenPromptAt) || 0,
+            lastTokenPromptAt_iso: (st && st.lastTokenPromptAt) ? new Date(st.lastTokenPromptAt).toISOString() : null,
+            tokenOnboardedOnce: !!(st && st.tokenOnboardedOnce)
+          });
+        } catch(_){}
+
         if (st && typeof st.workerModToken === 'string' && st.workerModToken.length > 8) {
           console.log('[modtools] modal suppressed: chrome.storage.local has token, hydrating cache');
+          try { _diagLog('auth-modal', 'BAIL: chrome.storage.local has token (len=' + st.workerModToken.length + '), hydrating cache'); } catch(_){}
           try { _secretsCache['workerModToken'] = st.workerModToken; } catch(_){}
           if (st.leadModToken) try { _secretsCache['leadModToken'] = st.leadModToken; } catch(_){}
           return;
@@ -13535,11 +13606,14 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         if (!force && lastPrompt && (Date.now() - lastPrompt) < sevenDaysMs) {
           const hoursAgo = Math.round((Date.now() - lastPrompt) / 3600000);
           console.log('[modtools] modal suppressed: throttled (last shown ' + hoursAgo + 'h ago, weekly window via chrome.storage.local)');
+          try { _diagLog('auth-modal', 'BAIL: throttled (last shown ' + hoursAgo + 'h ago)'); } catch(_){}
           return;
         }
         if (force) {
           try { window.__GAM_RESET_TOKEN_THROTTLE = false; } catch(_){}
         }
+      } else {
+        try { _diagLog('auth-modal', 'WARN: chrome.storage.local unavailable'); } catch(_){}
       }
     } catch(e) {
       console.warn('[modtools] modal-bail check threw:', e && e.message || e);
@@ -13547,6 +13621,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     }
 
     _tokenOnboardingOpen = true;
+    try { _diagLog('auth-modal', 'RENDER: all bails passed, modal opening', { reason: reason }); } catch(_){}
     // v8.5.4: stamp the throttle DIRECTLY to chrome.storage.local. Awaited so
     // the write is durable before the modal even renders -- prevents the
     // "modal flashes, user dismisses, no stamp written, modal re-appears next
@@ -13557,9 +13632,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         const merged = { ...(r[K_SETTINGS] || {}), lastTokenPromptAt: Date.now() };
         await chrome.storage.local.set({ [K_SETTINGS]: merged });
         console.log('[modtools] modal-throttle stamped (' + new Date().toISOString() + ') -- next show after 7 days');
+        try { _diagLog('auth-modal', 'STAMP: lastTokenPromptAt=' + merged.lastTokenPromptAt + ' written to chrome.storage.local'); } catch(_){}
       }
     } catch(e) {
       console.warn('[modtools] failed to stamp throttle:', e && e.message || e);
+      try { _diagLog('auth-modal', 'STAMP FAILED: ' + (e && e.message || e)); } catch(_){}
     }
 
     const backdrop = document.createElement('div');
@@ -14564,12 +14641,16 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   async function apiUnsticky(postId){
     // v5.1.4: CONFIRMED via Sniffer. /sticky is a TOGGLE endpoint - same URL
     // for stick and unstick, server checks current state. Body: id + community only.
+    try { _diagLog('sticky', 'apiUnsticky called', { postId: String(postId) }); } catch(_){}
     const r = await modPost('/sticky', { id:String(postId), community:COMMUNITY }, false);
+    try { _diagLog('sticky', 'apiUnsticky response', { postId: String(postId), ok: r && r.ok, status: r && r.status }); } catch(_){}
     return r;
   }
   // v5.1.4: also expose an explicit sticky call (same endpoint, toggles back on)
   async function apiSticky(postId){
+    try { _diagLog('sticky', 'apiSticky called', { postId: String(postId) }); } catch(_){}
     const r = await modPost('/sticky', { id:String(postId), community:COMMUNITY }, false);
+    try { _diagLog('sticky', 'apiSticky response', { postId: String(postId), ok: r && r.ok, status: r && r.status }); } catch(_){}
     return r;
   }
   function findStickyPosts(){
@@ -14588,6 +14669,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     return out;
   }
   async function autoUnstickyTick(){
+    try { _diagLog('sticky', 'autoUnstickyTick INVOKED -- expected to be no-op since v8.6.4'); } catch(_){}
     // v8.6.3 EMERGENCY DISABLE.
     //
     // GAW's /sticky endpoint is a TOGGLE: server flips whatever the current
