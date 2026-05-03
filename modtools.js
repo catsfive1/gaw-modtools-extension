@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.6.5';
+  const VERSION = 'v8.6.6';
 
   // ============================================================================
   // v8.6.5: diagnostic ring buffer for hard-to-reproduce bugs
@@ -3891,7 +3891,24 @@
     try { localStorage.setItem(key, JSON.stringify(pageValue)); } catch(e) {}
     try {
       if (chrome?.storage?.local) {
-        chrome.storage.local.set({ [key]: value }).catch(()=>{});
+        // v8.6.6: MERGE gam_settings instead of OVERWRITE. The v8.5.4 token-
+        // modal throttle writes lastTokenPromptAt directly to chrome.storage.local,
+        // bypassing the page-localStorage path. If we just .set() the whole
+        // blob here, any unrelated setSetting() call clobbers fields that
+        // chrome.storage.local has but page localStorage doesn't. Reading-
+        // before-writing preserves those fields.
+        if (key === 'gam_settings') {
+          chrome.storage.local.get(key).then(function(existing){
+            const merged = { ...((existing && existing[key]) || {}), ...value };
+            chrome.storage.local.set({ [key]: merged }).catch(function(){});
+          }).catch(function(){
+            // If the read failed, fall back to overwrite -- still better than
+            // dropping the write entirely.
+            chrome.storage.local.set({ [key]: value }).catch(function(){});
+          });
+        } else {
+          chrome.storage.local.set({ [key]: value }).catch(function(){});
+        }
       }
     } catch(e) {}
   }
