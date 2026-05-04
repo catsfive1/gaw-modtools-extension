@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.0.1';
+  const VERSION = 'v9.0.2';
 
   // ============================================================================
   // v8.6.5: diagnostic ring buffer for hard-to-reproduce bugs
@@ -4078,15 +4078,136 @@
 
   function getDeathRow(){ return lsGet(K.DR, []); }
   function saveDeathRow(dr){ lsSet(K.DR, dr); }
-  function addToDeathRow(username, delayMs, reason){
+  function addToDeathRow(username, delayMs, reason, opts){
     const dr=getDeathRow();
     if(dr.find(d=>d.username.toLowerCase()===username.toLowerCase())) return false;
     dr.push({username, reason:reason||getUsersBanReason(), queuedAt:Date.now(), executeAt:Date.now()+delayMs, status:'waiting'});
-    saveDeathRow(dr); return true;
+    saveDeathRow(dr);
+    // v9.0.2: persistent UNDO for user-initiated DR placements + 20s grace
+    // window so accidental clicks can be reversed without the row vanishing
+    // from the UNREVIEWED section. opts.fromUserAction must be true to opt
+    // in -- auto-DR rules / sweeps / sniper paths leave it false so they
+    // don't pollute the undo stack.
+    if (opts && opts.fromUserAction) {
+      try { _recordUndoAction({ type: 'dr-add', target: username, payload: { delayMs: delayMs, reason: reason || getUsersBanReason() } }); } catch(e){}
+      // v9.0.2: 20s grace window. The user just clicked DR -- keep the row
+      // visible in the UNREVIEWED section for 20s so an accidental click
+      // can be reverted via Ctrl+Z without the row vanishing first.
+      try {
+        _drGraceMap.set(String(username || '').toLowerCase(), Date.now() + 20 * 1000);
+      } catch(e){}
+      // After 20s elapses, force a triage refresh so the row moves to its
+      // proper Death Row section.
+      try {
+        setTimeout(function(){
+          try { _drGraceMap.delete(String(username || '').toLowerCase()); } catch(_){}
+          try { if (typeof refreshTriageConsole === 'function') refreshTriageConsole(); } catch(_){}
+        }, 20 * 1000 + 200);
+      } catch(e){}
+    }
+    return true;
   }
+
+  // v9.0.2: in-memory grace tracker for the 20s undo window. Only populated
+  // by user-action DR placements (not auto-rules). buildUserRecord checks
+  // this synchronously to decide whether to display the user as 'new'
+  // (still in UNREVIEWED) or 'deathrow' (moved to DR section).
+  const _drGraceMap = new Map();
   function removeFromDeathRow(username){
     saveDeathRow(getDeathRow().filter(d=>d.username.toLowerCase()!==username.toLowerCase()));
   }
+
+  // v9.0.2: persistent undo stack. 10-entry cap. Persists across reloads
+  // via chrome.storage.local. UI in status bar + Ctrl+Z hotkey.
+  const _UNDO_KEY = 'gam_undo_stack';
+  const _UNDO_MAX = 10;
+
+  async function _recordUndoAction(action) {
+    if (!chrome || !chrome.storage || !chrome.storage.local) return;
+    try {
+      const r = await chrome.storage.local.get(_UNDO_KEY);
+      const stack = (r[_UNDO_KEY] || []).slice(-(_UNDO_MAX - 1));
+      stack.push({ ...action, ts: Date.now() });
+      await chrome.storage.local.set({ [_UNDO_KEY]: stack });
+      try { _refreshUndoBtn(); } catch(_){}
+    } catch(e){}
+  }
+
+  async function _popLastUndo() {
+    if (!chrome || !chrome.storage || !chrome.storage.local) return null;
+    try {
+      const r = await chrome.storage.local.get(_UNDO_KEY);
+      const stack = r[_UNDO_KEY] || [];
+      if (stack.length === 0) return null;
+      const last = stack.pop();
+      await chrome.storage.local.set({ [_UNDO_KEY]: stack });
+      try { _refreshUndoBtn(); } catch(_){}
+      return last;
+    } catch(e) { return null; }
+  }
+
+  async function _peekLastUndo() {
+    if (!chrome || !chrome.storage || !chrome.storage.local) return null;
+    try {
+      const r = await chrome.storage.local.get(_UNDO_KEY);
+      const stack = r[_UNDO_KEY] || [];
+      return stack.length > 0 ? stack[stack.length - 1] : null;
+    } catch(e) { return null; }
+  }
+
+  async function undoLastModAction() {
+    const last = await _popLastUndo();
+    if (!last) {
+      try { snack('Nothing to undo', 'info'); } catch(_){}
+      return;
+    }
+    if (last.type === 'dr-add') {
+      removeFromDeathRow(last.target);
+      try { rosterSetStatus(last.target, 'new'); } catch(_){}
+      try {
+        if (chrome && chrome.storage && chrome.storage.local) {
+          await chrome.storage.local.remove('gam_dr_grace_' + last.target.toLowerCase());
+        }
+      } catch(_){}
+      try { snack('↩ Restored ' + last.target + ' from Death Row', 'success'); } catch(_){}
+      try { logAction({ type: 'undo-dr-add', user: last.target, source: 'undo' }); } catch(_){}
+      try { if (typeof refreshTriageConsole === 'function') refreshTriageConsole(); } catch(_){}
+    } else {
+      try { snack('Cannot undo action type: ' + last.type, 'warn'); } catch(_){}
+    }
+  }
+
+  // Status-bar undo button rendering -- updates label based on stack peek.
+  let _undoBtnEl = null;
+  async function _refreshUndoBtn() {
+    if (!_undoBtnEl) return;
+    const last = await _peekLastUndo();
+    if (last && last.type === 'dr-add') {
+      _undoBtnEl.style.opacity = '1';
+      _undoBtnEl.title = '↩ Undo: removed ' + last.target + ' from Death Row';
+    } else if (last) {
+      _undoBtnEl.style.opacity = '1';
+      _undoBtnEl.title = '↩ Undo: ' + last.type + ' ' + (last.target || '');
+    } else {
+      _undoBtnEl.style.opacity = '0.35';
+      _undoBtnEl.title = 'Nothing to undo';
+    }
+  }
+
+  // Ctrl+Z global hotkey for undo. Skipped when typing in inputs.
+  document.addEventListener('keydown', function(e){
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key !== 'z' && e.key !== 'Z') return;
+    if (e.shiftKey || e.altKey) return; // leave Ctrl+Shift+Z, Alt+Z for browser
+    const ae = document.activeElement;
+    if (ae) {
+      const tag = ae.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || ae.isContentEditable) return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    undoLastModAction();
+  }, true);
   function getDeathRowPending(){ return getDeathRow().filter(d=>d.status==='waiting'); }
   function getDeathRowReady(){ return getDeathRow().filter(d=>d.status==='waiting' && Date.now()>=d.executeAt); }
   function markDeathRowExecuted(username){
@@ -9511,6 +9632,18 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
     const drEntry=dr.find(d=>d.username.toLowerCase()===k && d.status==='waiting');
     if(drEntry) status='deathrow';
+    // v9.0.2: 20s grace window override. If the user was just placed on DR
+    // by a user click (not auto-rule), keep them displayed as 'new' so the
+    // row stays in UNREVIEWED for 20s. Lets accidental DR placements be
+    // reversed via Ctrl+Z before the row leaves the visible section.
+    if (status === 'deathrow' && _drGraceMap.has(k)) {
+      const expiresAt = _drGraceMap.get(k);
+      if (expiresAt > Date.now()) {
+        status = 'new';
+      } else {
+        _drGraceMap.delete(k);
+      }
+    }
     if(watchlist[k] && status==='new') status='watching';
 
     const hist=getUserHistory(username);
@@ -10276,7 +10409,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           let added = 0;
           for (const u of tards) {
             try {
-              if (typeof addToDeathRow === 'function' && addToDeathRow(u.username, 72 * 3600 * 1000, 'bulk APPLY TO ALL from Tards section')) added++;
+              if (typeof addToDeathRow === 'function' && addToDeathRow(u.username, 72 * 3600 * 1000, 'bulk APPLY TO ALL from Tards section', { fromUserAction: true })) added++;
             } catch(e){}
           }
           try { snack('\u{1F480} Queued ' + added + ' to Death Row', 'success'); } catch(e){}
@@ -10451,7 +10584,7 @@ Analyze this comment against the community rules. Then write a brief, profession
             showDeathRowPopover(btn, username);
           } else {
             const hours = getSetting('defaultDeathRowHours', 72);
-            const added = addToDeathRow(username, hours * 3600 * 1000, getUsersBanReason());
+            const added = addToDeathRow(username, hours * 3600 * 1000, getUsersBanReason(), { fromUserAction: true });
             if (added){
               rosterSetStatus(username, 'deathrow');
               logAction({ type:'deathrow', user:username, delay:`${hours} hours`, source:'users-triage-1click' });
@@ -10512,7 +10645,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       const checked = pop.querySelector('input[name="gam-dr-dur"]:checked');
       const ms = checked ? parseInt(checked.value) : DELAY_OPTIONS[0].value;
       const label = DELAY_OPTIONS.find(o=>o.value===ms)?.label || '72 hours';
-      const added = addToDeathRow(username, ms, getUsersBanReason());
+      const added = addToDeathRow(username, ms, getUsersBanReason(), { fromUserAction: true });
       if (added){
         rosterSetStatus(username,'deathrow');
         logAction({type:'deathrow', user:username, delay:label, source:'users-triage'});
