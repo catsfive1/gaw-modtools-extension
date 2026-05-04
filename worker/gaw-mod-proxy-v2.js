@@ -880,54 +880,172 @@ function randomToken(len = 48) {
   return out;
 }
 
-// ---- existing v1 handlers (kept) ----
+// ---- v9.2.0 H1: flags + profiles migrated from GitHub JSON to D1 ----
 
-async function handleFlagsRead(request, env) {
-  const auth = await checkModToken(request, env); if (auth) return auth;
+// Lazy-seed helper: on first read of mod_flags, if D1 is empty and GITHUB_PAT
+// is available, pull flags.json once into D1 and serve from D1 going forward.
+async function seedFlagsFromGithub(env) {
   try {
     const file = await readGithubFile(env, 'flags.json');
-    if (!file.content) return jsonResponse({ schemaVersion: 1, flags: {}, sha: null });
-    return jsonResponse({ ...JSON.parse(file.content), sha: file.sha });
+    if (!file.content) return;
+    const doc = JSON.parse(file.content);
+    const flagsMap = doc.flags || doc.users || {};
+    const stmts = [];
+    for (const [uname, flags] of Object.entries(flagsMap)) {
+      const arr = Array.isArray(flags) ? flags : [];
+      for (const f of arr) {
+        const ts = f.ts ? Math.floor(new Date(f.ts).getTime() / 1000) : Math.floor(Date.now() / 1000);
+        stmts.push(
+          env.AUDIT_DB.prepare(
+            'INSERT OR IGNORE INTO mod_flags (username, flagged_by, severity, reason, ts) VALUES (?, ?, ?, ?, ?)'
+          ).bind(uname.toLowerCase(), f.mod || f.flagged_by || 'legacy', f.severity || 'watch', (f.reason || '').slice(0, 500), ts)
+        );
+      }
+    }
+    if (stmts.length > 0) {
+      // D1 batch limit is 100; chunk if needed
+      for (let i = 0; i < stmts.length; i += 100) {
+        await env.AUDIT_DB.batch(stmts.slice(i, i + 100));
+      }
+    }
+  } catch (e) {
+    // Seed failure is non-fatal -- we just start with an empty table
+  }
+}
+
+// Lazy-seed helper: on first read of mod_profiles, if D1 is empty and GITHUB_PAT
+// is available, pull profiles.json once into D1.
+async function seedProfilesFromGithub(env) {
+  try {
+    const file = await readGithubFile(env, 'profiles.json');
+    if (!file.content) return;
+    const doc = JSON.parse(file.content);
+    const users = doc.users || {};
+    const stmts = [];
+    const now = Math.floor(Date.now() / 1000);
+    for (const [uname, profile] of Object.entries(users)) {
+      stmts.push(
+        env.AUDIT_DB.prepare(
+          'INSERT OR IGNORE INTO mod_profiles (username, data_json, updated_at, updated_by) VALUES (?, ?, ?, ?)'
+        ).bind(uname.toLowerCase(), JSON.stringify(profile), now, 'legacy-seed')
+      );
+    }
+    if (stmts.length > 0) {
+      for (let i = 0; i < stmts.length; i += 100) {
+        await env.AUDIT_DB.batch(stmts.slice(i, i + 100));
+      }
+    }
+  } catch (e) {
+    // Seed failure is non-fatal
+  }
+}
+
+// /flags/read -- returns all flags grouped by username.
+// Output shape: { ok, flags: { username: [{severity, reason, ts, flagged_by}, ...] } }
+async function handleFlagsRead(request, env) {
+  const auth = await checkModToken(request, env); if (auth) return auth;
+  if (!env.AUDIT_DB) return jsonResponse({ error: 'D1 not bound' }, 503);
+  try {
+    // Lazy seed: if table is empty and GitHub is configured, back-fill once.
+    const countRow = await env.AUDIT_DB.prepare('SELECT COUNT(*) as n FROM mod_flags').first();
+    if ((!countRow || countRow.n === 0) && env.GITHUB_PAT) {
+      await seedFlagsFromGithub(env);
+    }
+    const rows = await env.AUDIT_DB.prepare(
+      'SELECT username, flagged_by, severity, reason, ts FROM mod_flags ORDER BY ts DESC'
+    ).all();
+    const flags = {};
+    for (const r of (rows.results || [])) {
+      const key = r.username;
+      if (!flags[key]) flags[key] = [];
+      flags[key].push({ severity: r.severity, reason: r.reason || '', ts: r.ts, flagged_by: r.flagged_by });
+    }
+    return jsonResponse({ ok: true, flags, schemaVersion: 2 });
   } catch (e) { return jsonResponse({ error: String(e) }, 500); }
 }
+
+// /flags/write -- insert a flag row; idempotent within 24h per (username, flagged_by, severity).
 async function handleFlagsWrite(request, env) {
   const auth = await checkModToken(request, env); if (auth) return auth;
   if (!rateLimitWrite(request.headers.get('x-mod-token'))) return jsonResponse({ error: 'rate limit' }, 429);
+  if (!env.AUDIT_DB) return jsonResponse({ error: 'D1 not bound' }, 503);
   try {
     const body = await request.json();
     const { username, mod, severity, reason } = body;
     if (!username || !mod || !severity) return jsonResponse({ error: 'missing fields' }, 400);
-    const existing = await readGithubFile(env, 'flags.json');
-    const doc = existing.content ? JSON.parse(existing.content) : { schemaVersion: 1, flags: {} };
-    const key = username.toLowerCase();
-    doc.flags[key] = doc.flags[key] || [];
-    doc.flags[key].push({ mod, severity, reason: (reason || '').slice(0,500), ts: new Date().toISOString() });
-    doc.lastUpdated = new Date().toISOString();
-    await writeGithubFile(env, 'flags.json', JSON.stringify(doc, null, 2), existing.sha, `flag ${username} by ${mod}`);
+    const uname = username.toLowerCase();
+    const ts = Math.floor(Date.now() / 1000);
+    const window24h = ts - 86400;
+    // Check for recent duplicate (same username + flagged_by + severity in last 24h)
+    const dup = await env.AUDIT_DB.prepare(
+      'SELECT id FROM mod_flags WHERE username = ? AND flagged_by = ? AND severity = ? AND ts >= ?'
+    ).bind(uname, mod, severity, window24h).first();
+    if (dup) {
+      // Update reason + ts on the existing row instead of duplicating
+      await env.AUDIT_DB.prepare(
+        'UPDATE mod_flags SET reason = ?, ts = ? WHERE id = ?'
+      ).bind((reason || '').slice(0, 500), ts, dup.id).run();
+    } else {
+      await env.AUDIT_DB.prepare(
+        'INSERT INTO mod_flags (username, flagged_by, severity, reason, ts) VALUES (?, ?, ?, ?, ?)'
+      ).bind(uname, mod, severity, (reason || '').slice(0, 500), ts).run();
+    }
     return jsonResponse({ ok: true });
   } catch (e) { return jsonResponse({ error: String(e) }, 500); }
 }
+
+// /profiles/read -- returns all mod profiles keyed by username.
+// Output shape: { ok, users: { username: parsedProfileData } }
 async function handleProfilesRead(request, env) {
   const auth = await checkModToken(request, env); if (auth) return auth;
+  if (!env.AUDIT_DB) return jsonResponse({ error: 'D1 not bound' }, 503);
   try {
-    const file = await readGithubFile(env, 'profiles.json');
-    if (!file.content) return jsonResponse({ schemaVersion: 1, users: {}, sha: null });
-    return jsonResponse({ ...JSON.parse(file.content), sha: file.sha });
+    // Lazy seed: if table is empty and GitHub is configured, back-fill once.
+    const countRow = await env.AUDIT_DB.prepare('SELECT COUNT(*) as n FROM mod_profiles').first();
+    if ((!countRow || countRow.n === 0) && env.GITHUB_PAT) {
+      await seedProfilesFromGithub(env);
+    }
+    const rows = await env.AUDIT_DB.prepare(
+      'SELECT username, data_json, updated_at, updated_by FROM mod_profiles ORDER BY updated_at DESC'
+    ).all();
+    const users = {};
+    for (const r of (rows.results || [])) {
+      try {
+        users[r.username] = { ...JSON.parse(r.data_json), indexedAt: r.updated_at, updatedBy: r.updated_by };
+      } catch (e) {
+        users[r.username] = { raw: r.data_json, indexedAt: r.updated_at };
+      }
+    }
+    return jsonResponse({ ok: true, users, schemaVersion: 2 });
   } catch (e) { return jsonResponse({ error: String(e) }, 500); }
 }
+
+// /profiles/write -- upsert a profile row (INSERT OR REPLACE).
 async function handleProfilesWrite(request, env) {
   const auth = await checkModToken(request, env); if (auth) return auth;
   if (!rateLimitWrite(request.headers.get('x-mod-token'))) return jsonResponse({ error: 'rate limit' }, 429);
+  if (!env.AUDIT_DB) return jsonResponse({ error: 'D1 not bound' }, 503);
   try {
     const body = await safeJson(request);
     if (body instanceof Response) return body;
     const { username, profile } = body;
     if (!username || !profile) return jsonResponse({ error: 'missing fields' }, 400);
-    const existing = await readGithubFile(env, 'profiles.json');
-    const doc = existing.content ? JSON.parse(existing.content) : { schemaVersion: 1, users: {} };
-    doc.users[username.toLowerCase()] = { ...profile, indexedAt: new Date().toISOString() };
-    doc.lastUpdated = new Date().toISOString();
-    await writeGithubFile(env, 'profiles.json', JSON.stringify(doc, null, 2), existing.sha, `profile ${username}`);
+    const uname = username.toLowerCase();
+    const ts = Math.floor(Date.now() / 1000);
+    // Derive updatedBy from the mod token identity if available
+    const tokenHeader = request.headers.get('x-mod-token') || '';
+    let updatedBy = null;
+    if (env.AUDIT_DB && tokenHeader) {
+      try {
+        const tr = await env.AUDIT_DB.prepare(
+          'SELECT username FROM mod_tokens WHERE token_hash = ?'
+        ).bind(tokenHeader).first();
+        if (tr) updatedBy = tr.username;
+      } catch (e) {}
+    }
+    await env.AUDIT_DB.prepare(
+      'INSERT OR REPLACE INTO mod_profiles (username, data_json, updated_at, updated_by) VALUES (?, ?, ?, ?)'
+    ).bind(uname, JSON.stringify(profile), ts, updatedBy).run();
     return jsonResponse({ ok: true });
   } catch (e) { return jsonResponse({ error: String(e) }, 500); }
 }
@@ -2224,47 +2342,58 @@ async function handleMetricsWrite(request, env) {
 
 // ---- v5.1.11 Crew: crawler, titles, reports, DR sniper ----
 
-// /profiles/seen -- bulk upsert "last seen" timestamps for discovered users.
-// Body: { users: [{username, pageHint?}, ...] }. Writes KV 'seen:<u>' with 90d TTL.
+// /profiles/seen -- bulk upsert "last seen" timestamps into gaw_users D1 table.
+// Body: { users: [{username, pageHint?}, ...] }. Replaces KV 'seen:<u>' writes.
 async function handleProfilesSeen(request, env) {
   const auth = await checkModToken(request, env); if (auth) return auth;
-  if (!env.MOD_KV) return jsonResponse({ ok: false, error: 'KV not bound' }, 503);
+  if (!env.AUDIT_DB) return jsonResponse({ ok: false, error: 'D1 not bound' }, 503);
   try {
     const body = await request.json();
     const users = Array.isArray(body.users) ? body.users : [];
     if (!users.length) return jsonResponse({ ok: true, wrote: 0 });
-    const now = new Date().toISOString();
+    const nowTs = Math.floor(Date.now() / 1000);
     const capped = users.slice(0, 200); // safety cap per call
-    let wrote = 0;
+    const stmts = [];
     for (const u of capped) {
       const name = typeof u === 'string' ? u : (u && u.username);
       if (!name || typeof name !== 'string') continue;
-      const key = 'seen:' + name.toLowerCase();
-      let prev = null;
-      try { prev = await env.MOD_KV.get(key, 'json'); } catch(e){}
-      const firstSeen = (prev && prev.firstSeen) || now;
-      const rec = { username: name, firstSeen, lastSeen: now, pageHint: (u && u.pageHint) || (prev && prev.pageHint) || '' };
-      await env.MOD_KV.put(key, JSON.stringify(rec), { expirationTtl: 90 * 24 * 3600 });
-      wrote++;
+      stmts.push(
+        env.AUDIT_DB.prepare(
+          `INSERT INTO gaw_users (username, first_seen_at, last_seen_at, last_updated)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(username) DO UPDATE SET
+             last_seen_at = excluded.last_seen_at,
+             last_updated = excluded.last_updated`
+        ).bind(name.toLowerCase(), nowTs, nowTs, nowTs)
+      );
     }
-    return jsonResponse({ ok: true, wrote, skipped: users.length - wrote });
+    if (stmts.length > 0) {
+      for (let i = 0; i < stmts.length; i += 100) {
+        await env.AUDIT_DB.batch(stmts.slice(i, i + 100));
+      }
+    }
+    return jsonResponse({ ok: true, wrote: stmts.length, skipped: users.length - stmts.length });
   } catch (e) { return jsonResponse({ error: String(e) }, 500); }
 }
 
-// /profiles/seen/list -- return all seen users (paginated by KV cursor).
+// /profiles/seen/list -- return seen users from D1 gaw_users.
+// Body: { since?: epochMs, limit?: number }
 async function handleProfilesSeenList(request, env) {
   const auth = await checkModToken(request, env); if (auth) return auth;
-  if (!env.MOD_KV) return jsonResponse({ ok: false, error: 'KV not bound' }, 503);
+  if (!env.AUDIT_DB) return jsonResponse({ ok: false, error: 'D1 not bound' }, 503);
   try {
     const body = await request.json().catch(()=>({}));
-    const cursor = body.cursor || undefined;
-    const list = await env.MOD_KV.list({ prefix: 'seen:', cursor, limit: 500 });
-    const users = [];
-    for (const k of list.keys) {
-      const v = await env.MOD_KV.get(k.name, 'json');
-      if (v) users.push(v);
-    }
-    return jsonResponse({ ok: true, users, cursor: list.list_complete ? null : list.cursor });
+    const sinceMs = body.since || 0;
+    const sinceTs = Math.floor(sinceMs / 1000);
+    const lim = Math.min(body.limit || 500, 1000);
+    const rows = await env.AUDIT_DB.prepare(
+      'SELECT username, last_seen_at FROM gaw_users WHERE last_seen_at > ? ORDER BY last_seen_at DESC LIMIT ?'
+    ).bind(sinceTs, lim).all();
+    const users = (rows.results || []).map(r => ({
+      username: r.username,
+      lastSeen: new Date(r.last_seen_at * 1000).toISOString()
+    }));
+    return jsonResponse({ ok: true, users, cursor: null });
   } catch (e) { return jsonResponse({ error: String(e) }, 500); }
 }
 
@@ -2434,34 +2563,20 @@ async function handleReportSummary(request, env) {
         }
       }
     } catch(e) { out.comebackD1Error = String(e); }
-    if (!out.comebackCandidates || out.comebackCandidates.length === 0) {
-      try {
-        if (env.MOD_KV) {
-          const list = await env.MOD_KV.list({ prefix: 'seen:', limit: 1000 });
-          const sixtyDaysAgo = Date.now() - 60*24*3600*1000;
-          const comeback = [];
-          for (const k of list.keys) {
-            const v = await env.MOD_KV.get(k.name, 'json');
-            if (!v) continue;
-            if (Date.parse(v.lastSeen) < sixtyDaysAgo) comeback.push(v);
-          }
-          comeback.sort((a,b)=> Date.parse(b.lastSeen) - Date.parse(a.lastSeen));
-          out.comebackCandidates = comeback.slice(0, 50);
-          out.comebackSource = 'kv';
-          out.totalSeen = list.keys.length;
-        }
-      } catch(e) { out.seenError = String(e); }
-    }
+    // KV seen: fallback removed -- gaw_users D1 is now the primary seen store (v9.2.0 H2)
 
-    // --- Flag leaders (deferred migration -- keep GitHub source) ---
+    // --- Flag leaders -- v9.2.0: read from D1 mod_flags (no longer GitHub) ---
     try {
-      const f = await readGithubFile(env, 'flags.json');
-      const fdoc = f.content ? JSON.parse(f.content) : { users: {} };
-      const flagCounts = Object.entries(fdoc.users || {})
-        .map(([u, flags])=>({ username: u, count: (flags||[]).length, severities: (flags||[]).map(x=>x.severity||'watch') }))
-        .sort((a,b)=> b.count - a.count)
-        .slice(0, 20);
-      out.flagLeaders = flagCounts;
+      if (env.AUDIT_DB) {
+        const fl = await env.AUDIT_DB.prepare(
+          'SELECT username, COUNT(*) as n, GROUP_CONCAT(severity) as sevs FROM mod_flags GROUP BY username ORDER BY n DESC LIMIT 20'
+        ).all();
+        out.flagLeaders = (fl.results || []).map(r => ({
+          username: r.username,
+          count: r.n,
+          severities: r.sevs ? r.sevs.split(',') : []
+        }));
+      }
     } catch(e) { out.flagsError = String(e); }
 
     // --- Iter 5: Removed Content Snapshot (last 7 days) ---

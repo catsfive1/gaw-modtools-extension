@@ -445,28 +445,16 @@ async function saveToken() {
     return;
   }
   try {
-    const resp = await fetch(WORKER_BASE_POPUP + '/version', {
-      headers: { 'X-Mod-Token': token }
-    });
-    if (!resp.ok) {
+    // v5.0-Phase-1: route through background RPC vault. authValidateToken
+    // tests the candidate against /version server-side and stores it on success.
+    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'authValidateToken', args: { token: token } });
+    if (!r || !r.ok) {
       statusEl.className = 'pop-token-status err';
-      statusEl.textContent = 'rejected (HTTP ' + resp.status + ') \u2014 check token matches what the lead gave you';
+      statusEl.textContent = r && r.status ? 'rejected (HTTP ' + r.status + ') \u2014 check token matches what the lead gave you' : (r && r.error || 'network error');
       return;
     }
-    const data = await resp.json();
-    // v5.8.1 (LOW-1): validate worker response structure before trusting it
-    if (!data || typeof data !== 'object' || typeof data.version !== 'string' || data.version.length > 32) {
-      statusEl.className = 'pop-token-status err';
-      statusEl.textContent = 'malformed worker response \u2014 refusing to save token';
-      return;
-    }
-    const current = await chrome.storage.local.get('gam_settings');
-    const s = current.gam_settings || {};
-    s.workerModToken = token;
-    await chrome.storage.local.set({ gam_settings: s });
     statusEl.className = 'pop-token-status ok';
-    // textContent is safe; version already validated above
-    statusEl.textContent = '\u2713 accepted \u2014 worker version: ' + data.version;
+    statusEl.textContent = '\u2713 accepted \u2014 worker version: ' + (r.data && r.data.version || '?');
   } catch (e) {
     statusEl.className = 'pop-token-status err';
     statusEl.textContent = 'network error: ' + e.message;
@@ -563,28 +551,20 @@ async function saveLead() {
       statusEl.textContent = 'set the team token first';
       return;
     }
-    // v5.2.0 H8: server-side validation -- ping a lead-gated endpoint.
-    const resp = await fetch(WORKER_BASE_POPUP + '/presence/online', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json', 'X-Mod-Token': teamTok, 'X-Lead-Token': token },
-      body: '{}'
-    });
-    if (resp.status === 403){
+    // v5.0-Phase-1: route through background RPC vault. authValidateLeadToken
+    // tests + stores the lead token without exposing it on the popup side.
+    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'authValidateLeadToken', args: { token: token } });
+    if (!r || !r.ok) {
       statusEl.className = 'pop-token-status err';
-      statusEl.textContent = 'rejected: not a lead-mod token — paste the lead token above, not the team token';
+      if (r && r.status === 403) {
+        statusEl.textContent = 'rejected: not a lead-mod token -- paste the lead token above, not the team token';
+      } else {
+        statusEl.textContent = r && r.error ? r.error : 'worker error -- check CF dashboard if this persists';
+      }
       return;
     }
-    if (!resp.ok){
-      statusEl.className = 'pop-token-status err';
-      statusEl.textContent = 'worker error (HTTP ' + resp.status + ') — check CF dashboard if this persists';
-      return;
-    }
-    s.leadModToken = token;
-    s.isLeadMod = true;
-    await chrome.storage.local.set({ gam_settings: s });
     statusEl.className = 'pop-token-status ok';
-    statusEl.textContent = '\u2713 verified \u2014 reload GAW tabs to enable HUD';
-  } catch (e) {
+    statusEl.textContent = '✓ verified — reload GAW tabs to enable HUD';  } catch (e) {
     statusEl.className = 'pop-token-status err';
     statusEl.textContent = 'save failed: ' + e.message;
   }
@@ -622,17 +602,14 @@ async function generateInvite() {
     } else {
       who = prompt('GAW username this invite is for (optional, for audit):', '') || '';
     }
-    const resp = await fetch(WORKER_BASE_POPUP + '/invite/create', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json', 'X-Mod-Token': tok, 'X-Lead-Token': lead },
-      body: JSON.stringify({ mod: who })
-    });
-    if (!resp.ok){
+    // v5.0-Phase-1: route through RPC vault; background attaches tokens.
+    const rInv = await chrome.runtime.sendMessage({ type: 'rpc', name: 'adminInviteCreate', args: { mod: who } });
+    if (!rInv || !rInv.ok){
       resultEl.className = 'pop-token-status err';
-      resultEl.textContent = 'rejected (HTTP ' + resp.status + ')';
+      resultEl.textContent = 'rejected (HTTP ' + (rInv && rInv.status || '?') + ')';
       return;
     }
-    const data = await resp.json();
+    const data = rInv.data || {};
     const url = data.url || '';
     resultEl.className = 'pop-token-status ok';
     // v5.8.1 security fix: was innerHTML (XSS vector if server return is
@@ -732,25 +709,19 @@ function __renderInviteResult(container, invite, ttlHours) {
 }
 
 async function __issueSingleFromRoster(username, rowEl, tokens) {
-  const resp = await fetch(WORKER_BASE_POPUP + '/admin/mod/rotation-invite', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Mod-Token': tokens.team,
-      'X-Lead-Token': tokens.lead
-    },
-    body: JSON.stringify({ username: username })
-  });
-  if (!resp.ok) {
+  // v5.0-Phase-1: route through RPC vault; background attaches tokens.
+  const rsi = await chrome.runtime.sendMessage({ type: 'rpc', name: 'adminIssueInvite', args: { username: username } });
+  if (!rsi || !rsi.ok) {
     const err = document.createElement('div');
     err.style.cssText = 'color:#ff7a7a;font-size:10px;margin-top:2px';
-    let msg = 'rejected HTTP ' + resp.status;
-    try { const j = await resp.json(); if (j && j.error) msg += ' -- ' + j.error; } catch (_) {}
+    let msg = 'rejected HTTP ' + (rsi && rsi.status || '?');
+    if (rsi && rsi.data && rsi.data.error) msg += ' -- ' + rsi.data.error;
+    else if (rsi && rsi.error) msg += ' -- ' + rsi.error;
     err.textContent = msg;
     rowEl.appendChild(err);
     return;
   }
-  const data = await resp.json();
+  const data = rsi.data || {};
   if (!data || !data.ok) return;
   __renderInviteResult(rowEl, { username: data.username, code: data.code }, data.ttl_hours);
 }
@@ -771,25 +742,18 @@ async function __issueBulkFromRoster(panel, tokens) {
   status.textContent = 'issuing...';
   panel.appendChild(status);
 
-  const resp = await fetch(WORKER_BASE_POPUP + '/admin/mod/rotation-invite-bulk', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Mod-Token': tokens.team,
-      'X-Lead-Token': tokens.lead
-    },
-    body: '{}'
-  });
+  // v5.0-Phase-1: route through RPC vault; background attaches tokens.
+  const rBulk = await chrome.runtime.sendMessage({ type: 'rpc', name: 'adminBulkInvite', args: {} });
   status.remove();
 
-  if (!resp.ok) {
+  if (!rBulk || !rBulk.ok) {
     const err = document.createElement('div');
     err.style.cssText = 'color:#ff7a7a;font-size:11px;margin:6px 0';
-    err.textContent = 'bulk issue rejected (HTTP ' + resp.status + ')';
+    err.textContent = 'bulk issue rejected (HTTP ' + (rBulk && rBulk.status || '?') + ')';
     panel.appendChild(err);
     return;
   }
-  const data = await resp.json();
+  const data = rBulk.data || {};
   const invites = (data && data.invites) || [];
   if (invites.length === 0) {
     const note = document.createElement('div');
@@ -919,17 +883,16 @@ async function openRotationRoster() {
     }
     const tokens = { team: team, lead: lead };
 
-    const resp = await fetch(WORKER_BASE_POPUP + '/admin/mod/list', {
-      headers: { 'X-Mod-Token': team, 'X-Lead-Token': lead }
-    });
-    if (!resp.ok) {
+    // v5.0-Phase-1: route through RPC vault; background attaches tokens.
+    const rList = await chrome.runtime.sendMessage({ type: 'rpc', name: 'adminListMods', args: {} });
+    if (!rList || !rList.ok) {
       if (result) {
         result.className = 'pop-token-status err';
-        result.textContent = 'roster fetch rejected (HTTP ' + resp.status + ')' + (resp.status === 403 ? ' — lead token required' : ' — check your tokens');
+        result.textContent = 'roster fetch rejected (HTTP ' + (rList && rList.status || '?') + ')' + (rList && rList.status === 403 ? ' -- lead token required' : ' -- check your tokens');
       }
       return;
     }
-    const data = await resp.json();
+    const data = rList.data || {};
     const mods = (data && data.mods) || [];
     const ttlHours = Math.round((data.ttl_ms || 72 * 3600000) / 3600000);
 
@@ -1029,32 +992,16 @@ async function rotateToken() {
       status.textContent = 'no current token -- nothing to rotate';
       return;
     }
-    const resp = await fetch(WORKER_BASE_POPUP + '/mod/token/rotate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Mod-Token': tok }
-    });
-    if (!resp.ok) {
+    // v5.0-Phase-1: authRotateSelf validates, rotates, and stores the new token in the vault.
+    const rRot = await chrome.runtime.sendMessage({ type: 'rpc', name: 'authRotateSelf', args: {} });
+    if (!rRot || !rRot.ok) {
       status.className = 'pop-token-status err';
-      status.textContent = 'rotate rejected (HTTP ' + resp.status + ') — your current token may be invalid; re-save it first';
-      return;
-    }
-    const data = await resp.json();
-    if (!data || !data.ok || !__isTokenShape(data.new_token)) {
-      status.className = 'pop-token-status err';
-      status.textContent = 'malformed rotate response -- refused to save';
-      return;
-    }
-    // Persist via the secure path (background relay if hardening on).
-    const save = await saveTokensSecurely({ workerModToken: data.new_token });
-    if (!save || !save.ok) {
-      status.className = 'pop-token-status err';
-      status.textContent = 'save failed: ' + ((save && save.error) || 'unknown');
+      status.textContent = 'rotate rejected (HTTP ' + (rRot && rRot.status || '?') + ') -- your current token may be invalid; re-save it first';
       return;
     }
     status.className = 'pop-token-status ok';
     status.textContent = '✓ rotated -- lead no longer has access';
-    try { await loadToken(); } catch (e) {}
-  } catch (e) {
+    try { await loadToken(); } catch (e) {}  } catch (e) {
     status.className = 'pop-token-status err';
     status.textContent = 'rotate failed: ' + (e && e.message || e);
   }
@@ -1090,37 +1037,20 @@ async function claimRotationInvite() {
     if (!code) { status.textContent = 'cancelled'; return; }
 
     status.textContent = 'claiming...';
-    const resp = await fetch(WORKER_BASE_POPUP + '/mod/token/claim-rotation', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: code, username: username })
-    });
-    if (!resp.ok) {
+    // v5.0-Phase-1: authClaimInvite validates the code, stores the new token in the vault.
+    const rClaim = await chrome.runtime.sendMessage({ type: 'rpc', name: 'authClaimInvite', args: { code: code, username: username } });
+    if (!rClaim || !rClaim.ok) {
       status.className = 'pop-token-status err';
-      let msg = 'claim rejected (HTTP ' + resp.status + ')';
-      try {
-        const j = await resp.json();
-        if (j && j.error) msg += ' -- ' + j.error;
-      } catch (_) {}
+      let msg = 'claim rejected (HTTP ' + (rClaim && rClaim.status || '?') + ')';
+      if (rClaim && rClaim.data && rClaim.data.error) msg += ' -- ' + rClaim.data.error;
+      else if (rClaim && rClaim.error) msg += ' -- ' + rClaim.error;
       status.textContent = msg;
       return;
     }
-    const data = await resp.json();
-    if (!data || !data.ok || !__isTokenShape(data.new_token)) {
-      status.className = 'pop-token-status err';
-      status.textContent = 'malformed claim response -- refused to save';
-      return;
-    }
-    const save = await saveTokensSecurely({ workerModToken: data.new_token });
-    if (!save || !save.ok) {
-      status.className = 'pop-token-status err';
-      status.textContent = 'save failed: ' + ((save && save.error) || 'unknown');
-      return;
-    }
+    const claimData = rClaim.data || {};
     status.className = 'pop-token-status ok';
-    status.textContent = '✓ claimed -- you are now ' + data.mod_username;
-    try { await loadToken(); } catch (e) {}
-  } catch (e) {
+    status.textContent = '✓ claimed -- you are now ' + (claimData.mod_username || username);
+    try { await loadToken(); } catch (e) {}  } catch (e) {
     status.className = 'pop-token-status err';
     status.textContent = 'claim failed: ' + (e && e.message || e);
   }

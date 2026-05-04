@@ -30,12 +30,13 @@ const ALARM_PERIOD_MIN = 30;
 // inert memory.
 
 const WORKER_BASE = 'https://gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev';
+// v5.0-Phase-1 complete: all endpoints now have named RPC handlers.
+// ALLOWED_ENDPOINTS is kept ONLY for /admin/import-tokens-from-kv which has
+// no content-script caller but a direct popup path that predates v5.0.
+// All other paths are intentionally removed -- the workerFetch handler will
+// reject them with a hard error to surface any missed migration.
 const ALLOWED_ENDPOINTS = [
-  '/presence', '/drafts', '/proposals', '/claims', '/audit', '/features',
-  '/ai/next-best-action', '/bug/report', '/invite/claim',
-  '/admin/import-tokens-from-kv', '/modmail/sync',
-  // v8.0 Team Productivity endpoints (Session A backend lands in Session C deploy).
-  '/ai/shadow-triage', '/parked', '/ai-suspect'
+  '/admin/import-tokens-from-kv'
 ];
 
 let secretCache = { workerModToken: '', leadModToken: '' };
@@ -202,16 +203,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg && msg.type === 'workerFetch') {
     const path = msg.path || '';
-    // v8.6.0 / v5.0-Phase-1: legacy generic relay. Every call here is a
-    // pre-v5.0 call site that has not yet been migrated to a named RPC.
-    // Logged so the v8.6.x sweep can find them.
-    try {
-      console.warn('[v5.0/Phase-1 deprecated] workerFetch path=' + path + ' -- migrate to a named rpc handler in background.js (RPC_HANDLERS map)');
-    } catch (e) {}
+    // v5.0-Phase-1 complete: named RPCs cover all former workerFetch paths.
+    // Any workerFetch call for a path NOT in ALLOWED_ENDPOINTS is a missed
+    // migration -- hard-error to surface it immediately.
     if (!pathAllowed(path)) {
-      sendResponse({ ok: false, status: 0, error: 'endpoint not allowed' });
-      return; // no async work -> no true return
+      console.error('[v5.0/Phase-1 MIGRATION ERROR] workerFetch path=' + path + ' has an RPC equivalent -- use chrome.runtime.sendMessage({type:"rpc",name:...}) instead');
+      sendResponse({ ok: false, status: 0, error: 'path migrated to named RPC -- use rpcCall("...") not workerFetch for ' + path });
+      return;
     }
+    // Legacy path only for /admin/import-tokens-from-kv (no RPC equivalent yet).
+    try {
+      console.warn('[v5.0/Phase-1 legacy] workerFetch path=' + path + ' -- no named RPC yet, using relay');
+    } catch (e) {}
     (async () => {
       // Warm cache if service-worker was just revived.
       if (!secretCache.workerModToken && !secretCache.leadModToken) {
@@ -352,6 +355,104 @@ const RPC_HANDLERS = {
     async handler(args) { return await _rpcWorkerCall('POST', '/presence/ping', args || {}); }
   },
 
+  // ---- authXxx: validate + store a candidate mod token (popup token-save flow) -
+  authValidateToken: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const candidate = String(args && args.token || '');
+      if (!candidate || !/^[A-Za-z0-9_-]{32,256}$/.test(candidate)) {
+        return { ok: false, status: 0, error: 'malformed token' };
+      }
+      // Test the candidate against /version WITHOUT putting it in secretCache yet.
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, 15000);
+      try {
+        const headers = new Headers();
+        headers.set('X-Mod-Token', candidate);
+        const r = await fetch(WORKER_BASE + '/version', { method: 'GET', headers, signal: ctrl.signal });
+        const text = await r.text();
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch (e) {}
+        if (!r.ok) return { ok: false, status: r.status, error: 'token rejected by worker' };
+        if (!parsed || typeof parsed.version !== 'string' || parsed.version.length > 32) {
+          return { ok: false, status: r.status, error: 'malformed worker version response' };
+        }
+        // Token validated -- promote it into secretCache and persist.
+        secretCache.workerModToken = candidate;
+        try {
+          if (chrome.storage && chrome.storage.session) {
+            await chrome.storage.session.set({ gam_settings: secretCache });
+          }
+          if (chrome.storage && chrome.storage.local) {
+            const cur = await chrome.storage.local.get('gam_settings');
+            const merged = { ...((cur && cur.gam_settings) || {}), workerModToken: candidate };
+            await chrome.storage.local.set({ gam_settings: merged });
+          }
+        } catch (e) {}
+        return { ok: true, status: r.status, data: { version: parsed.version } };
+      } catch (e) {
+        return { ok: false, status: 0, error: String(e && e.message || e), timeout: !!(e && e.name === 'AbortError') };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  },
+
+  // ---- adminXxx: invite create (lead popup) ------------------------------
+  adminInviteCreate: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/invite/create', {
+        mod: args && args.mod
+      }, { asLead: true });
+    }
+  },
+
+  // ---- authXxx: validate + store a candidate lead token ------------------
+  authValidateLeadToken: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const candidate = String(args && args.token || '');
+      if (!candidate) return { ok: false, status: 0, error: 'no token provided' };
+      // Temporarily test the candidate against /presence/online (lead-gated).
+      // Use the stored team token + candidate lead token.
+      if (!secretCache.workerModToken && !secretCache.leadModToken) {
+        try { await loadSecrets(); } catch (e) {}
+      }
+      const teamTok = secretCache.workerModToken;
+      if (!teamTok) return { ok: false, status: 0, error: 'team token not set -- save team token first' };
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, 15000);
+      try {
+        const headers = new Headers({ 'Content-Type': 'application/json' });
+        headers.set('X-Mod-Token', teamTok);
+        headers.set('X-Lead-Token', candidate);
+        const r = await fetch(WORKER_BASE + '/presence/online', {
+          method: 'POST', headers, body: '{}', signal: ctrl.signal
+        });
+        if (r.status === 403) return { ok: false, status: 403, error: 'not a lead-mod token' };
+        if (!r.ok) return { ok: false, status: r.status, error: 'worker error (HTTP ' + r.status + ')' };
+        // Valid -- store it.
+        secretCache.leadModToken = candidate;
+        try {
+          if (chrome.storage && chrome.storage.session) {
+            await chrome.storage.session.set({ gam_settings: secretCache });
+          }
+          if (chrome.storage && chrome.storage.local) {
+            const cur = await chrome.storage.local.get('gam_settings');
+            const merged = { ...((cur && cur.gam_settings) || {}), leadModToken: candidate, isLeadMod: true };
+            await chrome.storage.local.set({ gam_settings: merged });
+          }
+        } catch (e) {}
+        return { ok: true, status: r.status, data: { verified: true } };
+      } catch (e) {
+        return { ok: false, status: 0, error: String(e && e.message || e), timeout: !!(e && e.name === 'AbortError') };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  },
+
   // ---- authXxx: popup-only, mod's own token management ------------------
   authRotateSelf: {
     allowed_callers: [RPC_CALLER_POPUP],
@@ -408,6 +509,423 @@ const RPC_HANDLERS = {
     allowed_callers: [RPC_CALLER_POPUP],
     async handler() {
       return { ok: false, status: 501, error: 'phase-3-pending: device revocation lands with mod_devices schema' };
+    }
+  },
+
+  // ---- modXxx: flags/* + profiles/* (Iter 2) --------------------------------
+  modFlagsRead: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/flags/read', args || {});
+    }
+  },
+  modFlagsWrite: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/flags/write', {
+        username: args && args.username,
+        mod: args && args.mod,
+        severity: args && args.severity,
+        reason: args && args.reason
+      });
+    }
+  },
+  modProfilesRead: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/profiles/read', args || {});
+    }
+  },
+  modProfilesWrite: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/profiles/write', {
+        username: args && args.username,
+        profile: args && args.profile
+      });
+    }
+  },
+  modProfilesWritePatch: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/profiles/write', {
+        username: args && args.username,
+        patch: args && args.patch
+      });
+    }
+  },
+  modProfilesSeen: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/profiles/seen', {
+        users: args && args.users
+      });
+    }
+  },
+
+  // ---- modXxx: titles/* + deathrow/sniper/* (Iter 3) ----------------------
+  modTitlesRead: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/titles/read', args || {});
+    }
+  },
+  modTitlesWrite: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/titles/write', {
+        username: args && args.username,
+        title: args && args.title,
+        kind: args && args.kind,
+        mod: args && args.mod,
+        expiresAt: args && args.expiresAt
+      });
+    }
+  },
+  modSniperArm: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/deathrow/sniper/arm', {
+        username: args && args.username,
+        mod: args && args.mod,
+        banDelayHours: args && args.banDelayHours
+      });
+    }
+  },
+  modSniperList: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/deathrow/sniper/list', args || {});
+    }
+  },
+  modSniperRemove: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/deathrow/sniper/remove', {
+        username: args && args.username
+      });
+    }
+  },
+
+  // ---- modXxx: ai/* + ai-suspect (Iter 4) ----------------------------------
+  modAiNextBestAction: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/ai/next-best-action', {
+        kind: args && args.kind,
+        id: args && args.id,
+        context: args && args.context,
+        extra: args && args.extra,
+        mod: args && args.mod
+      });
+    }
+  },
+  modAiGrokChat: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/ai/grok-chat', {
+        prompt: args && args.prompt,
+        max_tokens: args && args.max_tokens,
+        temperature: args && args.temperature,
+        model: args && args.model,
+        prefer: args && args.prefer
+      });
+    }
+  },
+  modAiBanSuggest: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/ai/ban-suggest', {
+        username: args && args.username,
+        comment: args && args.comment,
+        prompt: args && args.prompt
+      });
+    }
+  },
+  modAiScore: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/ai/score', {
+        usernames: args && args.usernames
+      });
+    }
+  },
+  modAiShadowTriage: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/ai/shadow-triage', {
+        kind: args && args.kind,
+        subject_id: args && args.subject_id,
+        context: args && args.context
+      });
+    }
+  },
+  modAiSuspectEnqueue: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/ai-suspect/enqueue', {
+        username: args && args.username,
+        ai_risk: args && args.ai_risk,
+        ai_reason: args && args.ai_reason,
+        source: args && args.source,
+        ai_model: args && args.ai_model,
+        prompt_version: args && args.prompt_version
+      });
+    }
+  },
+
+  // ---- modXxx: precedent/* + intel/* (Iter 5) ------------------------------
+  modPrecedentFind: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/precedent/find', {
+        kind: args && args.kind,
+        signature: args && args.signature,
+        limit: args && args.limit
+      });
+    }
+  },
+  modPrecedentMark: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/precedent/mark', {
+        kind: args && args.kind,
+        signature: args && args.signature,
+        title: args && args.title,
+        rule_ref: args && args.rule_ref,
+        action: args && args.action,
+        reason: args && args.reason,
+        source_ref: args && args.source_ref
+      }, { asLead: true });
+    }
+  },
+  modIntelDelta: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/intel/delta', {
+        kind: args && args.kind,
+        id: args && args.id,
+        since_ts: args && args.since_ts
+      });
+    }
+  },
+
+  // ---- modXxx: audit/query + presence/online (Iter 6) ----------------------
+  modAuditQuery: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/audit/query', {
+        sinceHours: args && args.sinceHours,
+        limit: args && args.limit
+      });
+    }
+  },
+  modPresenceOnline: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/presence/online', args || {}, { asLead: true });
+    }
+  },
+
+  // ---- modXxx: modmail/* + parked/* + bug/* + features/* + evidence/* + reports/* (Iter 7) --
+  modModmailSync: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/modmail/sync', {
+        mod: args && args.mod,
+        threads: args && args.threads,
+        messages: args && args.messages
+      });
+    }
+  },
+  modParkedCreate: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/parked/create', {
+        kind: args && args.kind,
+        subject_id: args && args.subject_id,
+        note: args && args.note
+      });
+    }
+  },
+  modParkedList: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const qs = (args && args.status) ? ('?status=' + encodeURIComponent(String(args.status))) : '?status=open';
+      return await _rpcWorkerCall('GET', '/parked/list' + qs, undefined);
+    }
+  },
+  modParkedResolve: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/parked/resolve', {
+        id: args && args.id,
+        resolution_action: args && args.resolution_action,
+        resolution_reason: args && args.resolution_reason
+      });
+    }
+  },
+  modBugReport: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/bug/report', {
+        title: args && args.title,
+        description: args && args.description,
+        debugSnapshot: args && args.debugSnapshot,
+        mod: args && args.mod,
+        payload: args && args.payload
+      });
+    }
+  },
+  modFeaturesRead: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler() {
+      return await _rpcWorkerCall('GET', '/features/team/read', undefined);
+    }
+  },
+  modFeaturesWrite: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/features/team/write', {
+        feature: args && args.feature,
+        value: args && args.value,
+        mod: args && args.mod
+      }, { asLead: true });
+    }
+  },
+  modFeaturesDelete: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/features/team/delete', {
+        feature: args && args.feature,
+        mod: args && args.mod
+      }, { asLead: true });
+    }
+  },
+  modEvidenceUpload: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/evidence/upload', {
+        key: args && args.key,
+        contentType: args && args.contentType,
+        contentBase64: args && args.contentBase64,
+        meta: args && args.meta
+      });
+    }
+  },
+  modReportsSummary: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/reports/summary', args || {});
+    }
+  },
+
+  // ---- modXxx: mod/message/* (Iter 8) -------------------------------------
+  modMessageUnreadCount: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('GET', '/mod/message/unread-count', undefined); }
+  },
+  modMessageModsList: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('GET', '/mod/message/mods-list', undefined); }
+  },
+  modMessageMarkRead: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/mod/message/mark-read', { ids: args && args.ids });
+    }
+  },
+  modMessageSend: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/mod/message/send', { to: args && args.to, content: args && args.content });
+    }
+  },
+  modMessageInbox: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('GET', '/mod/message/inbox', undefined); }
+  },
+
+  // ---- modXxx: drafts/* + proposals/* + claims/* + presence/viewing (Iter 8) -
+  modDraftsWrite: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/drafts/write', {
+        action: args && args.action, target: args && args.target, body: args && args.body
+      });
+    }
+  },
+  modDraftsDelete: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/drafts/delete', {
+        action: args && args.action, target: args && args.target
+      });
+    }
+  },
+  modDraftsRead: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const action = encodeURIComponent(String(args && args.action || ''));
+      const target = encodeURIComponent(String(args && args.target || ''));
+      return await _rpcWorkerCall('GET', '/drafts/read?action=' + action + '&target=' + target, undefined);
+    }
+  },
+  modDraftsList: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const mine = (args && args.mine) ? '?mine=1' : '';
+      return await _rpcWorkerCall('GET', '/drafts/list' + mine, undefined);
+    }
+  },
+  modDraftsHandoff: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/drafts/handoff', {
+        action: args && args.action, target: args && args.target, handoff_note: args && args.handoff_note
+      });
+    }
+  },
+  modProposalsCreate: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) { return await _rpcWorkerCall('POST', '/proposals/create', args || {}); }
+  },
+  modProposalsList: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const since = (args && args.since != null) ? ('?since=' + encodeURIComponent(String(args.since))) : '';
+      return await _rpcWorkerCall('GET', '/proposals/list' + since, undefined);
+    }
+  },
+  modProposalsVote: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const isLead = !!(args && (args.action === 'Veto'));
+      return await _rpcWorkerCall('POST', '/proposals/vote', {
+        id: args && args.id, action: args && args.action
+      }, { asLead: isLead });
+    }
+  },
+  modClaimsWrite: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/claims/write', { thread_id: args && args.thread_id });
+    }
+  },
+  modClaimsList: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('GET', '/claims/list', undefined); }
+  },
+  modPresenceViewing: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      // _get:true => GET (collision check), default => POST (announce presence)
+      if (args && args._get) {
+        const kind = encodeURIComponent(String(args.kind || ''));
+        const id = encodeURIComponent(String(args.id || ''));
+        return await _rpcWorkerCall('GET', '/presence/viewing?kind=' + kind + '&id=' + id, undefined);
+      }
+      return await _rpcWorkerCall('POST', '/presence/viewing', { kind: args && args.kind, id: args && args.id });
     }
   },
 

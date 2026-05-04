@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.1.1';
+  const VERSION = 'v9.2.0';
 
   // ============================================================================
   // v8.6.5: diagnostic ring buffer for hard-to-reproduce bugs
@@ -1083,7 +1083,7 @@
       };
 
       try {
-        const r = await workerCall('/bug/report', payload, false);
+        const r = await rpcCall('modBugReport', payload);
         if (r && r.ok && r.data && r.data.ok){
           const id = r.data.id != null ? r.data.id : '?';
           snack(`\u{1F41B} Bug report submitted -- Commander will see it shortly. ID: ${id}`, 'success');
@@ -1381,7 +1381,7 @@
   }
   async function pollTeamFeatures() {
     try {
-      const r = await workerCall('/features/team/read', undefined, false);
+      const r = await rpcCall('modFeaturesRead', {});
       if (r && r.ok && r.data && r.data.ok && r.data.data && typeof r.data.data === 'object') {
         // Replace in-place so references to _teamFeatures keep working.
         for (const k of Object.keys(_teamFeatures)) delete _teamFeatures[k];
@@ -2523,11 +2523,11 @@
     const p = (async () => {
       try {
         __v80EmitEvent('info', 'shadow.pre_decide.start', { kind: kind, subject_id: subjectId });
-        const r = await workerCall('/ai/shadow-triage', {
+        const r = await rpcCall('modAiShadowTriage', {
           kind: kind,
           subject_id: subjectId,
           context: context || {}
-        }, false);
+        });
         if (!r || !r.ok || !r.data) {
           __v80EmitEvent('warn', 'shadow.pre_decide.failure', { kind: kind, subject_id: subjectId, status: r && r.status });
           return null;
@@ -2708,9 +2708,9 @@
   async function __v80ParkCreate(kind, subjectId, note){
     if (!__teamBoostOn() || !__hardeningOn()) return { ok: false, error: 'teamBoost off' };
     if (!kind || !subjectId) return { ok: false, error: 'kind+subject_id required' };
-    const r = await workerCall('/parked/create', {
+    const r = await rpcCall('modParkedCreate', {
       kind: kind, subject_id: subjectId, note: String(note || '').slice(0, 200)
-    }, false);
+    });
     if (r && r.ok && r.data && r.data.id) {
       try {
         if (__V80_STORES && __V80_STORES.parked) {
@@ -2736,17 +2736,17 @@
     if (!__teamBoostOn() || !__hardeningOn()) return { ok: false, error: 'teamBoost off' };
     const qs = statusFilter ? ('?status=' + encodeURIComponent(statusFilter)) : '?status=open';
     // workerCall with undefined body => GET.
-    return await workerCall('/parked/list' + qs, undefined, false);
+    return await rpcCall('modParkedList', { status: statusFilter || 'open' });
   }
 
   async function __v80ParkResolve(id, action, reason){
     if (!__teamBoostOn() || !__hardeningOn()) return { ok: false, error: 'teamBoost off' };
     if (!id) return { ok: false, error: 'id required' };
-    const r = await workerCall('/parked/resolve', {
+    const r = await rpcCall('modParkedResolve', {
       id: id,
       resolution_action: action || 'OTHER',
       resolution_reason: String(reason || '').slice(0, 240)
-    }, false);
+    });
     if (r && r.ok) {
       try {
         if (__V80_STORES && __V80_STORES.parked) {
@@ -2768,14 +2768,14 @@
   async function __v80EnqueueAiSuspect(username, aiRisk, aiReason, source, aiModel, promptVersion){
     if (!__teamBoostOn() || !__hardeningOn()) return { ok: false, error: 'teamBoost off' };
     if (!username) return { ok: false, error: 'username required' };
-    return await workerCall('/ai-suspect/enqueue', {
+    return await rpcCall('modAiSuspectEnqueue', {
       username: String(username).toLowerCase().slice(0, 64),
       ai_risk: Math.max(0, Math.min(100, parseInt(aiRisk, 10) || 0)),
       ai_reason: String(aiReason || '').slice(0, 400),
       source: String(source || 'daily-ai').slice(0, 32),
       ai_model: String(aiModel || '').slice(0, 64),
       prompt_version: String(promptVersion || '').slice(0, 32)
-    }, false);
+    });
   }
 
   // Expose the Session-B-facing helpers on window.__v80. Session B will
@@ -4753,7 +4753,7 @@
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving\u2026';
         try {
-          const res = await workerCall('/precedent/mark', {
+          const res = await rpcCall('modPrecedentMark', {
             kind: state.currentKind,
             signature: sig,
             title: t,
@@ -4761,7 +4761,7 @@
             action: actionSel.value,
             reason: reasonInput.value.trim() || null,
             source_ref: (state.currentOpts && state.currentOpts.seedData && state.currentOpts.seedData.permalink) || null
-          }, true);   // lead token
+          });   // lead token via handler
           if (res && res.ok) {
             snack('Precedent marked', 'success');
             modal.remove();
@@ -4987,7 +4987,7 @@
       }
       let res = null;
       try {
-        res = await workerCall('/ai/next-best-action', { kind, id, context: ctx }, false, signal);
+        res = await rpcCall('modAiNextBestAction', { kind, id, context: ctx });
       } catch(err) {
         if (err && err.name === 'AbortError') return;
         console.error('[v7] NBA fetch error', err);
@@ -5087,10 +5087,10 @@
     IntelDrawer._setLastViewed('User', id, Date.now());
 
     // Parallel data pulls.
-    const pProfiles  = workerCall('/profiles/read',  { usernames: [id] }, false, signal);
-    const pAudit     = workerCall('/audit/query',    { limit: 20 }, false, signal);
-    const pDelta     = workerCall('/intel/delta',    { kind: 'User', id, since_ts: lastViewed }, false, signal);
-    const pPrecedent = workerCall('/precedent/find', { kind: 'User', signature: String(id).toLowerCase(), limit: 5 }, false, signal);
+    const pProfiles  = rpcCall('modProfilesRead',  { usernames: [id] });
+    const pAudit     = rpcCall('modAuditQuery',    { limit: 20 });
+    const pDelta     = rpcCall('modIntelDelta',    { kind: 'User', id, since_ts: lastViewed });
+    const pPrecedent = rpcCall('modPrecedentFind', { kind: 'User', signature: String(id).toLowerCase(), limit: 5 });
 
     async function sec1() {
       const res = await pProfiles;
@@ -5157,7 +5157,7 @@
         saveBtn.disabled = true; saveBtn.textContent = 'Saving\u2026';
         try {
           const mergedNotes = (notes || []).concat([{ author: me(), ts: new Date().toISOString(), body: v }]);
-          const r = await workerCall('/profiles/write', { username: id, patch: { notes: mergedNotes } }, false, signal);
+          const r = await rpcCall('modProfilesWritePatch', { username: id, patch: { notes: mergedNotes } });
           if (r && r.ok) {
             snack('Note saved', 'success');
             IntelDrawer.refresh(4);
@@ -5207,8 +5207,8 @@
         return IntelDrawer._sha1Hex12(tokens);
       } catch(e) { return 'empty'; }
     })();
-    const pPrecedent = workerCall('/precedent/find', { kind: 'Thread', signature: sig, limit: 5 }, false, signal);
-    const pDelta     = workerCall('/intel/delta', { kind: 'Thread', id, since_ts: lastViewed }, false, signal);
+    const pPrecedent = rpcCall('modPrecedentFind', { kind: 'Thread', signature: sig, limit: 5 });
+    const pDelta     = rpcCall('modIntelDelta', { kind: 'Thread', id, since_ts: lastViewed });
 
     const participants = (opts.seedData && Array.isArray(opts.seedData.participants)) ? opts.seedData.participants : [];
 
@@ -5265,10 +5265,10 @@
     const author = (opts.seedData && opts.seedData.author) || '';
     const sig = IntelDrawer._sha1Hex12(String(body).slice(0, 80));
 
-    const pPrecedent = workerCall('/precedent/find', { kind: 'Post', signature: sig, limit: 5 }, false, signal);
-    const pDelta     = workerCall('/intel/delta', { kind: 'Post', id, since_ts: lastViewed }, false, signal);
-    const pAuthor    = author ? workerCall('/profiles/read', { usernames: [author] }, false, signal) : Promise.resolve({ ok: false });
-    const pAudit     = workerCall('/audit/query', { limit: 20 }, false, signal);
+    const pPrecedent = rpcCall('modPrecedentFind', { kind: 'Post', signature: sig, limit: 5 });
+    const pDelta     = rpcCall('modIntelDelta', { kind: 'Post', id, since_ts: lastViewed });
+    const pAuthor    = author ? rpcCall('modProfilesRead', { usernames: [author] }) : Promise.resolve({ ok: false });
+    const pAudit     = rpcCall('modAuditQuery', { limit: 20 });
 
     async function sec1() {
       const b = el('div');
@@ -5350,8 +5350,8 @@
     const reasons = (opts.seedData && Array.isArray(opts.seedData.reportReasons)) ? opts.seedData.reportReasons : [];
     const reportCount = (opts.seedData && opts.seedData.reportCount) || reasons.length;
 
-    const pPrecedent = workerCall('/precedent/find', { kind: 'QueueItem', signature: sig, limit: 5 }, false, signal);
-    const pDelta     = workerCall('/intel/delta', { kind: 'QueueItem', id, since_ts: lastViewed }, false, signal);
+    const pPrecedent = rpcCall('modPrecedentFind', { kind: 'QueueItem', signature: sig, limit: 5 });
+    const pDelta     = rpcCall('modIntelDelta', { kind: 'QueueItem', id, since_ts: lastViewed });
 
     async function sec1() {
       const b = el('div');
@@ -5786,7 +5786,7 @@
     const now = Date.now();
     if (_cloudFlagsCache && (now - _cloudFlagsFetchedAt) < 6*60*60*1000) return _cloudFlagsCache;
     if (!getModToken()) return {};
-    const r = await workerCall('/flags/read', {});
+    const r = await rpcCall('modFlagsRead', {});
     if (r.ok && r.data && r.data.flags){
       _cloudFlagsCache = r.data.flags;
       _cloudFlagsFetchedAt = now;
@@ -5802,7 +5802,7 @@
     const now = Date.now();
     if (_cloudProfilesCache && (now - _cloudProfilesFetchedAt) < 6*60*60*1000) return _cloudProfilesCache;
     if (!getModToken()) return {};
-    const r = await workerCall('/profiles/read', {});
+    const r = await rpcCall('modProfilesRead', {});
     if (r.ok && r.data && r.data.users){
       _cloudProfilesCache = r.data.users;
       _cloudProfilesFetchedAt = now;
@@ -5813,7 +5813,7 @@
   async function pushProfileToCloud(username, profile){
     if (!getModToken()) return;
     // Fire-and-forget
-    workerCall('/profiles/write', { username, profile }).catch(()=>{});
+    rpcCall('modProfilesWrite', { username, profile }).catch(()=>{});
   }
 
   // ══ v5.4.1: CROSS-MOD PATTERN SYNC ══
@@ -5871,7 +5871,7 @@
       updatedBy: me,
     };
     try {
-      const r = await workerCall('/profiles/write', { username: PATTERN_SYNC_KEY, profile });
+      const r = await rpcCall('modProfilesWrite', { username: PATTERN_SYNC_KEY, profile });
       // v8.1.6 fix: surface push failures. Previously any error was silently
       // swallowed by `catch(e){}`, so a failed push left local-only rules
       // that never reached other mods. Log + toast so Commander notices.
@@ -5926,7 +5926,7 @@
       const contentBase64 = btoa(bin);
       const ts = new Date().toISOString().replace(/[:.]/g,'-');
       const key = `${kind}/${username.toLowerCase()}/${ts}.html`;
-      const r = await workerCall('/evidence/upload', {
+      const r = await rpcCall('modEvidenceUpload', {
         key, contentType: 'text/html; charset=utf-8', contentBase64,
         meta: { kind, user: username, url: location.href }
       });
@@ -6320,7 +6320,7 @@
             if (profiles && profiles[uKey]) baseProfile = profiles[uKey];
           } catch(e){}
           const nextProfile = { ...baseProfile, modNote: val };
-          const r = await workerCall('/profiles/write', { username: username, profile: nextProfile });
+          const r = await rpcCall('modProfilesWrite', { username: username, profile: nextProfile });
           if (r && r.ok){
             lastSaved = val;
             currentProfile = nextProfile;
@@ -6607,7 +6607,7 @@ Analyze these comments for rule violations. For each rule violation found, cite 
           result = { ok: false, error: 'No Worker token. Configure it in the popup.' };
         } else if (engine === 'grok'){
           try {
-            const r = await workerCall('/ai/grok-chat', { prompt, max_tokens: 500, temperature: 0.3, model: getSetting('aiProvider', 'grok-3-mini') });
+            const r = await rpcCall('modAiGrokChat', { prompt, max_tokens: 500, temperature: 0.3, model: getSetting('aiProvider', 'grok-3-mini') });
             if (!r.ok) result = { ok: false, error: r.data?.error || r.error || `Worker Grok error ${r.status || ''}` };
             else result = { ok: true, text: (r.data?.text || '').trim() };
           } catch(e){ result = { ok: false, error: String(e) }; }
@@ -6617,7 +6617,7 @@ Analyze these comments for rule violations. For each rule violation found, cite 
           // worker; prompt is already fully assembled above including username +
           // comment block, so no separate 'comments' field needed.)
           try {
-            const r = await workerCall('/ai/grok-chat', { prompt, max_tokens: 500, temperature: 0.3, prefer: 'llama' });
+            const r = await rpcCall('modAiGrokChat', { prompt, max_tokens: 500, temperature: 0.3, prefer: 'llama' });
             result = r.ok ? { ok: true, text: (r.data?.text || '').trim() } : { ok: false, error: r.data?.error || r.error || 'Worker AI error' };
           } catch(e){ result = { ok: false, error: String(e) }; }
         }
@@ -6694,14 +6694,14 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     if (engine === 'grok'){
       try {
-        const r = await workerCall('/ai/grok-chat', { prompt, max_tokens: 300, temperature: 0.4, model: getSetting('aiProvider', 'grok-3-mini') });
+        const r = await rpcCall('modAiGrokChat', { prompt, max_tokens: 300, temperature: 0.4, model: getSetting('aiProvider', 'grok-3-mini') });
         if (!r.ok) return { ok: false, error: r.data?.error || r.error || `Worker Grok error ${r.status || ''}` };
         return { ok: true, text: (r.data?.text || '').trim() };
       } catch(e){ return { ok: false, error: String(e) }; }
     } else {
       // Llama 3 via CF Worker
       try {
-        const r = await workerCall('/ai/ban-suggest', { username, comment: commentText.slice(0, 1500), prompt });
+        const r = await rpcCall('modAiBanSuggest', { username, comment: commentText.slice(0, 1500), prompt });
         if (!r.ok){ return { ok: false, error: r.data?.error || r.error || 'Worker AI error' }; }
         return { ok: true, text: (r.data?.text || r.data?.result || '').trim() };
       } catch(e){ return { ok: false, error: String(e) }; }
@@ -6941,11 +6941,11 @@ Analyze this comment against the community rules. Then write a brief, profession
           if (!cached) {
             try {
               __v80EmitEvent('info', 'precedent.fetch.start', { rule_ref: ruleRef });
-              const r = await workerCall('/precedent/find', {
+              const r = await rpcCall('modPrecedentFind', {
                 kind: 'Rule',
                 signature: String(ruleRef).toLowerCase(),
                 limit: 50
-              }, false);
+              });
               if (!(r && r.ok && Array.isArray(r.data))) {
                 __v80EmitEvent('warn', 'precedent.fetch.failure', { rule_ref: ruleRef, status: r && r.status });
                 return;
@@ -7526,7 +7526,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           const expiresAt = days > 0 ? new Date(Date.now() + days*24*3600*1000).toISOString() : null;
           btn.disabled = true;
           const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
-          const r = await workerCall('/titles/write', { username, title: label, kind, mod: me, expiresAt });
+          const r = await rpcCall('modTitlesWrite', { username, title: label, kind, mod: me, expiresAt });
           if (r.ok){
             _titlesCache = null;
             logAction({ type:'title', user:username, title:label, kind, expiresAt, source:'mod-console-quick' });
@@ -7542,7 +7542,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           if (!confirm(`Arm DR Sniper on ${username}?\nThey will be banned 125h after their NEXT comment.`)) return;
           btn.disabled = true;
           const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
-          const r = await workerCall('/deathrow/sniper/arm', { username, mod: me, banDelayHours: 125 });
+          const r = await rpcCall('modSniperArm', { username, mod: me, banDelayHours: 125 });
           if (r.ok){
             logAction({ type:'sniper-arm', user:username, delay:'125h after 1st comment', source:'mod-console-quick' });
             statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-green">\u{1F3AF} Sniper armed \u2014 trap ready</div>`;
@@ -7596,7 +7596,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           btn.disabled = true;
           statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Posting flag...</div>`;
           const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
-          const r = await workerCall('/flags/write', { username, mod: me, severity: sev, reason });
+          const r = await rpcCall('modFlagsWrite', { username, mod: me, severity: sev, reason });
           if (r.ok){
             _cloudFlagsCache = null;
             logAction({ type:'flag', user:username, severity:sev, reason, source:'mod-console-quick' });
@@ -8104,7 +8104,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           btn.disabled = true;
           try {
             if (isTeam){
-              const r = await workerCall('/features/team/delete', { feature: key, mod: me() }, true);
+              const r = await rpcCall('modFeaturesDelete', { feature: key, mod: me() });
               if (r && r.ok && r.data && r.data.ok){
                 delete _teamFeatures[key];
                 snack(`\u{1F4E4} ${label} demoted from team`, 'success');
@@ -8119,7 +8119,7 @@ Analyze this comment against the community rules. Then write a brief, profession
               }
             } else {
               const value = !!getSetting(key, localDefault);
-              const r = await workerCall('/features/team/write', { feature: key, value, mod: me() }, true);
+              const r = await rpcCall('modFeaturesWrite', { feature: key, value, mod: me() });
               if (r && r.ok && r.data && r.data.ok){
                 _teamFeatures[key] = { value, set_by: me(), set_at: Date.now() };
                 snack(`\u{1F4E4} ${label}=${value} promoted to team`, 'success');
@@ -9100,7 +9100,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     try {
       // v5.8.1: redact PII + strip HTML before upload
       const redactedMessages = _redactMessagesForUpload(messages || []);
-      const r = await workerCall('/modmail/sync', { mod: me, threads: threads||[], messages: redactedMessages });
+      const r = await rpcCall('modModmailSync', { mod: me, threads: threads||[], messages: redactedMessages });
       if (r && r.ok && r.data){
         return { ok:true, accepted_threads: r.data.accepted_threads|0, accepted_messages: r.data.accepted_messages|0 };
       }
@@ -10765,7 +10765,7 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     console.log(`[modtools] daily AI scan: ${candidates.length} usernames`);
     try {
-      const r = await workerCall('/ai/score', { usernames: candidates });
+      const r = await rpcCall('modAiScore', { usernames: candidates });
       if (!r.ok || !r.data || !Array.isArray(r.data.scores)){
         console.warn('[modtools] AI scan failed', r); return;
       }
@@ -11873,10 +11873,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       document.head.appendChild(s);
     }
 
-    async function call(path, body){
-      try { return await workerCall(path, body, false); }
-      catch(e){ return { ok:false, status:0, error:String(e && e.message || e) }; }
-    }
+    // v5.0-Phase-1: trampoline replaced by named RPCs at each call site below.
 
     function ingestMessages(rows){
       if (!Array.isArray(rows) || !rows.length) return 0;
@@ -11942,7 +11939,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     async function pollUnreadOnce(){
       if (!isEnabled()) return;
       if (document.visibilityState === 'hidden') return;
-      const r = await call('/mod/message/unread-count');
+      const r = await rpcCall('modMessageUnreadCount', {});
       if (r && r.ok && r.data && typeof r.data.unread === 'number'){
         STATE.unread = r.data.unread;
         updateBadge();
@@ -12003,7 +12000,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     async function refreshModsList(force){
       const now = Date.now();
       if (!force && STATE.modsList.length && (now - STATE.modsListFetchedAt) < MODS_LIST_TTL_MS) return;
-      const r = await call('/mod/message/mods-list');
+      const r = await rpcCall('modMessageModsList', {});
       if (r && r.ok && r.data && Array.isArray(r.data.data)){
         STATE.modsList = r.data.data;
         STATE.modsListFetchedAt = now;
@@ -12143,7 +12140,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         }
       }
       if (!ids.length) return;
-      const r = await call('/mod/message/mark-read', { ids });
+      const r = await rpcCall('modMessageMarkRead', { ids });
       if (r && r.ok){
         const now = Date.now();
         for (const id of ids){
@@ -12210,7 +12207,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       STATE.textarea.value = '';
       updateCharCount();
       try {
-        const r = await call('/mod/message/send', { to, content });
+        const r = await rpcCall('modMessageSend', { to, content });
         if (r && r.ok && r.data && r.data.ok && typeof r.data.id === 'number'){
           // Replace optimistic with real row.
           STATE.msgById.delete(tempId);
@@ -12343,7 +12340,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (!STATE.selectedConv) STATE.selectedConv = 'ALL';
       // Refresh mods list (composer) + full inbox sync on open.
       refreshModsList();
-      const r = await call('/mod/message/inbox');
+      const r = await rpcCall('modMessageInbox', {});
       if (r && r.ok && r.data && Array.isArray(r.data.data)){
         ingestMessages(r.data.data);
       }
@@ -12618,8 +12615,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (!body) return;
     // Parallel fetch
     const results = await Promise.allSettled([
-      workerCall('/audit/query', { sinceHours: 1, limit: 10 }),
-      workerCall('/presence/online', null, true)  // lead-gated
+      rpcCall('modAuditQuery', { sinceHours: 1, limit: 10 }),
+      rpcCall('modPresenceOnline', {})  // lead-gated via handler
     ]);
     // Clear body and rebuild
     while (body.firstChild) body.removeChild(body.firstChild);
@@ -14314,7 +14311,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim();
     if (!me) return;
     const ping = ()=>{
-      workerCall('/presence/ping', { mod: me, pagePath: _coarsePresencePath(location.pathname), lastActivity: new Date(lastActivity).toISOString() })
+      rpcCall('modPresencePing', { mod: me, pagePath: _coarsePresencePath(location.pathname), lastActivity: new Date(lastActivity).toISOString() })
         .catch(()=>{});
     };
     ping();
@@ -14402,7 +14399,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   async function flushSeenQueue(){
     if (!getModToken() || !_seenQueue.length) return;
     const batch = _seenQueue.splice(0, 200);
-    try { await workerCall('/profiles/seen', { users: batch }); }
+    try { await rpcCall('modProfilesSeen', { users: batch }); }
     catch(e){ /* best-effort; don't re-queue to avoid burn loops */ }
   }
   function startCrawler(){
@@ -14445,7 +14442,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         }
         const batch = Array.from(found).map(u=>({ username:u, pageHint:url }));
         if (batch.length){
-          await workerCall('/profiles/seen', { users: batch });
+          await rpcCall('modProfilesSeen', { users: batch });
           results.users += batch.length;
         }
         results.pages++;
@@ -14464,7 +14461,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     const now = Date.now();
     if (_titlesCache && (now - _titlesFetchedAt) < 5*60*1000) return _titlesCache;
     if (!getModToken()) return {};
-    const r = await workerCall('/titles/read', {});
+    const r = await rpcCall('modTitlesRead', {});
     if (r.ok && r.data && r.data.titles){
       _titlesCache = r.data.titles; _titlesFetchedAt = now;
       return _titlesCache;
@@ -14665,7 +14662,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   const _sniperFiring = new Set();
   async function sniperPickupTick(){
     if (!getModToken()) return;
-    const r = await workerCall('/deathrow/sniper/list', {});
+    const r = await rpcCall('modSniperList', {});
     if (!r.ok || !r.data || !Array.isArray(r.data.snipers)) return;
     for (const s of r.data.snipers){
       if (s.status !== 'ready') continue;
@@ -14677,7 +14674,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       _sniperFiring.add(key);
       // Claim the target server-side first: remove from the ready set BEFORE firing.
       // If another tab already removed it, the record disappears and we skip.
-      const claim = await workerCall('/deathrow/sniper/remove', { username: s.username });
+      const claim = await rpcCall('modSniperRemove', { username: s.username });
       if (!claim.ok){ _sniperFiring.delete(key); continue; }
       const banResp = await apiBan(s.username, 0, getUsersBanReason());
       if (banResp.ok){
@@ -14698,7 +14695,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   let presenceHudIv = null;
   async function refreshPresenceHud(){
     if (!presenceHudEl) return;
-    const r = await workerCall('/presence/online', {}, true);
+    const r = await rpcCall('modPresenceOnline', {});
     if (!r.ok || !r.data || !Array.isArray(r.data.mods)){
       presenceHudEl.querySelector('.gam-hud-body').innerHTML =
         `<div class="gam-hud-empty">offline / token missing</div>`;
@@ -14847,7 +14844,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     snap.recentActions = (Array.isArray(rawSnap.recentActions) ? rawSnap.recentActions.slice(-3) : [])
       .map(a => ({ type: a.type, ts: a.ts, user: '[redacted]', details: a.details ? '[redacted]' : undefined }));
     snap._redacted_for_public = true;
-    const r = await workerCall('/bug/report', { title, description, debugSnapshot: snap, mod: me });
+    const r = await rpcCall('modBugReport', { title, description, debugSnapshot: snap, mod: me });
     if (r.ok && r.data && r.data.url){
       snack(`\u2713 Bug filed: #${r.data.number}`, 'success');
       console.log('[modtools] bug filed:', r.data.url);
@@ -15500,7 +15497,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         return true;
       }
       if (msg && msg.type === 'fetchReport'){
-        workerCall('/reports/summary', {})
+        rpcCall('modReportsSummary', {})
           .then(r => sendResponse({ ok:r.ok, data:r.data }))
           .catch(e => sendResponse({ ok:false, error:String(e) }));
         return true;
@@ -15790,16 +15787,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 
     function debounce(fn, ms) { let t; return function(){ const a = arguments; clearTimeout(t); t = setTimeout(function(){ fn.apply(null, a); }, ms); }; }
 
-    // Worker call helper that always includes the mod's username header so
-    // the worker can attribute writes via v7ModUsername() without forcing
-    // every caller to set body.mod.
-    async function smCall(path, body, asLead) {
-      const me = getMyModUsername();
-      // Use the existing workerCall; it sets X-Mod-Token. We inject body.mod
-      // as a fallback since the existing workerCall does not expose extra headers.
-      const augmented = body && typeof body === 'object' ? Object.assign({ mod: me }, body) : body;
-      return workerCall(path, augmented, !!asLead);
-    }
+    // v5.0-Phase-1: smCall trampoline replaced by named RPCs at each call site below.
+    // mod username is injected by the background handler via secretCache, not needed client-side.
 
     // ---- CHUNK 8: audible chime (Web Audio, no bundled audio file) ----
     function chime() {
@@ -15832,11 +15821,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         try { localStorage.removeItem(k); } catch (e) {}
       }
       if (!smOn()) return;
-      try { smCall('/drafts/delete', { action: action, target: target }, false); } catch (e) {}
+      try { rpcCall('modDraftsDelete', { action: action, target: target }); } catch (e) {}
     }
 
     const _draftPut = debounce(function(action, target, bodyStr) {
-      smCall('/drafts/write', { action: action, target: target, body: bodyStr }, false);
+      rpcCall('modDraftsWrite', { action: action, target: target, body: bodyStr });
     }, 2000);
 
     function renderCrossModBanner(ta, rec) {
@@ -15853,7 +15842,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         const action = ta.dataset.gamAction;
         const target = ta.dataset.gamTarget;
         const newBody = ta.value || rec.body || '';
-        smCall('/drafts/write', { action: action, target: target, body: newBody }, false)
+        rpcCall('modDraftsWrite', { action: action, target: target, body: newBody })
           .then(function() { try { banner.remove(); } catch (e) {} snack('draft taken over', 'success'); });
       });
       try { ta.parentNode.insertBefore(banner, ta); } catch (e) {}
@@ -15911,7 +15900,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       });
 
       // Cross-mod read: if another mod was editing within 24h, show takeover banner.
-      smCall('/drafts/read?action=' + encodeURIComponent(action) + '&target=' + encodeURIComponent(target), undefined, false)
+      rpcCall('modDraftsRead', { action: action, target: target })
         .then(function(r) {
           if (!r || !r.ok || !r.data) return;
           const rec = r.data;
@@ -16003,7 +15992,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         cancel.addEventListener('click', function() { try { row.remove(); } catch (er) {} });
         submit.addEventListener('click', function() {
           const note = input.value || '';
-          smCall('/drafts/handoff', { action: action, target: target, handoff_note: note }, false)
+          rpcCall('modDraftsHandoff', { action: action, target: target, handoff_note: note })
             .then(function() {
               try { row.remove(); } catch (e) {}
               try { ta.value = ''; } catch (e) {}
@@ -16072,7 +16061,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           proposer_note: noteTa.value || ''
         };
         if (kind === 'ban') payload.duration = durSel.value;
-        const r = await smCall('/proposals/create', payload, false);
+        const r = await rpcCall('modProposalsCreate', payload);
         if (!r || !r.ok || !r.data) {
           status.textContent = 'Failed to file proposal.';
           submit.disabled = false;
@@ -16081,12 +16070,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         const id = r.data.id;
         // Fire-and-forget AI advisory. Result cached in L1 keyed proposal:<id>.
         const aiKind = kind === 'ban' ? 'ProposedBan' : kind === 'remove_post' ? 'ProposedRemove' : 'ProposedLock';
-        smCall('/ai/next-best-action', {
+        rpcCall('modAiNextBestAction', {
           kind: aiKind,
           id: String(target),
           context: { target: String(target), duration: payload.duration || null, reason: payload.reason, proposer_note: payload.proposer_note },
           extra: { source: 'v7.1-propose' }
-        }, false).then(function(ar) {
+        }).then(function(ar) {
           if (ar && ar.ok && ar.data && ar.data.reason) {
             const note = String(ar.data.reason).slice(0, 120);
             L1.set('proposal:' + id, note);
@@ -16180,13 +16169,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           var origLabelP = puntBtn.textContent;
           optimisticAction({
             apply: function(){ puntBtn.disabled = true; puntBtn.textContent = 'Punting...'; },
-            doWork: function(){ return smCall('/proposals/vote', { id: p.id, action: 'Punt' }, false); },
+            doWork: function(){ return rpcCall('modProposalsVote', { id: p.id, action: 'Punt' }); },
             applySuccess: function(){ dismiss(); },
             revert: function(){ puntBtn.disabled = false; puntBtn.textContent = origLabelP; },
             onErrorSnack: function(){ return 'Punt failed'; }
           });
         } else {
-          smCall('/proposals/vote', { id: p.id, action: 'Punt' }, false).then(dismiss);
+          rpcCall('modProposalsVote', { id: p.id, action: 'Punt' }).then(dismiss);
         }
       });
       vetoBtn.addEventListener('click', function() {
@@ -16196,13 +16185,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           var origLabelV = vetoBtn.textContent;
           optimisticAction({
             apply: function(){ vetoBtn.disabled = true; vetoBtn.textContent = 'Vetoing...'; },
-            doWork: function(){ return smCall('/proposals/vote', { id: p.id, action: 'Veto' }, true); },
+            doWork: function(){ return rpcCall('modProposalsVote', { id: p.id, action: 'Veto' }); },
             applySuccess: function(){ dismiss(); },
             revert: function(){ vetoBtn.disabled = false; vetoBtn.textContent = origLabelV; },
             onErrorSnack: function(){ return 'Veto failed'; }
           });
         } else {
-          smCall('/proposals/vote', { id: p.id, action: 'Veto' }, true).then(dismiss);
+          rpcCall('modProposalsVote', { id: p.id, action: 'Veto' }).then(dismiss);
         }
       });
       execBtn.addEventListener('click', async function() {
@@ -16223,7 +16212,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           }
         } catch (e) {}
         if (ok) {
-          await smCall('/proposals/vote', { id: p.id, action: 'Execute' }, false);
+          await rpcCall('modProposalsVote', { id: p.id, action: 'Execute' });
           snack('Proposal #' + p.id + ' executed', 'success');
         } else {
           snack('Execute failed; proposal remains pending', 'error');
@@ -16263,7 +16252,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     async function withCollisionCheck(kind, id, proceedFn) {
       if (!smOn()) return proceedFn();
       try {
-        const r = await smCall('/presence/viewing?kind=' + encodeURIComponent(kind) + '&id=' + encodeURIComponent(id), undefined, false);
+        const r = await rpcCall('modPresenceViewing', { kind: kind, id: String(id), _get: true });
         const me = getMyModUsername();
         if (r && r.ok && r.data && r.data.mod && r.data.mod !== me && (Date.now() - (r.data.ts || 0) < TTL.VIEWING_MS)) {
           const ok = await confirmModal(r.data.mod + ' is reviewing this right now. Continue?', 'Yes, proceed', 'No, wait');
@@ -16300,7 +16289,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       if (!smOn()) return;
       const tid = _threadIdFromPath();
       if (!tid) return;
-      smCall('/claims/write', { thread_id: tid }, false).catch(function() {});
+      rpcCall('modClaimsWrite', { thread_id: tid }).catch(function() {});
     }
 
     function renderClaimBadge(claim) {
@@ -16339,8 +16328,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         const rv = origOpen(opts);
         if (!smOn() || !opts || !opts.kind || !opts.id) return rv;
         // Announce my viewing presence + look for collisions.
-        smCall('/presence/viewing', { kind: opts.kind, id: String(opts.id) }, false).catch(function() {});
-        smCall('/presence/viewing?kind=' + encodeURIComponent(opts.kind) + '&id=' + encodeURIComponent(String(opts.id)), undefined, false)
+        rpcCall('modPresenceViewing', { kind: opts.kind, id: String(opts.id) }).catch(function() {});
+        rpcCall('modPresenceViewing', { kind: opts.kind, id: String(opts.id), _get: true })
           .then(function(r) {
             const rec = r && r.ok ? r.data : null;
             const me = getMyModUsername();
@@ -16351,13 +16340,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
             if (opts.kind === 'User') {
               const abortCtrl = (window.IntelDrawer && window.IntelDrawer._currentAbort) || null;
               const signal = abortCtrl ? abortCtrl.signal : undefined;
-              workerCall('/ai/next-best-action', {
+              rpcCall('modAiNextBestAction', {
                 kind: 'User',
                 id: String(opts.id),
                 context: { username: String(opts.id) },
                 extra: { intent: 'ban_draft' },
                 mod: me
-              }, false, signal).then(function(rr) {
+              }).then(function(rr) {
                 if (rr && rr.ok && rr.data && rr.data.reason) {
                   L1.set('banDraft:' + String(opts.id), String(rr.data.reason).slice(0, 400));
                 }
@@ -16410,8 +16399,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         el('div', { cls: 'gam-propose-actions' }, exec, punt, veto)
       );
       try { body.prepend(banner); } catch (e) {}
-      punt.addEventListener('click', function() { smCall('/proposals/vote', { id: id, action: 'Punt' }, false); try { banner.remove(); } catch (e) {} });
-      veto.addEventListener('click', function() { smCall('/proposals/vote', { id: id, action: 'Veto' }, true);  try { banner.remove(); } catch (e) {} });
+      punt.addEventListener('click', function() { rpcCall('modProposalsVote', { id: id, action: 'Punt' }); try { banner.remove(); } catch (e) {} });
+      veto.addEventListener('click', function() { rpcCall('modProposalsVote', { id: id, action: 'Veto' }); try { banner.remove(); } catch (e) {} });
       exec.addEventListener('click', async function() {
         exec.disabled = true;
         let ok = false;
@@ -16429,7 +16418,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           }
         } catch (e) {}
         if (ok) {
-          await smCall('/proposals/vote', { id: id, action: 'Execute' }, false);
+          await rpcCall('modProposalsVote', { id: id, action: 'Execute' });
           snack('Proposal #' + id + ' executed', 'success');
           try { banner.remove(); } catch (e) {}
         } else {
@@ -16519,10 +16508,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       let sawBackoff = false;
       try {
         const [props, online, myDrafts, claimsList] = await Promise.all([
-          smCall('/proposals/list?since=' + since, undefined, false),
-          smCall('/presence/online', undefined, true),
-          smCall('/drafts/list?mine=1', undefined, false),
-          smCall('/claims/list', undefined, false)
+          rpcCall('modProposalsList', { since: since }),
+          rpcCall('modPresenceOnline', {}),
+          rpcCall('modDraftsList', { mine: true }),
+          rpcCall('modClaimsList', {})
         ]);
         for (const r of [props, online, myDrafts, claimsList]){
           if (r && (r.status === 429 || r.status >= 500)){ sawBackoff = true; }
@@ -16582,10 +16571,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         const since = _smLastPollTs; _smLastPollTs = Date.now();
         try {
           const [props, online, myDrafts, claimsList] = await Promise.all([
-            smCall('/proposals/list?since=' + since, undefined, false),
-            smCall('/presence/online', undefined, true),
-            smCall('/drafts/list?mine=1', undefined, false),
-            smCall('/claims/list', undefined, false)
+            rpcCall('modProposalsList', { since: since }),
+            rpcCall('modPresenceOnline', {}),
+            rpcCall('modDraftsList', { mine: true }),
+            rpcCall('modClaimsList', {})
           ]);
           if (props && props.ok) handleProposals((props.data && props.data.data) || props.data || []);
           // /presence/online: existing shape is {ok,mods}; v7.1 endpoints use {ok,data:[]}
