@@ -2332,42 +2332,121 @@ async function handleReportSummary(request, env) {
   const auth = await checkModToken(request, env); if (auth) return auth;
   try {
     const out = { generatedAt: new Date().toISOString() };
-    // Profile-based reports
+    const since7d = new Date(Date.now() - 7*24*3600*1000).toISOString();
+    const since60d = new Date(Date.now() - 60*24*3600*1000).toISOString();
+
+    // --- Iter 7: D1 counts for stat bar ---
     try {
-      const file = await readGithubFile(env, 'profiles.json');
-      const doc = file.content ? JSON.parse(file.content) : { users: {} };
-      const arr = Object.entries(doc.users || {}).map(([u, v]) => ({ username: u, ...v }));
-      const byPosts = arr
-        .filter(x => x.stats && typeof x.stats.posts === 'number')
-        .sort((a,b)=> (b.stats.posts||0) - (a.stats.posts||0))
-        .slice(0, 10)
-        .map(x=>({ username:x.username, posts:x.stats.posts, comments:x.stats.comments||0 }));
-      const byQuality = arr
-        .filter(x => x.stats && (x.stats.posts||0) >= 20 && typeof x.stats.upvoteRatio === 'number')
-        .sort((a,b)=> (b.stats.upvoteRatio||0) - (a.stats.upvoteRatio||0))
-        .slice(0, 10)
-        .map(x=>({ username:x.username, upvoteRatio:x.stats.upvoteRatio, posts:x.stats.posts }));
-      out.topPosters = byPosts;
-      out.topQuality = byQuality;
-      out.totalProfiles = arr.length;
-    } catch(e) { out.profilesError = String(e); }
-    // Seen-based report: comeback candidates
-    try {
-      if (env.MOD_KV){
-        const list = await env.MOD_KV.list({ prefix: 'seen:', limit: 1000 });
-        const sixtyDaysAgo = Date.now() - 60*24*3600*1000;
-        const comeback = [];
-        for (const k of list.keys){
-          const v = await env.MOD_KV.get(k.name, 'json');
-          if (!v) continue;
-          if (Date.parse(v.lastSeen) < sixtyDaysAgo) comeback.push(v);
-        }
-        comeback.sort((a,b)=> Date.parse(b.lastSeen) - Date.parse(a.lastSeen));
-        out.comebackCandidates = comeback.slice(0, 50);
-        out.totalSeen = list.keys.length;
+      if (env.AUDIT_DB) {
+        const [uc, pc, ac] = await Promise.all([
+          env.AUDIT_DB.prepare('SELECT COUNT(*) as n FROM gaw_users').all(),
+          env.AUDIT_DB.prepare('SELECT COUNT(*) as n FROM gaw_posts').all(),
+          env.AUDIT_DB.prepare('SELECT COUNT(*) as n FROM actions WHERE is_test = 0').all()
+        ]);
+        out.d1UserCount   = (uc.results[0] && uc.results[0].n) || 0;
+        out.d1PostCount   = (pc.results[0] && pc.results[0].n) || 0;
+        out.d1ActionCount = (ac.results[0] && ac.results[0].n) || 0;
       }
-    } catch(e) { out.seenError = String(e); }
-    // Flag leaders
+    } catch(e) { out.d1CountsError = String(e); }
+
+    // --- Iter 1: Active Mods -- per-mod summary with top actions ---
+    try {
+      if (env.AUDIT_DB) {
+        const rs = await env.AUDIT_DB.prepare(
+          'SELECT mod, action, COUNT(*) as n FROM actions WHERE ts >= ? AND is_test = 0 GROUP BY mod, action ORDER BY n DESC LIMIT 200'
+        ).bind(since7d).all();
+        // Collapse into per-mod objects with action breakdown
+        const modMap = {};
+        for (const row of (rs.results || [])) {
+          if (!modMap[row.mod]) modMap[row.mod] = { mod: row.mod, total: 0, actions: {} };
+          modMap[row.mod].total += row.n;
+          modMap[row.mod].actions[row.action] = (modMap[row.mod].actions[row.action] || 0) + row.n;
+        }
+        out.activeMods = Object.values(modMap).sort((a, b) => b.total - a.total).slice(0, 20);
+      }
+    } catch(e) { out.auditError = String(e); }
+
+    // --- Iter 2: Recent Bans (last 10) from D1 ---
+    try {
+      if (env.AUDIT_DB) {
+        const rb = await env.AUDIT_DB.prepare(
+          "SELECT ts, mod, target_user, action, details FROM actions WHERE action LIKE 'ban%' AND is_test = 0 ORDER BY ts DESC LIMIT 10"
+        ).all();
+        out.recentBans = rb.results || [];
+      }
+    } catch(e) { out.recentBansError = String(e); }
+
+    // --- Iter 3: Top Posters / Top Quality -- D1 gaw_users primary, GitHub fallback ---
+    try {
+      if (env.AUDIT_DB) {
+        const tp = await env.AUDIT_DB.prepare(
+          'SELECT username, post_count, comment_count FROM gaw_users WHERE post_count > 0 ORDER BY post_count DESC LIMIT 10'
+        ).all();
+        if (tp.results && tp.results.length > 0) {
+          out.topPosters = tp.results.map(x => ({ username: x.username, posts: x.post_count, comments: x.comment_count || 0 }));
+          out.topPostersSource = 'd1';
+        }
+      }
+    } catch(e) { out.topPostersD1Error = String(e); }
+    if (!out.topPosters || out.topPosters.length === 0) {
+      try {
+        const file = await readGithubFile(env, 'profiles.json');
+        const doc = file.content ? JSON.parse(file.content) : { users: {} };
+        const arr = Object.entries(doc.users || {}).map(([u, v]) => ({ username: u, ...v }));
+        out.topPosters = arr
+          .filter(x => x.stats && typeof x.stats.posts === 'number')
+          .sort((a,b)=> (b.stats.posts||0) - (a.stats.posts||0))
+          .slice(0, 10)
+          .map(x=>({ username:x.username, posts:x.stats.posts, comments:x.stats.comments||0 }));
+        out.topPostersSource = 'github';
+        out.totalProfiles = arr.length;
+        // Top quality from same file while we have it
+        out.topQuality = arr
+          .filter(x => x.stats && (x.stats.posts||0) >= 20 && typeof x.stats.upvoteRatio === 'number')
+          .sort((a,b)=> (b.stats.upvoteRatio||0) - (a.stats.upvoteRatio||0))
+          .slice(0, 10)
+          .map(x=>({ username:x.username, upvoteRatio:x.stats.upvoteRatio, posts:x.stats.posts }));
+      } catch(e) { out.profilesError = String(e); }
+    }
+
+    // --- Iter 4: Comeback Candidates -- D1 gaw_users primary, KV fallback ---
+    try {
+      if (env.AUDIT_DB) {
+        const cc = await env.AUDIT_DB.prepare(
+          'SELECT username, last_seen_at, post_count, comment_count FROM gaw_users WHERE last_seen_at IS NOT NULL AND last_seen_at < ? AND last_seen_at > 0 ORDER BY last_seen_at DESC LIMIT 50'
+        ).bind(Date.now() - 60*24*3600*1000).all();
+        if (cc.results && cc.results.length > 0) {
+          out.comebackCandidates = cc.results.map(x => ({
+            username: x.username,
+            lastSeen: new Date(x.last_seen_at).toISOString(),
+            posts: x.post_count || 0,
+            comments: x.comment_count || 0
+          }));
+          out.comebackSource = 'd1';
+          out.totalSeen = out.d1UserCount || cc.results.length;
+        }
+      }
+    } catch(e) { out.comebackD1Error = String(e); }
+    if (!out.comebackCandidates || out.comebackCandidates.length === 0) {
+      try {
+        if (env.MOD_KV) {
+          const list = await env.MOD_KV.list({ prefix: 'seen:', limit: 1000 });
+          const sixtyDaysAgo = Date.now() - 60*24*3600*1000;
+          const comeback = [];
+          for (const k of list.keys) {
+            const v = await env.MOD_KV.get(k.name, 'json');
+            if (!v) continue;
+            if (Date.parse(v.lastSeen) < sixtyDaysAgo) comeback.push(v);
+          }
+          comeback.sort((a,b)=> Date.parse(b.lastSeen) - Date.parse(a.lastSeen));
+          out.comebackCandidates = comeback.slice(0, 50);
+          out.comebackSource = 'kv';
+          out.totalSeen = list.keys.length;
+        }
+      } catch(e) { out.seenError = String(e); }
+    }
+
+    // --- Flag leaders (deferred migration -- keep GitHub source) ---
     try {
       const f = await readGithubFile(env, 'flags.json');
       const fdoc = f.content ? JSON.parse(f.content) : { users: {} };
@@ -2377,16 +2456,55 @@ async function handleReportSummary(request, env) {
         .slice(0, 20);
       out.flagLeaders = flagCounts;
     } catch(e) { out.flagsError = String(e); }
-    // Audit-based reports (D1)
+
+    // --- Iter 5: Removed Content Snapshot (last 7 days) ---
     try {
-      if (env.AUDIT_DB){
-        const since = new Date(Date.now() - 7*24*3600*1000).toISOString();
-        const rs = await env.AUDIT_DB.prepare(
-          'SELECT mod, action, COUNT(*) as n FROM actions WHERE ts >= ? GROUP BY mod, action ORDER BY n DESC LIMIT 100'
-        ).bind(since).all();
-        out.activeMods = rs.results || [];
+      if (env.AUDIT_DB) {
+        const cutoff = Date.now() - 7*24*3600*1000;
+        const rc = await env.AUDIT_DB.prepare(
+          'SELECT COUNT(*) as n FROM gaw_posts WHERE is_removed = 1 AND captured_at >= ?'
+        ).bind(cutoff).all();
+        const rcAuthor = await env.AUDIT_DB.prepare(
+          'SELECT author, COUNT(*) as n FROM gaw_posts WHERE is_removed = 1 AND captured_at >= ? GROUP BY author ORDER BY n DESC LIMIT 10'
+        ).bind(cutoff).all();
+        out.removedCount7d = (rc.results[0] && rc.results[0].n) || 0;
+        out.removedByAuthor = rcAuthor.results || [];
       }
-    } catch(e) { out.auditError = String(e); }
+    } catch(e) { out.removedError = String(e); }
+
+    // --- Iter 6: Activity Heatmap (hour-of-day buckets, last 7 days) ---
+    try {
+      if (env.AUDIT_DB) {
+        // ts is ISO string; extract hour via substr
+        const hm = await env.AUDIT_DB.prepare(
+          "SELECT CAST(substr(ts, 12, 2) AS INTEGER) as hr, COUNT(*) as n FROM actions WHERE ts >= ? AND is_test = 0 GROUP BY hr ORDER BY hr"
+        ).bind(since7d).all();
+        // Build a 24-slot array
+        const slots = new Array(24).fill(0);
+        for (const row of (hm.results || [])) {
+          const h = Number(row.hr);
+          if (h >= 0 && h < 24) slots[h] = row.n;
+        }
+        out.heatmap24h = slots;
+      }
+    } catch(e) { out.heatmapError = String(e); }
+
+    // --- Iter 8: Death Row Pipeline ---
+    try {
+      if (env.AUDIT_DB) {
+        const [drPending, drRecent] = await Promise.all([
+          env.AUDIT_DB.prepare(
+            "SELECT COUNT(*) as n FROM proposals WHERE kind = 'ban' AND status = 'pending'"
+          ).all(),
+          env.AUDIT_DB.prepare(
+            "SELECT COUNT(*) as n FROM actions WHERE action = 'deathrow' AND ts >= ? AND is_test = 0"
+          ).bind(since7d).all()
+        ]);
+        out.drPendingProposals = (drPending.results[0] && drPending.results[0].n) || 0;
+        out.drActionsWeek     = (drRecent.results[0]  && drRecent.results[0].n)  || 0;
+      }
+    } catch(e) { out.drError = String(e); }
+
     return jsonResponse({ ok: true, report: out });
   } catch (e) { return jsonResponse({ error: String(e) }, 500); }
 }

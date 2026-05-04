@@ -1189,45 +1189,128 @@ function buildDashboardHtml(rep) {
   const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const userLink = u => `<a href="https://greatawakening.win/u/${encodeURIComponent(u)}/" target="_blank">${esc(u)}</a>`;
   const table = (rows, headers) => `<table><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
-  const section = (title, body) => `<section><h2>${esc(title)}</h2>${body}</section>`;
+  const section = (icon, title, body) => `<section><h2>${icon} ${esc(title)}</h2>${body}</section>`;
+  const badge = (label) => `<span class="badge">${esc(label)}</span>`;
+  const srcBadge = (src) => src ? `<span class="src-badge src-${esc(src)}">${esc(src)}</span>` : '';
+  const empty = (msg) => `<div class="empty">${esc(msg)}</div>`;
+  const fmtNum = n => Number(n||0).toLocaleString();
 
-  const topPosters = (rep.topPosters||[]).map(x=>`<tr><td>${userLink(x.username)}</td><td>${x.posts}</td><td>${x.comments||0}</td></tr>`).join('');
-  const topQuality = (rep.topQuality||[]).map(x=>`<tr><td>${userLink(x.username)}</td><td>${(x.upvoteRatio*100).toFixed(1)}%</td><td>${x.posts}</td></tr>`).join('');
-  const comeback  = (rep.comebackCandidates||[]).map(x=>`<tr><td>${userLink(x.username)}</td><td>${esc((x.lastSeen||'').slice(0,10))}</td><td>${esc(x.pageHint||'')}</td></tr>`).join('');
-  const flagLead  = (rep.flagLeaders||[]).map(x=>`<tr><td>${userLink(x.username)}</td><td>${x.count}</td><td>${esc((x.severities||[]).join(', '))}</td></tr>`).join('');
-  const active    = (rep.activeMods||[]).map(x=>`<tr><td>${esc(x.mod)}</td><td>${esc(x.action)}</td><td>${x.n}</td></tr>`).join('');
+  // --- Iter 9: Stat bar with D1 counts (Iter 7 data) ---
+  const statsBar = `<div class="stats-bar">
+  <div class="stat-card"><div class="stat-n" style="color:#4A9EFF">${fmtNum(rep.d1UserCount)}</div><div class="stat-l">D1 Users</div></div>
+  <div class="stat-card"><div class="stat-n" style="color:#4A9EFF">${fmtNum(rep.d1PostCount)}</div><div class="stat-l">D1 Posts</div></div>
+  <div class="stat-card"><div class="stat-n" style="color:#E8A317">${fmtNum(rep.d1ActionCount)}</div><div class="stat-l">Audit Events</div></div>
+  <div class="stat-card"><div class="stat-n" style="color:#2ECC71">${fmtNum((rep.comebackCandidates||[]).length)}</div><div class="stat-l">Comeback Candidates</div></div>
+  <div class="stat-card"><div class="stat-n" style="color:#ff6b6b">${fmtNum(rep.removedCount7d)}</div><div class="stat-l">Posts Removed (7d)</div></div>
+  <div class="stat-card"><div class="stat-n" style="color:#bb86fc">${fmtNum(rep.drPendingProposals)}</div><div class="stat-l">DR Pending</div></div>
+</div>`;
+
+  // --- Iter 1: Active Mods with per-mod breakdown ---
+  let activeHtml = '';
+  if ((rep.activeMods||[]).length > 0) {
+    activeHtml = `<div class="mod-grid">${(rep.activeMods||[]).map(m => {
+      const topActions = Object.entries(m.actions||{}).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([k,v])=>`<span class="pill">${esc(k)} <strong>${v}</strong></span>`).join('');
+      return `<div class="mod-card"><div class="mod-name">${esc(m.mod)}</div><div class="mod-total">${fmtNum(m.total)} actions</div><div class="mod-actions">${topActions}</div></div>`;
+    }).join('')}</div>`;
+  } else {
+    activeHtml = empty('No audit events in the last 7 days -- run the extension on GAW to generate audit rows');
+  }
+
+  // --- Iter 2: Recent Bans ---
+  const banRows = (rep.recentBans||[]).map(x=>`<tr><td>${esc((x.ts||'').slice(0,10))}</td><td>${userLink(x.target_user)}</td><td>${badge(x.action)}</td><td>${esc(x.mod)}</td></tr>`).join('');
+  const recentBansHtml = banRows ? table(banRows, ['Date','Target','Action','Mod']) : empty('No bans logged yet -- D1 audit rows are written when mods execute bans through the extension');
+
+  // --- Iter 3: Top Posters ---
+  const posterRows = (rep.topPosters||[]).map(x=>`<tr><td>${userLink(x.username)}</td><td>${fmtNum(x.posts)}</td><td>${fmtNum(x.comments||0)}</td></tr>`).join('');
+  const topPostersHtml = posterRows ? `${srcBadge(rep.topPostersSource)}${table(posterRows, ['User','Posts','Comments'])}` : empty('No post data yet -- the firehose populates gaw_users as posts are captured');
+
+  // Top Quality (only from GitHub profiles.json; not in D1)
+  const qualRows = (rep.topQuality||[]).map(x=>`<tr><td>${userLink(x.username)}</td><td>${(x.upvoteRatio*100).toFixed(1)}%</td><td>${fmtNum(x.posts)}</td></tr>`).join('');
+  const topQualityHtml = qualRows ? table(qualRows, ['User','Upvote Ratio','Posts']) : empty('No quality data yet -- populated via hover-harvest (profiles.json)');
+
+  // --- Iter 4: Comeback Candidates ---
+  const comebackRows = (rep.comebackCandidates||[]).map(x=>`<tr><td>${userLink(x.username)}</td><td>${esc((x.lastSeen||'').slice(0,10))}</td><td>${fmtNum(x.posts||0)}</td><td>${fmtNum(x.comments||0)}</td></tr>`).join('');
+  const comebackHtml = comebackRows ? `${srcBadge(rep.comebackSource)}${table(comebackRows, ['User','Last Seen','Posts','Comments'])}` : empty('No comeback candidates yet -- gaw_users last_seen_at is populated by the firehose');
+
+  // Flag leaders
+  const flagRows = (rep.flagLeaders||[]).map(x=>`<tr><td>${userLink(x.username)}</td><td>${x.count}</td><td>${esc((x.severities||[]).join(', '))}</td></tr>`).join('');
+  const flagHtml = flagRows ? table(flagRows, ['User','Flags','Severities']) : empty('No flags yet -- flags.json is populated when mods flag users (migration to D1 deferred)');
+
+  // --- Iter 5: Removed Content ---
+  const removedRows = (rep.removedByAuthor||[]).map(x=>`<tr><td>${userLink(x.author)}</td><td>${fmtNum(x.n)}</td></tr>`).join('');
+  const removedHtml = removedRows ? table(removedRows, ['Author','Removed Posts']) : empty('No removed posts captured this week -- firehose captures removals when posts are re-fetched');
+
+  // --- Iter 6: Heatmap ---
+  let heatmapHtml = '';
+  if ((rep.heatmap24h||[]).length === 24) {
+    const slots = rep.heatmap24h;
+    const maxV = Math.max(...slots, 1);
+    const bars = slots.map((n, h) => {
+      const pct = Math.round((n / maxV) * 100);
+      const label = h === 0 ? '12a' : h < 12 ? h+'a' : h === 12 ? '12p' : (h-12)+'p';
+      return `<div class="hm-col"><div class="hm-bar" style="height:${pct}%" title="${n} actions at ${label}"></div><div class="hm-label">${h%3===0?label:''}</div></div>`;
+    }).join('');
+    heatmapHtml = `<div class="heatmap">${bars}</div>`;
+  } else {
+    heatmapHtml = empty('No heatmap data yet -- requires audit events in the last 7 days');
+  }
+
+  // --- Iter 8: Death Row Pipeline ---
+  const drHtml = `<div class="stats-bar">
+  <div class="stat-card"><div class="stat-n" style="color:#bb86fc">${fmtNum(rep.drPendingProposals)}</div><div class="stat-l">Pending Proposals</div></div>
+  <div class="stat-card"><div class="stat-n" style="color:#E8A317">${fmtNum(rep.drActionsWeek)}</div><div class="stat-l">DR Actions (7d)</div></div>
+</div>`;
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>GAW ModTools Dashboard</title>
 <style>
-body{font:14px/1.4 ui-sans-serif,system-ui,sans-serif;background:#0f1114;color:#e4e4e4;margin:0;padding:20px;max-width:1200px;margin:auto}
-h1{color:#4A9EFF;margin-top:0}
-h2{color:#E8A317;border-bottom:1px solid #2a2a2a;padding-bottom:6px;margin-top:32px}
-section{margin-bottom:24px}
-table{width:100%;border-collapse:collapse;background:#1a1c20;border-radius:6px;overflow:hidden}
-th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #2a2a2a}
-th{background:#22252a;color:#aaa;font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.05em}
+*{box-sizing:border-box}
+body{font:14px/1.5 ui-sans-serif,system-ui,sans-serif;background:#0f1114;color:#e4e4e4;margin:0;padding:24px 28px;max-width:1280px;margin:auto}
+h1{color:#4A9EFF;margin:0 0 4px 0;font-size:22px;font-weight:700}
+h2{color:#E8A317;border-bottom:1px solid #252830;padding-bottom:8px;margin:32px 0 12px;font-size:15px;font-weight:600}
+section{margin-bottom:28px}
+table{width:100%;border-collapse:collapse;background:#14161a;border-radius:8px;overflow:hidden;font-size:13px}
+th,td{padding:9px 14px;text-align:left;border-bottom:1px solid #1e2026}
+th{background:#1c1f25;color:#888;font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.06em}
 tr:last-child td{border-bottom:none}
-tr:hover td{background:#222}
+tr:hover td{background:#1a1d23}
 a{color:#4A9EFF;text-decoration:none}
 a:hover{text-decoration:underline}
-.meta{color:#888;font-size:12px;margin-bottom:20px}
-.stat{display:inline-block;background:#1a1c20;border-radius:6px;padding:10px 16px;margin:0 8px 8px 0}
-.stat .n{font-size:24px;color:#2ECC71;font-weight:700}
-.stat .l{color:#888;font-size:11px;text-transform:uppercase}
-.empty{color:#666;font-style:italic;padding:12px 0}
+.meta{color:#666;font-size:12px;margin-bottom:18px}
+.stats-bar{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px}
+.stat-card{background:#14161a;border:1px solid #1e2026;border-radius:8px;padding:12px 18px;min-width:110px}
+.stat-n{font-size:26px;font-weight:700;line-height:1.1}
+.stat-l{color:#666;font-size:11px;text-transform:uppercase;margin-top:2px;letter-spacing:.04em}
+.empty{color:#555;font-style:italic;padding:14px 4px;font-size:13px}
+.badge{display:inline-block;background:#2a1a00;color:#E8A317;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:600}
+.src-badge{display:inline-block;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
+.src-d1{background:#0d2236;color:#4A9EFF}
+.src-github{background:#1a2400;color:#7ec850}
+.src-kv{background:#1a1a00;color:#ccc}
+.mod-grid{display:flex;flex-wrap:wrap;gap:10px}
+.mod-card{background:#14161a;border:1px solid #1e2026;border-radius:8px;padding:12px 16px;min-width:180px;flex:1 1 180px}
+.mod-name{font-weight:600;color:#e4e4e4;margin-bottom:2px;font-size:13px}
+.mod-total{color:#2ECC71;font-size:12px;margin-bottom:8px;font-weight:600}
+.mod-actions{display:flex;flex-wrap:wrap;gap:4px}
+.pill{background:#1e2026;border-radius:4px;padding:2px 7px;font-size:11px;color:#aaa}
+.pill strong{color:#e4e4e4}
+.heatmap{display:flex;align-items:flex-end;gap:3px;height:60px;padding:0 2px;background:#14161a;border-radius:8px;padding:10px 10px 0}
+.hm-col{display:flex;flex-direction:column;align-items:center;flex:1}
+.hm-bar{width:100%;background:#4A9EFF;border-radius:2px 2px 0 0;min-height:2px;transition:opacity .15s}
+.hm-bar:hover{opacity:.7}
+.hm-label{color:#555;font-size:9px;margin-top:3px;white-space:nowrap}
 </style></head><body>
 <h1>&#x1F4CA; GAW ModTools Dashboard</h1>
-<div class="meta">Generated ${esc(rep.generatedAt||'')}</div>
-<div>
-  <div class="stat"><div class="n">${rep.totalProfiles||0}</div><div class="l">Profiles indexed</div></div>
-  <div class="stat"><div class="n">${rep.totalSeen||0}</div><div class="l">Users seen (crawler)</div></div>
-  <div class="stat"><div class="n">${(rep.comebackCandidates||[]).length}</div><div class="l">Comeback candidates</div></div>
-</div>
-${section('Top 10 Posters', topPosters ? table(topPosters, ['User','Posts','Comments']) : '<div class="empty">No data yet &mdash; hover some profiles to populate</div>')}
-${section('Top 10 Highest Quality (20+ posts)', topQuality ? table(topQuality, ['User','Upvote Ratio','Posts']) : '<div class="empty">No data yet</div>')}
-${section('Comeback Candidates (60+ days silent)', comeback ? table(comeback, ['User','Last Seen','Found On']) : '<div class="empty">Crawler has not found any yet</div>')}
-${section('Flag Leaders', flagLead ? table(flagLead, ['User','Flags','Severities']) : '<div class="empty">No flags yet</div>')}
-${section('Active Mods (last 7 days)', active ? table(active, ['Mod','Action','Count']) : '<div class="empty">No audit events yet</div>')}
+<div class="meta">Generated ${esc(rep.generatedAt||'')} &nbsp;&#x2022;&nbsp; v9.1.0</div>
+${statsBar}
+${section('&#x26A1;', 'Active Mods (last 7 days)', activeHtml)}
+${section('&#x1F6E1;', 'Recent Bans', recentBansHtml)}
+${section('&#x1F4C8;', 'Activity Heatmap (last 7 days, UTC hour)', heatmapHtml)}
+${section('&#x2620;', 'Death Row Pipeline', drHtml)}
+${section('&#x1F4B0;', 'Top 10 Posters', topPostersHtml)}
+${section('&#x1F31F;', 'Top 10 Highest Quality', topQualityHtml)}
+${section('&#x1F550;', 'Comeback Candidates (60+ days silent)', comebackHtml)}
+${section('&#x1F6AB;', 'Removed Content This Week', removedHtml)}
+${section('&#x1F6A9;', 'Flag Leaders', flagHtml)}
 </body></html>`;
 }
 

@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.0.2';
+  const VERSION = 'v9.1.0';
 
   // ============================================================================
   // v8.6.5: diagnostic ring buffer for hard-to-reproduce bugs
