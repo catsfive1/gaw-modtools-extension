@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v8.6.9';
+  const VERSION = 'v9.0.0';
 
   // ============================================================================
   // v8.6.5: diagnostic ring buffer for hard-to-reproduce bugs
@@ -11752,11 +11752,19 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     function computeUnread(){
-      const meName = myName();
+      // v9.0.0: case-insensitive identity compare. GAW canonicalizes usernames
+      // lowercase server-side; me() can return mixed case from the page DOM.
+      // Pre-fix, self-sent broadcast messages (to_mod='ALL') counted as unread
+      // because 'Catsfive' !== 'catsfive', incrementing the badge after the
+      // user just sent the message they're now seeing as "unread".
+      const meName = (myName() || '').toLowerCase();
+      if (!meName) { STATE.unread = 0; return 0; }
       let n = 0;
       for (const msg of STATE.messages){
-        if ((msg.to_mod === meName || msg.to_mod === 'ALL')
-            && msg.from_mod !== meName
+        const to = String(msg.to_mod || '').toLowerCase();
+        const from = String(msg.from_mod || '').toLowerCase();
+        if ((to === meName || to === 'all')
+            && from !== meName
             && msg.read_at == null){
           n++;
         }
