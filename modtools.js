@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.0.0';
+  const VERSION = 'v9.0.1';
 
   // ============================================================================
   // v8.6.5: diagnostic ring buffer for hard-to-reproduce bugs
@@ -11522,6 +11522,22 @@ Analyze this comment against the community rules. Then write a brief, profession
   // ╚══════════════════════════════════════════════════════════════════╝
   const FILTER_AGE_HOURS = { 'off':0, '4h':4, '8h':8, '12h':12 };
   function applyUpvoteAgeFilter(){
+    // v9.0.1: NEVER filter on user profile pages. The upvote+age filter is
+    // a feed-skipping convenience for community pages (skip stuff the
+    // community already validated). On YOUR OWN /u/<name> page or any
+    // /u/<name> page, mods want to see ALL the content -- recent and old --
+    // because that's the audit surface. Pre-fix: filter ran here too and
+    // hid any older upvoted post on profile pages, making it look like
+    // "the last 10 days are missing".
+    if (IS_USER_PROFILE_PAGE) {
+      // Defensive un-hide: if the filter previously ran here (pre-fix) the
+      // posts are still display:none. Restore them on the next render.
+      document.querySelectorAll('[data-gam-age-hidden="1"]').forEach(el=>{
+        el.style.display = '';
+        el.removeAttribute('data-gam-age-hidden');
+      });
+      return;
+    }
     const mode = getSetting('upvoteAgeFilter', 'off');
     const cutoffH = FILTER_AGE_HOURS[mode] || 0;
     // First un-hide anything we previously hid, so switching modes is reversible
