@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.2.0';
+  const VERSION = 'v9.2.1';
 
   // ============================================================================
   // v8.6.5: diagnostic ring buffer for hard-to-reproduce bugs
@@ -1259,6 +1259,39 @@
   const SECRET_SETTING_KEYS = new Set(['workerModToken', 'leadModToken']);
   // In-memory mirror of secret settings (populated by preloadSecrets at init).
   const _secretsCache = {};
+
+  // v9.2.1 hotfix: re-hydrate _secretsCache when chrome.storage.local changes
+  // (e.g. after popup rotation). Without this the content script holds the old
+  // plaintext until the next page load, causing 401s on every token-gated call.
+  (function _installStorageTokenSync() {
+    if (!chrome || !chrome.storage || !chrome.storage.onChanged) return;
+    chrome.storage.onChanged.addListener(function(changes, area) {
+      if (area !== 'local') return;
+      if (!changes.gam_settings) return;
+      var newVal = changes.gam_settings.newValue;
+      if (!newVal || typeof newVal !== 'object') return;
+      var updated = false;
+      if (typeof newVal.workerModToken === 'string' &&
+          newVal.workerModToken !== _secretsCache.workerModToken) {
+        _secretsCache.workerModToken = newVal.workerModToken;
+        updated = true;
+      }
+      if (typeof newVal.leadModToken === 'string' &&
+          newVal.leadModToken !== _secretsCache.leadModToken) {
+        _secretsCache.leadModToken = newVal.leadModToken;
+        updated = true;
+      }
+      if (updated) {
+        try {
+          _diagLog('auth', 'storage.onChanged: _secretsCache re-hydrated from gam_settings update', {
+            hasWorkerToken: !!_secretsCache.workerModToken,
+            hasLeadToken: !!_secretsCache.leadModToken
+          });
+        } catch(_) {}
+      }
+    });
+  })();
+
   async function preloadSecrets(){
     try {
       let stored = null;
@@ -11657,17 +11690,46 @@ Analyze this comment against the community rules. Then write a brief, profession
   // ║  Stickies are NEVER hidden (per user mandate).                  ║
   // ╚══════════════════════════════════════════════════════════════════╝
   const FILTER_AGE_HOURS = { 'off':0, '4h':4, '8h':8, '12h':12 };
+  // v9.2.1: dynamic profile-page check. The original IS_USER_PROFILE_PAGE
+  // const (line ~4286) is captured at IIFE startup and goes STALE the
+  // moment GAW does an SPA navigation (home -> /u/catsfive via pushState).
+  // The MutationObserver below keeps re-running applyUpvoteAgeFilter, which
+  // read the stale const and happily kept hiding posts on the operator's
+  // own profile. Reproduces every time you click your username from the
+  // header instead of hard-reloading /u/<name>. This helper re-evaluates
+  // location.pathname on every call and also accepts the /saved, /upvoted,
+  // /downvoted sub-routes the original regex missed.
+  function _isProfileViewNow(){
+    const p = window.location.pathname;
+    // /u/<name>, /u/<name>/, /u/<name>/posts, /u/<name>/saved,
+    // /u/<name>/upvoted, /u/<name>/downvoted — ALL audit surfaces, never filter.
+    // /u/<name>/comments is intentionally excluded: comments don't render as
+    // .post elements anyway, so the filter naturally no-ops there.
+    return /^\/u\/[^/]+(?:\/(?:posts|saved|upvoted|downvoted))?\/?$/.test(p);
+  }
+  // v9.2.1: one-shot proof in DevTools console when the gate fires. Lets
+  // the operator confirm the patch is actually loaded without typing
+  // anything. Logs once per page load.
+  let __v921FilterGateLogged = false;
+  function _logFilterGateOnce(){
+    if (__v921FilterGateLogged) return;
+    __v921FilterGateLogged = true;
+    try {
+      const totalPosts = document.querySelectorAll('.post').length;
+      console.info('%c[modtools v9.2.1] profile view detected — upvote/age filter is GATED OFF. ' + totalPosts + ' .post elements in DOM, all should remain visible.', 'color:#3dd68c;font-weight:700');
+    } catch(_){}
+  }
   function applyUpvoteAgeFilter(){
-    // v9.0.1: NEVER filter on user profile pages. The upvote+age filter is
-    // a feed-skipping convenience for community pages (skip stuff the
-    // community already validated). On YOUR OWN /u/<name> page or any
-    // /u/<name> page, mods want to see ALL the content -- recent and old --
-    // because that's the audit surface. Pre-fix: filter ran here too and
-    // hid any older upvoted post on profile pages, making it look like
-    // "the last 10 days are missing".
-    if (IS_USER_PROFILE_PAGE) {
-      // Defensive un-hide: if the filter previously ran here (pre-fix) the
-      // posts are still display:none. Restore them on the next render.
+    // v9.0.1 / v9.2.1: NEVER filter on user profile pages. The upvote+age
+    // filter is a feed-skipping convenience for community pages (skip stuff
+    // the community already validated). On a /u/<name> page (yours or
+    // anyone's) mods want to see ALL the content -- recent and old --
+    // because that's the audit surface.
+    if (_isProfileViewNow()) {
+      _logFilterGateOnce();
+      // Defensive un-hide: if the filter previously ran here (pre-fix, or
+      // before SPA nav landed us on the profile) the posts are still
+      // display:none. Restore them on the next render.
       document.querySelectorAll('[data-gam-age-hidden="1"]').forEach(el=>{
         el.style.display = '';
         el.removeAttribute('data-gam-age-hidden');

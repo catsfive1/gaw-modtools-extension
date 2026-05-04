@@ -290,6 +290,47 @@ function _classifyCaller(sender) {
   return RPC_CALLER_POPUP;
 }
 
+// v9.2.1 hotfix: read-verify-retry save for token rotation.
+// Updates the SW vault immediately, then persists to chrome.storage.local with
+// a confirm-read step. Returns { saved: bool, lastError: string|null }.
+// If saved=false, the caller MUST surface a CRITICAL error -- the worker has
+// already flipped to the new hash; the old token is dead.
+async function _persistRotatedToken(newTokenPlaintext) {
+  // Update in-memory SW vault immediately so this SW lifecycle still works.
+  secretCache.workerModToken = newTokenPlaintext;
+
+  var saved = false;
+  var lastError = null;
+  for (var attempt = 1; attempt <= 3; attempt++) {
+    try {
+      var cur = await chrome.storage.local.get('gam_settings');
+      var merged = Object.assign({}, (cur && cur.gam_settings) || {}, { workerModToken: newTokenPlaintext });
+      await chrome.storage.local.set({ gam_settings: merged });
+      // Read back to confirm -- chrome.storage.local is generally reliable but
+      // can fail silently under disk quota or extension update races.
+      var verify = await chrome.storage.local.get('gam_settings');
+      var verifiedToken = verify && verify.gam_settings && verify.gam_settings.workerModToken;
+      if (verifiedToken === newTokenPlaintext) {
+        saved = true;
+        break;
+      }
+      lastError = 'verify mismatch on attempt ' + attempt;
+    } catch (e) {
+      lastError = String((e && e.message) || e);
+    }
+    // Exponential-ish backoff: 100ms, 200ms before attempt 3
+    await new Promise(function(res) { setTimeout(res, 100 * attempt); });
+  }
+  // Best-effort session write (not durable across SW restarts, but covers the
+  // gap between rotation and the next chrome.storage.local flush).
+  try {
+    if (chrome.storage && chrome.storage.session) {
+      await chrome.storage.session.set({ gam_settings: secretCache });
+    }
+  } catch (_) {}
+  return { saved: saved, lastError: lastError };
+}
+
 async function _rpcWorkerCall(method, path, body, opts) {
   const o = opts || {};
   if (!secretCache.workerModToken && !secretCache.leadModToken) {
@@ -454,25 +495,30 @@ const RPC_HANDLERS = {
   },
 
   // ---- authXxx: popup-only, mod's own token management ------------------
+
+  // v9.2.1 hotfix: verified save with read-back confirmation + 3-attempt retry.
+  // The old silent-catch pattern returned ok:true even when storage failed,
+  // leaving the user locked out after SW eviction. This version surfaces the
+  // failure so the popup can show a CRITICAL recovery banner instead of a
+  // false-success snack.
   authRotateSelf: {
     allowed_callers: [RPC_CALLER_POPUP],
     async handler() {
       const r = await _rpcWorkerCall('POST', '/mod/token/rotate', null);
-      if (r.ok && r.data && typeof r.data.new_token === 'string') {
-        secretCache.workerModToken = r.data.new_token;
-        try {
-          if (chrome.storage && chrome.storage.session) {
-            await chrome.storage.session.set({ gam_settings: secretCache });
-          }
-          if (chrome.storage && chrome.storage.local) {
-            const cur = await chrome.storage.local.get('gam_settings');
-            const merged = { ...((cur && cur.gam_settings) || {}), workerModToken: r.data.new_token };
-            await chrome.storage.local.set({ gam_settings: merged });
-          }
-        } catch (e) {}
-        return { ok: true, status: r.status, data: { ok: true, mod_username: r.data.mod_username, rotated: true } };
+      if (!(r.ok && r.data && typeof r.data.new_token === 'string')) return r;
+      const persistResult = await _persistRotatedToken(r.data.new_token);
+      if (!persistResult.saved) {
+        return {
+          ok: false,
+          status: 500,
+          error: 'rotation_save_failed',
+          detail: 'Worker rotation succeeded but local storage write failed: ' + persistResult.lastError +
+            '. Your token is at risk -- you may be locked out after a service-worker restart.' +
+            ' Please use a lead-issued rotation invite to recover via /mod/token/claim-rotation.',
+          new_token_in_memory: true
+        };
       }
-      return r;
+      return { ok: true, status: r.status, data: { ok: true, mod_username: r.data.mod_username, rotated: true } };
     }
   },
   authClaimInvite: {
@@ -482,21 +528,20 @@ const RPC_HANDLERS = {
         code: args && args.code,
         username: args && args.username
       });
-      if (r.ok && r.data && typeof r.data.new_token === 'string') {
-        secretCache.workerModToken = r.data.new_token;
-        try {
-          if (chrome.storage && chrome.storage.session) {
-            await chrome.storage.session.set({ gam_settings: secretCache });
-          }
-          if (chrome.storage && chrome.storage.local) {
-            const cur = await chrome.storage.local.get('gam_settings');
-            const merged = { ...((cur && cur.gam_settings) || {}), workerModToken: r.data.new_token };
-            await chrome.storage.local.set({ gam_settings: merged });
-          }
-        } catch (e) {}
-        return { ok: true, status: r.status, data: { ok: true, mod_username: r.data.mod_username, claimed: true } };
+      if (!(r.ok && r.data && typeof r.data.new_token === 'string')) return r;
+      const persistResult = await _persistRotatedToken(r.data.new_token);
+      if (!persistResult.saved) {
+        return {
+          ok: false,
+          status: 500,
+          error: 'rotation_save_failed',
+          detail: 'Worker claim succeeded but local storage write failed: ' + persistResult.lastError +
+            '. Your token is at risk -- you may be locked out after a service-worker restart.' +
+            ' Please retry the claim invite or contact the lead mod.',
+          new_token_in_memory: true
+        };
       }
-      return r;
+      return { ok: true, status: r.status, data: { ok: true, mod_username: r.data.mod_username, claimed: true } };
     }
   },
   authGetMyDevices: {

@@ -995,12 +995,22 @@ async function rotateToken() {
     // v5.0-Phase-1: authRotateSelf validates, rotates, and stores the new token in the vault.
     const rRot = await chrome.runtime.sendMessage({ type: 'rpc', name: 'authRotateSelf', args: {} });
     if (!rRot || !rRot.ok) {
+      // v9.2.1: rotation_save_failed = worker rotated but storage write failed.
+      // Surface CRITICAL banner so the mod knows they need lead recovery.
+      if (rRot && rRot.error === 'rotation_save_failed') {
+        status.className = 'pop-token-status err';
+        status.textContent = 'CRITICAL: token rotated on server but FAILED to save locally. ' +
+          'You may be locked out after browser restart. ' +
+          'Contact lead mod for a new rotation invite to recover. Detail: ' + (rRot.detail || '');
+        return;
+      }
       status.className = 'pop-token-status err';
       status.textContent = 'rotate rejected (HTTP ' + (rRot && rRot.status || '?') + ') -- your current token may be invalid; re-save it first';
       return;
     }
     status.className = 'pop-token-status ok';
     status.textContent = '✓ rotated -- lead no longer has access';
+    _showVerifyTokenBtn();
     try { await loadToken(); } catch (e) {}  } catch (e) {
     status.className = 'pop-token-status err';
     status.textContent = 'rotate failed: ' + (e && e.message || e);
@@ -1040,6 +1050,14 @@ async function claimRotationInvite() {
     // v5.0-Phase-1: authClaimInvite validates the code, stores the new token in the vault.
     const rClaim = await chrome.runtime.sendMessage({ type: 'rpc', name: 'authClaimInvite', args: { code: code, username: username } });
     if (!rClaim || !rClaim.ok) {
+      // v9.2.1: rotation_save_failed = worker accepted claim but storage write failed.
+      if (rClaim && rClaim.error === 'rotation_save_failed') {
+        status.className = 'pop-token-status err';
+        status.textContent = 'CRITICAL: claim accepted by server but FAILED to save locally. ' +
+          'You may be locked out after browser restart. ' +
+          'Contact lead mod for a fresh rotation invite to recover. Detail: ' + (rClaim.detail || '');
+        return;
+      }
       status.className = 'pop-token-status err';
       let msg = 'claim rejected (HTTP ' + (rClaim && rClaim.status || '?') + ')';
       if (rClaim && rClaim.data && rClaim.data.error) msg += ' -- ' + rClaim.data.error;
@@ -1050,10 +1068,46 @@ async function claimRotationInvite() {
     const claimData = rClaim.data || {};
     status.className = 'pop-token-status ok';
     status.textContent = '✓ claimed -- you are now ' + (claimData.mod_username || username);
+    _showVerifyTokenBtn();
     try { await loadToken(); } catch (e) {}  } catch (e) {
     status.className = 'pop-token-status err';
     status.textContent = 'claim failed: ' + (e && e.message || e);
   }
+}
+
+// v9.2.1: one-click token health check after rotation/claim.
+// Calls modWhoami so the mod gets instant confirmation the new token works.
+async function verifyTokenRoundTrip() {
+  const status = $('rotateStatus');
+  if (!status) return;
+  status.textContent = 'verifying...';
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
+    if (r && r.ok && r.data && r.data.username) {
+      status.className = 'pop-token-status ok';
+      status.textContent = '✓ verified -- token works as ' + r.data.username;
+    } else {
+      status.className = 'pop-token-status err';
+      status.textContent = '✗ token verification FAILED -- you may be locked out. Use lead-issued rotation invite to recover.';
+    }
+  } catch (e) {
+    status.className = 'pop-token-status err';
+    status.textContent = 'verify error: ' + (e && e.message || e);
+  }
+}
+
+// Injects the Verify button into rotateStatus parent on first call; subsequent
+// calls are no-ops (button already present).
+function _showVerifyTokenBtn() {
+  if ($('verifyTokenBtn')) return;
+  const status = $('rotateStatus');
+  if (!status || !status.parentNode) return;
+  const btn = document.createElement('button');
+  btn.id = 'verifyTokenBtn';
+  btn.className = 'pop-btn pop-btn-ghost';
+  btn.textContent = 'Verify token works';
+  btn.addEventListener('click', verifyTokenRoundTrip);
+  status.parentNode.insertBefore(btn, status.nextSibling);
 }
 
 (function wireRotation() {
