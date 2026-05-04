@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.1.0';
+  const VERSION = 'v9.1.1';
 
   // ============================================================================
   // v8.6.5: diagnostic ring buffer for hard-to-reproduce bugs
@@ -6607,15 +6607,18 @@ Analyze these comments for rule violations. For each rule violation found, cite 
           result = { ok: false, error: 'No Worker token. Configure it in the popup.' };
         } else if (engine === 'grok'){
           try {
-            const r = await workerCall('/ai/grok-chat', { prompt, max_tokens: 500, temperature: 0.3, model: 'grok-3-mini' });
+            const r = await workerCall('/ai/grok-chat', { prompt, max_tokens: 500, temperature: 0.3, model: getSetting('aiProvider', 'grok-3-mini') });
             if (!r.ok) result = { ok: false, error: r.data?.error || r.error || `Worker Grok error ${r.status || ''}` };
             else result = { ok: true, text: (r.data?.text || '').trim() };
           } catch(e){ result = { ok: false, error: String(e) }; }
         } else {
-          // Llama 3 via CF Worker
+          // Llama 3 via CF Worker -- routes to /ai/grok-chat with prefer:'llama'
+          // (Option B per v9.1 audit H5: /ai/conformity-check never existed in
+          // worker; prompt is already fully assembled above including username +
+          // comment block, so no separate 'comments' field needed.)
           try {
-            const r = await workerCall('/ai/conformity-check', { username, comments: commentsForAi.slice(0,25), prompt });
-            result = r.ok ? { ok: true, text: (r.data?.text || r.data?.result || '').trim() } : { ok: false, error: r.data?.error || r.error || 'Worker AI error' };
+            const r = await workerCall('/ai/grok-chat', { prompt, max_tokens: 500, temperature: 0.3, prefer: 'llama' });
+            result = r.ok ? { ok: true, text: (r.data?.text || '').trim() } : { ok: false, error: r.data?.error || r.error || 'Worker AI error' };
           } catch(e){ result = { ok: false, error: String(e) }; }
         }
 
@@ -6691,7 +6694,7 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     if (engine === 'grok'){
       try {
-        const r = await workerCall('/ai/grok-chat', { prompt, max_tokens: 300, temperature: 0.4, model: 'grok-3-mini' });
+        const r = await workerCall('/ai/grok-chat', { prompt, max_tokens: 300, temperature: 0.4, model: getSetting('aiProvider', 'grok-3-mini') });
         if (!r.ok) return { ok: false, error: r.data?.error || r.error || `Worker Grok error ${r.status || ''}` };
         return { ok: true, text: (r.data?.text || '').trim() };
       } catch(e){ return { ok: false, error: String(e) }; }
@@ -15027,40 +15030,6 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     //
     // Until one of those lands, this function is a no-op.
     return;
-    // ----- legacy body kept below for reactivation; do not delete -----
-    /* eslint-disable no-unreachable */
-    if (!getSetting('autoUnstickyEnabled', false)) return;
-    // v5.9.2 (QA): NEVER run on a user profile page. Stickies shown on
-    // /u/<name> are that user's own posts which were pinned in some
-    // community they moderate. Auto-unsticking them there actively
-    // strips their pin status and makes them disappear from the top
-    // of the community feed -- not desired behavior. Feed pages
-    // (home, /new, /top, community pages) are the correct scope.
-    if (IS_USER_PROFILE_PAGE) return;
-    const maxH = getSetting('autoUnstickyMaxHours', 12);
-    const upH = getSetting('autoUnstickyUpvoteHours', 8);
-    const upT = getSetting('autoUnstickyUpvoteThreshold', 100);
-    const stickies = findStickyPosts();
-    if (stickies.length === 0) return;
-    for (const s of stickies){
-      const shouldUnstick = (s.ageHours > maxH) || (s.ageHours > upH && s.upvotes >= upT);
-      if (!shouldUnstick) continue;
-      // Dedupe per session - don't retry the same sticky for 30 min
-      const marker = `_gam_unsticky_${s.id}`;
-      if (window[marker] && Date.now() - window[marker] < 30*60*1000) continue;
-      window[marker] = Date.now();
-      console.log(`[auto-unsticky] ${s.id} age=${s.ageHours.toFixed(1)}h up=${s.upvotes} \u2192 unstick`);
-      try {
-        const r = await apiUnsticky(s.id);
-        if (r.ok){
-          logAction({ type:'unsticky', contentId:s.id, ageHours:s.ageHours.toFixed(1), upvotes:s.upvotes, source:'auto-rule' });
-          snack(`\u{1F4CC} auto-unstuck #${s.id} (${s.ageHours.toFixed(0)}h / ${s.upvotes} up)`, 'info');
-        } else {
-          console.warn(`[auto-unsticky] ${s.id} failed: status ${r.status}. Endpoint may need correction; enable Sniffer and click unsticky once natively.`);
-        }
-      } catch(e){ console.error('[auto-unsticky]', e); }
-      await new Promise(r=>setTimeout(r, 1500));
-    }
   }
 
   // QUICK STICKY KEYS (v8.4.0) -- FOXY-style hover-and-press.
@@ -15539,14 +15508,6 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     });
 
     setTimeout(()=>processDeathRow(), 5000);
-    // v5.1.2: E8 auto-unsticky (scaffolded, runs every 5min on feed pages)
-    // v8.6.4: function-level kill-switch in v8.6.3 made these no-ops, but the
-    // setInterval still fires every 5 min and walks the dispatch into a
-    // returned function. Removed entirely until the feature is rebuilt
-    // (requires server-side state read or non-toggle worker shim).
-    // setTimeout(()=>autoUnstickyTick(), 10000);
-    // setInterval(autoUnstickyTick, 5 * 60 * 1000);
-
     // v5.3.0: DOM health check — warn if expected site elements are missing
     setTimeout(runDomHealthCheck, 1500);
 

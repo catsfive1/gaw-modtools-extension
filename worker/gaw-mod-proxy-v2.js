@@ -48,6 +48,13 @@ const BUG_REPO_NAME = 'gaw-mod-shared-flags';  // reuse same repo for issues
 const WORKER_VERSION = '8.3.0';
 
 const BUDGET_XAI_CALLS_PER_DAY = 200;
+// Workers AI model used across all AI endpoints (non-bot and bot).
+// Hoisted here (from bot section) so all handlers above the bot section can reference it.
+const BOT_LLAMA = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+// Grok budget/model consts hoisted here (T4) so shadow-triage and any pre-bot handler can reference them without forward-reference confusion.
+const BOT_GROK_DAILY_CENTS_CAP = 500;
+const BOT_GROK_MINI = 'grok-3-mini';
+const BOT_GROK_FULL = 'grok-3';
 const WRITE_RATE_PER_MINUTE = 30;
 const PRESENCE_TTL_SEC = 90;
 const INVITE_TTL_SEC = 24 * 60 * 60;
@@ -1035,7 +1042,7 @@ async function handleAiScore(request, env) {
       const out = await runAiProvider(env, provider, async () => {
         if (provider === 'workers-ai') {
           if (!env.AI) return { ok: false, error: 'env.AI binding undefined' };
-          const resp = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+          const resp = await env.AI.run(BOT_LLAMA, {
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: userPrompt }
@@ -1184,7 +1191,7 @@ async function handleAiGrokChat(request, env) {
         }
         if (provider === 'workers-ai') {
           if (!env.AI) return { ok: false, error: 'env.AI binding undefined' };
-          const resp = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+          const resp = await env.AI.run(BOT_LLAMA, {
             messages: [{ role: 'user', content: prompt.slice(0, 8000) }],
             max_tokens: maxTokens
           });
@@ -1238,7 +1245,7 @@ async function handleAiBanSuggest(request, env) {
       const out = await runAiProvider(env, provider, async () => {
         if (provider === 'workers-ai') {
           if (!env.AI) return { ok: false, error: 'env.AI binding undefined' };
-          const resp = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+          const resp = await env.AI.run(BOT_LLAMA, {
             messages: [
               { role: 'system', content: sys },
               { role: 'user', content: prompt }
@@ -2798,7 +2805,7 @@ Return JSON with EXACTLY these keys:
       }
     ];
 
-    let meta = null, modelUsed = '@cf/meta/llama-3.1-8b-instruct', errMsg = null;
+    let meta = null, modelUsed = BOT_LLAMA, errMsg = null;
     try {
       const aiResp = await env.AI.run(modelUsed, { messages: prompt, max_tokens: 512 });
       const txt = (aiResp && aiResp.response) ? aiResp.response : '';
@@ -2942,7 +2949,7 @@ Generate the three drafts now.`;
     // Fallback: Workers AI Llama
     if (!drafts && env.AI){
       try {
-        const aiResp = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+        const aiResp = await env.AI.run(BOT_LLAMA, {
           messages: [
             { role:'system', content: sysPrompt + ' Return JSON only — no markdown fences.' },
             { role:'user',   content: userPrompt }
@@ -2955,7 +2962,7 @@ Generate the three drafts now.`;
         if (parsed && parsed.firm && parsed.neutral && parsed.empathetic){
           drafts = { firm: parsed.firm, neutral: parsed.neutral, empathetic: parsed.empathetic };
           reasoning = parsed.reasoning || '(llama fallback)';
-          modelUsed = '@cf/meta/llama-3.1-8b-instruct';
+          modelUsed = BOT_LLAMA;
         }
       } catch(e){ errMsg = errMsg || String(e); }
     }
@@ -3031,10 +3038,7 @@ async function handleModmailHistory(request, env, username){
 //     to Llama silently.
 // ============================================================================
 
-const BOT_GROK_DAILY_CENTS_CAP = 500;
-const BOT_GROK_MINI = 'grok-3-mini';
-const BOT_GROK_FULL = 'grok-3';
-const BOT_LLAMA = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+// BOT_GROK_DAILY_CENTS_CAP, BOT_GROK_MINI, BOT_GROK_FULL, BOT_LLAMA hoisted to top of file (near BUDGET_XAI_CALLS_PER_DAY) -- defined there.
 const BOT_CTX_KV_KEY = 'bot:ctx:architecture:v1';
 const BOT_CTX_TTL = 600;
 const BOT_POLL_DEFAULT_HOURS = 48;
@@ -6144,7 +6148,7 @@ function _seedTestSampleFeatureRequests() {
 }
 
 function _seedTestSampleBotAuditRows() {
-  const models = ['grok-3-mini', 'grok-3', '@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct'];
+  const models = ['grok-3-mini', 'grok-3', '@cf/meta/llama-3.3-70b-instruct-fp8-fast', BOT_LLAMA];
   const interactions = ['ask-mini', 'ask-g3', 'ask-llama', 'propose', 'finalize', 'delegate-llama', 'auto-finalize'];
   const actors = ['123456789012345678', '234567890123456789', '345678901234567890'];
   const out = [];

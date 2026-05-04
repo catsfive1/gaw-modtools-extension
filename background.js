@@ -32,7 +32,7 @@ const ALARM_PERIOD_MIN = 30;
 const WORKER_BASE = 'https://gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev';
 const ALLOWED_ENDPOINTS = [
   '/presence', '/drafts', '/proposals', '/claims', '/audit', '/features',
-  '/ai/next-best-action', '/ai/analyze', '/bug/report', '/invite/claim',
+  '/ai/next-best-action', '/bug/report', '/invite/claim',
   '/admin/import-tokens-from-kv', '/modmail/sync',
   // v8.0 Team Productivity endpoints (Session A backend lands in Session C deploy).
   '/ai/shadow-triage', '/parked', '/ai-suspect'
