@@ -169,6 +169,52 @@ Plus Audit-N1..N5 (noob-rollout audit), full Vanguard Round 1 (30+ findings), fu
 
 ---
 
+## v9.4.3 — Legacy HMAC backfill endpoint (2026-05-05)
+
+**Worker only.** Deploy: `9cb49ebb-7d93-43ca-a778-64cf5eb6a535` (worker `gaw-mod-proxy` v9.4.3).
+
+New endpoint: `POST /admin/audit/backfill-hmac` — fills `entry_hmac` on every legacy `actions` row whose hmac is NULL but whose `entry_hash` is set. Uses the same `hmacSha256Hex(env, entry_hash)` helper that `appendAuditAction` calls for new rows. After full backfill the migration-026 boundary becomes irrelevant (every row is HMAC-signed) and the verifier can be tightened to reject any NULL hmac as forgery.
+
+**Files**: `cloudflare-worker/gaw-mod-proxy-v2.js` lines 2450-2604 (handler) and the route case at the `/admin/audit/verify` adjacency in the dispatch switch.
+
+**Auth**: lead-only, two-factor — token-derived `is_lead === true` AND `x-lead-token` matches `env.LEAD_MOD_TOKEN`. Same model as `/admin/health/extended`. The `LEAD_MOD_TOKEN` value lives only in the CF dashboard / wrangler secret store, so this endpoint can only be invoked from Commander's side.
+
+**Behaviour**: idempotent (no-op once `total_remaining` hits zero), self-audited (writes one `audit.backfill_hmac` action at the end via the normal HMAC-signing path so the operation appears in its own chain), invalidates the cached `audit_migration_026_boundary_id` KV value so the next `/admin/audit/verify` re-derives the boundary cleanly.
+
+### Invocation — Commander runs this from PowerShell
+
+The endpoint requires `LEAD_MOD_TOKEN` which is only present in Commander's CF dashboard. Run from `D:\AI\_PROJECTS\` (replace the `LEAD` value with the live secret):
+
+```powershell
+$LEAD = Read-Host 'Paste LEAD_MOD_TOKEN (from CF dashboard, hidden)' -AsSecureString
+$LEADPLAIN = [System.Net.NetworkCredential]::new('', $LEAD).Password
+$headers = @{
+  'x-mod-token'  = 'Ts2wPWowho27L2AlaMAYWncIlEzFQzZDWyZbQAyw6whUUl7k'
+  'x-lead-token' = $LEADPLAIN
+  'content-type' = 'application/json'
+}
+$body = @{ batch_size = 100; max_rows = 1000 } | ConvertTo-Json
+Invoke-RestMethod -Method POST `
+  -Uri 'https://gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev/admin/audit/backfill-hmac' `
+  -Headers $headers -Body $body
+```
+
+Expected response shape:
+```
+ok                : True
+backfilled        : 459
+total_remaining   : 0
+batches_processed : 5
+took_ms           : <some number>
+last_error        : <null>
+```
+
+If `total_remaining > 0` after the first call (because `max_rows` capped the run), repeat the same command — it picks up where it left off. Re-run after `total_remaining` is zero is a no-op (returns `backfilled:0, total_remaining:0`).
+
+After backfill confirms zero remaining, run `/admin/audit/verify` to validate the chain — `hmac_legacy` should be 0 and `hmac_checked` should equal the chain length.
+
+---
+
 ## Build artifacts
 
 ```
