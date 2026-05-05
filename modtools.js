@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.4.0';
+  const VERSION = 'v9.4.6';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -7377,11 +7377,22 @@ Analyze this comment against the community rules. Then write a brief, profession
 
   // ── NOTE tab ──────────────────────────────────────────────────────
   function renderNoteTab(root, username, item){
-    // v5.1.3: show full note history (the JSON array from /get_note) above
-    // the "add new note" textarea. GAW appends each POST as a new entry.
+    // v5.1.3 / v9.4.6 (Commander 2026-05-05): note history above the
+    // "add new note" textarea. v9.4.6 adds:
+    //   - Clear All button on the Note history section header (top-right)
+    //   - Action buttons (Cancel + Append) repositioned to the TOP of the
+    //     "Add new note" section per Commander's "buttons on top of each
+    //     section" directive
+    // GAW notes are append-only; "Clear All" archives them by writing a
+    // marker entry "[notes cleared by <mod> on <date>] (prior history
+    // preserved)" — actual prior entries stay readable in audit + this
+    // tab continues to render them but with a clear divider.
     root.innerHTML = `
       <div class="gam-mc-section">
-        <div class="gam-mc-h">Note history <span class="gam-mc-hint" id="mc-note-count">(loading...)</span></div>
+        <div class="gam-mc-h" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <span>Note history <span class="gam-mc-hint" id="mc-note-count">(loading...)</span></span>
+          <button class="gam-btn gam-btn-cancel" id="mc-note-clear-all" style="font-size:10px;padding:3px 8px" title="Archive prior notes with a marker entry (history preserved, visually divided)">\u{1F9F9} Clear all</button>
+        </div>
         <div id="mc-note-history" class="gam-mc-note-history">\u{1F50D} loading notes...</div>
       </div>
       <div class="gam-mc-field">
@@ -7391,16 +7402,41 @@ Analyze this comment against the community rules. Then write a brief, profession
           ${NOTE_TEMPLATES.map(t=>`<option value="${t.id}">${escapeHtml(t.label)}</option>`).join('')}
         </select>
       </div>
-      <div class="gam-mc-field">
-        <label>Add new note (appends to history) for ${escapeHtml(username)}</label>
+      <div class="gam-mc-section">
+        <div class="gam-mc-h" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+          <span>Add new note for <b>${escapeHtml(username)}</b></span>
+          <span class="gam-mc-actions" style="display:flex;gap:6px">
+            <button class="gam-btn gam-btn-cancel" id="mc-note-cancel" style="font-size:10px;padding:3px 8px">Cancel</button>
+            <button class="gam-btn gam-btn-accent" id="mc-note-save" style="font-size:10px;padding:3px 10px">\u{1F4BE} Append</button>
+          </span>
+        </div>
         <textarea class="gam-input gam-textarea" id="mc-note-body" rows="6" placeholder="Add your mod note here..."></textarea>
-      </div>
-      <div class="gam-mc-actions">
-        <button class="gam-btn gam-btn-cancel" id="mc-note-cancel">Cancel</button>
-        <button class="gam-btn gam-btn-accent" id="mc-note-save">\u{1F4BE} Append note</button>
       </div>
       <div id="mc-note-status"></div>
     `;
+    // v9.4.6: Clear-all handler. Confirms first; appends an archive marker
+    // (prior entries stay visible in history) then re-renders.
+    const clearAllBtn = root.querySelector('#mc-note-clear-all');
+    if (clearAllBtn){
+      clearAllBtn.addEventListener('click', async ()=>{
+        if (!confirm('Archive all current notes for ' + username + '?\n\nGAW notes are append-only — prior entries stay readable. This appends a marker line so future viewers see when they were archived.')) return;
+        const marker = '[notes cleared by ' + (me() || 'unknown') + ' on ' + new Date().toISOString().slice(0,10) + '] (prior history above this line preserved)';
+        try {
+          const r = await apiAddNote(username, marker);
+          if (r && r.ok){
+            try { snack('\u{1F9F9} Notes archived (marker appended)', 'success'); } catch(_){}
+            // Re-fetch + render
+            const raw = await apiGetNote(username);
+            const info = parseModNotes(raw);
+            renderHistory(info);
+          } else {
+            try { snack('Clear all failed (HTTP ' + (r && r.status || '?') + ')', 'error'); } catch(_){}
+          }
+        } catch(e){
+          try { snack('Clear all error: ' + (e.message||e), 'error'); } catch(_){}
+        }
+      });
+    }
 
     const body = root.querySelector('#mc-note-body');
     const countEl = root.querySelector('#mc-note-count');
@@ -13202,8 +13238,30 @@ Analyze this comment against the community rules. Then write a brief, profession
     // v5.2.1: icon-only compact bar. Text labels gone; native `title` gives tooltips.
     // Session = plain colored dot. Fallback = lock icon (closed/open). DR = skull + number.
     // Modmail bar merges in as a popover anchored to an envelope icon when on modmail pages.
-    const sessDot = el('span', { id:'gam-sess-pill', cls:'gam-bar-icon', title:'Session: checking...' }, '\u25CF');
+    // v9.4.6 (Commander): green dot is a session-health indicator. Pre-fix
+    // it inherited cursor:pointer from .gam-bar-icon but had no click
+    // handler \u2014 confusing. Now: click runs a one-shot session-health probe
+    // (CSRF check + worker /mod/whoami) and snacks the result. This makes
+    // the click meaningful without changing the visual.
+    const sessDot = el('button', { id:'gam-sess-pill', cls:'gam-bar-icon', title:'Session health \u2014 click for live check' }, '\u25CF');
     sessDot.style.color = C.TEXT3;
+    sessDot.addEventListener('click', async ()=>{
+      try {
+        const csrfOk = !!csrf();
+        let whoamiOk = false, whoamiName = null;
+        try {
+          const r = await rpcCall('modWhoami', {});
+          whoamiOk = !!(r && r.ok && r.data && r.data.username);
+          whoamiName = whoamiOk ? r.data.username : null;
+        } catch(_){}
+        const msg = csrfOk && whoamiOk
+          ? '\u2713 Session OK \u2014 CSRF valid, worker confirms ' + whoamiName
+          : (csrfOk
+              ? '\u26A0 GAW session OK but worker auth failed (token rotated? expired?)'
+              : '\u2717 GAW session expired \u2014 reload + log in');
+        snack(msg, csrfOk && whoamiOk ? 'success' : 'error');
+      } catch(e){ snack('Session check failed: ' + (e.message||e), 'error'); }
+    });
     const fbBtn = el('button', { cls:'gam-bar-icon', id:'gam-fb-toggle' });
     function renderFallback(){
       fbBtn.textContent = FallbackMode ? '\u{1F513}' : '\u{1F512}';
@@ -13270,11 +13328,25 @@ Analyze this comment against the community rules. Then write a brief, profession
           sirenClearBtn.style.display = 'none';
           return;
         }
-        sirenBtn.style.display = '';
-        sirenClearBtn.style.display = '';
+        // v9.4.1 (Commander 2026-05-05): force horizontal inline-flex with
+        // explicit width and nowrap. Pre-fix the chip was using the standard
+        // .gam-bar-icon class which is fixed-width 22px — text content
+        // longer than ~3 chars wrapped to a SECOND LINE, putting the count
+        // ABOVE the emoji visually. Now: inline-flex, width:auto, nowrap,
+        // gap:4px between count and emoji. Layout is "🚨 5" (emoji LEFT,
+        // count RIGHT) per Commander's "right of the siren" directive.
+        sirenBtn.style.display = 'inline-flex';
+        sirenBtn.style.alignItems = 'center';
+        sirenBtn.style.justifyContent = 'center';
+        sirenBtn.style.width = 'auto';
+        sirenBtn.style.minWidth = '36px';
+        sirenBtn.style.padding = '0 6px';
+        sirenBtn.style.whiteSpace = 'nowrap';
+        sirenBtn.style.gap = '4px';
+        sirenClearBtn.style.display = 'inline-flex';
         sirenBtn.setAttribute('data-current-total', String(total));
-        // v9.3.16: count BEFORE emoji per Commander.
-        sirenBtn.innerHTML = total + ' \u{1F6A8}';
+        // v9.4.1: emoji LEFT, count RIGHT — same layout as ❤️ 12 / 🚨 5
+        sirenBtn.innerHTML = '\u{1F6A8} <span style="font-weight:700">' + total + '</span>';
         // Color tier: red if 5+ recent DRs OR any HOT SUS (>8 comments/24h), amber otherwise.
         const isHot = recentDr >= 5 || [..._susState.rows.values()].some(r => (r.comment_count_24h || 0) > 8);
         sirenBtn.style.color = isHot ? C.RED : C.WARN;

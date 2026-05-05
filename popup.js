@@ -1365,9 +1365,20 @@ function buildDashboardHtml(rep) {
   const posterRows = (rep.topPosters||[]).map(x=>`<tr><td>${userLink(x.username)}</td><td>${fmtNum(x.posts)}</td><td>${fmtNum(x.comments||0)}</td></tr>`).join('');
   const topPostersHtml = posterRows ? `${srcBadge(rep.topPostersSource)}${table(posterRows, ['User','Posts','Comments'])}` : empty('No post data yet -- the firehose populates gaw_users as posts are captured');
 
-  // Top Quality (only from GitHub profiles.json; not in D1)
-  const qualRows = (rep.topQuality||[]).map(x=>`<tr><td>${userLink(x.username)}</td><td>${(x.upvoteRatio*100).toFixed(1)}%</td><td>${fmtNum(x.posts)}</td></tr>`).join('');
-  const topQualityHtml = qualRows ? table(qualRows, ['User','Upvote Ratio','Posts']) : empty('No quality data yet -- populated via hover-harvest (profiles.json)');
+  // Top Quality -- v9.4.5: AVG(post score) per author, min 3 posts, from gaw_posts D1.
+  // Old GitHub-profiles.json source still supported for backwards-compat (upvoteRatio).
+  const qualRows = (rep.topQuality||[]).map(x => {
+    if (typeof x.avgScore === 'number') {
+      return `<tr><td>${userLink(x.username)}</td><td>${fmtNum(x.avgScore)}</td><td>${fmtNum(x.posts)}</td></tr>`;
+    }
+    if (typeof x.upvoteRatio === 'number') {
+      return `<tr><td>${userLink(x.username)}</td><td>${(x.upvoteRatio*100).toFixed(1)}%</td><td>${fmtNum(x.posts)}</td></tr>`;
+    }
+    return `<tr><td>${userLink(x.username)}</td><td>--</td><td>${fmtNum(x.posts||0)}</td></tr>`;
+  }).join('');
+  const qualScoreHeader = (rep.topQuality && rep.topQuality[0] && typeof rep.topQuality[0].avgScore === 'number')
+    ? 'Avg Score' : 'Upvote Ratio';
+  const topQualityHtml = qualRows ? `${srcBadge(rep.topQualitySource)}${table(qualRows, ['User', qualScoreHeader, 'Posts'])}` : empty('No quality data yet -- need >=3 posts per author in gaw_posts');
 
   // --- Iter 4: Comeback Candidates ---
   const comebackRows = (rep.comebackCandidates||[]).map(x=>`<tr><td>${userLink(x.username)}</td><td>${esc((x.lastSeen||'').slice(0,10))}</td><td>${fmtNum(x.posts||0)}</td><td>${fmtNum(x.comments||0)}</td></tr>`).join('');
@@ -1377,9 +1388,22 @@ function buildDashboardHtml(rep) {
   const flagRows = (rep.flagLeaders||[]).map(x=>`<tr><td>${userLink(x.username)}</td><td>${x.count}</td><td>${esc((x.severities||[]).join(', '))}</td></tr>`).join('');
   const flagHtml = flagRows ? table(flagRows, ['User','Flags','Severities']) : empty('No flags yet -- flags.json is populated when mods flag users (migration to D1 deferred)');
 
-  // --- Iter 5: Removed Content ---
-  const removedRows = (rep.removedByAuthor||[]).map(x=>`<tr><td>${userLink(x.author)}</td><td>${fmtNum(x.n)}</td></tr>`).join('');
-  const removedHtml = removedRows ? table(removedRows, ['Author','Removed Posts']) : empty('No removed posts captured this week -- firehose captures removals when posts are re-fetched');
+  // --- Iter 5: Removed Content (v9.4.5: posts + mod actions) ---
+  const removedAuthorRows = (rep.removedByAuthor||[]).map(x=>`<tr><td>${userLink(x.author)}</td><td>${fmtNum(x.n)}</td></tr>`).join('');
+  const removedActionsByModRows = (rep.removedActionsByMod||[]).map(x=>`<tr><td>${esc(x.mod)}</td><td>${badge(x.action)}</td><td>${fmtNum(x.n)}</td></tr>`).join('');
+  const removedActionsByTargetRows = (rep.removedActionsByTarget||[]).map(x=>`<tr><td>${userLink(x.author)}</td><td>${fmtNum(x.n)}</td></tr>`).join('');
+  const totalRemoved = (rep.removedPostsCount||0) + (rep.removedActionsCount||0);
+  let removedHtml = '';
+  if (totalRemoved > 0) {
+    const summary = `<div class="meta">Posts flipped is_removed: <strong>${fmtNum(rep.removedPostsCount||0)}</strong> &nbsp;&#x2022;&nbsp; Mod removal actions: <strong>${fmtNum(rep.removedActionsCount||0)}</strong></div>`;
+    const blocks = [];
+    if (removedAuthorRows)        blocks.push(`<h3 style="margin:14px 0 6px;color:#aaa;font-size:12px;text-transform:uppercase;letter-spacing:.06em">By post author</h3>${table(removedAuthorRows, ['Author','Removed Posts'])}`);
+    if (removedActionsByModRows)  blocks.push(`<h3 style="margin:14px 0 6px;color:#aaa;font-size:12px;text-transform:uppercase;letter-spacing:.06em">By mod (action)</h3>${table(removedActionsByModRows, ['Mod','Action','Count'])}`);
+    if (removedActionsByTargetRows) blocks.push(`<h3 style="margin:14px 0 6px;color:#aaa;font-size:12px;text-transform:uppercase;letter-spacing:.06em">By target user</h3>${table(removedActionsByTargetRows, ['Target','Count'])}`);
+    removedHtml = summary + blocks.join('');
+  } else {
+    removedHtml = empty('No removed content this week -- firehose marks gaw_posts.is_removed=1 on re-capture, and mods log remove_post/deathrow/unsticky to actions');
+  }
 
   // --- Iter 6: Heatmap ---
   let heatmapHtml = '';
@@ -1441,7 +1465,7 @@ a:hover{text-decoration:underline}
 .hm-label{color:#555;font-size:9px;margin-top:3px;white-space:nowrap}
 </style></head><body>
 <h1>&#x1F4CA; GAW ModTools Dashboard</h1>
-<div class="meta">Generated ${esc(rep.generatedAt||'')} &nbsp;&#x2022;&nbsp; v9.1.0</div>
+<div class="meta">Generated ${esc(rep.generatedAt||'')} &nbsp;&#x2022;&nbsp; v9.4.5</div>
 ${statsBar}
 ${section('&#x26A1;', 'Active Mods (last 7 days)', activeHtml)}
 ${section('&#x1F6E1;', 'Recent Bans', recentBansHtml)}
@@ -1449,7 +1473,7 @@ ${section('&#x1F4C8;', 'Activity Heatmap (last 7 days, UTC hour)', heatmapHtml)}
 ${section('&#x2620;', 'Death Row Pipeline', drHtml)}
 ${section('&#x1F4B0;', 'Top 10 Posters', topPostersHtml)}
 ${section('&#x1F31F;', 'Top 10 Highest Quality', topQualityHtml)}
-${section('&#x1F550;', 'Comeback Candidates (60+ days silent)', comebackHtml)}
+${section('&#x1F550;', 'Comeback Candidates (' + (rep.comebackThresholdDays || 60) + '+ days silent)', comebackHtml)}
 ${section('&#x1F6AB;', 'Removed Content This Week', removedHtml)}
 ${section('&#x1F6A9;', 'Flag Leaders', flagHtml)}
 </body></html>`;
@@ -1636,3 +1660,657 @@ async function saveFlagTtl(){
   if (inp) inp.addEventListener('keydown', function(e){ if (e.key === 'Enter') withLoading($('flagTtlSave'), 'saving...', saveFlagTtl); });
 }
 loadTeamSettings();
+
+// =========================================================================
+// v9.4.4: Bug-report triage panel (lead-only)
+// =========================================================================
+// The lead section now surfaces incoming bug reports stored in the
+// bug_reports D1 table. Pre-fix, reports went into D1 and were never read by
+// any client surface — leads only saw them via raw wrangler queries. This
+// adds: list, expand, mark triaged/fixed/wontfix, set assignee, set the
+// "who can read bug reports" allowlist (visibility config).
+//
+// Visibility model: a `team_features` row keyed `bug_report_visible_to` whose
+// value is one of: "leads" (default), "all", or a comma list of usernames.
+// Worker enforces on every GET.
+//
+// Polling: background.js polls /admin/bug-reports?status=open every 5min and
+// updates `chrome.action.setBadgeText`. The popup mirrors the count locally
+// when the panel is open.
+
+function __bugFmtTs(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return '—';
+  const ageMin = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (ageMin < 60) return ageMin + 'm ago';
+  if (ageMin < 1440) return Math.floor(ageMin / 60) + 'h ago';
+  return Math.floor(ageMin / 1440) + 'd ago';
+}
+
+// XSS-safe row renderer. All user input goes through textContent.
+function __renderBugRow(panel, row, refresh) {
+  const wrap = document.createElement('div');
+  wrap.style.borderBottom = '1px solid #2b303a';
+  wrap.style.padding = '6px 4px';
+  wrap.style.cursor = 'pointer';
+
+  const head = document.createElement('div');
+  head.style.display = 'flex';
+  head.style.justifyContent = 'space-between';
+  head.style.gap = '6px';
+  head.style.alignItems = 'baseline';
+
+  const left = document.createElement('div');
+  left.style.flex = '1 1 auto';
+  left.style.overflow = 'hidden';
+  left.style.textOverflow = 'ellipsis';
+  const id = document.createElement('span');
+  id.style.color = '#888';
+  id.style.marginRight = '6px';
+  id.textContent = '#' + row.id;
+  const reporter = document.createElement('span');
+  reporter.style.color = '#4A9EFF';
+  reporter.textContent = row.reported_by || '?';
+  const desc = document.createElement('span');
+  desc.style.marginLeft = '6px';
+  desc.style.color = '#e5e9f0';
+  desc.textContent = (row.description || '').slice(0, 100);
+  left.appendChild(id);
+  left.appendChild(reporter);
+  left.appendChild(document.createTextNode(' '));
+  left.appendChild(desc);
+
+  const right = document.createElement('div');
+  right.style.color = '#888';
+  right.style.fontSize = '10px';
+  right.style.flex = '0 0 auto';
+  right.textContent = (row.version || '?') + ' · ' + __bugFmtTs(row.created_at);
+
+  head.appendChild(left);
+  head.appendChild(right);
+  wrap.appendChild(head);
+
+  // Expandable detail
+  const detail = document.createElement('div');
+  detail.style.display = 'none';
+  detail.style.marginTop = '6px';
+  detail.style.padding = '6px';
+  detail.style.background = '#0b0d12';
+  detail.style.borderRadius = '3px';
+
+  const fullDesc = document.createElement('pre');
+  fullDesc.style.whiteSpace = 'pre-wrap';
+  fullDesc.style.color = '#cdd0d6';
+  fullDesc.style.margin = '0 0 6px 0';
+  fullDesc.style.fontSize = '11px';
+  fullDesc.textContent = row.description || '';
+  detail.appendChild(fullDesc);
+
+  if (row.page_url) {
+    const p = document.createElement('div');
+    p.style.color = '#888';
+    p.style.fontSize = '10px';
+    p.textContent = 'page: ' + row.page_url;
+    detail.appendChild(p);
+  }
+
+  if (row.snapshot_json) {
+    const snapBtn = document.createElement('button');
+    snapBtn.className = 'pop-btn pop-btn-ghost';
+    snapBtn.style.fontSize = '10px';
+    snapBtn.style.padding = '2px 6px';
+    snapBtn.style.marginTop = '4px';
+    snapBtn.textContent = 'Show debug snapshot';
+    const snapPre = document.createElement('pre');
+    snapPre.style.display = 'none';
+    snapPre.style.maxHeight = '180px';
+    snapPre.style.overflow = 'auto';
+    snapPre.style.background = '#000';
+    snapPre.style.color = '#a0d0a0';
+    snapPre.style.padding = '4px';
+    snapPre.style.fontSize = '10px';
+    snapPre.style.marginTop = '4px';
+    try {
+      snapPre.textContent = JSON.stringify(JSON.parse(row.snapshot_json), null, 2);
+    } catch (e) { snapPre.textContent = row.snapshot_json; }
+    snapBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      snapPre.style.display = snapPre.style.display === 'none' ? 'block' : 'none';
+    });
+    detail.appendChild(snapBtn);
+    detail.appendChild(snapPre);
+  }
+
+  // Action row: status select + assignee + resolution note + save button
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.gap = '4px';
+  actions.style.flexWrap = 'wrap';
+  actions.style.marginTop = '6px';
+  actions.style.alignItems = 'center';
+
+  const statusSel = document.createElement('select');
+  statusSel.style.fontSize = '10px';
+  statusSel.style.background = '#11131a';
+  statusSel.style.color = '#e5e9f0';
+  statusSel.style.border = '1px solid #3b414d';
+  statusSel.style.padding = '2px 4px';
+  ['open', 'triaged', 'fixed', 'wontfix'].forEach(function (s) {
+    const opt = document.createElement('option');
+    opt.value = s; opt.textContent = s;
+    if (row.status === s) opt.selected = true;
+    statusSel.appendChild(opt);
+  });
+
+  const assignInp = document.createElement('input');
+  assignInp.type = 'text';
+  assignInp.placeholder = 'assignee';
+  assignInp.value = row.assigned_to || '';
+  assignInp.style.fontSize = '10px';
+  assignInp.style.background = '#11131a';
+  assignInp.style.color = '#e5e9f0';
+  assignInp.style.border = '1px solid #3b414d';
+  assignInp.style.padding = '2px 4px';
+  assignInp.style.width = '100px';
+
+  const noteInp = document.createElement('input');
+  noteInp.type = 'text';
+  noteInp.placeholder = 'note (triage / resolution)';
+  noteInp.style.fontSize = '10px';
+  noteInp.style.background = '#11131a';
+  noteInp.style.color = '#e5e9f0';
+  noteInp.style.border = '1px solid #3b414d';
+  noteInp.style.padding = '2px 4px';
+  noteInp.style.flex = '1 1 100px';
+
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'pop-btn pop-btn-ghost';
+  saveBtn.style.fontSize = '10px';
+  saveBtn.style.padding = '2px 8px';
+  saveBtn.textContent = 'Save';
+
+  saveBtn.addEventListener('click', async function (e) {
+    e.stopPropagation();
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'saving...';
+    try {
+      const newStatus = statusSel.value;
+      const args = { id: row.id, status: newStatus };
+      if (assignInp.value !== (row.assigned_to || '')) {
+        args.assigned_to = assignInp.value || null;
+      }
+      if (noteInp.value) {
+        if (newStatus === 'fixed' || newStatus === 'wontfix') {
+          args.resolution_note = noteInp.value;
+        } else {
+          args.triage_note = noteInp.value;
+        }
+      }
+      const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'bugReportUpdate', args });
+      if (r && r.ok) {
+        saveBtn.textContent = 'saved';
+        setTimeout(refresh, 400);
+      } else {
+        saveBtn.textContent = 'fail';
+        saveBtn.disabled = false;
+        console.warn('[bugReportUpdate]', r);
+      }
+    } catch (e) {
+      saveBtn.textContent = 'err';
+      saveBtn.disabled = false;
+    }
+  });
+
+  // Stop propagation so clicking inside controls doesn't toggle expand.
+  [statusSel, assignInp, noteInp].forEach(function (el) {
+    el.addEventListener('click', function (e) { e.stopPropagation(); });
+    el.addEventListener('keydown', function (e) { e.stopPropagation(); });
+  });
+
+  actions.appendChild(statusSel);
+  actions.appendChild(assignInp);
+  actions.appendChild(noteInp);
+  actions.appendChild(saveBtn);
+  detail.appendChild(actions);
+
+  wrap.appendChild(detail);
+
+  wrap.addEventListener('click', function () {
+    detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+  });
+
+  panel.appendChild(wrap);
+}
+
+async function loadBugReports() {
+  const panel = $('bugListPanel');
+  const status = $('bugListStatus');
+  const badge = $('bugListBadge');
+  if (!panel) return;
+  panel.style.display = 'block';
+  status.className = 'pop-token-status';
+  status.textContent = 'loading...';
+  while (panel.firstChild) panel.removeChild(panel.firstChild);
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: 'rpc', name: 'bugReportList', args: { status: 'open', limit: 100 }
+    });
+    if (!r || !r.ok || !r.data) {
+      status.className = 'pop-token-status err';
+      status.textContent = 'failed (HTTP ' + (r && r.status || '?') + ')'
+        + (r && r.data && r.data.error ? ' — ' + r.data.error : '');
+      return;
+    }
+    const reports = (r.data && r.data.reports) || [];
+    const n = parseInt(r.data.open_count, 10) || 0;
+    if (badge) {
+      if (n > 0) { badge.textContent = String(n); badge.style.display = 'inline'; }
+      else { badge.style.display = 'none'; }
+    }
+    status.className = 'pop-token-status ok';
+    status.textContent = (reports.length === 0
+      ? 'no open reports'
+      : reports.length + ' open · click row to expand')
+      + ' · visibility: ' + (r.data.visible_to || 'leads');
+    reports.forEach(function (row) { __renderBugRow(panel, row, loadBugReports); });
+  } catch (e) {
+    status.className = 'pop-token-status err';
+    status.textContent = 'network error: ' + (e && e.message || e);
+  }
+}
+
+async function saveBugVisibility() {
+  const inp = $('bugVisInput');
+  const status = $('bugVisStatus');
+  const v = String(inp.value || '').trim();
+  if (!v) {
+    status.className = 'pop-token-status err';
+    status.textContent = 'enter "leads", "all", or a comma list of usernames';
+    return;
+  }
+  status.className = 'pop-token-status';
+  status.textContent = 'saving...';
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: 'rpc', name: 'bugReportVisibilityWrite', args: { visible_to: v }
+    });
+    if (r && r.ok) {
+      status.className = 'pop-token-status ok';
+      status.textContent = '✓ saved: ' + (r.data && r.data.visible_to);
+    } else {
+      status.className = 'pop-token-status err';
+      status.textContent = 'failed: HTTP ' + (r && r.status || '?')
+        + (r && r.data && r.data.error ? ' — ' + r.data.error : '');
+    }
+  } catch (e) {
+    status.className = 'pop-token-status err';
+    status.textContent = 'network error: ' + (e && e.message || e);
+  }
+}
+
+async function loadBugVisibility() {
+  const inp = $('bugVisInput');
+  if (!inp) return;
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: 'rpc', name: 'bugReportVisibilityRead'
+    });
+    if (r && r.ok && r.data && r.data.visible_to) {
+      inp.value = r.data.visible_to;
+    }
+  } catch (e) {}
+}
+
+{
+  const listBtn = $('bugListBtn');
+  if (listBtn) listBtn.addEventListener('click', function () {
+    withLoading(listBtn, 'loading...', loadBugReports);
+  });
+  const visBtn = $('bugVisSave');
+  if (visBtn) visBtn.addEventListener('click', function () {
+    withLoading(visBtn, 'saving...', saveBugVisibility);
+  });
+}
+loadBugVisibility();
+
+// =========================================================================
+// v9.4.5: Stat-card drill-downs
+// =========================================================================
+// Each of the 6 stat cards in the popup has a `data-drill="<key>"` attribute.
+// Clicking a card opens the #pop-drill drawer with a tabular detail view.
+//   pending / dr / banned    -> source from chrome.storage.local (roster, dr)
+//   bans24 / msgs24 / notes24 -> source from K.LOG (mod_log) filtered to last 24h
+//
+// All rendering uses textContent + element creation (no innerHTML on user data)
+// to honour the v6.3.0 XSS contract. The CSP forbids inline handlers; rows are
+// wired via addEventListener.
+
+const __DRILL_TITLES = {
+  pending: 'Pending users (awaiting triage)',
+  dr:      'Death Row queue',
+  banned:  'Banned users (roster)',
+  bans24:  'Bans (last 24h)',
+  msgs24:  'Messages / replies (last 24h)',
+  notes24: 'Notes (last 24h)'
+};
+const __DRILL_EMPTY_HINT = {
+  pending: 'No users waiting on triage. Run a /users crawl to refresh the roster.',
+  dr:      'Death Row queue is empty. Schedule a ban from the Mod Console to populate.',
+  banned:  'No banned users in your local roster. Crawl /users with status=banned to import.',
+  bans24:  'No ban actions logged in the last 24h.',
+  msgs24:  'No mod messages or replies sent in the last 24h.',
+  notes24: 'No mod notes written in the last 24h.'
+};
+
+// Format an ms-epoch or ISO ts as "HH:MM" if today, else "Mon DD".
+function __fmtDrillTs(ts) {
+  if (ts == null || ts === '') return '—';
+  const d = (typeof ts === 'number') ? new Date(ts) : new Date(String(ts));
+  if (!d || isNaN(d.getTime())) return '—';
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear()
+                && d.getMonth() === now.getMonth()
+                && d.getDate() === now.getDate();
+  const pad = n => (n < 10 ? '0' + n : '' + n);
+  if (sameDay) return pad(d.getHours()) + ':' + pad(d.getMinutes());
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[d.getMonth()] + ' ' + d.getDate();
+}
+
+// Build a row element for the drill-down body.
+function __makeDrillRow(opts) {
+  const row = document.createElement('div');
+  row.className = 'pop-drill-row';
+
+  const tsCell = document.createElement('span');
+  tsCell.className = 'col-ts';
+  tsCell.textContent = opts.ts || '—';
+  row.appendChild(tsCell);
+
+  const userCell = document.createElement('span');
+  userCell.className = 'col-user';
+  if (opts.user) {
+    const a = document.createElement('a');
+    a.href = 'https://greatawakening.win/u/' + encodeURIComponent(opts.user) + '/';
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = opts.user;
+    userCell.appendChild(a);
+  } else {
+    userCell.textContent = opts.label || '—';
+  }
+  row.appendChild(userCell);
+
+  const metaCell = document.createElement('span');
+  metaCell.className = 'col-meta';
+  if (opts.pill) {
+    const pill = document.createElement('span');
+    pill.className = 'pop-drill-pill ' + (opts.pill.cls || '');
+    pill.textContent = opts.pill.text;
+    metaCell.appendChild(pill);
+  }
+  if (opts.metaText) {
+    const t = document.createElement('span');
+    t.style.marginLeft = opts.pill ? '6px' : '0';
+    t.textContent = opts.metaText;
+    metaCell.appendChild(t);
+  }
+  row.appendChild(metaCell);
+
+  if (opts.snippet) {
+    const snip = document.createElement('span');
+    snip.className = 'col-snippet';
+    snip.textContent = opts.snippet;
+    row.appendChild(snip);
+  }
+  return row;
+}
+
+// Cache last rendered rows so CSV export can serialise them.
+let __lastDrill = { key: null, rows: [], cols: [] };
+
+function __renderDrillEmpty(key) {
+  const body = $('pop-drill-body');
+  body.textContent = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'pop-drill-empty';
+  wrap.textContent = 'No data in window.';
+  const hint = document.createElement('div');
+  hint.className = 'pop-drill-empty-hint';
+  hint.textContent = __DRILL_EMPTY_HINT[key] || '';
+  wrap.appendChild(hint);
+  body.appendChild(wrap);
+}
+
+function __setDrillMeta(text) {
+  const m = $('pop-drill-meta');
+  if (m) m.textContent = text || '';
+}
+
+async function __renderPending(body) {
+  const data = await chrome.storage.local.get(K.ROSTER);
+  const roster = data[K.ROSTER] || {};
+  const rows = Object.entries(roster)
+    .filter(([_, e]) => e && (e.status === 'new' || e.status === 'pending'))
+    .sort((a, b) => (b[1].first_seen || 0) - (a[1].first_seen || 0));
+  if (rows.length === 0) { __renderDrillEmpty('pending'); return; }
+  __lastDrill.cols = ['ts', 'user', 'status', 'reason'];
+  __lastDrill.rows = [];
+  rows.forEach(([username, e]) => {
+    body.appendChild(__makeDrillRow({
+      ts: __fmtDrillTs(e.first_seen),
+      user: username,
+      pill: { text: e.status || 'new', cls: 'pending' },
+      snippet: e.reason || e.last_seen_reason || ''
+    }));
+    __lastDrill.rows.push({
+      ts: e.first_seen || '', user: username,
+      status: e.status || 'new', reason: e.reason || ''
+    });
+  });
+  __setDrillMeta(rows.length + ' pending');
+}
+
+async function __renderDeathRow(body) {
+  const data = await chrome.storage.local.get(K.DR);
+  const dr = (data[K.DR] || []).filter(d => d && d.status === 'waiting');
+  if (dr.length === 0) { __renderDrillEmpty('dr'); return; }
+  dr.sort((a, b) => (a.executeAt || 0) - (b.executeAt || 0));
+  const now = Date.now();
+  __lastDrill.cols = ['executeAt', 'user', 'state', 'reason'];
+  __lastDrill.rows = [];
+  dr.forEach(d => {
+    const ready = now >= (d.executeAt || 0);
+    body.appendChild(__makeDrillRow({
+      ts: __fmtDrillTs(d.executeAt),
+      user: d.target || d.username,
+      pill: ready ? { text: 'ready', cls: 'ready' } : { text: 'waiting', cls: 'dr' },
+      snippet: d.reason || ''
+    }));
+    __lastDrill.rows.push({
+      executeAt: d.executeAt || '',
+      user: d.target || d.username || '',
+      state: ready ? 'ready' : 'waiting',
+      reason: d.reason || ''
+    });
+  });
+  const readyCount = dr.filter(d => now >= (d.executeAt || 0)).length;
+  __setDrillMeta(dr.length + ' queued, ' + readyCount + ' ready');
+}
+
+async function __renderBanned(body) {
+  const data = await chrome.storage.local.get(K.ROSTER);
+  const roster = data[K.ROSTER] || {};
+  const rows = Object.entries(roster)
+    .filter(([_, e]) => e && e.status === 'banned')
+    .sort((a, b) => (b[1].banned_at || b[1].last_seen || 0) - (a[1].banned_at || a[1].last_seen || 0));
+  if (rows.length === 0) { __renderDrillEmpty('banned'); return; }
+  __lastDrill.cols = ['ts', 'user', 'status', 'reason'];
+  __lastDrill.rows = [];
+  rows.forEach(([username, e]) => {
+    body.appendChild(__makeDrillRow({
+      ts: __fmtDrillTs(e.banned_at || e.last_seen),
+      user: username,
+      pill: { text: 'banned', cls: 'banned' },
+      snippet: e.reason || ''
+    }));
+    __lastDrill.rows.push({
+      ts: e.banned_at || e.last_seen || '',
+      user: username, status: 'banned', reason: e.reason || ''
+    });
+  });
+  __setDrillMeta(rows.length + ' banned');
+}
+
+// Helper: pull last-24h log entries of given action types.
+async function __log24(filterFn) {
+  const data = await chrome.storage.local.get(K.LOG);
+  const log = data[K.LOG] || [];
+  const cutoff = Date.now() - 86400000;
+  return log
+    .filter(l => l && l.ts && (new Date(l.ts).getTime() >= cutoff))
+    .filter(filterFn)
+    .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+}
+
+async function __renderBans24(body) {
+  const rows = await __log24(l => l.type === 'ban');
+  if (rows.length === 0) { __renderDrillEmpty('bans24'); return; }
+  __lastDrill.cols = ['ts', 'user', 'mod', 'reason'];
+  __lastDrill.rows = [];
+  rows.forEach(l => {
+    const tgt = l.target || l.target_user || l.user || (l.details && l.details.target);
+    const reason = l.reason || (l.details && l.details.reason) || '';
+    const mod = l.mod || (l.details && l.details.mod) || '';
+    body.appendChild(__makeDrillRow({
+      ts: __fmtDrillTs(l.ts),
+      user: tgt,
+      pill: { text: 'ban', cls: 'ban' },
+      metaText: mod ? 'by ' + mod : '',
+      snippet: reason
+    }));
+    __lastDrill.rows.push({
+      ts: l.ts || '', user: tgt || '', mod: mod, reason: reason
+    });
+  });
+  __setDrillMeta(rows.length + ' bans / 24h');
+}
+
+async function __renderMsgs24(body) {
+  const rows = await __log24(l => l.type === 'message' || l.type === 'reply');
+  if (rows.length === 0) { __renderDrillEmpty('msgs24'); return; }
+  __lastDrill.cols = ['ts', 'user', 'kind', 'snippet'];
+  __lastDrill.rows = [];
+  rows.forEach(l => {
+    const tgt = l.target || l.target_user || l.user || (l.details && l.details.recipient);
+    const snip = l.body || l.message || l.text || (l.details && (l.details.body || l.details.message)) || '';
+    body.appendChild(__makeDrillRow({
+      ts: __fmtDrillTs(l.ts),
+      user: tgt,
+      pill: { text: l.type, cls: 'msg' },
+      snippet: snip
+    }));
+    __lastDrill.rows.push({
+      ts: l.ts || '', user: tgt || '', kind: l.type || '', snippet: snip
+    });
+  });
+  __setDrillMeta(rows.length + ' messages / 24h');
+}
+
+async function __renderNotes24(body) {
+  const rows = await __log24(l => l.type === 'note');
+  if (rows.length === 0) { __renderDrillEmpty('notes24'); return; }
+  __lastDrill.cols = ['ts', 'user', 'snippet'];
+  __lastDrill.rows = [];
+  rows.forEach(l => {
+    const tgt = l.target || l.target_user || l.user || (l.details && l.details.subject);
+    const snip = l.note || l.body || (l.details && (l.details.note || l.details.body)) || '';
+    body.appendChild(__makeDrillRow({
+      ts: __fmtDrillTs(l.ts),
+      user: tgt,
+      pill: { text: 'note', cls: 'note' },
+      snippet: snip
+    }));
+    __lastDrill.rows.push({ ts: l.ts || '', user: tgt || '', snippet: snip });
+  });
+  __setDrillMeta(rows.length + ' notes / 24h');
+}
+
+async function renderDrillDown(key) {
+  const drawer = $('pop-drill');
+  const body = $('pop-drill-body');
+  const title = $('pop-drill-title');
+  if (!drawer || !body || !title) return;
+  title.textContent = __DRILL_TITLES[key] || 'Detail';
+  body.textContent = '';
+  __setDrillMeta('loading...');
+  __lastDrill = { key: key, rows: [], cols: [] };
+  drawer.style.display = 'flex';
+  try {
+    if (key === 'pending')      await __renderPending(body);
+    else if (key === 'dr')      await __renderDeathRow(body);
+    else if (key === 'banned')  await __renderBanned(body);
+    else if (key === 'bans24')  await __renderBans24(body);
+    else if (key === 'msgs24')  await __renderMsgs24(body);
+    else if (key === 'notes24') await __renderNotes24(body);
+    else { __renderDrillEmpty(key); }
+  } catch (e) {
+    body.textContent = '';
+    const errBox = document.createElement('div');
+    errBox.className = 'pop-drill-empty';
+    errBox.textContent = 'Failed to load: ' + (e && e.message || String(e));
+    body.appendChild(errBox);
+    __setDrillMeta('error');
+  }
+}
+
+function __closeDrillDown() {
+  const drawer = $('pop-drill');
+  if (drawer) drawer.style.display = 'none';
+}
+
+// CSV export of the last rendered drill-down.
+function __exportDrillCsv() {
+  const cur = __lastDrill;
+  if (!cur || !cur.rows || cur.rows.length === 0) return;
+  const cols = cur.cols;
+  const esc = v => {
+    const s = (v == null) ? '' : String(v);
+    if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  };
+  const lines = [cols.join(',')];
+  cur.rows.forEach(r => lines.push(cols.map(c => esc(r[c])).join(',')));
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'modtools-drill-' + (cur.key || 'data') + '-'
+             + new Date().toISOString().slice(0, 10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Wire the cards via event delegation. Single listener on .pop-stats.
+{
+  const stats = document.querySelector('.pop-stats');
+  if (stats) {
+    stats.addEventListener('click', (e) => {
+      const card = e.target.closest('.pop-stat[data-drill]');
+      if (!card) return;
+      const key = card.getAttribute('data-drill');
+      if (key) renderDrillDown(key);
+    });
+  }
+  const closeBtn = $('pop-drill-close');
+  if (closeBtn) closeBtn.addEventListener('click', __closeDrillDown);
+  const csvBtn = $('pop-drill-csv');
+  if (csvBtn) csvBtn.addEventListener('click', __exportDrillCsv);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const drawer = $('pop-drill');
+      if (drawer && drawer.style.display !== 'none') __closeDrillDown();
+    }
+  });
+}

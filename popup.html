@@ -24,34 +24,52 @@
     <span class="pop-ver" id="ver">v5.2.8</span>
   </div>
 
+  <!-- v9.4.5: stat cards are clickable. data-drill key routes to renderDrillDown(key)
+       in popup.js. Tooltip text in title= attribute (browser-native hover). -->
   <div class="pop-stats">
-    <div class="pop-stat">
+    <div class="pop-stat" data-drill="pending" title="Users awaiting first-decision triage. Click to list.">
       <div class="pop-stat-val" id="s-pending">&mdash;</div>
       <div class="pop-stat-label">Pending</div>
     </div>
-    <div class="pop-stat">
+    <div class="pop-stat" data-drill="dr" title="Death Row queue: scheduled bans pending execution. Click to list.">
       <div class="pop-stat-val" id="s-dr" style="color:#a78bfa">&mdash;</div>
       <div class="pop-stat-label">Death Row</div>
     </div>
-    <div class="pop-stat">
+    <div class="pop-stat" data-drill="banned" title="Users in your roster with status=banned. Click to list.">
       <div class="pop-stat-val" id="s-banned" style="color:#f04040">&mdash;</div>
       <div class="pop-stat-label">Banned</div>
     </div>
-    <div class="pop-stat">
+    <div class="pop-stat" data-drill="bans24" title="Mod actions tagged 'ban' in the last 24h (your local log). Click for detail.">
       <div class="pop-stat-val" id="s-today" style="color:#4A9EFF">&mdash;</div>
       <div class="pop-stat-label">Bans / 24h</div>
     </div>
-    <div class="pop-stat">
+    <div class="pop-stat" data-drill="msgs24" title="Messages and replies sent in the last 24h. Click for detail.">
       <div class="pop-stat-val" id="s-msgs" style="color:#3dd68c">&mdash;</div>
       <div class="pop-stat-label">Msgs / 24h</div>
     </div>
-    <div class="pop-stat">
+    <div class="pop-stat" data-drill="notes24" title="Mod notes written in the last 24h. Click for detail.">
       <div class="pop-stat-val" id="s-notes" style="color:#f0a040">&mdash;</div>
       <div class="pop-stat-label">Notes / 24h</div>
     </div>
   </div>
 
   <div class="pop-alert" id="dr-alert" style="display:none"></div>
+
+  <!-- v9.4.5: drill-down drawer overlays the popup body when a stat card is
+       clicked. Header (title + close X), scrollable body (table or empty
+       state), footer (CSV export). Hidden by default. Populated by
+       renderDrillDown() in popup.js. -->
+  <div id="pop-drill" class="pop-drill" style="display:none">
+    <div class="pop-drill-head">
+      <span class="pop-drill-title" id="pop-drill-title"></span>
+      <button class="pop-drill-close" id="pop-drill-close" title="Close (Esc)">&times;</button>
+    </div>
+    <div class="pop-drill-body" id="pop-drill-body"></div>
+    <div class="pop-drill-foot">
+      <span class="pop-drill-meta" id="pop-drill-meta"></span>
+      <button class="pop-link" id="pop-drill-csv">Export CSV</button>
+    </div>
+  </div>
 
   <div class="pop-actions">
     <a href="https://greatawakening.win/users" target="_blank" class="pop-btn pop-btn-primary">
@@ -72,11 +90,18 @@
   <div class="pop-tools">
     <button id="debugBtn" class="pop-btn pop-btn-ghost">&#x1F9EA; Debug snapshot</button>
     <button id="dashBtn" class="pop-btn pop-btn-ghost">&#x1F4CA; Dashboard</button>
-    <!-- v9.3.14 (Vanguard L-2): replaces window.__GAM_REHYDRATE() console call.
-         Asks the active GAW tab's content script to re-read chrome.storage.local
-         into the in-memory cache + SW vault. Used after a recovery/rotation
-         script writes directly to storage. -->
-    <button id="rehydrateBtn" class="pop-btn pop-btn-ghost">&#x21BB; Force re-hydrate</button>
+    <!-- v9.3.14 (Vanguard L-2) / v9.4.6 (Commander): replaces the legacy
+         window.__GAM_REHYDRATE() page-console call. Asks the active GAW
+         tab to re-read chrome.storage.local into the in-memory cache + SW
+         vault. Use this if you rotated your token via a recovery script or
+         saw an "auth desynced" snack — it forces the SW to re-read storage.
+         Result format "team=yes(48), lead=yes(N)" reports each token's
+         length in chars (32-256 range). Available to ALL mods (per-mod
+         popup; any mod can have a token desync). -->
+    <button id="rehydrateBtn" class="pop-btn pop-btn-ghost"
+            title="Re-load token vault from storage. 'team=yes(48)' means a 48-char team token is now cached in the SW vault. Run if you saw an auth-desynced snack.">
+      &#x21BB; Force re-hydrate
+    </button>
   </div>
   <div id="rehydrateStatus" class="pop-token-status"></div>
 
@@ -86,7 +111,7 @@
     <button class="pop-btn pop-btn-ghost crawl-btn" data-section="users" data-pages="30">&#x1F578; Crawl /users (30)</button>
     <button class="pop-btn pop-btn-ghost crawl-btn" data-section="queue" data-pages="5">&#x1F578; Crawl /queue (5)</button>
   </div>
-  <div id="crawlStatus" class="pop-token-status" style="padding: 0 14px 6px;"></div>
+  <div id="crawlStatus" class="pop-token-status" style="padding: 0 12px 4px;"></div>
 
   <div class="pop-token">
     <label for="tokenInput">&#x1F511; Team Mod Token</label>
@@ -95,8 +120,9 @@
     <button id="tokenSave" class="pop-btn pop-btn-ghost">Save</button>
     <div id="tokenStatus" class="pop-token-status"></div>
     <!-- v8.5.0: per-mod token sovereignty. Rotate generates a new token only
-         the mod knows -- lead can no longer authenticate as them after this. -->
-    <div class="pop-tools" style="margin-top:8px">
+         the mod knows -- lead can no longer authenticate as them after this.
+         v9.4.4: margin-top 8 -> 4 to match tightened rhythm. -->
+    <div class="pop-tools" style="margin-top:4px">
       <button id="rotateBtn" class="pop-btn pop-btn-ghost">&#x1F504; Rotate my token (lead loses access)</button>
       <button id="claimRotateBtn" class="pop-btn pop-btn-ghost">&#x1F4E5; I have a rotation invite</button>
     </div>
@@ -109,7 +135,8 @@
     <input id="leadInput" type="password" placeholder="lead-mod token — enables HUD + invites">
     <button id="leadSave" class="pop-btn pop-btn-ghost">Save</button>
     <div id="leadStatus" class="pop-token-status"></div>
-    <div class="pop-tools" style="margin-top:8px">
+    <!-- v9.4.4: margin-top 8 -> 4 across lead sub-rows. -->
+    <div class="pop-tools" style="margin-top:4px">
       <button id="inviteBtn" class="pop-btn pop-btn-ghost">&#x1F4E8; Generate invite link</button>
     </div>
     <div id="inviteResult" class="pop-token-status"></div>
@@ -117,7 +144,7 @@
          single-issue button with a roster view: see every mod, their
          rotation status, click to issue per-mod, OR one button to issue
          for all unrotated at once. -->
-    <div class="pop-tools" style="margin-top:8px">
+    <div class="pop-tools" style="margin-top:4px">
       <button id="rotateRosterBtn" class="pop-btn pop-btn-ghost">&#x1F465; Mod rotation roster</button>
     </div>
     <div id="rotateInviteResult" class="pop-token-status"></div>
@@ -125,15 +152,38 @@
 
     <!-- v9.3.1 (P0-4): team-wide settings. First setting is the username
          flag TTL (default 30d). Lead writes; all mods read on the next
-         /flags/read (server enforces filter). -->
-    <div class="pop-section-label" style="margin-top:10px">Team settings</div>
+         /flags/read (server enforces filter).
+         v9.4.4: margin-top 10 -> 8 (was off-grid). Input padding 4/6 -> 4/8,
+         Save button padding 3/10 -> 4/8. All values now snap to 4/8 grid. -->
+    <div class="pop-section-label" style="margin-top:8px">Team settings</div>
     <div class="pop-tools" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <label for="flagTtlInput" style="font-size:11px;color:#aaa;flex:1 1 auto">Flag expiry (days)</label>
       <input id="flagTtlInput" type="number" min="1" max="365" step="1" placeholder="30"
-             style="width:64px;padding:4px 6px;background:#11131a;color:#e5e9f0;border:1px solid #3b414d;border-radius:4px;font:inherit">
-      <button id="flagTtlSave" class="pop-btn pop-btn-ghost" style="font-size:11px;padding:3px 10px">Save</button>
+             style="width:64px;padding:4px 8px;background:#11131a;color:#e5e9f0;border:1px solid #3b414d;border-radius:4px;font:inherit">
+      <button id="flagTtlSave" class="pop-btn pop-btn-ghost" style="font-size:11px;padding:4px 8px">Save</button>
     </div>
     <div id="flagTtlStatus" class="pop-token-status"></div>
+
+    <!-- v9.4.4: bug-report triage. Lead-only section. Visibility config lets
+         the lead grant non-lead mods read access (comma list, "all", or
+         "leads"). The "Open bug reports" button opens an inline panel
+         listing each open report with click-to-expand + status controls. -->
+    <div class="pop-section-label" style="margin-top:8px">Bug reports</div>
+    <div class="pop-tools">
+      <button id="bugListBtn" class="pop-btn pop-btn-ghost" style="font-size:11px">
+        &#x1F41B; Open bug reports <span id="bugListBadge" style="display:none;background:#cc3333;color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px"></span>
+      </button>
+    </div>
+    <div id="bugListStatus" class="pop-token-status"></div>
+    <div id="bugListPanel" style="display:none;max-height:400px;overflow:auto;background:#11131a;border:1px solid #3b414d;border-radius:4px;padding:6px;margin:6px 0;font-size:11px"></div>
+
+    <div class="pop-tools" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px">
+      <label for="bugVisInput" style="font-size:11px;color:#aaa;flex:1 1 100%">Who can read bug reports? (<code>leads</code> | <code>all</code> | <code>user1,user2</code>)</label>
+      <input id="bugVisInput" type="text" placeholder="leads"
+             style="flex:1 1 auto;padding:4px 8px;background:#11131a;color:#e5e9f0;border:1px solid #3b414d;border-radius:4px;font:inherit;min-width:160px">
+      <button id="bugVisSave" class="pop-btn pop-btn-ghost" style="font-size:11px;padding:4px 8px">Save</button>
+    </div>
+    <div id="bugVisStatus" class="pop-token-status"></div>
   </div>
 
   <!-- v7.2 Platform Hardening: Claim invite button. When platformHardening is

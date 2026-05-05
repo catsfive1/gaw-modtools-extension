@@ -25,6 +25,10 @@ const WORKER_BASE_FOR_VERSION = 'https://gaw-mod-proxy.gaw-mods-a2f2d0e4.workers
 const VERSION_JSON_URL = `${WORKER_BASE_FOR_VERSION}/version`;
 const ALARM_NAME = 'gam_update_check';
 const ALARM_PERIOD_MIN = 30;
+// v9.4.4: poll for open bug reports for the toolbar badge. Lead/visible-mod
+// only; harmless 403 for un-allowlisted mods.
+const BUG_POLL_ALARM = 'gam_bug_poll';
+const BUG_POLL_PERIOD_MIN = 5;
 // v9.3.14 (Vanguard C-3): if a banner has been ignored for >7d, escalate
 // from silent storage flag to a console.warn so a forensic check sees it.
 const UPDATE_NAG_WARN_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
@@ -108,6 +112,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // (Re)create the recurring update-check alarm on install/update
   try {
     chrome.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
+    chrome.alarms.create(BUG_POLL_ALARM, { periodInMinutes: BUG_POLL_PERIOD_MIN });
   } catch (e) { console.warn('[ModTools] alarm create failed', e); }
   // v8.6.9: AWAIT __ensureSessionAccess so subsequent storage calls don't
   // fire before the session-area access level is set. Pre-fix race: the
@@ -122,6 +127,9 @@ chrome.runtime.onStartup?.addListener(async () => {
   try {
     chrome.alarms.get(ALARM_NAME, (a) => {
       if (!a) chrome.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
+    });
+    chrome.alarms.get(BUG_POLL_ALARM, (a) => {
+      if (!a) chrome.alarms.create(BUG_POLL_ALARM, { periodInMinutes: BUG_POLL_PERIOD_MIN });
     });
   } catch (e) {}
   // v8.6.9: AWAIT both bootstrap calls so the SW is fully ready before
@@ -235,7 +243,35 @@ try {
   });
 } catch (e) {}
 
+// v9.4.4: poll worker for open bug reports; update toolbar badge.
+async function _bugPollAndBadge() {
+  try {
+    if (!secretCache.workerModToken) {
+      try { await loadSecrets(); } catch (_) {}
+    }
+    if (!secretCache.workerModToken) {
+      try { chrome.action.setBadgeText({ text: '' }); } catch (_) {}
+      return;
+    }
+    const r = await _rpcWorkerCall('GET', '/admin/bug-reports?status=open&limit=1', undefined);
+    if (!r || !r.ok || !r.data) {
+      // 403 = not allowlisted. Clear the badge silently.
+      try { chrome.action.setBadgeText({ text: '' }); } catch (_) {}
+      return;
+    }
+    const n = parseInt(r.data.open_count, 10) || 0;
+    const text = n > 0 ? (n > 99 ? '99+' : String(n)) : '';
+    try {
+      chrome.action.setBadgeText({ text });
+      if (text) chrome.action.setBadgeBackgroundColor({ color: '#cc3333' });
+    } catch (_) {}
+  } catch (e) {
+    try { chrome.action.setBadgeText({ text: '' }); } catch (_) {}
+  }
+}
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === BUG_POLL_ALARM) { await _bugPollAndBadge(); return; }
   if (alarm.name !== ALARM_NAME) return;
   try {
     const resp = await fetch(VERSION_JSON_URL, { cache: 'no-store' });
@@ -647,6 +683,47 @@ const RPC_HANDLERS = {
       const value = String(args && args.value || '');
       if (!key) return { ok: false, status: 0, error: 'missing key' };
       return await _rpcWorkerCall('PUT', '/admin/settings', { key, value }, { asLead: true });
+    }
+  },
+
+  // ---- bugReport*: lead/visible-mod read; lead-only write/visibility -----
+  // v9.4.4 — surfaces the previously dead-letter `bug_reports` D1 table to the
+  // popup so leads can triage incoming reports without a separate dashboard.
+  // GET /admin/bug-reports (mod token, gated by team_features.bug_report_visible_to)
+  // PUT /admin/bug-reports/<id> (lead-only)
+  // POST /admin/bug-reports/visibility (lead-only)
+  // GET  /admin/bug-reports/visibility (any mod)
+  bugReportList: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const status = encodeURIComponent(String(args && args.status || 'open'));
+      const limit  = Math.min(500, Math.max(1, parseInt(args && args.limit, 10) || 100));
+      return await _rpcWorkerCall('GET', '/admin/bug-reports?status=' + status + '&limit=' + limit, undefined);
+    }
+  },
+  bugReportUpdate: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const id = parseInt(args && args.id, 10);
+      if (!Number.isFinite(id) || id <= 0) return { ok: false, status: 0, error: 'missing id' };
+      const body = {};
+      if (args && args.status !== undefined) body.status = String(args.status);
+      if (args && args.assigned_to !== undefined) body.assigned_to = args.assigned_to === null ? null : String(args.assigned_to);
+      if (args && args.triage_note !== undefined) body.triage_note = String(args.triage_note);
+      if (args && args.resolution_note !== undefined) body.resolution_note = String(args.resolution_note);
+      return await _rpcWorkerCall('PUT', '/admin/bug-reports/' + id, body);
+    }
+  },
+  bugReportVisibilityRead: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('GET', '/admin/bug-reports/visibility', undefined); }
+  },
+  bugReportVisibilityWrite: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const visible_to = String(args && args.visible_to || '').trim();
+      if (!visible_to) return { ok: false, status: 0, error: 'missing visible_to' };
+      return await _rpcWorkerCall('POST', '/admin/bug-reports/visibility', { visible_to });
     }
   },
 
