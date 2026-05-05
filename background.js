@@ -1,22 +1,33 @@
 // GAW ModTools - Background Service Worker
 // v5.8.2: adds auto-reload-on-update via chrome.alarms.
 // v7.2: adds secret vault + workerFetch relay (platformHardening flag-on).
-//
-// Flow:
-//   1. Windows Task Scheduler runs update-modtools.ps1 every 30 min (see
-//      install-auto-update.ps1). That overwrites modtools-ext/ on disk.
-//   2. This alarm fires every 30 min and compares our loaded
-//      chrome.runtime.getManifest().version to the published version.json
-//      in the shared-flags repo.
-//   3. If GitHub shows a NEWER version AND our manifest still reports the
-//      old one, the files on disk were updated but Chrome is still running
-//      the old copy -- so we call chrome.runtime.reload() to swap in fresh
-//      code.
-//   4. If GitHub version == our loaded version, reload is pointless; skip.
+// v9.3.14 (Vanguard C-3): REMOVED auto chrome.runtime.reload() supply-chain
+//   primitive. The pre-fix flow (poll GitHub raw version.json -> reload
+//   extension on mismatch) was a single-account-compromise -> mass-RCE
+//   vector: a push to the shared GitHub repo would, on the next 30-min
+//   alarm, force every installed extension to reload from on-disk files
+//   that the same scheduled task had already overwritten from the same
+//   account. NEW flow is notification-only:
+//     * Poll worker /version every 30min (no GitHub URL in extension code).
+//     * On mismatch, write `gam_update_available` flag to chrome.storage.local.
+//     * Content script reads the flag at init and renders the existing
+//       .gam-update-banner with a "Reload" button that opens
+//       chrome://extensions/?id=<extension-id> -- the user must click
+//       the reload arrow themselves.
+//   No auto-reload. No GitHub raw URL. RCE primitive eliminated.
+// v9.3.14 (Vanguard L-3): version-check URL moved off raw.githubusercontent.com
+//   (which leaked the maintainer's GitHub username `catsfive1`) to the
+//   already-existing worker `/version` endpoint, which proxies the same
+//   shared-flags repo file. Net effect: extension binary no longer contains
+//   the maintainer's GitHub handle.
 
-const VERSION_JSON_URL = 'https://raw.githubusercontent.com/catsfive1/gaw-mod-shared-flags/main/version.json';
+const WORKER_BASE_FOR_VERSION = 'https://gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev';
+const VERSION_JSON_URL = `${WORKER_BASE_FOR_VERSION}/version`;
 const ALARM_NAME = 'gam_update_check';
 const ALARM_PERIOD_MIN = 30;
+// v9.3.14 (Vanguard C-3): if a banner has been ignored for >7d, escalate
+// from silent storage flag to a console.warn so a forensic check sees it.
+const UPDATE_NAG_WARN_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 // --- v7.2 Platform Hardening BEGIN ---
 // Secret vault in service-worker RAM + chrome.storage.session. When the
@@ -123,6 +134,107 @@ chrome.runtime.onStartup?.addListener(async () => {
 // leaves the session area locked to extension-only contexts.
 try { __ensureSessionAccess(); } catch (e) {}
 
+// v9.2.2 hotfix: keep secretCache in sync with chrome.storage.local. Pre-fix,
+// the SW's vault was only updated by the {type:'setTokens'} message path.
+// Any direct write to chrome.storage.local (emergency console snippet, lead
+// rotation script, or any out-of-band recovery) left the vault stale, so
+// every subsequent RPC sent the OLD token and the worker rejected with 401.
+// This listener re-mirrors gam_settings into secretCache on every change.
+//
+// v9.3.13 (Vanguard C-2/H-2) + v9.3.15 (Vanguard ER2-H-4): validate token
+// shape before any promotion. v9.3.15 tightens the regex to (a) reject
+// leading/trailing dashes (CLI flag-injection footgun if a token ever lands
+// in a wrangler/curl command line via debug paste), and (b) require at
+// least one letter AND one digit so all-dash or all-underscore strings are
+// rejected. Empty string is still "explicit clear, OK."
+var __TOKEN_SHAPE_RE = /^[A-Za-z0-9_-]{32,256}$/;
+function __isValidTokenOrEmpty(v) {
+  if (typeof v !== 'string') return false;
+  if (v === '') return true; // empty = explicit clear, OK
+  if (!__TOKEN_SHAPE_RE.test(v)) return false;
+  // ER2-H-4: tightening — reject leading/trailing dash (CLI flag-injection)
+  if (v.startsWith('-') || v.startsWith('_') || v.endsWith('-') || v.endsWith('_')) return false;
+  // Must contain at least one ASCII letter AND one digit (rejects all-dash etc.)
+  if (!/[A-Za-z]/.test(v)) return false;
+  if (!/[0-9]/.test(v)) return false;
+  return true;
+}
+// v9.3.15 (Vanguard ER2-C-3): popup-only snapshot consent nonce, held in
+// SW RAM (not chrome.storage.session). Content scripts cannot read SW RAM,
+// so a compromised content-script context cannot mint its own consent.
+// The popup mints, the content script verifies via SW round-trip.
+const _SNAPSHOT_CONSENT = { nonce: null, mintedAt: 0 };
+function __mintSnapshotConsent() {
+  try {
+    const buf = new Uint8Array(16);
+    crypto.getRandomValues(buf);
+    const hex = Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
+    _SNAPSHOT_CONSENT.nonce = hex;
+    _SNAPSHOT_CONSENT.mintedAt = Date.now();
+    return hex;
+  } catch (_) { return null; }
+}
+function __verifyAndConsumeSnapshotConsent(presented) {
+  const now = Date.now();
+  const valid = !!(_SNAPSHOT_CONSENT.nonce
+    && presented === _SNAPSHOT_CONSENT.nonce
+    && (now - _SNAPSHOT_CONSENT.mintedAt) < 5000);
+  // One-shot regardless of outcome — prevents replay even on validation fail.
+  _SNAPSHOT_CONSENT.nonce = null;
+  _SNAPSHOT_CONSENT.mintedAt = 0;
+  return valid;
+}
+// v9.3.15 (Vanguard ER2-C-4): the gam_update_available banner is now
+// background-verified. Background tracks the last flag value it set in SW
+// RAM; content script must call `verifyUpdateFlag` and only renders the
+// banner if SW confirms the flag matches what background set. A malicious
+// in-extension write to chrome.storage.local cannot trick the banner
+// because it never matches the SW's record.
+let _UPDATE_FLAG_LAST_SET = null;
+// v9.3.15 (Vanguard ER2-H-3): rate-limit clearTokens to 1 every 10s.
+// Pre-fix any in-extension surface could spam the RPC and DoS the vault.
+let _LAST_CLEAR_TOKENS_AT = 0;
+try {
+  chrome.storage.onChanged.addListener(function(changes, area) {
+    if (area !== 'local') return;
+    if (!changes || !changes.gam_settings) return;
+    var nv = changes.gam_settings.newValue;
+    if (!nv || typeof nv !== 'object') return;
+    var prevWorker = secretCache.workerModToken || '';
+    var prevLead = secretCache.leadModToken || '';
+    // v9.3.13: validate shape BEFORE promotion. Reject malformed values
+    // and keep the prior cached value rather than overwriting with garbage.
+    var rawNextWorker = (typeof nv.workerModToken === 'string') ? nv.workerModToken : prevWorker;
+    var rawNextLead   = (typeof nv.leadModToken === 'string')   ? nv.leadModToken   : prevLead;
+    var nextWorker = __isValidTokenOrEmpty(rawNextWorker) ? rawNextWorker : prevWorker;
+    var nextLead   = __isValidTokenOrEmpty(rawNextLead)   ? rawNextLead   : prevLead;
+    if (rawNextWorker !== nextWorker || rawNextLead !== nextLead) {
+      try { console.error('[ModTools v9.3.13 SECURITY] storage.onChanged refused malformed token write — keeping prior cache value'); } catch(_){}
+    }
+    if (nextWorker !== prevWorker || nextLead !== prevLead) {
+      secretCache = { workerModToken: nextWorker, leadModToken: nextLead };
+      // Also push into chrome.storage.session so the next SW evict+reload
+      // picks the right vault from loadSecrets()'s session-first lookup.
+      try {
+        if (chrome.storage && chrome.storage.session) {
+          chrome.storage.session.get('gam_settings').then(function(out){
+            var cur = (out && out.gam_settings) || {};
+            var merged = Object.assign({}, cur, {
+              workerModToken: nextWorker,
+              leadModToken: nextLead
+            });
+            chrome.storage.session.set({ gam_settings: merged }).catch(function(){});
+          }).catch(function(){});
+        }
+      } catch (_) {}
+      try {
+        console.log('[ModTools v9.2.2] SW vault re-synced from storage change',
+          { hasTeam: !!nextWorker, hasLead: !!nextLead });
+      } catch (_) {}
+    }
+  });
+} catch (e) {}
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== ALARM_NAME) return;
   try {
@@ -132,17 +244,47 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     const remote = (data && typeof data.version === 'string') ? data.version : null;
     if (!remote) return;
     const local = chrome.runtime.getManifest().version;
-    if (remote === local) return;                     // we're up to date
-    // Newer remote AND local files may have been refreshed by the scheduled
-    // task -- reload the extension so Chrome picks up the on-disk changes.
-    // If the scheduled task HASN'T run, this reload is a no-op and we retry
-    // next tick.
-    console.log('[ModTools] version mismatch (loaded=' + local + ', remote=' + remote + ') -- reloading extension');
-    // Mark the intended upgrade in storage so content scripts can show a toast
-    await chrome.storage.local.set({ gam_autoreload: {
-      from: local, to: remote, at: new Date().toISOString()
-    }});
-    chrome.runtime.reload();
+    if (remote === local) {
+      // We are current. Clear any stale notification flag so the banner
+      // disappears once the user actually reloads.
+      try { await chrome.storage.local.remove('gam_update_available'); } catch (_) {}
+      return;
+    }
+    // v9.3.14 (Vanguard C-3): NOTIFY ONLY. Do not call chrome.runtime.reload().
+    // The content script's banner consumer surfaces this to the mod, who must
+    // click the Reload arrow themselves. This breaks the GitHub-account ->
+    // RCE chain entirely.
+    let firstSeenAt = Date.now();
+    try {
+      const cur = await chrome.storage.local.get('gam_update_available');
+      if (cur && cur.gam_update_available && cur.gam_update_available.to === remote && cur.gam_update_available.firstSeenAt) {
+        firstSeenAt = cur.gam_update_available.firstSeenAt; // preserve original
+      }
+    } catch (_) {}
+    // v9.3.15 (Vanguard ER2-C-4): track this in SW RAM so verifyUpdateFlag
+    // can attest that the flag was set BY the alarm path, not by some other
+    // in-extension write. A malicious in-extension surface can still write
+    // the storage key, but its value won't match _UPDATE_FLAG_LAST_SET so
+    // the content-script consumer (which calls verifyUpdateFlag before
+    // rendering) refuses to draw the banner.
+    const _flagPayload = {
+      from: local,
+      to: remote,
+      at: new Date().toISOString(),
+      firstSeenAt: firstSeenAt
+    };
+    _UPDATE_FLAG_LAST_SET = _flagPayload;
+    await chrome.storage.local.set({ gam_update_available: _flagPayload });
+    const ageMs = Date.now() - firstSeenAt;
+    if (ageMs > UPDATE_NAG_WARN_AFTER_MS) {
+      try {
+        console.warn('[ModTools v9.3.14] update banner ignored for ' +
+          Math.round(ageMs / 86400000) + 'd (loaded=' + local + ', remote=' + remote +
+          ') -- mod still on stale build');
+      } catch (_) {}
+    } else {
+      try { console.log('[ModTools v9.3.14] update available (loaded=' + local + ', remote=' + remote + ') -- banner flag set, NO auto-reload'); } catch (_) {}
+    }
   } catch (e) {
     console.warn('[ModTools] update check failed', e);
   }
@@ -162,15 +304,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // --- v7.2 Platform Hardening BEGIN ---
   if (msg && msg.type === 'setTokens') {
+    // v9.3.13 (Vanguard H-2): validate token shape on inbound setTokens.
+    // Reject any field with a malformed shape rather than overwriting the
+    // cache. Empty string is a valid "clear me" signal.
     const hasWorker = Object.prototype.hasOwnProperty.call(msg, 'workerModToken');
     const hasLead = Object.prototype.hasOwnProperty.call(msg, 'leadModToken');
+    const candWorker = hasWorker ? ((typeof msg.workerModToken === 'string') ? msg.workerModToken : '') : null;
+    const candLead   = hasLead   ? ((typeof msg.leadModToken === 'string')   ? msg.leadModToken   : '') : null;
+    if (hasWorker && !__isValidTokenOrEmpty(candWorker)) {
+      sendResponse({ ok: false, error: 'malformed workerModToken (rejected by SW vault)' });
+      return true;
+    }
+    if (hasLead && !__isValidTokenOrEmpty(candLead)) {
+      sendResponse({ ok: false, error: 'malformed leadModToken (rejected by SW vault)' });
+      return true;
+    }
     secretCache = {
-      workerModToken: hasWorker
-        ? ((typeof msg.workerModToken === 'string') ? msg.workerModToken : '')
-        : (secretCache.workerModToken || ''),
-      leadModToken: hasLead
-        ? ((typeof msg.leadModToken === 'string') ? msg.leadModToken : '')
-        : (secretCache.leadModToken || '')
+      workerModToken: hasWorker ? candWorker : (secretCache.workerModToken || ''),
+      leadModToken:   hasLead   ? candLead   : (secretCache.leadModToken   || '')
     };
     (async () => {
       try {
@@ -182,6 +333,67 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, error: String(e && e.message || e) });
       }
     })();
+    return true;
+  }
+  // v9.3.13 (Vanguard M-1) + v9.3.15 (Vanguard ER2-H-3): atomic clearTokens
+  // RPC, rate-limited to 1 per 10s to prevent DoS-replay-spam from any
+  // in-extension surface that briefly gets compromised.
+  if (msg && msg.type === 'clearTokens') {
+    const _now = Date.now();
+    if (_now - _LAST_CLEAR_TOKENS_AT < 10_000) {
+      try { console.warn('[ModTools v9.3.15] clearTokens rate-limited (debounce 10s)'); } catch (_) {}
+      sendResponse({ ok: false, error: 'clearTokens rate-limited (10s debounce)' });
+      return true;
+    }
+    _LAST_CLEAR_TOKENS_AT = _now;
+    secretCache = { workerModToken: '', leadModToken: '' };
+    (async () => {
+      try {
+        if (chrome.storage && chrome.storage.session) {
+          try { await chrome.storage.session.remove('gam_settings'); } catch (_) {}
+        }
+        try { console.warn('[ModTools v9.3.15] SW vault explicitly cleared via clearTokens RPC'); } catch (_) {}
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e && e.message || e) });
+      }
+    })();
+    return true;
+  }
+  // v9.3.15 (Vanguard ER2-C-3): popup-only mint of one-shot snapshot consent.
+  // Held in SW RAM; content scripts cannot mint. Popup → mint → tab.sendMessage.
+  if (msg && msg.type === 'mintSnapshotConsent') {
+    // Reject if caller is not the popup (no sender.tab; sender.url is the
+    // popup HTML URL like chrome-extension://<id>/popup.html). Content
+    // scripts always have sender.tab populated.
+    if (sender && sender.tab) {
+      sendResponse({ ok: false, error: 'mintSnapshotConsent: popup-only' });
+      return true;
+    }
+    const nonce = __mintSnapshotConsent();
+    sendResponse({ ok: !!nonce, nonce });
+    return true;
+  }
+  // v9.3.15 (Vanguard ER2-C-3): content script forwards the popup-supplied
+  // nonce here. Background validates against SW RAM (one-shot, 5s TTL).
+  if (msg && msg.type === 'verifySnapshotConsent') {
+    const presented = String((msg && msg.nonce) || '');
+    const ok = __verifyAndConsumeSnapshotConsent(presented);
+    sendResponse({ ok });
+    return true;
+  }
+  // v9.3.15 (Vanguard ER2-C-4): content script asks SW to verify that the
+  // gam_update_available flag in chrome.storage.local was actually set by
+  // the SW alarm path (and not by some other in-extension surface). Returns
+  // ok only if the flag matches the SW's most-recent set.
+  if (msg && msg.type === 'verifyUpdateFlag') {
+    const presented = msg && msg.flag;
+    const last = _UPDATE_FLAG_LAST_SET;
+    const matches = !!(last && presented
+      && last.from === presented.from
+      && last.to === presented.to
+      && last.firstSeenAt === presented.firstSeenAt);
+    sendResponse({ ok: matches, expected: matches ? null : 'flag does not match SW-set value' });
     return true;
   }
 
@@ -201,51 +413,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // v9.3.13 (Vanguard H-1): legacy `workerFetch` relay DELETED. It was the
+  // last general-purpose token-attached relay and any future RPC bug that
+  // could trigger it with `asLead:true` was a one-shot at the most dangerous
+  // admin endpoint that exists. Every former workerFetch path is now covered
+  // by a named RPC handler (RPC_HANDLERS). If something still tries to use
+  // type='workerFetch', return a hard error so we hear about it immediately.
   if (msg && msg.type === 'workerFetch') {
-    const path = msg.path || '';
-    // v5.0-Phase-1 complete: named RPCs cover all former workerFetch paths.
-    // Any workerFetch call for a path NOT in ALLOWED_ENDPOINTS is a missed
-    // migration -- hard-error to surface it immediately.
-    if (!pathAllowed(path)) {
-      console.error('[v5.0/Phase-1 MIGRATION ERROR] workerFetch path=' + path + ' has an RPC equivalent -- use chrome.runtime.sendMessage({type:"rpc",name:...}) instead');
-      sendResponse({ ok: false, status: 0, error: 'path migrated to named RPC -- use rpcCall("...") not workerFetch for ' + path });
-      return;
-    }
-    // Legacy path only for /admin/import-tokens-from-kv (no RPC equivalent yet).
     try {
-      console.warn('[v5.0/Phase-1 legacy] workerFetch path=' + path + ' -- no named RPC yet, using relay');
-    } catch (e) {}
-    (async () => {
-      // Warm cache if service-worker was just revived.
-      if (!secretCache.workerModToken && !secretCache.leadModToken) {
-        try { await loadSecrets(); } catch (e) {}
-      }
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, 20000);
-      try {
-        const headers = new Headers(msg.headers || {});
-        if (secretCache.workerModToken) headers.set('X-Mod-Token', secretCache.workerModToken);
-        if (msg.asLead && secretCache.leadModToken) headers.set('X-Lead-Token', secretCache.leadModToken);
-        if (msg.body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-        const r = await fetch(WORKER_BASE + path, {
-          method: msg.method || (msg.body === undefined ? 'GET' : 'POST'),
-          headers: headers,
-          body: msg.body === undefined ? undefined : JSON.stringify(msg.body),
-          signal: ctrl.signal
-        });
-        const text = await r.text();
-        sendResponse({ ok: r.ok, status: r.status, text: text });
-      } catch (e) {
-        sendResponse({
-          ok: false,
-          status: 0,
-          error: String(e && e.message || e),
-          timeout: !!(e && e.name === 'AbortError')
-        });
-      } finally {
-        clearTimeout(timer);
-      }
-    })();
+      console.error('[ModTools v9.3.13] DEPRECATED type:"workerFetch" — use named RPC dispatch (type:"rpc", name:...) instead. path=' + (msg.path || '?'));
+    } catch (_) {}
+    sendResponse({
+      ok: false,
+      status: 0,
+      error: 'workerFetch removed in v9.3.13 (Vanguard H-1) — migrate to a named RPC handler'
+    });
     return true;
   }
 
@@ -446,6 +628,102 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('POST', '/invite/create', {
         mod: args && args.mod
       }, { asLead: true });
+    }
+  },
+
+  // ---- modSettings: shared team settings (cross-mod sync, P0-4 v9.3.1) ----
+  // Worker: GET /mod/settings (any mod), PUT /admin/settings (lead-only).
+  // The first lead-mutable setting is `username_flag_ttl_days` (default 30) —
+  // server-side enforced on /flags/read, so just calling the GETs/PUTs here
+  // is enough; no extra propagation logic needed.
+  modSettingsRead: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('GET', '/mod/settings', undefined); }
+  },
+  adminSettingsWrite: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const key = String(args && args.key || '');
+      const value = String(args && args.value || '');
+      if (!key) return { ok: false, status: 0, error: 'missing key' };
+      return await _rpcWorkerCall('PUT', '/admin/settings', { key, value }, { asLead: true });
+    }
+  },
+
+  // ---- modSus: cross-mod-visible "Mark SUS" flag (P1-3, v9.3.4) ----------
+  // Worker: POST /mod/user/sus (any mod), GET /mod/user/sus, DELETE same.
+  // Includes comment_count_24h per row for the BOLD-RED velocity override.
+  modSusMark: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const username = String(args && args.username || '');
+      const reason   = String(args && args.reason || '');
+      if (!username) return { ok: false, status: 0, error: 'missing username' };
+      return await _rpcWorkerCall('POST', '/mod/user/sus', { username, reason });
+    }
+  },
+  modSusList: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('GET', '/mod/user/sus', undefined); }
+  },
+  modSusClear: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const username = String(args && args.username || '');
+      if (!username) return { ok: false, status: 0, error: 'missing username' };
+      return await _rpcWorkerCall('DELETE', '/mod/user/sus', { username });
+    }
+  },
+
+  // ---- Death Row rule sync (P1-6, v9.3.5) --------------------------------
+  // Worker: GET /mod/dr-rules (any mod), POST/DELETE /admin/dr-rules (lead).
+  // Shared rules are read-only on the client; local rules in
+  // gam_settings.autoDeathRowRules continue to work and merge with shared
+  // at eval time (modtools.js side).
+  modDrRulesList: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('GET', '/mod/dr-rules', undefined); }
+  },
+  adminDrRulesAdd: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const pattern = String(args && args.pattern || '');
+      const reason  = String(args && args.reason || '');
+      const ttl_hours = parseInt(args && args.ttl_hours, 10);
+      if (!pattern) return { ok: false, status: 0, error: 'missing pattern' };
+      const body = { pattern, reason };
+      if (Number.isFinite(ttl_hours) && ttl_hours > 0) body.ttl_hours = ttl_hours;
+      return await _rpcWorkerCall('POST', '/admin/dr-rules', body, { asLead: true });
+    }
+  },
+  adminDrRulesDelete: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const id = parseInt(args && args.id, 10);
+      if (!Number.isFinite(id) || id <= 0) return { ok: false, status: 0, error: 'missing id' };
+      return await _rpcWorkerCall('DELETE', '/admin/dr-rules', { id }, { asLead: true });
+    }
+  },
+
+  // ---- Mod chat edit/delete (P1-7, v9.3.8) -------------------------------
+  // Worker enforces 5-min edit window + own-message-only authorship from
+  // the canonical token-derived username. Client just calls.
+  modMessageEdit: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const id = parseInt(args && args.id, 10);
+      const content = String(args && args.content || '');
+      if (!Number.isFinite(id) || id <= 0) return { ok: false, status: 0, error: 'missing id' };
+      if (!content) return { ok: false, status: 0, error: 'empty content' };
+      return await _rpcWorkerCall('PUT', '/mod/message/edit', { id, content });
+    }
+  },
+  modMessageDelete: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const id = parseInt(args && args.id, 10);
+      if (!Number.isFinite(id) || id <= 0) return { ok: false, status: 0, error: 'missing id' };
+      return await _rpcWorkerCall('DELETE', '/mod/message/delete', { id });
     }
   },
 
@@ -813,10 +1091,23 @@ const RPC_HANDLERS = {
   modBugReport: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
     async handler(args) {
+      // v9.3.13 (Vanguard H-3): cap debugSnapshot at 16KB before relay.
+      // The RPC arg-bytes ceiling is 256KB which a compromised mod token
+      // could spam to blow D1 row-size budget. 16KB is plenty for the
+      // snapshot fields we actually use (counts, status, env). Anything
+      // larger is truncated with a marker.
+      const _MAX_SNAPSHOT_BYTES = 16 * 1024;
+      let snap = args && args.debugSnapshot;
+      try {
+        if (snap && typeof snap !== 'string') snap = JSON.stringify(snap);
+        if (typeof snap === 'string' && snap.length > _MAX_SNAPSHOT_BYTES){
+          snap = snap.slice(0, _MAX_SNAPSHOT_BYTES) + '\n…[TRUNCATED by SW v9.3.13 — was ' + (args.debugSnapshot.length || '?') + ' bytes]';
+        }
+      } catch (_) { snap = '[snapshot serialization error]'; }
       return await _rpcWorkerCall('POST', '/bug/report', {
         title: args && args.title,
         description: args && args.description,
-        debugSnapshot: args && args.debugSnapshot,
+        debugSnapshot: snap,
         mod: args && args.mod,
         payload: args && args.payload
       });
@@ -1033,9 +1324,19 @@ const _ALLOWED_CONTENT_ORIGINS = [
 
 function _validateRpcSenderOrigin(callerCtx, sender) {
   if (callerCtx !== 'content') return true; // popup/options: no tab origin
+  // v9.3.15 (Vanguard Round-2 ER2-C-1): origin must be checked via
+  // `new URL().origin` exact-equal, NOT prefix-string matching. The pre-fix
+  // `url.indexOf(o) === 0` accepted hostname-confusion attacks like
+  // `https://greatawakening.win.evil.com/x` (string-prefix matches but
+  // origin is evil.com) and userinfo-spoof like
+  // `https://greatawakening.win@evil.com/`. String-prefix is NEVER a valid
+  // origin check.
   const url = sender && sender.url ? String(sender.url) : '';
+  if (!url) return false;
+  let parsedOrigin;
+  try { parsedOrigin = new URL(url).origin; } catch (_) { return false; }
   for (const o of _ALLOWED_CONTENT_ORIGINS) {
-    if (url.indexOf(o) === 0) return true;
+    if (parsedOrigin === o) return true;
   }
   return false;
 }

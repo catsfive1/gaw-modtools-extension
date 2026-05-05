@@ -116,8 +116,25 @@ $('exportBtn').addEventListener('click', async () => {
 });
 
 $('clearBtn').addEventListener('click', async () => {
-  if (!confirm('Clear ALL ModTools data (mod log, roster, death row, watchlist, verification, notes, intel cache)? This cannot be undone.')) return;
+  // v9.3.6 (noob-rollout audit fix): the confirm message previously omitted
+  // the most consequential data wiped here — your mod token. Without it, a
+  // mod has to ask their lead for a fresh rotation invite to recover.
+  if (!confirm(
+    'Clear ALL ModTools data?\n\n' +
+    'This wipes:\n' +
+    '  • Your mod token (you\'ll need a fresh rotation invite from your lead to recover)\n' +
+    '  • Lead token (if set)\n' +
+    '  • Mod log, roster, death row, watchlist, verification, notes, intel cache\n\n' +
+    'This cannot be undone. Continue?'
+  )) return;
   try {
+    // v9.3.13 (Vanguard M-1): explicitly clear the SW vault BEFORE wiping
+    // chrome.storage.local. Pre-fix, the storage wipe alone left the SW
+    // vault with the prior token cached (the onChanged listener treated
+    // newValue=undefined as no-op), so a "Clear All" appeared to leave the
+    // mod still authenticated until the SW evicted naturally. clearTokens
+    // RPC zeroes the cache atomically.
+    try { await chrome.runtime.sendMessage({ type: 'clearTokens' }); } catch (e) {}
     // v5.1.1: scope clear to ModTools-owned keys only (don't nuke unrelated settings)
     await chrome.storage.local.remove(OWNED_KEYS);
     // Also tell every open GAW tab to clear its localStorage - otherwise
@@ -139,13 +156,30 @@ $('clearBtn').addEventListener('click', async () => {
 });
 
 // v5.1.2: Debug snapshot button - collect from active GAW tab content script
+// v9.3.14 (Vanguard H-4): write a one-shot consent token to
+// chrome.storage.session BEFORE asking the content script for the snapshot.
+// The content script's getDebugSnapshot handler reads + validates + clears
+// that token within a 2s window. Closes the silent-PII-exfil vector where
+// any extension-surface compromise could trigger the message and walk away
+// with the full mod history.
 $('debugBtn').addEventListener('click', async () => {
   try {
     const tabs = await chrome.tabs.query({ url: GAW_TAB_PATTERNS, active: true, currentWindow: true });
     let snapshot = null;
     if (tabs.length > 0){
       try {
-        const resp = await chrome.tabs.sendMessage(tabs[0].id, { type: 'getDebugSnapshot' });
+        // v9.3.15 (Vanguard ER2-C-3): mint a one-shot consent nonce via SW
+        // RAM (NOT chrome.storage.session — that's content-script writable
+        // because background sets TRUSTED_AND_UNTRUSTED_CONTEXTS for the
+        // invite-staging flow). The popup is the only RPC caller allowed
+        // to mint; content scripts cannot. Embed the nonce in the message;
+        // content script forwards to SW for verification.
+        let nonce = null;
+        try {
+          const r = await chrome.runtime.sendMessage({ type: 'mintSnapshotConsent' });
+          if (r && r.ok) nonce = r.nonce;
+        } catch (_) { /* SW unavailable; handler will reject */ }
+        const resp = await chrome.tabs.sendMessage(tabs[0].id, { type: 'getDebugSnapshot', nonce: nonce });
         if (resp && resp.ok) snapshot = resp.snapshot;
       } catch (e) { /* no content script on this tab */ }
     }
@@ -171,6 +205,43 @@ $('debugBtn').addEventListener('click', async () => {
   }
 });
 
+// v9.3.14 (Vanguard L-2): Force re-hydrate button. Replaces the
+// window.__GAM_REHYDRATE() console snippet. Sends a `forceRehydrate` runtime
+// message to the active GAW tab; the content script re-reads
+// chrome.storage.local into both its own cache and the SW vault. No token
+// material is returned -- only length + boolean presence (Vanguard L-1).
+const __rehydrateBtn = document.getElementById('rehydrateBtn');
+if (__rehydrateBtn) {
+  __rehydrateBtn.addEventListener('click', async () => {
+    const status = document.getElementById('rehydrateStatus');
+    if (status) { status.textContent = 'rehydrating...'; status.className = 'pop-token-status'; }
+    try {
+      const tabs = await chrome.tabs.query({ url: GAW_TAB_PATTERNS, active: true, currentWindow: true });
+      if (!tabs || tabs.length === 0) {
+        if (status) { status.textContent = 'no active GAW tab -- open greatawakening.win in this window'; status.className = 'pop-token-status err'; }
+        return;
+      }
+      const r = await chrome.tabs.sendMessage(tabs[0].id, { type: 'forceRehydrate' });
+      if (r && r.ok) {
+        if (status) {
+          status.textContent = `OK: team=${r.hasTeamToken ? 'yes('+r.teamLen+')' : 'no'}, lead=${r.hasLeadToken ? 'yes('+r.leadLen+')' : 'no'}`;
+          status.className = 'pop-token-status ok';
+        }
+      } else {
+        if (status) {
+          status.textContent = 'failed: ' + (r && r.error || 'no response');
+          status.className = 'pop-token-status err';
+        }
+      }
+    } catch (e) {
+      if (status) {
+        status.textContent = 'error: ' + (e && e.message || String(e));
+        status.className = 'pop-token-status err';
+      }
+    }
+  });
+}
+
 // v5.2.0 H3: sniffer is no-op (MV3 isolated-world limitation) - stub kept for back-compat.
 async function refreshSniffLabel(){}
 
@@ -195,33 +266,34 @@ function __popupAskText(opts) {
   const o = opts || {};
   return new Promise(function (resolve) {
     try {
+      // v9.3.14 (Vanguard M-4 partial): inline style.cssText -> CSS classes.
       const backdrop = document.createElement('div');
-      backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2147483646;display:flex;align-items:center;justify-content:center;';
+      backdrop.className = 'gam-pop-modal-backdrop';
       const panel = document.createElement('div');
-      panel.style.cssText = 'background:#1a1c20;color:#e4e4e4;border-radius:8px;padding:14px 16px;min-width:260px;max-width:360px;font-family:ui-sans-serif,system-ui,sans-serif;';
+      panel.className = 'gam-pop-modal-panel';
       const title = document.createElement('div');
-      title.style.cssText = 'font-size:13px;font-weight:700;margin-bottom:6px;color:#4A9EFF;';
+      title.className = 'gam-pop-modal-title';
       title.textContent = String(o.title || 'Input required');
       const label = document.createElement('label');
-      label.style.cssText = 'display:block;font-size:11px;color:#aaa;margin-bottom:4px;';
+      label.className = 'gam-pop-modal-label';
       label.textContent = String(o.label || '');
       const input = document.createElement('input');
       input.type = 'text';
       input.placeholder = String(o.placeholder || '');
       input.maxLength = Number(o.max) || 120;
-      input.style.cssText = 'width:100%;background:#0f1114;color:#e4e4e4;border:1px solid #2a2a2a;border-radius:4px;padding:6px 8px;font-size:12px;box-sizing:border-box;';
+      input.className = 'gam-pop-modal-input';
       const err = document.createElement('div');
-      err.style.cssText = 'color:#E74C3C;font-size:11px;margin-top:4px;min-height:14px;';
+      err.className = 'gam-pop-modal-err';
       const btnRow = document.createElement('div');
-      btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:6px;margin-top:10px;';
+      btnRow.className = 'gam-pop-modal-btnrow';
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
       cancelBtn.textContent = 'Cancel';
-      cancelBtn.style.cssText = 'background:#2a2a2a;color:#e4e4e4;border:0;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px;';
+      cancelBtn.className = 'gam-pop-modal-btn-cancel';
       const okBtn = document.createElement('button');
       okBtn.type = 'button';
       okBtn.textContent = 'OK';
-      okBtn.style.cssText = 'background:#4A9EFF;color:#fff;border:0;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px;';
+      okBtn.className = 'gam-pop-modal-btn-ok';
       btnRow.appendChild(cancelBtn);
       btnRow.appendChild(okBtn);
       panel.appendChild(title);
@@ -266,26 +338,27 @@ function __popupConfirm(opts) {
   const o = opts || {};
   return new Promise(function (resolve) {
     try {
+      // v9.3.14 (Vanguard M-4 partial): inline style.cssText -> CSS classes.
       const backdrop = document.createElement('div');
-      backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2147483646;display:flex;align-items:center;justify-content:center;';
+      backdrop.className = 'gam-pop-modal-backdrop';
       const panel = document.createElement('div');
-      panel.style.cssText = 'background:#1a1c20;color:#e4e4e4;border-radius:8px;padding:14px 16px;min-width:260px;max-width:360px;font-family:ui-sans-serif,system-ui,sans-serif;';
+      panel.className = 'gam-pop-modal-panel';
       const title = document.createElement('div');
-      title.style.cssText = 'font-size:13px;font-weight:700;margin-bottom:6px;color:#4A9EFF;';
+      title.className = 'gam-pop-modal-title';
       title.textContent = String(o.title || 'Confirm');
       const body = document.createElement('div');
-      body.style.cssText = 'font-size:12px;color:#ddd;margin-bottom:10px;white-space:pre-wrap;word-break:break-word;';
+      body.className = 'gam-pop-modal-body';
       body.textContent = String(o.body || '');
       const btnRow = document.createElement('div');
-      btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:6px;';
+      btnRow.className = 'gam-pop-modal-btnrow no-margin';
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
       cancelBtn.textContent = String(o.cancelLabel || 'Cancel');
-      cancelBtn.style.cssText = 'background:#2a2a2a;color:#e4e4e4;border:0;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px;';
+      cancelBtn.className = 'gam-pop-modal-btn-cancel';
       const okBtn = document.createElement('button');
       okBtn.type = 'button';
       okBtn.textContent = String(o.okLabel || 'OK');
-      okBtn.style.cssText = 'background:#4A9EFF;color:#fff;border:0;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px;';
+      okBtn.className = 'gam-pop-modal-btn-ok';
       btnRow.appendChild(cancelBtn);
       btnRow.appendChild(okBtn);
       panel.appendChild(title);
@@ -393,7 +466,10 @@ async function loadToken() {
         statusEl.className = 'pop-token-status';
         statusEl.textContent = 'stored';
       } else {
-        statusEl.textContent = 'not configured';
+        // v9.2.5: direct new mods (e.g. PresidentialSeal pre-claim) toward
+        // the claim flow rather than the dead-end "not configured" message.
+        // v9.3.6: clearer first-run guidance per noob-rollout audit.
+        statusEl.textContent = '👋 First time? Click 📨 Claim invite below if you have a link, OR 📥 I have a rotation invite to enter the code manually. Both work.';
       }
       // Show claim-invite wrap when flag on (even before a code is staged --
       // clicking with nothing staged surfaces a clear status message).
@@ -406,13 +482,19 @@ async function loadToken() {
     const { gam_settings } = await chrome.storage.local.get('gam_settings');
     const s = gam_settings || {};
     const t = s.workerModToken || '';
-    $('tokenInput').value = t;
+    // v9.2.3: do NOT pre-fill the input when a token is already stored.
+    // Pre-filling caused team-rollout footgun: user clicks input, places
+    // cursor at end of pre-filled token, pastes their new token, save
+    // concatenates 48+48=96 chars (still passes regex, fails at worker).
+    // Leaving the input empty forces a clean replace on next paste.
+    $('tokenInput').value = '';
     const statusEl = $('tokenStatus');
     if (t) {
       statusEl.className = 'pop-token-status';
-      statusEl.textContent = 'stored (' + t.length + ' chars)';
+      statusEl.textContent = 'stored (' + t.length + ' chars) \u2014 paste a new value to replace';
     } else {
-      statusEl.textContent = 'not configured \u2014 cross-mod features disabled';
+      // v9.3.6: clearer first-run guidance per noob-rollout audit.
+      statusEl.textContent = '\u{1F44B} First time? Click \u{1F4E8} Claim invite below if you have a link, OR \u{1F4E5} I have a rotation invite to enter the code manually.';
     }
   } catch (e) {}
 }
@@ -487,11 +569,12 @@ async function loadLead() {
     const { gam_settings } = await chrome.storage.local.get('gam_settings');
     const s = gam_settings || {};
     const t = s.leadModToken || '';
-    $('leadInput').value = t;
+    // v9.2.3: same anti-concat fix as the team token input -- never pre-fill.
+    $('leadInput').value = '';
     const statusEl = $('leadStatus');
     if (t){
       statusEl.className = 'pop-token-status ok';
-      statusEl.textContent = 'stored (' + t.length + ' chars) \u2014 HUD + invites enabled';
+      statusEl.textContent = 'stored (' + t.length + ' chars) \u2014 paste new value to replace';
     } else {
       statusEl.textContent = 'lead-mod only feature';
     }
@@ -656,12 +739,17 @@ $('inviteBtn').addEventListener('click', function () { withLoading($('inviteBtn'
 // POST /admin/mod/rotation-invite-bulk.
 
 function __dmTemplate(username, code, ttlHours) {
-  return 'Hey ' + username + ', here is your rotation invite for ModTools.\n\n' +
-    'Open the ModTools popup, click "I have a rotation invite", enter your GAW ' +
-    'username (' + username + '), then paste this code:\n\n' +
+  // v9.2.6: lead with the clickable URL -- one-click claim is the path
+  // of least resistance for non-technical mods. Code-only paste fallback
+  // is kept for users whose Discord/email mangles the link.
+  const url = 'https://greatawakening.win/?mt_invite=' + encodeURIComponent(code);
+  return 'Hey ' + username + ', here is your rotation invite for GAW ModTools.\n\n' +
+    'Easiest way: click this link in the browser where you have ModTools installed (signed into GAW as ' + username + '):\n\n' +
+    url + '\n\n' +
+    'Then open the ModTools popup and click "I have a rotation invite". Confirm.\n\n' +
+    'Manual fallback (if the link is mangled): open the popup, click "I have a rotation invite", enter your GAW username (' + username + '), paste this code:\n\n' +
     code + '\n\n' +
-    'Expires in ' + (ttlHours || 72) + 'h and is single-use. Once you claim it, ' +
-    'your token will be one ONLY YOU know.';
+    'Expires in ' + (ttlHours || 72) + 'h and is single-use. Once you claim it, your token will be one ONLY YOU know.';
 }
 
 function __makeCopyBtn(label, payload, parentBtn) {
@@ -687,25 +775,40 @@ function __renderInviteResult(container, invite, ttlHours) {
   const existing = container.querySelector('.gam-roster-invite-result');
   if (existing) existing.remove();
 
+  // v9.3.14 (Vanguard M-4 partial): inline style.cssText -> CSS classes.
   const block = document.createElement('div');
   block.className = 'gam-roster-invite-result';
-  block.style.cssText = 'background:#0f1114;border:1px solid #2a2a2a;border-radius:4px;padding:6px;margin-top:4px';
 
   const codeRow = document.createElement('div');
-  codeRow.style.cssText = 'font-family:ui-monospace,monospace;font-size:10px;word-break:break-all;color:#e4e4e4;margin-bottom:4px';
+  codeRow.className = 'gam-invite-code-row';
   codeRow.textContent = invite.code;
   block.appendChild(codeRow);
 
+  // v9.2.6: full GAW invite URL — what the recipient mod actually clicks.
+  // The content script's URL detector (?mt_invite=CODE) is what stages the
+  // code into chrome.storage.session for the Claim button to consume.
+  const inviteUrl = 'https://greatawakening.win/?mt_invite=' + encodeURIComponent(invite.code);
+
+  const urlRow = document.createElement('div');
+  urlRow.className = 'gam-invite-url-row';
+  urlRow.textContent = inviteUrl;
+  block.appendChild(urlRow);
+
   const btnRow = document.createElement('div');
-  btnRow.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap';
-  btnRow.appendChild(__makeCopyBtn('Copy code', invite.code));
-  btnRow.appendChild(__makeCopyBtn('Copy DM', __dmTemplate(invite.username, invite.code, ttlHours)));
+  btnRow.className = 'gam-invite-btn-row';
+  // v9.2.6: "Copy invite link" is the lead's primary action. Most useful
+  // payload for handing to the target mod via Discord/Signal/etc.
+  btnRow.appendChild(__makeCopyBtn('🔗 Copy invite link', inviteUrl));
+  btnRow.appendChild(__makeCopyBtn('Copy code only', invite.code));
+  btnRow.appendChild(__makeCopyBtn('Copy DM template', __dmTemplate(invite.username, invite.code, ttlHours)));
   block.appendChild(btnRow);
 
   container.appendChild(block);
 
-  // Auto-copy the code so the lead can paste straight into Discord.
-  try { navigator.clipboard.writeText(invite.code); } catch (e) {}
+  // v9.2.6: auto-copy the FULL INVITE URL (was raw code). The URL is what
+  // the recipient pastes into their browser; the bare code on its own
+  // requires extra steps. URL is the primary lead artifact.
+  try { navigator.clipboard.writeText(inviteUrl); } catch (e) {}
 }
 
 async function __issueSingleFromRoster(username, rowEl, tokens) {
@@ -808,12 +911,17 @@ function __buildRosterRow(m, tokens) {
   info.style.cssText = 'flex:1;min-width:0';
 
   const name = document.createElement('div');
-  name.style.cssText = 'color:#e4e4e4;font-weight:600;font-size:12px';
+  // v9.2.3: ellipsis on long usernames so they never push the Re-issue button off-screen.
+  name.style.cssText = 'color:#e4e4e4;font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
   name.textContent = m.mod_username + (m.is_lead ? ' 👑' : '');
   info.appendChild(name);
 
   const status = document.createElement('div');
-  status.style.cssText = 'font-size:10px';
+  // v9.2.4: status text wraps naturally. Pre-fix, ellipsis truncated
+  // "⚠ never rotated -- lead can still impersonate" to "...lea...",
+  // hiding the actually-important warning. Full text is more useful
+  // than a tidy single line; wrap to 2 lines if needed.
+  status.style.cssText = 'font-size:10px;line-height:1.4';
   if (m.rotated_at) {
     status.style.color = '#3dd68c';
     status.textContent = '✓ rotated ' + new Date(m.rotated_at).toLocaleDateString() +
@@ -1117,6 +1225,29 @@ function _showVerifyTokenBtn() {
   if (c) c.addEventListener('click', function () { withLoading(c, 'claiming…', claimRotationInvite); });
 })();
 
+// v9.2.5: hide the "Rotate my token" button when there is no token to rotate.
+// Pre-fix, a fresh mod (e.g. PresidentialSeal pre-claim) saw a button that
+// makes no sense in their state. The button only applies once the mod has
+// a token to rotate FROM. Re-evaluated whenever the popup opens or storage
+// changes.
+(function gateRotateBtn(){
+  const r = $('rotateBtn');
+  if (!r) return;
+  function update(){
+    chrome.storage.local.get('gam_settings').then(function(out){
+      const s = (out && out.gam_settings) || {};
+      const has = !!(s.workerModToken && String(s.workerModToken).length >= 32);
+      r.style.display = has ? '' : 'none';
+    }).catch(function(){});
+  }
+  update();
+  try {
+    chrome.storage.onChanged.addListener(function(changes, area){
+      if (area === 'local' && changes && changes.gam_settings) update();
+    });
+  } catch (_) {}
+})();
+
 // v5.1.11: Manual crawler buttons + dashboard opener
 async function sendToActiveGawTab(msg) {
   const tabs = await chrome.tabs.query({ url: GAW_TAB_PATTERNS, active: true, currentWindow: true });
@@ -1330,10 +1461,30 @@ async function __claimInviteClick() {
     }
     const prefix = String(code).slice(0, 12);
     const suffix = String(code).slice(-4);
+
+    // v9.2.7: prompt for username so the worker can verify the invite is bound
+    // to the right mod. Pre-fix, this button hit the LEGACY /invite/claim
+    // endpoint which queries a different table (team_invites) and returned
+    // 404 for every per-mod rotation invite -- the entire reason
+    // PresidentialSeal kept hitting "404 invalid code" with a perfectly
+    // valid rotation invite in token_invites.
+    const username = await __popupAskText({
+      title: 'Claim rotation invite',
+      label: 'Your GAW username (any spelling \u2014 match is case-insensitive since v9.3.0)',
+      placeholder: 'e.g. PresidentialSeal',
+      max: 32,
+      validate: function (v) {
+        if (!v) return 'username required';
+        return /^[A-Za-z0-9_-]{2,32}$/.test(v) ? '' : 'invalid username shape';
+      }
+    });
+    if (!username) { statusEl.textContent = 'cancelled'; return; }
+
     const ok = await __popupConfirm({
-      title: 'Claim team invite?',
-      body: 'Invite code: ' + prefix + '\u2026' + suffix + '\n\n' +
-            'This will link this browser to your mod team and store a team token.\n\n' +
+      title: 'Claim rotation invite?',
+      body: 'Username: ' + username + '\n' +
+            'Invite code: ' + prefix + '\u2026' + suffix + '\n\n' +
+            'This generates a fresh team token bound to this browser.\n\n' +
             'ONLY CLICK OK if you were personally given this link by your lead mod.',
       okLabel: 'Claim',
       cancelLabel: 'Cancel'
@@ -1343,40 +1494,29 @@ async function __claimInviteClick() {
       return;
     }
     statusEl.textContent = 'claiming...';
-    // Route through the background relay -- same allowlist + token path the
-    // content script uses. Extension-page context -> sender.id === runtime id
-    // so the handler's origin guard passes.
-    const r = await chrome.runtime.sendMessage({
-      type: 'workerFetch',
-      path: '/invite/claim',
-      method: 'POST',
-      body: { code: code },
-      asLead: false
+
+    // v9.2.7: route through authClaimInvite RPC, which hits
+    // /mod/token/claim-rotation (correct endpoint for per-mod rotation
+    // invites). The RPC also stores the resulting token in the SW vault
+    // automatically, so we don't need a separate saveTokensSecurely step.
+    const rClaim = await chrome.runtime.sendMessage({
+      type: 'rpc',
+      name: 'authClaimInvite',
+      args: { code: code, username: username }
     });
-    if (!r || !r.ok) {
+    if (!rClaim || !rClaim.ok) {
       statusEl.className = 'pop-token-status err';
-      const hint = (r && r.status) ? ' (HTTP ' + r.status + ')' : '';
-      statusEl.textContent = 'claim rejected' + hint;
-      return;
-    }
-    let parsed = null;
-    try { parsed = JSON.parse(r.text || 'null'); } catch (e) { parsed = null; }
-    const modTok = parsed && typeof parsed.modToken === 'string' ? parsed.modToken : '';
-    if (!__isTokenShape(modTok)) {
-      statusEl.className = 'pop-token-status err';
-      statusEl.textContent = 'server returned malformed modToken \u2014 refused';
-      return;
-    }
-    // Store via relay (never chrome.storage.local direct from popup).
-    const save = await saveTokensSecurely({ workerModToken: modTok });
-    if (!save || !save.ok) {
-      statusEl.className = 'pop-token-status err';
-      statusEl.textContent = 'token store failed: ' + ((save && save.error) || 'unknown');
+      let msg = 'claim rejected';
+      if (rClaim && rClaim.status) msg += ' (HTTP ' + rClaim.status + ')';
+      if (rClaim && rClaim.data && rClaim.data.error) msg += ' -- ' + rClaim.data.error;
+      else if (rClaim && rClaim.error) msg += ' -- ' + rClaim.error;
+      statusEl.textContent = msg;
       return;
     }
     try { await chrome.storage.session.remove('gam_pending_invite'); } catch (e) {}
+    const claimData = rClaim.data || {};
     statusEl.className = 'pop-token-status ok';
-    statusEl.textContent = '\u2713 claimed \u2014 team token stored';
+    statusEl.textContent = '\u2713 claimed \u2014 you are now ' + (claimData.mod_username || username);
     try { await loadToken(); } catch (e) {}
     try { await loadLead(); } catch (e) {}
   } catch (e) {
@@ -1407,3 +1547,66 @@ loadStats();
 refreshSniffLabel();
 loadToken();
 loadLead();
+
+// =========================================================================
+// v9.3.1 (P0-4): team-wide settings — username flag TTL.
+// Worker enforces the filter on /flags/read; here we only present + write.
+// Lead-only UI (only renders when leadSection is visible).
+// =========================================================================
+async function loadTeamSettings(){
+  const inputEl = $('flagTtlInput');
+  const statusEl = $('flagTtlStatus');
+  if (!inputEl || !statusEl) return;
+  try {
+    const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modSettingsRead' });
+    if (!r || !r.ok) { statusEl.textContent = '(could not read team settings)'; return; }
+    const ttl = parseInt((r.data && r.data.settings && r.data.settings.username_flag_ttl_days), 10);
+    if (Number.isFinite(ttl) && ttl > 0) {
+      inputEl.value = String(ttl);
+      statusEl.className = 'pop-token-status';
+      statusEl.textContent = 'current: ' + ttl + 'd (server-enforced on flag reads)';
+    } else {
+      statusEl.textContent = 'default 30d';
+    }
+  } catch(e){
+    statusEl.className = 'pop-token-status err';
+    statusEl.textContent = 'load failed: ' + (e && e.message || e);
+  }
+}
+async function saveFlagTtl(){
+  const inputEl = $('flagTtlInput');
+  const statusEl = $('flagTtlStatus');
+  if (!inputEl || !statusEl) return;
+  const v = parseInt(inputEl.value, 10);
+  if (!Number.isFinite(v) || v < 1 || v > 365) {
+    statusEl.className = 'pop-token-status err';
+    statusEl.textContent = 'enter a number between 1 and 365';
+    return;
+  }
+  statusEl.className = 'pop-token-status';
+  statusEl.textContent = 'saving...';
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type:'rpc',
+      name:'adminSettingsWrite',
+      args:{ key:'username_flag_ttl_days', value:String(v) }
+    });
+    if (r && r.ok){
+      statusEl.className = 'pop-token-status ok';
+      statusEl.textContent = '✓ flag TTL = ' + v + 'd (live to all mods on next /flags/read)';
+    } else {
+      statusEl.className = 'pop-token-status err';
+      statusEl.textContent = 'save failed: HTTP ' + (r && r.status || '?') + (r && r.error ? ' — ' + r.error : '');
+    }
+  } catch(e){
+    statusEl.className = 'pop-token-status err';
+    statusEl.textContent = 'network error: ' + (e && e.message || e);
+  }
+}
+{
+  const btn = $('flagTtlSave');
+  if (btn) btn.addEventListener('click', function(){ withLoading(btn, 'saving...', saveFlagTtl); });
+  const inp = $('flagTtlInput');
+  if (inp) inp.addEventListener('keydown', function(e){ if (e.key === 'Enter') withLoading($('flagTtlSave'), 'saving...', saveFlagTtl); });
+}
+loadTeamSettings();

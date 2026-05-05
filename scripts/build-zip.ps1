@@ -79,6 +79,25 @@ try {
   Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $outZip -Force
   Remove-Item $stage -Recurse -Force
 
+  # v9.2.3: also extract into the "Load unpacked" folder Chrome reads from.
+  # Without this step, the user has to manually unzip every build before the
+  # extension reload arrow can pick up changes -- regression caught when the
+  # popup stayed at v9.2.2 after a clean v9.2.3 build because Chrome was
+  # still loading from a stale extraction.
+  $UnpackedDir = Join-Path $DistDir 'mod-tools dist'
+  try {
+    if (Test-Path $UnpackedDir) {
+      # Wipe contents (not the directory itself, so Chrome's path stays valid)
+      Get-ChildItem $UnpackedDir -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
+      New-Item -ItemType Directory -Path $UnpackedDir | Out-Null
+    }
+    Expand-Archive -Path $outZip -DestinationPath $UnpackedDir -Force
+    Log "extracted to: $UnpackedDir" 'Cyan'
+  } catch {
+    Log ("WARN: extract to '$UnpackedDir' failed: " + $_.Exception.Message) 'Yellow'
+  }
+
   $info = Get-Item $outZip
   $sha = (Get-FileHash $outZip -Algorithm SHA256).Hash.ToLower()
   $sizeKB = [math]::Round($info.Length / 1KB, 1)
