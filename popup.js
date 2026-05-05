@@ -561,7 +561,15 @@ async function loadLead() {
       } else {
         statusEl.textContent = 'lead-mod only feature';
       }
-      if (status.hasTeamToken) $('leadSection').style.display = '';
+      // v9.3.16 (Commander): NEVER show #leadSection to non-lead mods.
+      // Pre-fix this was gated on `hasTeamToken` (any mod) OR
+      // `workerModToken` presence \u2014 meaning every regular mod (e.g.
+      // PresidentialSeal) saw the Lead Mod Token paste field and the
+      // "lead-mod only feature" status line, which is confusing AND
+      // exposes lead-only surface to non-leads. Now: gate STRICTLY on
+      // worker /mod/whoami's `is_lead === true` response. Defaults
+      // hidden; only un-hidden when worker confirms lead identity.
+      await __applyLeadGate();
     } catch (e) {}
     return;
   }
@@ -578,9 +586,27 @@ async function loadLead() {
     } else {
       statusEl.textContent = 'lead-mod only feature';
     }
-    // Show section only if team token is set (lead-mod features require both)
-    if (s.workerModToken) $('leadSection').style.display = '';
+    // v9.3.16 (Commander): see __applyLeadGate above. Strict whoami-driven gate.
+    await __applyLeadGate();
   } catch (e) {}
+}
+// v9.3.16 (Commander): worker-verified lead gate. Calls modWhoami RPC.
+// Shows #leadSection ONLY if `is_lead === true`. Defaults hidden so a
+// regular mod (PresidentialSeal etc.) NEVER sees the lead surface even
+// if the popup loads before the network call returns.
+async function __applyLeadGate() {
+  const sec = $('leadSection');
+  if (!sec) return;
+  // Default hidden until proven lead.
+  sec.style.display = 'none';
+  try {
+    const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modWhoami' });
+    if (r && r.ok && r.data && r.data.is_lead === true) {
+      sec.style.display = '';
+    }
+  } catch (_) {
+    // Network/auth failure \u2192 stay hidden (fail-closed).
+  }
 }
 
 async function saveLead() {

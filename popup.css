@@ -1,129 +1,139 @@
-/* Popup - loop-5 polish: tighter grid, stat card hierarchy, header gradient */
+/* ───────────────────────────────────────────────────────────────────────
+   Popup — v9.4.0 design pass
+   Unified design language with the in-page UI (modtools.js GAM_CSS).
+   PALETTE (mirrors `const C` in modtools.js):
+     BG #0c0e12  BG2 #181b20  BG3 #252a31
+     BORDER #2a2f38  BORDER2 #3a3f48
+     ACCENT #4A9EFF  GREEN #3dd68c  RED #f04040
+     WARN #f0a040  PURPLE #a78bfa  YELLOW #ffd60a
+     TEXT #e8eaed  TEXT2 #8b929e  TEXT3 #5c6370
+   SPACING: 4 / 8 / 12 / 16 grid. No 5/6/7/9/10/11 pixel values.
+   TYPE SCALE: 10 / 11 / 12 / 13. Weights 400 / 600 / 700 only.
+   ─────────────────────────────────────────────────────────────────────── */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
-  /* v9.2.4: bumped from 460px to 520px so the rotation roster's status
-     text ("⚠ never rotated -- lead can still impersonate") fits beside
-     the Re-issue button without ellipsis truncating the warning to
-     "lea..." -- the truncation hid the actually-important info.
-     Well within Chrome's 25-800px popup spec. */
+  /* v9.2.4: 520px width to fit rotation roster row labels without ellipsis. */
   width: 520px;
   background: #0c0e12;
   color: #e8eaed;
-  font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font: 12px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 }
 
+/* ── Header ─────────────────────────────────────────────────────────── */
 .pop-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 11px 14px;
-  background: linear-gradient(180deg, #1a1e26 0%, #141720 100%);
-  border-bottom: 1px solid #252a33;
+  padding: 8px 12px;
+  background: linear-gradient(180deg, #181b20 0%, #0c0e12 100%);
+  border-bottom: 1px solid #2a2f38;
 }
 .pop-brand {
-  font-weight: 800;
-  font-size: 13px;
+  font-weight: 700;
+  font-size: 12px;
   color: #4A9EFF;
   letter-spacing: 0.1px;
 }
 .pop-ver {
   font-size: 10px;
-  color: #4a5060;
-  font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+  color: #5c6370;
+  font-family: 'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;
   background: rgba(74,158,255,.08);
-  padding: 2px 6px;
+  padding: 1px 6px;
   border-radius: 3px;
 }
 
+/* ── Stats grid ─────────────────────────────────────────────────────── */
 .pop-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  padding: 12px 14px;
+  gap: 4px;
+  padding: 8px 12px;
 }
 .pop-stat {
-  background: #141720;
-  border: 1px solid #232830;
-  border-radius: 5px;
-  padding: 8px 6px;
+  background: #181b20;
+  border: 1px solid #2a2f38;
+  border-radius: 4px;
+  padding: 6px 4px;
   text-align: center;
-  transition: border-color 0.12s, background 0.12s;
+  transition: border-color .12s, background .12s;
 }
-.pop-stat:hover { border-color: #3a4050; background: #181c24; }
+.pop-stat:hover { border-color: #3a3f48; background: #1c2028; }
 .pop-stat-val {
-  font-size: 22px;
-  font-weight: 800;
+  font-size: 20px;
+  font-weight: 700;
   line-height: 1;
   color: #e8eaed;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.4px;
 }
 .pop-stat-label {
-  font-size: 8px;
-  color: #4a5060;
+  font-size: 9px;
+  color: #5c6370;
   text-transform: uppercase;
   letter-spacing: 0.6px;
   margin-top: 4px;
   font-weight: 600;
 }
 
+/* ── Alert banner ───────────────────────────────────────────────────── */
 .pop-alert {
-  margin: 0 14px 10px;
-  padding: 7px 11px;
-  background: rgba(240, 64, 64, 0.1);
-  border: 1px solid rgba(240, 64, 64, 0.3);
+  margin: 0 12px 8px;
+  padding: 6px 10px;
+  background: rgba(240,64,64,.10);
+  border: 1px solid rgba(240,64,64,.3);
   border-left: 3px solid #f04040;
   border-radius: 4px;
   color: #f06060;
   font-size: 11px;
   font-weight: 600;
-  line-height: 1.45;
+  line-height: 1.4;
 }
 
+/* ── Action buttons ─────────────────────────────────────────────────── */
 .pop-actions {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 0 14px 12px;
+  gap: 4px;
+  padding: 0 12px 8px;
 }
 .pop-btn {
   display: block;
-  padding: 7px 12px;
-  background: #141720;
-  border: 1px solid #252b35;
-  border-radius: 5px;
-  color: #c8cdd6;
+  padding: 6px 12px;
+  background: #181b20;
+  border: 1px solid #2a2f38;
+  border-radius: 4px;
+  color: #e8eaed;
   text-decoration: none;
   font-size: 11px;
   font-weight: 600;
   text-align: center;
-  transition: background 0.1s, border-color 0.1s, color 0.1s;
+  transition: background .1s, border-color .1s, color .1s;
   letter-spacing: 0.1px;
 }
 .pop-btn:hover {
-  background: #1c2130;
-  border-color: #3a4255;
-  color: #e8eaed;
+  background: #1c2028;
+  border-color: #3a3f48;
 }
 .pop-btn-primary {
   background: #4A9EFF;
   border-color: #4A9EFF;
   color: #fff;
   font-size: 12px;
-  padding: 8px 12px;
+  padding: 7px 12px;
 }
 .pop-btn-primary:hover {
   background: #5aadff;
   border-color: #5aadff;
-  color: #fff;
 }
 
+/* ── Footer ─────────────────────────────────────────────────────────── */
 .pop-footer {
   display: flex;
   justify-content: center;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
+  padding: 8px 12px;
   border-top: 1px solid #2a2f38;
   background: #181b20;
 }
@@ -136,54 +146,53 @@ html, body {
   font-family: inherit;
   padding: 2px 4px;
   border-radius: 4px;
-  transition: color 0.15s;
+  transition: color .12s;
 }
 .pop-link:hover { color: #e8eaed; }
 .pop-link-danger:hover { color: #f04040; }
 .pop-sep { color: #5c6370; font-size: 11px; }
 
-/* v8.5.3: section label above tool rows */
+/* ── Section labels ─────────────────────────────────────────────────── */
 .pop-section-label {
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.7px;
-  color: #3a4050;
-  padding: 8px 14px 0;
+  color: #5c6370;
+  padding: 8px 12px 0;
 }
 
-/* v5.1.2 tools row (Debug snapshot + Sniffer toggle) */
+/* ── Tool rows ──────────────────────────────────────────────────────── */
 .pop-tools {
   display: flex;
-  gap: 5px;
-  padding: 6px 14px 8px;
-  border-top: 1px solid #1f2430;
+  gap: 4px;
+  padding: 4px 12px 8px;
 }
 .pop-btn-ghost {
   flex: 1;
-  padding: 6px 8px;
+  padding: 5px 8px;
   background: transparent;
-  border: 1px solid #252b35;
+  border: 1px solid #2a2f38;
   border-radius: 4px;
-  color: #6b737f;
+  color: #8b929e;
   font: 10px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-weight: 600;
   cursor: pointer;
   text-align: center;
-  transition: border-color 0.1s, color 0.1s, background 0.1s;
+  transition: border-color .1s, color .1s, background .1s;
   letter-spacing: 0.1px;
 }
 .pop-btn-ghost:hover {
   border-color: #4A9EFF;
-  color: #c8d4e8;
-  background: rgba(74,158,255,.05);
+  color: #e8eaed;
+  background: rgba(74,158,255,.06);
 }
 .pop-btn-ghost.active {
-  background: rgba(240, 64, 64, 0.12);
+  background: rgba(240,64,64,.12);
   border-color: #f04040;
   color: #f04040;
 }
-/* v8.5.3: in-flight state — prevents double-submit and shows action is running */
+/* v8.5.3: in-flight state */
 .pop-btn-ghost:disabled,
 .pop-btn-ghost.loading {
   cursor: not-allowed;
@@ -197,13 +206,13 @@ html, body {
   pointer-events: none;
 }
 
-/* v5.1.6: team mod token input */
+/* ── Token panel ────────────────────────────────────────────────────── */
 .pop-token {
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 8px;
   align-items: center;
-  padding: 12px 16px 10px;
+  padding: 8px 12px;
   border-top: 1px solid #2a2f38;
 }
 .pop-token label {
@@ -213,14 +222,14 @@ html, body {
   letter-spacing: 0.3px;
 }
 .pop-token input {
-  background: #181b20;
+  background: #0c0e12;
   border: 1px solid #2a2f38;
   border-radius: 4px;
   color: #e8eaed;
   font: 11px 'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;
-  padding: 6px 10px;
+  padding: 5px 8px;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color .12s;
   min-width: 0;
 }
 .pop-token input:focus { border-color: #4A9EFF; }
@@ -230,51 +239,43 @@ html, body {
   font-size: 10px;
   color: #5c6370;
   margin-top: 2px;
-  min-height: 14px;
+  min-height: 12px;
 }
 .pop-token-status.ok { color: #3dd68c; }
 .pop-token-status.err { color: #f04040; }
 
-/* v8.5.3: one-line capability hint — sits on its own row spanning all columns */
+/* v8.5.3: capability hint, sits on row 2 */
 .pop-token-hint {
   grid-column: 1 / -1;
   grid-row: 2;
-  font-size: 9px;
-  color: #3a4050;
-  margin-bottom: 2px;
-  line-height: 1.4;
+  font-size: 10px;
+  color: #5c6370;
+  margin-bottom: 0;
+  line-height: 1.35;
 }
-/* Explicitly anchor input+button to row 1 so they share row with label,
-   and hint gets row 2, and status/tools continue naturally on rows 3+. */
 .pop-token label   { grid-column: 1; grid-row: 1; }
 .pop-token input   { grid-column: 2; grid-row: 1; }
 .pop-token > button { grid-column: 3; grid-row: 1; }
 
-/* v9.3.14 (Vanguard M-4 partial): the LARGEST inline-style blocks — the
-   modal scaffold used by __popupAskText / __popupConfirm and the invite
-   result block built by __renderInviteResult — now use CSS classes instead
-   of style.cssText. The smaller per-element inline-style assignments still
-   exist in popup.js (token status colors, error messages, single-row layout
-   tweaks) and the popup.html CSP still allows 'unsafe-inline' on style-src.
-   Dropping 'unsafe-inline' entirely is gated on cleaning ALL inline-style
-   sites; tracked for v9.4. */
+/* ── Modal scaffold (used by popupAskText / popupConfirm) ───────────── */
 .gam-pop-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0,0,0,.55);
   z-index: 2147483646;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .gam-pop-modal-panel {
-  background: #1a1c20;
-  color: #e4e4e4;
-  border-radius: 8px;
-  padding: 14px 16px;
+  background: #181b20;
+  color: #e8eaed;
+  border: 1px solid #3a3f48;
+  border-radius: 6px;
+  padding: 12px 14px;
   min-width: 260px;
   max-width: 360px;
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 }
 .gam-pop-modal-title {
   font-size: 13px;
@@ -285,42 +286,42 @@ html, body {
 .gam-pop-modal-label {
   display: block;
   font-size: 11px;
-  color: #aaa;
+  color: #8b929e;
   margin-bottom: 4px;
 }
 .gam-pop-modal-input {
   width: 100%;
-  background: #0f1114;
-  color: #e4e4e4;
-  border: 1px solid #2a2a2a;
+  background: #0c0e12;
+  color: #e8eaed;
+  border: 1px solid #2a2f38;
   border-radius: 4px;
   padding: 6px 8px;
   font-size: 12px;
   box-sizing: border-box;
 }
 .gam-pop-modal-err {
-  color: #E74C3C;
+  color: #f04040;
   font-size: 11px;
   margin-top: 4px;
-  min-height: 14px;
+  min-height: 12px;
 }
 .gam-pop-modal-btnrow {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 .gam-pop-modal-btnrow.no-margin { margin-top: 0; }
 .gam-pop-modal-body {
   font-size: 12px;
-  color: #ddd;
-  margin-bottom: 10px;
+  color: #e8eaed;
+  margin-bottom: 8px;
   white-space: pre-wrap;
   word-break: break-word;
 }
 .gam-pop-modal-btn-cancel {
-  background: #2a2a2a;
-  color: #e4e4e4;
+  background: #252a31;
+  color: #e8eaed;
   border: 0;
   border-radius: 4px;
   padding: 4px 10px;
@@ -337,29 +338,29 @@ html, body {
   font-size: 12px;
 }
 
-/* __renderInviteResult */
+/* ── Invite result panel ────────────────────────────────────────────── */
 .gam-roster-invite-result {
-  background: #0f1114;
-  border: 1px solid #2a2a2a;
+  background: #0c0e12;
+  border: 1px solid #2a2f38;
   border-radius: 4px;
-  padding: 6px;
+  padding: 6px 8px;
   margin-top: 4px;
 }
 .gam-invite-code-row {
-  font-family: ui-monospace, monospace;
+  font-family: 'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;
   font-size: 10px;
   word-break: break-all;
-  color: #e4e4e4;
+  color: #e8eaed;
   margin-bottom: 4px;
 }
 .gam-invite-url-row {
-  font-family: ui-monospace, monospace;
-  font-size: 9px;
+  font-family: 'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;
+  font-size: 10px;
   word-break: break-all;
-  color: #7aa7ff;
+  color: #4A9EFF;
   margin-bottom: 4px;
   padding: 4px;
-  background: #0a0c10;
+  background: #181b20;
   border-radius: 3px;
 }
 .gam-invite-btn-row {

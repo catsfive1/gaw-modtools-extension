@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.3.15';
+  const VERSION = 'v9.4.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -3357,7 +3357,9 @@
         const rows = Object.values(snap.entries || {}).filter(function(x){ return x && x.status === 'open'; });
         const pop = el('div', {
           id: 'gam-v80-park-popover',
-          style: { position: 'fixed', background: '#1a202c', color: '#e2e8f0', border: '1px solid #4a5568', borderRadius: '6px', padding: '10px 12px', minWidth: '360px', maxWidth: '480px', maxHeight: '420px', overflowY: 'auto', zIndex: 9999990, fontSize: '12px' }
+          // v9.4.0 design pass: align to C palette + 70vh so most parked-review
+          // sessions fit without scrollbar; spawns one only when list overflows viewport.
+          style: { position: 'fixed', background: C.BG, color: C.TEXT, border: '1px solid '+C.BORDER2, borderRadius: '6px', padding: '12px', minWidth: '360px', maxWidth: '480px', maxHeight: '70vh', overflowY: 'auto', zIndex: 9999990, fontSize: '12px' }
         });
         const head = el('div', { style: { fontWeight: '600', marginBottom: '8px' } });
         head.textContent = 'Parked items (' + rows.length + ')';
@@ -5733,12 +5735,18 @@
     // different selectors. The unified selector now catches every backdrop
     // variant; orphans cleaned on every Escape, modal-open, and the new
     // _gamOrphanBackdropSweep() init/interval pass.
+    // v9.3.16: .gam-preflight-wrap added. Pre-fix, preflight confirmations
+    // over the Mod Console modal could leave their wrap+blur in DOM if the
+    // async resolver was lost (e.g. caller awaited and threw before resolve
+    // could fire). closeAllPanels now sweeps the wrap so an ESC/click-out
+    // hard-cancels stale preflights along with everything else.
     const SEL = [
       '.gam-modal',
       '#gam-backdrop',
       '.gam-modal-backdrop',          // v7.2 asktext backdrop (line ~2173)
       '#gam-intel-backdrop',          // intel drawer (line ~4505)
       '#gam-token-onboard-backdrop',  // token onboarding modal (line ~14061)
+      '.gam-preflight-wrap',          // v5.1.1 preflight confirmation (line ~14102)
       '[data-gam-orphan-backdrop]'    // opt-in marker for any future backdrops
     ].join(', ');
     document.querySelectorAll(SEL).forEach(e => {
@@ -5756,11 +5764,36 @@
   // backdrops that have nothing left to backdrop.
   function _gamOrphanBackdropSweep(){
     try {
-      const backdrops = document.querySelectorAll('#gam-backdrop, .gam-modal-backdrop, #gam-intel-backdrop');
+      // v9.3.16: include .gam-preflight-wrap. Whole wrap removed (not just the
+      // inner backdrop) because the wrap owns the document-level Escape handler
+      // and the async resolver -- both abandoned when the wrap leaks. A live
+      // preflight is detected by checking for the cancel/confirm buttons which
+      // only exist while the wrap is mounted; if those are absent and the wrap
+      // is still in DOM, the wrap is orphaned.
+      const backdrops = document.querySelectorAll(
+        '#gam-backdrop, .gam-modal-backdrop, #gam-intel-backdrop, .gam-preflight-wrap'
+      );
       if (!backdrops.length) return;
       const liveModal = document.querySelector('.gam-modal, #gam-mc-panel.gam-modal-open, #gam-intel-drawer.gam-intel-open');
       const liveOnboardInput = document.querySelector('#gam-tob-input:focus, #gam-token-onboard-backdrop input:focus');
-      if (liveModal || liveOnboardInput) return;
+      // Preflight wraps are LIVE if they were mounted in the last 30s; we use
+      // the wrap-level dataset stamp set on creation as the cheap freshness
+      // signal. Anything older than the sweep interval is fair game.
+      if (liveModal || liveOnboardInput) {
+        // A modal is open -- ONLY sweep .gam-preflight-wrap that have NO
+        // open buttons (the wrap should always have data-pf="yes" + "no"
+        // children while live). This catches a partial-render leak without
+        // killing a healthy preflight that's stacked over a modal.
+        const stuck = [...backdrops].filter(b =>
+          b.classList && b.classList.contains('gam-preflight-wrap') &&
+          !b.querySelector('[data-pf="yes"]')
+        );
+        stuck.forEach(b => { try { b.remove(); } catch(_){} });
+        if (stuck.length) {
+          console.info('%c[modtools v9.3.16] preflight orphan sweep: removed ' + stuck.length + ' stale wrap(s) over live modal', 'color:#f0a040;font-weight:700');
+        }
+        return;
+      }
       backdrops.forEach(b => {
         try { b.remove(); } catch(_){}
       });
@@ -7963,9 +7996,90 @@ Analyze this comment against the community rules. Then write a brief, profession
     actions.appendChild(strip);
   }
 
+  // v9.3.16 (Commander 2026-05-05): byline cleanup.
+  // GAW native byline DOM (verified live 2026-05-05):
+  //   .details > span.since
+  //     TEXT_NODE "posted "
+  //     <time class="timeago">"15 hours"</time>      <-- count + unit, no "ago"
+  //     TEXT_NODE " ago by "
+  //     <a class="author">name</a>
+  // Commander wants: "15h ago name" (no "posted", no " by ", compact unit).
+  // We rewrite text nodes + the <time> textContent in place. Idempotent via
+  // data-gam-byline-compact='1' on the .since host. .author click target
+  // and absolute-time <time title="..."> tooltip are preserved.
+  function compactTimeUnit(s){
+    s = String(s || '').trim();
+    if (!s || /^\d+[smhdwy]o?$/i.test(s) || /^just now$/i.test(s)) return s;
+    return s
+      .replace(/^(\d+)\s+seconds?$/i, '$1s')
+      .replace(/^(\d+)\s+minutes?$/i, '$1m')
+      .replace(/^(\d+)\s+hours?$/i,   '$1h')
+      .replace(/^(\d+)\s+days?$/i,    '$1d')
+      .replace(/^(\d+)\s+weeks?$/i,   '$1w')
+      .replace(/^(\d+)\s+months?$/i,  '$1mo')
+      .replace(/^(\d+)\s+years?$/i,   '$1y')
+      // also handle "N hours ago" form, in case some surfaces inline it
+      .replace(/^(\d+)\s+seconds?\s+ago$/i, '$1s ago')
+      .replace(/^(\d+)\s+minutes?\s+ago$/i, '$1m ago')
+      .replace(/^(\d+)\s+hours?\s+ago$/i,   '$1h ago')
+      .replace(/^(\d+)\s+days?\s+ago$/i,    '$1d ago')
+      .replace(/^(\d+)\s+weeks?\s+ago$/i,   '$1w ago')
+      .replace(/^(\d+)\s+months?\s+ago$/i,  '$1mo ago')
+      .replace(/^(\d+)\s+years?\s+ago$/i,   '$1y ago');
+  }
+  function compactBylines(){
+    // Native GAW bylines live in .details > span.since.
+    document.querySelectorAll('.post .details > span.since, .comment .details > span.since').forEach(host => {
+      if (host.dataset.gamBylineCompact === '1') return;
+      // Drop "posted " prefix and " by " joiner from text-node children only.
+      // .author anchor and <time> element are preserved untouched (click targets
+      // and tooltip-title attribute survive).
+      for (const node of Array.from(host.childNodes)) {
+        if (node.nodeType !== 3) continue;
+        const before = node.nodeValue;
+        const after = before
+          .replace(/^\s*posted\s+/i, '')
+          .replace(/\s+by\s+/i, ' ');
+        if (after !== before) node.nodeValue = after;
+      }
+      // Compact the <time> text ("15 hours" -> "15h"). GAW also has a 'ago'
+      // suffix in the surrounding text node which we leave intact.
+      const timeEl = host.querySelector('time, span[title]');
+      if (timeEl) {
+        const t = (timeEl.textContent || '').trim();
+        const compact = compactTimeUnit(t);
+        if (compact !== t) timeEl.textContent = compact;
+      }
+      host.dataset.gamBylineCompact = '1';
+    });
+  }
+  // Inject the CSS that tightens vertical gaps between title / byline / meta
+  // on every GAW post-or-comment row. Scoped to .post and .comment so we don't
+  // touch popups, modals, or the modtools UI.
+  (function injectBylineCompactCSS(){
+    if (document.__v9316_byline_css) return;
+    document.__v9316_byline_css = true;
+    try {
+      const style = document.createElement('style');
+      style.id = 'gam-v9316-byline-compact';
+      style.textContent = [
+        '/* v9.3.16 byline compact - tighten title/byline/meta spacing */',
+        '.post .title{margin-bottom:1px !important;line-height:1.25 !important}',
+        '.post .details{padding-top:1px !important;padding-bottom:1px !important;line-height:1.3 !important}',
+        '.post .details > *{margin-top:0 !important;margin-bottom:0 !important}',
+        '.post .stats{margin-top:1px !important;line-height:1.3 !important}',
+        '.comment .details{line-height:1.3 !important}'
+      ].join('\n');
+      (document.head || document.documentElement).appendChild(style);
+    } catch(e){}
+  })();
+
   function injectAllStrips(){
     if (FallbackMode) return; // T4: native UI takes over
     document.querySelectorAll('.post, .comment').forEach(buildActionStrip);
+    // v9.3.16: piggyback byline compaction on the universal post-mutation hook
+    // so newly-rendered (infinite-scroll, JSON-fetch) posts get the same treatment.
+    try { compactBylines(); } catch(e){}
   }
 
   // Close any open strip dropdown on outside click
@@ -11817,13 +11931,13 @@ Analyze this comment against the community rules. Then write a brief, profession
     wrap.setAttribute('data-type', 'post');
     wrap.setAttribute('data-gam-jsonpost', '1');
     wrap.innerHTML = `
-      <div class="details" style="padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.05)">
+      <div class="details" style="padding:6px 12px;border-bottom:1px solid rgba(255,255,255,.05)">
         <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
           <a class="title" href="${_esc(url)}" style="font-weight:600">${_esc(title)}</a>
           <span style="color:#888;font-size:11px">\u25B2 ${score} \u00B7 \u{1F4AC} ${comments} \u00B7 ${_esc(createdTxt)} \u00B7 /c/${_esc(guildName)}</span>
         </div>
-        <div style="color:#999;font-size:11px;margin-top:3px">
-          posted by <a class="author" href="/u/${encodeURIComponent(safeAuthor)}/">${_esc(safeAuthor)}</a>
+        <div style="color:#999;font-size:11px;margin-top:1px">
+          <a class="author" href="/u/${encodeURIComponent(safeAuthor)}/">${_esc(safeAuthor)}</a>
         </div>
       </div>`;
     return wrap;
@@ -13125,22 +13239,43 @@ Analyze this comment against the community rules. Then write a brief, profession
     const drBtn = el('button', { id:'gam-dr-count', cls:'gam-bar-icon', style:{display:'none'}, title:'Death Row queue' });
     drBtn.addEventListener('click', openModLog);
 
-    // v9.3.7 (P1-4): SIREN chip. Live count of TARDs (SUS users) +
-    // recent DR adds (last 24h). Tooltip shows "CURRENT STATUS: N TARDs,
-    // M DRs added in last 24h". Click opens the mod log filtered.
-    const sirenBtn = el('button', { id:'gam-siren-count', cls:'gam-bar-icon', style:{display:'none'}, title:'Live status' });
+    // v9.3.7 (P1-4) / v9.3.16 (Commander): SIREN chip. Live count of
+    // TARDs (SUS users) + recent DR adds (last 24h).
+    // v9.3.16 changes per Commander 2026-05-05:
+    //   1) count moved to LEFT of the siren emoji ("5 🚨" not "🚨 5").
+    //   2) added a "✕" Dismiss button. Hides the chip until total
+    //      crosses a higher mark — i.e. a NEW alert event re-shows.
+    //      Persisted via getSetting('siren.dismissedAtTotal') so a
+    //      reload doesn't un-dismiss.
+    const sirenBtn = el('button', { id:'gam-siren-count', cls:'gam-bar-icon', style:{display:'none'}, title:'Live status — click to open mod log' });
     sirenBtn.addEventListener('click', openModLog);
+    const sirenClearBtn = el('button', { id:'gam-siren-clear', cls:'gam-bar-icon', style:{display:'none', fontSize:'11px', color:C.TEXT3, padding:'0 4px'}, title:'Dismiss alert (re-shows on new activity)' }, '✕');
+    sirenClearBtn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const lastTotal = parseInt(sirenBtn.getAttribute('data-current-total') || '0', 10) || 0;
+      try { setSetting('siren.dismissedAtTotal', lastTotal); } catch(_){}
+      sirenBtn.style.display = 'none';
+      sirenClearBtn.style.display = 'none';
+    });
     function _updateSirenChip(){
       try {
         const susCount = _susState.rows.size;
         const since24h = Date.now() - 86400_000;
         const recentDr = (getDeathRow() || []).filter(d => (d && d.addedAt || 0) >= since24h).length;
         const total = susCount + recentDr;
-        if (total === 0) { sirenBtn.style.display = 'none'; return; }
+        const dismissedAt = parseInt(getSetting('siren.dismissedAtTotal', '0'), 10) || 0;
+        // Hide if zero, or if user dismissed and no new activity has bumped the total.
+        if (total === 0 || (dismissedAt > 0 && total <= dismissedAt)) {
+          sirenBtn.style.display = 'none';
+          sirenClearBtn.style.display = 'none';
+          return;
+        }
         sirenBtn.style.display = '';
-        sirenBtn.innerHTML = '\u{1F6A8} ' + total;
-        // Color tier: red if 5+ recent DRs OR any HOT SUS (>8 comments/24h),
-        // amber otherwise.
+        sirenClearBtn.style.display = '';
+        sirenBtn.setAttribute('data-current-total', String(total));
+        // v9.3.16: count BEFORE emoji per Commander.
+        sirenBtn.innerHTML = total + ' \u{1F6A8}';
+        // Color tier: red if 5+ recent DRs OR any HOT SUS (>8 comments/24h), amber otherwise.
         const isHot = recentDr >= 5 || [..._susState.rows.values()].some(r => (r.comment_count_24h || 0) > 8);
         sirenBtn.style.color = isHot ? C.RED : C.WARN;
         sirenBtn.title = 'CURRENT STATUS: ' + susCount + ' TARDs (SUS), ' + recentDr + ' DRs added in last 24h — click to open mod log';
@@ -13198,6 +13333,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       filterSel,
       drBtn,
       sirenBtn,
+      sirenClearBtn,
       mmBtn,
       c5Btn,
       IS_USERS_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.ACCENT, cursor:'default'}, title:'Triage Console active' }, '\u{1F4CA}') : null,
@@ -13449,7 +13585,8 @@ Analyze this comment against the community rules. Then write a brief, profession
 /* Snack / Toast */
 /* v6.0.1: snack sits 100px from the right edge (was right:14px). Status bar
    now centered, so notifications have clean real-estate on the right. */
-.gam-snack{position:fixed;bottom:14px;right:100px;z-index:9999999;padding:7px 14px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;opacity:0;transform:translateY(6px) scale(.97);transition:opacity .14s,transform .18s;pointer-events:none;box-shadow:0 6px 20px rgba(0,0,0,.55),0 1px 0 rgba(255,255,255,.05) inset;letter-spacing:.15px;max-width:340px}
+/* v9.4.0: snack padding 7/14→6/12, single shadow layer (no inset stack). */
+.gam-snack{position:fixed;bottom:14px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;opacity:0;transform:translateY(6px) scale(.97);transition:opacity .14s,transform .18s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px}
 .gam-snack-show{opacity:1;transform:translateY(0)}
 .gam-snack-success{background:${C.GREEN};color:#0f1114}
 .gam-snack-error{background:${C.RED};color:#fff}
@@ -13473,13 +13610,17 @@ Analyze this comment against the community rules. Then write a brief, profession
    [data-dock] so only the chat panel matches it (further down the file). */
 #gam-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999990;opacity:0;transition:opacity .2s}
 /* ── Iter-3: modal + console polish ── */
-.gam-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.97);z-index:9999995;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:8px;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};opacity:0;transition:opacity .15s,transform .18s;box-shadow:0 32px 64px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.04);max-height:85vh;display:flex;flex-direction:column;overflow:hidden}
-.gam-modal-header{display:flex;justify-content:space-between;align-items:center;padding:11px 16px;border-bottom:1px solid ${C.BORDER};background:linear-gradient(180deg,${C.BG2} 0%,${C.BG} 100%)}
+/* v9.4.0: dropped the inset 1px highlight (the ",0 0 0 1px rgba(255,255,255,.04)"
+   was pure visual noise on a 1px border). Shadow now a single clean layer. */
+.gam-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.97);z-index:9999995;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:8px;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};opacity:0;transition:opacity .15s,transform .18s;box-shadow:0 24px 48px rgba(0,0,0,.6);max-height:85vh;display:flex;flex-direction:column;overflow:hidden}
+/* v9.4.0: header padding 11/16 → 10/14, body padding 16 → 12. Closes
+   ~10px of vertical+horizontal whitespace per modal — substantial when
+   stacked across stats / actions / form fields. */
+.gam-modal-header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid ${C.BORDER};background:linear-gradient(180deg,${C.BG2} 0%,${C.BG} 100%)}
 .gam-modal-title{font-weight:700;font-size:13px;letter-spacing:.1px;flex:1}
 .gam-modal-close{background:none;border:none;color:${C.TEXT3};font-size:18px;cursor:pointer;padding:2px 6px;line-height:1;transition:color .1s,background .1s;border-radius:4px}
 .gam-modal-close:hover{color:${C.TEXT};background:rgba(255,255,255,.06)}
-.gam-modal-close:hover{color:${C.TEXT}}
-.gam-modal-body{padding:16px;overflow-y:auto;flex:1}
+.gam-modal-body{padding:12px 14px;overflow-y:auto;flex:1}
 .gam-modal-pin{background:none;border:none;color:${C.TEXT3};font-size:14px;cursor:pointer;padding:0 6px;line-height:1;margin-right:4px;transition:color .15s}
 .gam-modal-pin:hover{color:${C.ACCENT}}
 /* v5.2.2: side-dock variant. Full-height vertical rail pinned to an edge. */
@@ -13489,15 +13630,17 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-modal-dock-right.gam-modal{border-right:none;border-left:1px solid ${C.BORDER2}}
 @media (max-width:1100px){ .gam-modal-dock{width:360px} }
 
-/* Generic form fields */
-.gam-field{margin-bottom:12px}
+/* Generic form fields
+   v9.4.0: field margin 12→10, input padding 8/12→6/10, font 13→12 to match
+   the 12px base type. */
+.gam-field{margin-bottom:10px}
 .gam-field label{display:block;font-size:11px;font-weight:600;color:${C.TEXT2};text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
-.gam-input,.gam-textarea,.gam-select{width:100%;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT};font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:8px 12px;outline:none;box-sizing:border-box;transition:border-color .15s}
+.gam-input,.gam-textarea,.gam-select{width:100%;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT};font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 10px;outline:none;box-sizing:border-box;transition:border-color .15s}
 .gam-input:hover,.gam-textarea:hover,.gam-select:hover{border-color:${C.BORDER2}}
 .gam-input:focus,.gam-textarea:focus,.gam-select:focus{border-color:${C.ACCENT}}
-.gam-textarea{resize:vertical;min-height:80px;font-family:inherit}
+.gam-textarea{resize:vertical;min-height:72px;font-family:inherit}
 
-.gam-btn{padding:8px 16px;border:none;border-radius:4px;cursor:pointer;font:12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:opacity .15s,transform .1s,background .15s;letter-spacing:.2px}
+.gam-btn{padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font:12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:opacity .15s,transform .1s,background .15s;letter-spacing:.2px}
 .gam-btn:hover{opacity:.9}
 .gam-btn:active{transform:scale(.98)}
 .gam-btn:disabled{opacity:.5;cursor:not-allowed}
@@ -13505,7 +13648,7 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-btn-accent{background:${C.ACCENT};color:#fff}
 .gam-btn-cancel{background:${C.BG3};color:${C.TEXT2};border:1px solid ${C.BORDER}}
 .gam-btn-cancel:hover{background:${C.BORDER};color:${C.TEXT};opacity:1}
-.gam-btn-small{padding:6px 12px;font-size:11px}
+.gam-btn-small{padding:4px 10px;font-size:11px}
 
 /* ── MOD CONSOLE ─────────────────────────────────────────────── */
 .gam-mc-titlebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -13520,26 +13663,34 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-mc-pill-clean{background:rgba(61,214,140,.08);color:${C.GREEN};border-color:rgba(61,214,140,.2)}
 
 .gam-mc-body{display:flex;flex-direction:column;min-height:0}
-.gam-mc-tabs{display:flex;gap:3px;padding:0 0 10px 0;border-bottom:1px solid ${C.BORDER};margin-bottom:14px;flex-wrap:wrap}
-.gam-mc-tab{background:transparent;border:1px solid ${C.BORDER};border-radius:4px;padding:6px 12px;color:${C.TEXT2};font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px}
+/* v9.4.0: tabs row tightened — padding 10→8, margin 14→10, tab padding
+   6→5/12, font 12→11. Removes ~6px vertical real estate per console open. */
+.gam-mc-tabs{display:flex;gap:4px;padding:0 0 8px 0;border-bottom:1px solid ${C.BORDER};margin-bottom:10px;flex-wrap:wrap}
+.gam-mc-tab{background:transparent;border:1px solid ${C.BORDER};border-radius:4px;padding:5px 12px;color:${C.TEXT2};font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px}
 .gam-mc-tab:hover{border-color:${C.BORDER2};color:${C.TEXT}}
 .gam-mc-tab-active{background:${C.ACCENT};border-color:${C.ACCENT};color:#fff}
 .gam-mc-tab-active:hover{opacity:.9;color:#fff}
 .gam-mc-panels{}
 .gam-mc-panel{}
 
-.gam-mc-section{margin-bottom:16px}
-.gam-mc-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:${C.TEXT2};margin-bottom:8px}
+/* v9.4.0: section margin 16→12, header margin 8→6 — same hierarchy, less air. */
+.gam-mc-section{margin-bottom:12px}
+.gam-mc-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:${C.TEXT2};margin-bottom:6px}
 .gam-mc-empty{padding:12px;background:${C.BG2};border:1px dashed ${C.BORDER};border-radius:4px;color:${C.TEXT3};font-size:12px;text-align:center}
 .gam-mc-loading{padding:12px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT2};font-size:12px;font-style:italic}
 .gam-mc-loading::before{content:'';display:inline-block;width:10px;height:10px;border:2px solid ${C.ACCENT};border-top-color:transparent;border-radius:50%;margin-right:8px;animation:gam-spin 1s linear infinite;vertical-align:middle}
 @keyframes gam-spin{to{transform:rotate(360deg)}}
 
+/* v9.4.0: stat tile padding 10→8, value 20→18 — same readability with
+   ~20% less vertical chrome. */
 .gam-mc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px}
-.gam-mc-stat{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;padding:10px;text-align:center}
-.gam-mc-stat-v{font-size:20px;font-weight:700;line-height:1;color:${C.TEXT}}
+.gam-mc-stat{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;padding:8px;text-align:center}
+.gam-mc-stat-v{font-size:18px;font-weight:700;line-height:1;color:${C.TEXT};letter-spacing:-.4px}
 .gam-mc-stat-l{font-size:9px;color:${C.TEXT3};text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
-.gam-mc-summary-raw{font-size:11px;color:${C.TEXT3};padding:8px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;max-height:120px;overflow-y:auto;white-space:pre-wrap;line-height:1.5}
+/* v9.4.0: removed max-height:120 + overflow-y:auto. Raw summaries are short
+   blurbs from the AI scorer; cramping them behind a scrollbar hid context
+   that mods need at-a-glance. Now expands to natural content size. */
+.gam-mc-summary-raw{font-size:11px;color:${C.TEXT3};padding:8px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;white-space:pre-wrap;line-height:1.5}
 
 .gam-mc-score{display:flex;align-items:baseline;gap:8px;padding:10px 12px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px}
 .gam-mc-score-label{font-size:14px;font-weight:700;letter-spacing:.5px}
@@ -13574,7 +13725,8 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-mc-banner-red{background:rgba(240,64,64,.1);color:${C.RED};border:1px solid rgba(240,64,64,.25)}
 
 .gam-mc-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
-.gam-mc-quick{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:6px;padding:14px;text-align:left;cursor:pointer;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};display:flex;flex-direction:column;gap:4px;transition:all .15s}
+/* v9.4.0: quick-action tile padding 14→12, fits 4-up grid better. */
+.gam-mc-quick{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:5px;padding:12px;text-align:left;cursor:pointer;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};display:flex;flex-direction:column;gap:4px;transition:all .15s}
 .gam-mc-quick:hover{border-color:${C.BORDER2};background:${C.BG3}}
 .gam-mc-quick:disabled{opacity:.5;cursor:not-allowed}
 .gam-mc-q-icon{font-size:18px;line-height:1}
@@ -13591,7 +13743,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-strip-btn{display:inline-block;padding:2px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:${C.ACCENT}!important;background:rgba(74,158,255,.08);border:1px solid rgba(74,158,255,.2);border-radius:4px;cursor:pointer;text-decoration:none!important;transition:all .15s}
 .gam-strip-btn:hover{background:rgba(74,158,255,.15);border-color:${C.ACCENT}}
 .gam-strip-drop{position:relative;display:inline-block}
-.gam-strip-menu{display:none;position:absolute;top:100%;left:0;margin-top:4px;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.6);min-width:220px;max-height:320px;overflow-y:auto;z-index:9999990;padding:4px}
+/* v9.4.0: bumped max-height 320→480 so the standard ~10-item menu fits
+   without scrolling on common 1080p+ displays. Scrollbar only spawns for
+   pathological lists (e.g., custom violation templates >18 items). */
+.gam-strip-menu{display:none;position:absolute;top:100%;left:0;margin-top:4px;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.6);min-width:220px;max-height:480px;overflow-y:auto;z-index:9999990;padding:4px}
 .gam-strip-menu-open{display:block}
 .gam-strip-item{display:block;padding:6px 10px;font-size:11px;color:${C.TEXT};cursor:pointer;border-radius:4px;text-decoration:none!important;transition:background .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gam-strip-item:hover{background:${C.BG3};color:${C.TEXT}!important}
@@ -13636,21 +13791,25 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-help-key{min-width:110px;text-align:right;background:${C.BG3};border:1px solid ${C.BORDER};border-radius:4px;padding:2px 8px;font-weight:600;color:${C.TEXT};font-size:11px;font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace}
 .gam-help-desc{font-size:12px;color:${C.TEXT2}}
 
-/* Tooltip */
-/* v9.3.3 (P1-2): pointer-events:auto so the mouse can ENTER the tooltip
-   without dismissing it. Combined with the 200ms dismiss-grace-timer in
-   the JS handlers, mouse can traverse from username → tooltip without
-   the tooltip vanishing during the gap. */
-#gam-tooltip{position:fixed;z-index:9999998;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:6px;padding:10px 12px;font:11px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};box-shadow:0 8px 24px rgba(0,0,0,.6);pointer-events:auto;opacity:0;transition:opacity .15s;display:none;max-width:320px;min-width:220px}
-.gam-tip-name{font-size:12px;margin-bottom:4px}
-.gam-tip-badges{display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;font-size:10px}
-.gam-tip-meta{color:${C.TEXT3};font-size:10px;margin-bottom:6px}
-.gam-tip-loading{color:${C.TEXT3};font-size:10px;padding-top:6px;border-top:1px solid ${C.BORDER};font-style:italic}
-.gam-tip-intel{padding-top:6px;border-top:1px solid ${C.BORDER}}
-.gam-tip-score{font-size:11px;margin-bottom:2px;letter-spacing:.5px}
-.gam-tip-stats{color:${C.TEXT3};font-size:10px;margin-bottom:2px}
-.gam-tip-hits{color:${C.WARN};font-size:10px;margin-top:2px}
-.gam-tip-sum{color:${C.TEXT3};font-size:10px;margin-top:4px;padding-top:4px;border-top:1px dashed ${C.BORDER}}
+/* Tooltip — User Info card
+   v9.4.0 design pass: rebuilt as a modern info card with a single shadow
+   layer (no fake stacked shadows), 8px internal grid, consistent typography
+   (12 / 11 / 10), and a subtle accent rail down the left edge so the card
+   reads like an "official" surface. NO scrollbar — content sizes naturally;
+   if intel overflows, it wraps. The card is intentionally compact so it
+   never dominates the viewport.
+   v9.3.3 (P1-2): pointer-events:auto so the mouse can ENTER the tooltip
+   without dismissing it (paired with 200ms dismiss-grace-timer in JS). */
+#gam-tooltip{position:fixed;z-index:9999998;background:${C.BG};border:1px solid ${C.BORDER2};border-left:3px solid ${C.ACCENT};border-radius:6px;padding:10px 12px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};box-shadow:0 12px 32px rgba(0,0,0,.55);pointer-events:auto;opacity:0;transition:opacity .15s;display:none;max-width:320px;min-width:240px}
+.gam-tip-name{font-size:12px;margin-bottom:6px}
+.gam-tip-badges{display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;font-size:10px}
+.gam-tip-meta{color:${C.TEXT3};font-size:10px;margin-bottom:6px;line-height:1.4}
+.gam-tip-loading{color:${C.TEXT3};font-size:10px;padding-top:6px;margin-top:2px;border-top:1px solid ${C.BORDER};font-style:italic}
+.gam-tip-intel{padding-top:8px;margin-top:4px;border-top:1px solid ${C.BORDER}}
+.gam-tip-score{font-size:11px;margin-bottom:4px;letter-spacing:.3px;font-weight:600}
+.gam-tip-stats{color:${C.TEXT3};font-size:10px;margin-bottom:2px;letter-spacing:.2px}
+.gam-tip-hits{color:${C.WARN};font-size:10px;margin-top:4px}
+.gam-tip-sum{color:${C.TEXT3};font-size:10px;margin-top:6px;padding-top:6px;border-top:1px dashed ${C.BORDER};line-height:1.45}
 
 /* v7.0 state chips */
 :root {
@@ -13685,44 +13844,54 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-chip--ai_conf-low      { color:var(--chip-fg-neutral); }
 .gam-chip--ai_conf-no_model { color:var(--chip-fg-neutral); font-style:italic; }
 
-/* v7.0 Intel Drawer */
-#gam-intel-drawer { position:fixed; top:0; right:0; height:100vh; width:min(480px, 40vw); background:#1a202c; color:#e2e8f0; box-shadow:-4px 0 24px rgba(0,0,0,.6); transform:translateX(100%); transition:transform .18s ease-out; z-index:2147483600; display:flex; flex-direction:column; font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; }
+/* v7.0 Intel Drawer
+   v9.4.0 design pass: full unification with C palette. Replaced
+   Tailwind-style hex values (#1a202c, #2d3748, #a0aec0, #718096) that
+   drifted from the rest of the UI with C.BG2 / C.BORDER / C.TEXT2 /
+   C.TEXT3 — drawer now reads as part of the same surface family.
+   Padding tightened (sections 14/16 → 10/14), title 15→14, button
+   sizing brought in line with .gam-btn-small. */
+#gam-intel-drawer { position:fixed; top:0; right:0; height:100vh; width:min(480px, 40vw); background:${C.BG2}; color:${C.TEXT}; box-shadow:-4px 0 24px rgba(0,0,0,.6); transform:translateX(100%); transition:transform .18s ease-out; z-index:2147483600; display:flex; flex-direction:column; font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; }
 #gam-intel-drawer.gam-intel-drawer--open { transform:translateX(0); }
 #gam-intel-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:2147483599; opacity:0; pointer-events:none; transition:opacity .18s; }
 #gam-intel-backdrop.gam-intel-backdrop--open { opacity:1; pointer-events:auto; }
-.gam-drawer-header { display:flex; align-items:center; padding:12px 16px; border-bottom:1px solid #2d3748; gap:8px; flex-wrap:wrap; }
+.gam-drawer-header { display:flex; align-items:center; padding:10px 14px; border-bottom:1px solid ${C.BORDER}; gap:8px; flex-wrap:wrap; }
 .gam-drawer-chips { display:inline-flex; flex-wrap:wrap; gap:4px; flex:0 0 auto; }
-.gam-drawer-title { font-size:15px; font-weight:600; margin:0; flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.gam-drawer-mark-precedent, .gam-drawer-close { background:transparent; border:1px solid #2d3748; color:#e2e8f0; border-radius:4px; cursor:pointer; padding:4px 10px; font:inherit; }
-.gam-drawer-mark-precedent:hover, .gam-drawer-close:hover { background:#2d3748; }
+.gam-drawer-title { font-size:14px; font-weight:700; margin:0; flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; letter-spacing:-.1px; }
+.gam-drawer-mark-precedent, .gam-drawer-close { background:transparent; border:1px solid ${C.BORDER}; color:${C.TEXT}; border-radius:4px; cursor:pointer; padding:4px 10px; font:inherit; font-size:11px; font-weight:600; transition:background .12s,border-color .12s; }
+.gam-drawer-mark-precedent:hover, .gam-drawer-close:hover { background:${C.BG3}; border-color:${C.BORDER2}; }
 .gam-drawer-body { flex:1; overflow-y:auto; }
-.gam-drawer-section { padding:14px 16px; border-bottom:1px solid #2d3748; }
-.gam-drawer-section h3 { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:#a0aec0; margin:0 0 8px; }
-.gam-drawer-section p { margin:4px 0; font-size:13px; line-height:1.45; }
+.gam-drawer-section { padding:10px 14px; border-bottom:1px solid ${C.BORDER}; }
+.gam-drawer-section h3 { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:${C.TEXT2}; margin:0 0 6px; }
+.gam-drawer-section p { margin:4px 0; font-size:12px; line-height:1.45; }
 .gam-drawer-section button { font:inherit; }
-.gam-skeleton { height:12px; background:linear-gradient(90deg,#2d3748,#4a5568,#2d3748); background-size:200% 100%; animation:gam-shimmer 1.2s infinite; border-radius:3px; margin:4px 0; }
+.gam-skeleton { height:12px; background:linear-gradient(90deg,${C.BG2},${C.BORDER2},${C.BG2}); background-size:200% 100%; animation:gam-shimmer 1.2s infinite; border-radius:3px; margin:4px 0; }
 @keyframes gam-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-.gam-muted { color:#718096; font-style:italic; font-size:12px; }
-.gam-nba-gen { background:#2c5282; color:#fff; border:none; border-radius:4px; padding:6px 12px; cursor:pointer; }
-.gam-nba-gen:hover { background:#2b6cb0; }
-.gam-nba-action-primary { background:#276749; color:#fff; border:none; border-radius:4px; padding:6px 12px; cursor:pointer; margin-right:6px; }
-.gam-nba-action-alt     { background:#2d3748; color:#e2e8f0; border:1px solid #4a5568; border-radius:4px; padding:6px 12px; cursor:pointer; }
-.gam-why-seeing { background:transparent; border:none; color:#718096; text-decoration:underline; cursor:pointer; font-size:11px; padding:2px 0; margin-top:6px; }
-.gam-drawer-note-row { padding:6px 0; border-top:1px solid #2d3748; }
+.gam-muted { color:${C.TEXT3}; font-style:italic; font-size:11px; }
+.gam-nba-gen { background:${C.ACCENT}; color:#fff; border:none; border-radius:4px; padding:5px 12px; cursor:pointer; font-size:11px; font-weight:600; transition:opacity .15s; }
+.gam-nba-gen:hover { opacity:.9; }
+.gam-nba-action-primary { background:${C.GREEN}; color:${C.BG}; border:none; border-radius:4px; padding:5px 12px; cursor:pointer; margin-right:6px; font-size:11px; font-weight:700; transition:opacity .15s; }
+.gam-nba-action-primary:hover { opacity:.9; }
+.gam-nba-action-alt     { background:${C.BG3}; color:${C.TEXT}; border:1px solid ${C.BORDER}; border-radius:4px; padding:5px 12px; cursor:pointer; font-size:11px; font-weight:600; transition:border-color .12s; }
+.gam-nba-action-alt:hover { border-color:${C.BORDER2}; }
+.gam-why-seeing { background:transparent; border:none; color:${C.TEXT3}; text-decoration:underline; cursor:pointer; font-size:11px; padding:2px 0; margin-top:6px; }
+.gam-drawer-note-row { padding:6px 0; border-top:1px solid ${C.BORDER}; }
 .gam-drawer-note-row:first-child { border-top:none; }
-.gam-drawer-note-author { color:#a0aec0; font-size:11px; margin-right:6px; }
-.gam-drawer-note-ts { color:#718096; font-size:10px; }
-.gam-drawer-note-body { color:#e2e8f0; font-size:12px; white-space:pre-wrap; margin:2px 0 0; }
+.gam-drawer-note-author { color:${C.TEXT2}; font-size:11px; font-weight:600; margin-right:6px; }
+.gam-drawer-note-ts { color:${C.TEXT3}; font-size:10px; }
+.gam-drawer-note-body { color:${C.TEXT}; font-size:12px; white-space:pre-wrap; margin:2px 0 0; line-height:1.45; }
 .gam-drawer-note-form { margin-top:8px; display:flex; flex-direction:column; gap:4px; }
-.gam-drawer-note-form textarea { background:#0f1114; color:#e2e8f0; border:1px solid #2d3748; border-radius:4px; padding:6px; font:inherit; resize:vertical; min-height:48px; }
-.gam-precedent-row { padding:6px 0; border-top:1px solid #2d3748; display:flex; flex-direction:column; gap:2px; }
+.gam-drawer-note-form textarea { background:${C.BG}; color:${C.TEXT}; border:1px solid ${C.BORDER}; border-radius:4px; padding:6px 8px; font:inherit; font-size:12px; resize:vertical; min-height:48px; outline:none; transition:border-color .15s; }
+.gam-drawer-note-form textarea:focus { border-color:${C.ACCENT}; }
+.gam-precedent-row { padding:6px 0; border-top:1px solid ${C.BORDER}; display:flex; flex-direction:column; gap:2px; }
 .gam-precedent-row:first-child { border-top:none; }
-.gam-precedent-title { color:#e2e8f0; font-size:12px; font-weight:600; }
-.gam-precedent-meta  { color:#718096; font-size:10px; }
-.gam-precedent-apply { background:#2d3748; color:#e2e8f0; border:1px solid #4a5568; border-radius:3px; padding:2px 8px; cursor:pointer; font-size:11px; align-self:flex-start; margin-top:2px; }
-.gam-delta-row { padding:4px 0; color:#a0aec0; font-size:11px; border-top:1px dashed #2d3748; }
+.gam-precedent-title { color:${C.TEXT}; font-size:12px; font-weight:600; }
+.gam-precedent-meta  { color:${C.TEXT3}; font-size:10px; }
+.gam-precedent-apply { background:${C.BG3}; color:${C.TEXT}; border:1px solid ${C.BORDER}; border-radius:3px; padding:2px 8px; cursor:pointer; font-size:11px; align-self:flex-start; margin-top:2px; }
+.gam-precedent-apply:hover { border-color:${C.BORDER2}; }
+.gam-delta-row { padding:4px 0; color:${C.TEXT2}; font-size:11px; border-top:1px dashed ${C.BORDER}; }
 .gam-delta-row:first-child { border-top:none; }
-.gam-delta-ts { color:#718096; margin-right:6px; }
+.gam-delta-ts { color:${C.TEXT3}; margin-right:6px; }
 
 /* Status Bar */
 /* ── Loop-3: status bar pill refinement ── */
@@ -13961,8 +14130,18 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-ban-unban:disabled{opacity:.5;cursor:not-allowed}
 
 /* v5.1.1 Trust Pass: preflight + evidence + tooltip-pin + session pill */
+/* v9.3.16: backdrop-filter:blur(4px) removed for the same compositing reason
+   as #gam-backdrop in v9.3.11. When preflight wraps a confirmation over the
+   open Mod Console modal, blur on this layer leaked through Chrome's GPU
+   compositor onto the modal's tab icons (USER INFO / BAN HAMMER / NOTES /
+   REPLY TO USER) -- the icons appeared "stuck behind a frosted UI element."
+   .gam-preflight-wrap was also missing from closeAllPanels' SEL list and
+   from _gamOrphanBackdropSweep, so an unresolved preflight (network hiccup,
+   async resolver lost) could linger forever, parking the blur indefinitely.
+   Both gaps closed together. Solid 0.7 black gives the same focus-direction
+   without the GPU side effect. */
 .gam-preflight-wrap{position:fixed;inset:0;z-index:10000000;display:flex;align-items:center;justify-content:center}
-.gam-preflight-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px)}
+.gam-preflight-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.7)}
 .gam-preflight{position:relative;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:6px;padding:20px;min-width:420px;max-width:560px;box-shadow:0 24px 48px rgba(0,0,0,.7);color:${C.TEXT}}
 .gam-preflight-danger{border-color:${C.RED};box-shadow:0 0 0 2px rgba(240,64,64,.2), 0 24px 48px rgba(0,0,0,.7)}
 .gam-preflight-title{font-size:14px;font-weight:700;margin-bottom:12px;letter-spacing:.3px}
@@ -13978,7 +14157,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-row{transition:background .2s, border-color .2s, opacity .2s}
 .gam-preflight-actions{display:flex;gap:8px;justify-content:flex-end}
 
-.gam-mc-evidence{background:${C.BG2};border:1px solid ${C.BORDER};border-left:3px solid ${C.ACCENT};border-radius:4px;padding:10px 12px;margin-bottom:12px;font-size:12px}
+.gam-mc-evidence{background:${C.BG2};border:1px solid ${C.BORDER};border-left:3px solid ${C.ACCENT};border-radius:4px;padding:8px 12px;margin-bottom:10px;font-size:12px}
 .gam-mc-evidence-label{font-size:10px;font-weight:700;color:${C.TEXT3};text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
 .gam-mc-evidence-text{color:${C.TEXT};font-style:italic;line-height:1.45}
 .gam-mc-evidence-link{display:inline-block;margin-top:4px;font-size:10px;color:${C.ACCENT};text-decoration:none}
@@ -14018,11 +14197,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 #gam-sess-pill{font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;letter-spacing:.3px}
 #gam-fb-toggle{font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;letter-spacing:.3px}
 
-/* ═══ v5.1.2 Ergonomics Pass CSS ═══ */
+/* ═══ v5.1.2 Ergonomics Pass CSS — refined v9.4.0 ═══ */
 
 /* Richer tooltip with chips, note, score */
-#gam-tooltip{min-width:260px;max-width:360px;padding:10px 12px}
-.gam-tip-name{font-size:13px;font-weight:700;color:${C.TEXT};margin-bottom:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#gam-tooltip{min-width:260px;max-width:340px;padding:10px 12px}
+.gam-tip-name{font-size:13px;font-weight:700;color:${C.TEXT};margin-bottom:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;letter-spacing:-.1px}
 .gam-tip-badges{display:inline-flex;gap:4px;flex-wrap:wrap}
 .gam-tip-chip{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase}
 .gam-tip-chip-ok{background:rgba(61,214,140,.15);color:${C.GREEN}}
@@ -14046,7 +14225,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 /* v9.3.10: backdrop-filter:blur(6px) removed for the same compositing reason
    as the popovers above. ${C.BG2} is fully opaque; nothing visible behind
    the bar that benefits from blur anyway. */
-.gam-mm-bar{position:sticky;top:0;z-index:9999970;display:flex;justify-content:center;align-items:center;gap:8px;padding:10px 14px;margin:-12px -12px 12px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:0 0 6px 6px;flex-wrap:wrap;box-shadow:inset 3px 0 0 ${C.ACCENT}, 0 4px 12px rgba(0,0,0,.35)}
+.gam-mm-bar{position:sticky;top:0;z-index:9999970;display:flex;justify-content:center;align-items:center;gap:8px;padding:8px 12px;margin:-12px -12px 10px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:0 0 6px 6px;flex-wrap:wrap;box-shadow:inset 3px 0 0 ${C.ACCENT}, 0 4px 12px rgba(0,0,0,.35)}
 .gam-mm-bar-label{font-size:12px;color:${C.TEXT};margin-right:6px}
 .gam-mm-bar-label b{color:${C.ACCENT};margin-left:2px}
 .gam-mm-bar-btn{padding:5px 10px;background:${C.BG3};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT};font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:all .15s}
@@ -14072,7 +14251,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-da-status{padding:8px 14px;background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.2);border-radius:4px;color:${C.PURPLE};font-size:11px;font-weight:600;margin-bottom:10px;letter-spacing:.2px}
 
 /* v5.1.9 EXP Loop 2: Mini-HQ strip on GAW home pages */
-.gam-home-strip{display:flex;align-items:center;gap:10px;padding:10px 14px;margin-bottom:12px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:6px;flex-wrap:wrap;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}
+.gam-home-strip{display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:10px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:6px;flex-wrap:wrap;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}
 .gam-home-label{font-weight:700;color:${C.ACCENT};letter-spacing:.3px;font-size:13px;margin-right:6px}
 .gam-home-pill{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;background:${C.BG3};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT}!important;text-decoration:none!important;transition:border-color .15s,background .15s;font-size:11px}
 .gam-home-pill b{color:${C.ACCENT};font-weight:700}
@@ -14129,15 +14308,20 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-mc-note-inline b{color:${C.ACCENT};margin-right:4px}
 .gam-mc-empty-dense{padding:6px 10px;background:${C.BG};border:1px dashed ${C.BORDER};border-radius:4px;color:${C.TEXT3};font-size:11px;text-align:center}
 .gam-mc-intel-tip{font-size:10px;color:${C.TEXT3};margin-top:10px;padding:6px 10px;background:rgba(74,158,255,.05);border-left:2px solid ${C.ACCENT};border-radius:3px}
-.gam-mc-note{margin-top:10px;padding-top:10px;border-top:1px solid #2a2d33}
-.gam-mc-note-label{display:block;font-size:11px;color:#a0a8b6;margin-bottom:4px}
-.gam-mc-note-hint{color:#666;font-weight:400}
-.gam-mc-note-ta{width:100%;min-height:60px;background:#16181d;color:#d8dee9;border:1px solid #2a2d33;border-radius:4px;padding:6px 8px;font:12px/1.4 ui-sans-serif,system-ui,sans-serif;resize:vertical;box-sizing:border-box}
-.gam-mc-note-ta:focus{outline:none;border-color:#4A9EFF}
-.gam-mc-note-status{font-size:10px;color:#666;margin-top:4px;min-height:14px}
+/* v9.4.0: hard-coded greys (#2a2d33, #a0a8b6, #666, #16181d) replaced
+   with C palette tokens so the Note tab inherits the global theme. */
+.gam-mc-note{margin-top:10px;padding-top:10px;border-top:1px solid ${C.BORDER}}
+.gam-mc-note-label{display:block;font-size:11px;font-weight:600;color:${C.TEXT2};margin-bottom:4px}
+.gam-mc-note-hint{color:${C.TEXT3};font-weight:400}
+.gam-mc-note-ta{width:100%;min-height:60px;background:${C.BG2};color:${C.TEXT};border:1px solid ${C.BORDER};border-radius:4px;padding:6px 8px;font:12px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;resize:vertical;box-sizing:border-box;outline:none;transition:border-color .15s}
+.gam-mc-note-ta:focus{border-color:${C.ACCENT}}
+.gam-mc-note-status{font-size:10px;color:${C.TEXT3};margin-top:4px;min-height:14px}
 
-/* Note history (v5.1.3 Note tab) */
-.gam-mc-note-history{max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-right:4px}
+/* Note history (v5.1.3 Note tab)
+   v9.4.0: removed max-height + overflow:auto. Note history was creating
+   a NESTED scrollbar inside the already-scrolling modal-body — double
+   scrollbar UX. Now the parent .gam-modal-body handles overflow. */
+.gam-mc-note-history{display:flex;flex-direction:column;gap:6px}
 .gam-mc-note-row{padding:8px 10px;background:${C.BG2};border:1px solid ${C.BORDER};border-left:3px solid ${C.ACCENT};border-radius:4px}
 .gam-mc-note-meta{font-size:10px;color:${C.TEXT2};margin-bottom:4px;display:flex;gap:8px;align-items:center}
 .gam-mc-note-meta b{color:${C.TEXT};font-weight:700}
@@ -14217,6 +14401,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 #gam-ee-overlay .gam-ee-line1{font-size:clamp(22px,4vw,48px);font-weight:700;color:gold;letter-spacing:.05em;text-shadow:0 0 30px rgba(255,215,0,.7);text-align:center;padding:0 24px}
 #gam-ee-overlay .gam-ee-line2{font-size:clamp(14px,2vw,22px);color:rgba(255,215,0,.6);margin-top:16px;letter-spacing:.25em;text-transform:uppercase}
 #gam-ee-overlay .gam-ee-q{font-size:clamp(60px,10vw,120px);color:rgba(255,215,0,.12);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);user-select:none}
+
+/* v9.3.16: tighten top of every GAW post by 7px (8px → 1px). Base GAW
+   .post rule is padding:8px and .post-list .post is padding:8px 8px 8px 0.
+   We override only padding-top; bottom/sides untouched, comments untouched
+   (their 7px is already tight), inner .body padding-top:2px preserved. */
+.post{padding-top:1px!important}
+.post-list .post{padding-top:1px!important}
 `;
 
 
