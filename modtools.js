@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.5.2';
+  const VERSION = 'v9.5.3';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -16641,23 +16641,114 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // worker confirms the stored team token resolves to a real mod identity.
   // No token, expired token, or worker rejection -> false. Fail closed so a
   // network blip can't briefly expose the UI to a non-mod.
+  // v9.5.3: returns structured { ok, reason, tokenLen, status } instead of
+  // bare bool so the caller can show Commander exactly why UI is suppressed.
   async function __validateModAuth() {
     try {
       const tok = (typeof getModToken === 'function') ? getModToken() : '';
-      if (!tok || String(tok).length < 32) return false;
+      if (!tok) return { ok:false, reason:'no_token', tokenLen:0 };
+      if (String(tok).length < 32) return { ok:false, reason:'short_token', tokenLen:String(tok).length };
       // Direct fetch (rpcCall would also work, but we avoid the SW round-trip
       // here for the very first init -- SW may not be alive yet on cold start).
-      const r = await fetch(WORKER_BASE + '/mod/whoami', {
-        method: 'GET',
-        headers: { 'X-Mod-Token': tok },
-        cache: 'no-store'
-      }).catch(() => null);
-      if (!r || r.status !== 200) return false;
+      let r;
+      try {
+        r = await fetch(WORKER_BASE + '/mod/whoami', {
+          method: 'GET',
+          headers: { 'X-Mod-Token': tok },
+          cache: 'no-store'
+        });
+      } catch(eFetch) {
+        return { ok:false, reason:'fetch_failed', tokenLen:String(tok).length, error:String(eFetch && eFetch.message || eFetch) };
+      }
+      if (!r) return { ok:false, reason:'no_response', tokenLen:String(tok).length };
+      if (r.status !== 200) return { ok:false, reason:'whoami_status', tokenLen:String(tok).length, status:r.status };
       const j = await r.json().catch(() => null);
-      return !!(j && j.username);
+      if (!j || !j.username) return { ok:false, reason:'whoami_empty', tokenLen:String(tok).length };
+      return { ok:true, username:j.username, tokenLen:String(tok).length };
     } catch (e) {
-      return false;
+      return { ok:false, reason:'exception', error:String(e && e.message || e) };
     }
+  }
+
+  // v9.5.3: visible auth-fail banner. Was: silent console.log + no UI.
+  // Commander hit "bar gone, no signal" twice this week. Now: a small
+  // fixed-position banner with the failure reason + a "Force re-hydrate"
+  // button that triggers the same SW-vault resync the popup uses. No
+  // dependency on the rest of init having run -- pure DOM, no helpers.
+  function __showAuthFailBanner(authResult) {
+    try {
+      // Don't double-render if already shown.
+      if (document.getElementById('gam-auth-fail-banner')) return;
+      const reasonText = (function(){
+        switch(authResult && authResult.reason) {
+          case 'no_token':       return 'No token stored. Open the GAW ModTools popup and claim a rotation invite.';
+          case 'short_token':    return 'Stored token is malformed (length ' + (authResult.tokenLen || 0) + '). Re-claim via the popup.';
+          case 'fetch_failed':   return 'Worker unreachable: ' + (authResult.error || 'network error') + '. Check connectivity, try Force re-hydrate.';
+          case 'no_response':    return 'No response from worker /mod/whoami. Try Force re-hydrate.';
+          case 'whoami_status':  return 'Worker rejected token (HTTP ' + (authResult.status || '?') + '). Token may be expired or rotated -- claim a fresh invite.';
+          case 'whoami_empty':   return 'Worker accepted token but returned no username. Try Force re-hydrate.';
+          case 'exception':      return 'Auth check threw: ' + (authResult.error || 'unknown') + '. Open DevTools console for stack.';
+          default:               return 'Auth check failed (unknown reason). Open DevTools console.';
+        }
+      })();
+      const b = document.createElement('div');
+      b.id = 'gam-auth-fail-banner';
+      b.style.cssText = [
+        'position:fixed','top:8px','right:8px','z-index:2147483640',
+        'max-width:380px','padding:10px 12px','background:rgba(220,40,40,.95)',
+        'color:#fff','font:12px/1.45 -apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif',
+        'border-radius:8px','box-shadow:0 4px 16px rgba(0,0,0,.5)',
+        'border:1px solid rgba(255,255,255,.15)'
+      ].join(';');
+      const title = document.createElement('div');
+      title.style.cssText = 'font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:6px';
+      title.textContent = '\u{1F512} GAW ModTools: auth failed';
+      const msg = document.createElement('div');
+      msg.style.cssText = 'margin-bottom:8px;opacity:.95';
+      msg.textContent = reasonText;
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:6px;justify-content:flex-end';
+      const btnRetry = document.createElement('button');
+      btnRetry.textContent = 'Force re-hydrate';
+      btnRetry.style.cssText = 'padding:4px 10px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.15);color:#fff;border-radius:4px;cursor:pointer;font:inherit';
+      btnRetry.addEventListener('click', async () => {
+        btnRetry.disabled = true;
+        btnRetry.textContent = 'Re-hydrating...';
+        try {
+          // Re-pull from chrome.storage.local + push to SW vault. If a fresh
+          // claim has landed since first init, this brings it in-process.
+          if (typeof preloadSecrets === 'function') await preloadSecrets();
+          if (typeof syncSecretsToBackgroundVault === 'function') await syncSecretsToBackgroundVault();
+          // Re-validate.
+          const re = await __validateModAuth();
+          if (re && re.ok) {
+            btnRetry.textContent = 'Success -- reloading';
+            setTimeout(() => location.reload(), 400);
+          } else {
+            btnRetry.textContent = 'Still failed (' + (re && re.reason || '?') + ')';
+            btnRetry.disabled = false;
+          }
+        } catch(e) {
+          btnRetry.textContent = 'Error: ' + (e && e.message || e);
+          btnRetry.disabled = false;
+        }
+      });
+      const btnDismiss = document.createElement('button');
+      btnDismiss.textContent = 'Dismiss';
+      btnDismiss.style.cssText = 'padding:4px 10px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;border-radius:4px;cursor:pointer;font:inherit;opacity:.85';
+      btnDismiss.addEventListener('click', () => { try { b.remove(); } catch(_){} });
+      row.appendChild(btnRetry);
+      row.appendChild(btnDismiss);
+      b.appendChild(title);
+      b.appendChild(msg);
+      b.appendChild(row);
+      // body may not be ready on document_end on edge cases; defer if needed.
+      if (document.body) document.body.appendChild(b);
+      else document.addEventListener('DOMContentLoaded', () => { try { document.body.appendChild(b); } catch(_){} }, { once:true });
+      try {
+        console.log('%c[modtools v9.5.3] auth-fail banner shown', 'color:#f04040;font-weight:700', authResult);
+      } catch(_){}
+    } catch(_e){}
   }
 
   async function init(){
@@ -16673,13 +16764,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     // bar, panels, mod chat, or any mod-only DOM injection. Re-checked
     // whenever chrome.storage.local mutates (storage.onChanged listener
     // installed elsewhere) so a fresh claim triggers init via page reload.
-    const __isAuthMod = await __validateModAuth();
-    if (!__isAuthMod) {
+    // v9.5.3: shape changed from bool -> { ok, reason, ... } so we can show
+    // Commander a visible banner explaining WHY UI is suppressed instead of
+    // a silent console.log. Pre-fix: bar disappeared, only signal was a
+    // muted devtools line; took two debug-snapshot round-trips to diagnose.
+    const __authResult = await __validateModAuth();
+    try { window.__GAM_AUTH_RESULT = __authResult; } catch(_){}
+    if (!(__authResult && __authResult.ok)) {
       try {
-        console.log('%c[modtools] non-mod context — UI suppressed (v9.3.0 security gate). ' +
-          'Install + claim a rotation invite via the popup and refresh this tab to enable mod UI.',
-          'color:#888;font-style:italic');
+        console.log('%c[modtools v9.5.3] auth gate failed -- UI suppressed.', 'color:#f04040;font-weight:700', __authResult);
       } catch (_) {}
+      try { __showAuthFailBanner(__authResult); } catch(e){}
       // Still arm the SPA watcher so a future navigation can re-run init if
       // the user logs into a mod account in this tab.
       try { installSpaWatcher(); } catch(e){}
