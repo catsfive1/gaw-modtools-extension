@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.5.0';
+  const VERSION = 'v9.5.2';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -15213,13 +15213,50 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // a path. Returns the same { ok, status, data, text, error } shape as
   // workerCall so call sites can swap with minimal churn.
   async function rpcCall(name, args){
+    // v9.5.2: detect Extension Context Invalidated state up front. After a
+    // build/install reload, content scripts in already-open tabs are orphaned
+    // -- chrome.runtime is severed. Report a clear, actionable error so every
+    // caller (bug-report, console submit, force-rehydrate, etc.) surfaces the
+    // same "refresh the page" hint instead of the cryptic chrome internals
+    // message "Cannot read properties of undefined (reading 'sendMessage')".
+    try {
+      if (typeof chrome === 'undefined' || !chrome || !chrome.runtime || typeof chrome.runtime.sendMessage !== 'function'){
+        return {
+          ok: false,
+          status: 0,
+          code: 'EXT_CONTEXT_INVALIDATED',
+          error: 'Extension was reloaded -- please refresh this page (Ctrl+R) and try again.'
+        };
+      }
+    } catch(_e0){
+      return {
+        ok: false,
+        status: 0,
+        code: 'EXT_CONTEXT_INVALIDATED',
+        error: 'Extension was reloaded -- please refresh this page (Ctrl+R) and try again.'
+      };
+    }
     try {
       const resp = await chrome.runtime.sendMessage({ type: 'rpc', name: name, args: args || {} });
       if (!resp) return { ok: false, status: 0, error: 'no response from background' };
       // Background returns { ok, status, data, text, error, timeout } already.
       return resp;
     } catch (e) {
-      return { ok: false, status: 0, error: String(e && e.message || e) };
+      const msg = String(e && e.message || e);
+      // Chrome variants of "extension context invalidated":
+      //   "Extension context invalidated."
+      //   "Could not establish connection. Receiving end does not exist."
+      //   "The message port closed before a response was received."
+      // Coalesce all of these into the same actionable code.
+      if (/context invalidated|receiving end does not exist|message port closed|sendMessage/i.test(msg)){
+        return {
+          ok: false,
+          status: 0,
+          code: 'EXT_CONTEXT_INVALIDATED',
+          error: 'Extension was reloaded -- please refresh this page (Ctrl+R) and try again.'
+        };
+      }
+      return { ok: false, status: 0, error: msg };
     }
   }
 
