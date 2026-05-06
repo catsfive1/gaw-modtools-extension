@@ -283,6 +283,13 @@
         ban:         path===('/ban') || path.startsWith('/ban/'),
         home:        path==='/' || path==='/all',
         modmailList: /^\/modmail\b/.test(path) && !/\/thread\//.test(path),
+        // v9.5.1: profile-view flag for SPA-nav defensive un-hide. Mirrors
+        // _isProfileViewNow() (line ~12214). When SPA-nav lands on a /u/<name>
+        // route, posts hidden by applyUpvoteAgeFilter on the PREVIOUS page
+        // stay display:none until the next mutation. The MutationObserver
+        // root may also have been detached. So we call applyUpvoteAgeFilter
+        // directly in _handleNav, which triggers its built-in defensive un-hide.
+        user:        /^\/u\/[^/]+(?:\/(?:posts|saved|upvoted|downvoted))?\/?$/.test(path),
       };
     }
 
@@ -318,6 +325,39 @@
       }
       if(now.modmailList){
         setTimeout(()=>{ try{ injectModmailUnbanButtons(); }catch(e){} }, 700);
+      }
+      // v9.5.1: when SPA-nav lands on a user profile, immediately fire the
+      // upvote/age filter so its built-in defensive un-hide block runs and
+      // restores any posts that were hidden on the previous page. Also
+      // re-attach the MutationObserver to the new root and start a short
+      // defensive sweep window (5x at 500ms intervals) to catch posts that
+      // stream in via the profile river fetcher AFTER the gate has fired.
+      if(now.user){
+        setTimeout(()=>{
+          try{
+            applyUpvoteAgeFilter();
+            const root = document.querySelector('.post-list, .posts, .main-content');
+            if (root && _filterObs) {
+              try { _filterObs.disconnect(); } catch(_){}
+              _filterObs.observe(root, { childList:true, subtree:false });
+            }
+            // Belt-and-suspenders: 5 sweeps at 500ms intervals catches the
+            // profile-river's first ~3 page appends. After that, the
+            // MutationObserver re-attached above takes over.
+            let sweepN = 0;
+            const sweepIv = setInterval(()=>{
+              if (++sweepN > 5) { clearInterval(sweepIv); return; }
+              if (!/^\/u\/[^/]+(?:\/(?:posts|saved|upvoted|downvoted))?\/?$/.test(location.pathname)) {
+                clearInterval(sweepIv); return;
+              }
+              const stuck = document.querySelectorAll('.post[data-gam-age-hidden="1"]');
+              if (stuck.length > 0) {
+                stuck.forEach(p=>{ p.style.display=''; p.removeAttribute('data-gam-age-hidden'); });
+                try { _diagLog('profile-defense', `swept ${stuck.length} stuck-hidden posts on ${location.pathname}`); } catch(_){}
+              }
+            }, 500);
+          } catch(e){ try { console.warn('[ModTools v9.5.1] profile-defense sweep failed', e); } catch(_){} }
+        }, 350);
       }
 
       // Re-inject badges and action strips on any page
@@ -12228,7 +12268,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     __v921FilterGateLogged = true;
     try {
       const totalPosts = document.querySelectorAll('.post').length;
-      console.info('%c[modtools v9.2.1] profile view detected — upvote/age filter is GATED OFF. ' + totalPosts + ' .post elements in DOM, all should remain visible.', 'color:#3dd68c;font-weight:700');
+      console.info('%c[modtools v9.5.1] profile view detected — upvote/age filter is GATED OFF. ' + totalPosts + ' .post elements in DOM, all should remain visible.', 'color:#3dd68c;font-weight:700');
     } catch(_){}
   }
   function applyUpvoteAgeFilter(){
