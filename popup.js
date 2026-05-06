@@ -2314,3 +2314,762 @@ function __exportDrillCsv() {
     }
   });
 }
+
+// =========================================================================
+// v9.5.0: MAINTENANCE MODE
+// =========================================================================
+// 12 self-heal routines surfaced in the popup so non-tech mods can resolve
+// common issues (stuck cookies, full storage, schema drift, etc.) without
+// needing to ping the lead. 8 routines in the user tier (visible to all
+// mods) + 4 lead-tier routines (gated by __applyLeadGate via #leadSection).
+//
+// Every routine logs to gam_diag_log via the modtools.js _diagLog handler
+// (we delegate by sending a runtime message to the active GAW tab; if no
+// tab, we write the entry directly to chrome.storage.local).
+//
+// Background alarms (background.js) write a `gam_maint_warning` flag when
+// quota >80% or token age >60d. The header chip + banner read that flag.
+// The flag is independent of `gam_update_available` — different concern.
+
+const MAINT_DIAG_KEY = 'gam_diag_log';
+const MAINT_DIAG_MAX = 500;
+const MAINT_WARNING_KEY = 'gam_maint_warning';
+const MAINT_SCHEMA_KEY  = 'gam_settings_schema_version';
+const MAINT_SCHEMA_CURRENT = 3;
+// Conservative defaults the schema migration installs for missing keys.
+const MAINT_DEFAULT_SETTINGS = {
+  'features.platformHardening': true,
+  'features.uxPolish': false,
+  autoRefreshEnabled: true
+};
+
+// Quota for chrome.storage.local is 5MB on default; 10MB with the
+// "unlimitedStorage" permission (we don't have it). Use 5MB.
+const MAINT_QUOTA_BYTES = 5 * 1024 * 1024;
+
+// Append a maint event to gam_diag_log without depending on the active GAW
+// tab. Mirrors modtools.js _diagLog's persisted shape.
+async function __maintLog(routine, result, extra) {
+  try {
+    const entry = {
+      ts: Date.now(),
+      iso: new Date().toISOString(),
+      cat: 'maint',
+      msg: String(routine || ''),
+      extra: { result: result, ...(extra || null) },
+      stack: null,
+      v: chrome.runtime.getManifest().version
+    };
+    const r = await chrome.storage.local.get(MAINT_DIAG_KEY);
+    const log = (r[MAINT_DIAG_KEY] || []).slice(-(MAINT_DIAG_MAX - 1));
+    log.push(entry);
+    await chrome.storage.local.set({ [MAINT_DIAG_KEY]: log });
+  } catch (e) { /* fire-and-forget */ }
+}
+
+function __maintSetStatus(elId, text, kind) {
+  const el = $(elId);
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'pop-token-status pop-maint-status'
+    + (kind === 'ok' ? ' ok' : '')
+    + (kind === 'err' ? ' err' : '')
+    + (kind === 'warn' ? ' warn' : '');
+}
+
+function __fmtBytes(n) {
+  if (!Number.isFinite(n)) return '?';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+// =========================================================================
+// Routine #1: Clear stuck GAW cookies + page localStorage
+// =========================================================================
+async function maintClearCookies() {
+  __maintSetStatus('maintCookiesStatus', 'clearing...');
+  // Triple-domain coverage: subdomain + apex + dotted (cf cookies often set
+  // at apex with leading dot).
+  const domains = ['greatawakening.win', '.greatawakening.win'];
+  // Cookies we own; deleting these forces a CSRF re-fetch + session re-handshake.
+  // We also wildcard-match cf_* via predicate (chrome.cookies.getAll then filter).
+  const exactNames = ['XSRF-TOKEN', 'session', '_session', 'cf_clearance', 'cf_chl_2'];
+  let removed = 0;
+  let inspected = 0;
+  let errors = [];
+  try {
+    if (!chrome.cookies || !chrome.cookies.getAll) {
+      throw new Error('chrome.cookies API unavailable -- did the cookies permission install?');
+    }
+    for (const dom of domains) {
+      let all = [];
+      try { all = await chrome.cookies.getAll({ domain: dom }); }
+      catch (e) { errors.push('getAll(' + dom + '): ' + e.message); continue; }
+      inspected += all.length;
+      for (const c of all) {
+        const matchesExact = exactNames.includes(c.name);
+        const matchesPrefix = /^cf_/.test(c.name) || /-session$/.test(c.name);
+        if (!matchesExact && !matchesPrefix) continue;
+        const url = (c.secure ? 'https://' : 'http://') + (c.domain.replace(/^\./, '')) + (c.path || '/');
+        try {
+          await chrome.cookies.remove({ url: url, name: c.name });
+          removed++;
+        } catch (e) { errors.push('remove(' + c.name + '): ' + e.message); }
+      }
+    }
+    // Notify any open GAW tabs to clear their localStorage too.
+    let tabsHit = 0;
+    try {
+      const tabs = await chrome.tabs.query({ url: GAW_TAB_PATTERNS });
+      for (const t of tabs) {
+        try {
+          await chrome.tabs.sendMessage(t.id, { type: 'clearLocalStorage' });
+          tabsHit++;
+        } catch (e) { /* tab may not have content script ready */ }
+      }
+    } catch (e) { errors.push('tabs.query: ' + e.message); }
+    const out = { removed, inspected, tabsHit, errors: errors.slice(0, 5) };
+    __maintLog('clearCookies', removed > 0 ? 'ok' : 'noop', out);
+    if (removed === 0 && errors.length === 0) {
+      __maintSetStatus('maintCookiesStatus',
+        'no matching cookies found (' + inspected + ' inspected). reload GAW tabs to test.', 'warn');
+      return;
+    }
+    __maintSetStatus('maintCookiesStatus',
+      '✓ removed ' + removed + ' cookie(s) on ' + inspected + ' inspected, '
+      + tabsHit + ' tab(s) cleared. Reload GAW.',
+      errors.length ? 'warn' : 'ok');
+    if (errors.length) console.warn('[maint] clearCookies partial errors', errors);
+  } catch (e) {
+    __maintLog('clearCookies', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintCookiesStatus', 'failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+// =========================================================================
+// Routine #2: Storage health probe
+// =========================================================================
+async function maintStorageProbe() {
+  __maintSetStatus('maintStorageStatus', 'probing...');
+  try {
+    // Total bytes
+    const total = await new Promise((resolve, reject) => {
+      try { chrome.storage.local.getBytesInUse(null, n => resolve(n)); }
+      catch (e) { reject(e); }
+    });
+    // Per-key sizes (best effort: re-read each owned key + JSON-stringify length).
+    const allKeys = await chrome.storage.local.get(null);
+    const sizes = Object.entries(allKeys).map(([k, v]) => {
+      let s;
+      try { s = JSON.stringify(v).length; } catch (e) { s = 0; }
+      return [k, s];
+    }).sort((a, b) => b[1] - a[1]);
+    const top5 = sizes.slice(0, 5);
+    const pct = total / MAINT_QUOTA_BYTES * 100;
+    const summary = __fmtBytes(total) + ' (' + pct.toFixed(1) + '% of 5MB) -- top: '
+      + top5.map(([k, s]) => k + ' ' + __fmtBytes(s)).join(', ');
+    __maintLog('storageProbe', 'ok', { total, pct, top5 });
+    const trim = document.createElement('button');
+    trim.className = 'pop-btn pop-btn-ghost';
+    trim.textContent = 'Trim now';
+    trim.style.cssText = 'font-size:10px;padding:2px 8px;margin-left:6px';
+    trim.addEventListener('click', () => withLoading(trim, 'trimming...', maintStorageTrim));
+    __maintSetStatus('maintStorageStatus', summary, pct > 80 ? 'warn' : 'ok');
+    const el = $('maintStorageStatus');
+    if (el) el.appendChild(trim);
+  } catch (e) {
+    __maintLog('storageProbe', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintStorageStatus', 'failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+async function maintStorageTrim() {
+  __maintSetStatus('maintStorageStatus', 'trimming...');
+  try {
+    let evicted = 0;
+    // Evict oldest 50% of intel cache.
+    const intelData = await chrome.storage.local.get(K.INTEL);
+    const intel = intelData[K.INTEL] || {};
+    const entries = Object.entries(intel);
+    if (entries.length > 0) {
+      // Sort by .ts ascending; drop bottom half.
+      entries.sort((a, b) => (a[1] && a[1].ts || 0) - (b[1] && b[1].ts || 0));
+      const dropCount = Math.floor(entries.length / 2);
+      const kept = entries.slice(dropCount);
+      const next = Object.fromEntries(kept);
+      await chrome.storage.local.set({ [K.INTEL]: next });
+      evicted += dropCount;
+    }
+    // Cap diag log at 500 entries.
+    const dr = await chrome.storage.local.get(MAINT_DIAG_KEY);
+    const log = dr[MAINT_DIAG_KEY] || [];
+    if (log.length > MAINT_DIAG_MAX) {
+      const trimmed = log.slice(-MAINT_DIAG_MAX);
+      await chrome.storage.local.set({ [MAINT_DIAG_KEY]: trimmed });
+      evicted += (log.length - MAINT_DIAG_MAX);
+    }
+    __maintLog('storageTrim', 'ok', { evicted });
+    __maintSetStatus('maintStorageStatus', '✓ evicted ' + evicted + ' entries. Re-probe to confirm.', 'ok');
+  } catch (e) {
+    __maintLog('storageTrim', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintStorageStatus', 'trim failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+// =========================================================================
+// Routine #3: Token health probe
+// =========================================================================
+async function maintTokenProbe() {
+  __maintSetStatus('maintTokenStatus', 'probing...');
+  try {
+    const t0 = Date.now();
+    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
+    const latency = Date.now() - t0;
+    if (!r || !r.ok || !r.data) {
+      __maintLog('tokenProbe', 'err', { status: r && r.status, error: r && r.error });
+      __maintSetStatus('maintTokenStatus',
+        'whoami failed (HTTP ' + (r && r.status || '?') + ') -- token may be invalid', 'err');
+      return;
+    }
+    const username = r.data.username || '?';
+    const isLead = !!r.data.is_lead;
+    // Read rotation timestamp from gam_settings if present.
+    const { gam_settings } = await chrome.storage.local.get('gam_settings');
+    const rotatedAt = gam_settings && gam_settings.rotated_at;
+    let ageStr = 'age unknown';
+    let kind = 'ok';
+    if (rotatedAt) {
+      const ageMs = Date.now() - new Date(rotatedAt).getTime();
+      const ageDays = Math.floor(ageMs / 86400000);
+      ageStr = 'rotated ' + ageDays + 'd ago';
+      if (ageDays > 90) kind = 'err';
+      else if (ageDays > 60) kind = 'warn';
+    }
+    const summary = '✓ ' + username + (isLead ? ' (lead)' : '')
+      + ' -- ' + latency + 'ms, ' + ageStr;
+    __maintLog('tokenProbe', 'ok', { username, isLead, latency, ageStr });
+    __maintSetStatus('maintTokenStatus', summary, kind);
+  } catch (e) {
+    __maintLog('tokenProbe', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintTokenStatus', 'failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+// =========================================================================
+// Routine #4: Selector drift report
+// =========================================================================
+async function maintSelectorDriftReport() {
+  __maintSetStatus('maintSelectorDriftStatus', 'reading...');
+  try {
+    const r = await chrome.storage.local.get('gam_learned_selectors');
+    const learned = (r && r.gam_learned_selectors) || {};
+    const keys = Object.keys(learned);
+    if (keys.length === 0) {
+      __maintLog('selectorDrift', 'noop', { count: 0 });
+      __maintSetStatus('maintSelectorDriftStatus',
+        'no drift recorded -- primary selectors winning across the board.', 'ok');
+      return;
+    }
+    const summary = keys.length + ' selector(s) self-promoted: '
+      + keys.slice(0, 4).join(', ') + (keys.length > 4 ? '...' : '');
+    __maintLog('selectorDrift', 'ok', { count: keys.length, learned });
+    __maintSetStatus('maintSelectorDriftStatus', summary, 'warn');
+  } catch (e) {
+    __maintLog('selectorDrift', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintSelectorDriftStatus', 'failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+// =========================================================================
+// Routine #5: Force re-hydrate (alias to existing handler)
+// =========================================================================
+async function maintForceRehydrate() {
+  __maintSetStatus('maintRehydrateAliasStatus', 'rehydrating...');
+  try {
+    const tabs = await chrome.tabs.query({ url: GAW_TAB_PATTERNS, active: true, currentWindow: true });
+    if (!tabs || tabs.length === 0) {
+      __maintSetStatus('maintRehydrateAliasStatus',
+        'no active GAW tab -- open greatawakening.win in this window', 'err');
+      return;
+    }
+    const r = await chrome.tabs.sendMessage(tabs[0].id, { type: 'forceRehydrate' });
+    if (r && r.ok) {
+      const stamp = new Date().toLocaleTimeString();
+      __maintLog('forceRehydrate', 'ok', { teamLen: r.teamLen, leadLen: r.leadLen });
+      __maintSetStatus('maintRehydrateAliasStatus',
+        '✓ last rehydrate: ' + stamp + ' -- team=' + (r.hasTeamToken ? 'yes(' + r.teamLen + ')' : 'no')
+        + ', lead=' + (r.hasLeadToken ? 'yes(' + r.leadLen + ')' : 'no'), 'ok');
+    } else {
+      __maintLog('forceRehydrate', 'err', { error: r && r.error });
+      __maintSetStatus('maintRehydrateAliasStatus',
+        'failed: ' + (r && r.error || 'no response'), 'err');
+    }
+  } catch (e) {
+    __maintLog('forceRehydrate', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintRehydrateAliasStatus', 'failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+// =========================================================================
+// Routine #6: Diag log status + purge
+// =========================================================================
+async function maintDiagStatus() {
+  __maintSetStatus('maintDiagStatus', 'reading...');
+  try {
+    const r = await chrome.storage.local.get(MAINT_DIAG_KEY);
+    const log = r[MAINT_DIAG_KEY] || [];
+    const oldest = log.length > 0 ? new Date(log[0].ts).toLocaleString() : 'none';
+    __maintLog('diagStatus', 'ok', { count: log.length });
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'pop-btn pop-btn-ghost';
+    exportBtn.textContent = 'Export';
+    exportBtn.style.cssText = 'font-size:10px;padding:2px 8px;margin-left:6px';
+    exportBtn.addEventListener('click', () => withLoading(exportBtn, 'copying...', maintDiagExport));
+    const purgeBtn = document.createElement('button');
+    purgeBtn.className = 'pop-btn pop-btn-ghost';
+    purgeBtn.textContent = 'Purge 50%';
+    purgeBtn.style.cssText = 'font-size:10px;padding:2px 8px;margin-left:4px';
+    purgeBtn.addEventListener('click', () => withLoading(purgeBtn, 'purging...', maintDiagPurge));
+    __maintSetStatus('maintDiagStatus', log.length + ' entries, oldest: ' + oldest, 'ok');
+    const el = $('maintDiagStatus');
+    if (el) { el.appendChild(exportBtn); el.appendChild(purgeBtn); }
+  } catch (e) {
+    __maintLog('diagStatus', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintDiagStatus', 'failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+async function maintDiagExport() {
+  try {
+    const r = await chrome.storage.local.get(MAINT_DIAG_KEY);
+    const log = r[MAINT_DIAG_KEY] || [];
+    // Redact: drop any "extra" keys named "token", "secret", "auth".
+    const redacted = log.map(e => {
+      const out = { ts: e.ts, iso: e.iso, cat: e.cat, msg: e.msg, v: e.v };
+      if (e.extra && typeof e.extra === 'object') {
+        const ex = {};
+        for (const [k, v] of Object.entries(e.extra)) {
+          if (/token|secret|auth/i.test(k)) ex[k] = '[REDACTED]';
+          else ex[k] = v;
+        }
+        out.extra = ex;
+      }
+      return out;
+    });
+    const json = JSON.stringify({
+      exportedAt: new Date().toISOString(),
+      version: chrome.runtime.getManifest().version,
+      count: redacted.length,
+      entries: redacted
+    }, null, 2);
+    await navigator.clipboard.writeText(json);
+    __maintLog('diagExport', 'ok', { count: redacted.length });
+    __maintSetStatus('maintDiagStatus', '✓ ' + redacted.length + ' entries copied to clipboard (redacted).', 'ok');
+  } catch (e) {
+    __maintLog('diagExport', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintDiagStatus', 'export failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+async function maintDiagPurge() {
+  try {
+    const r = await chrome.storage.local.get(MAINT_DIAG_KEY);
+    const log = r[MAINT_DIAG_KEY] || [];
+    const dropCount = Math.floor(log.length / 2);
+    const kept = log.slice(dropCount);
+    await chrome.storage.local.set({ [MAINT_DIAG_KEY]: kept });
+    __maintLog('diagPurge', 'ok', { dropped: dropCount, kept: kept.length });
+    __maintSetStatus('maintDiagStatus', '✓ dropped ' + dropCount + ', kept ' + kept.length + '.', 'ok');
+  } catch (e) {
+    __maintLog('diagPurge', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintDiagStatus', 'purge failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+// =========================================================================
+// Routine #7: Schema migration check
+// =========================================================================
+async function maintSchemaCheck() {
+  __maintSetStatus('maintSchemaStatus', 'checking...');
+  try {
+    const r = await chrome.storage.local.get('gam_settings');
+    const s = (r && r.gam_settings) || {};
+    const stored = parseInt(s[MAINT_SCHEMA_KEY], 10) || 1;
+    if (stored === MAINT_SCHEMA_CURRENT) {
+      __maintLog('schemaCheck', 'noop', { stored });
+      __maintSetStatus('maintSchemaStatus', '✓ schema v' + stored + ' (current).', 'ok');
+      return;
+    }
+    if (stored > MAINT_SCHEMA_CURRENT) {
+      __maintLog('schemaCheck', 'warn', { stored, code: MAINT_SCHEMA_CURRENT });
+      __maintSetStatus('maintSchemaStatus',
+        'stored v' + stored + ' > code v' + MAINT_SCHEMA_CURRENT + ' (downgrade?). No-op.', 'warn');
+      return;
+    }
+    // Additive migration: install missing keys with safe defaults.
+    let added = 0;
+    const next = { ...s };
+    for (const [k, v] of Object.entries(MAINT_DEFAULT_SETTINGS)) {
+      if (!(k in next)) { next[k] = v; added++; }
+    }
+    next[MAINT_SCHEMA_KEY] = MAINT_SCHEMA_CURRENT;
+    await chrome.storage.local.set({ gam_settings: next });
+    __maintLog('schemaMigrate', 'ok', { from: stored, to: MAINT_SCHEMA_CURRENT, added });
+    __maintSetStatus('maintSchemaStatus',
+      '✓ migrated v' + stored + ' -> v' + MAINT_SCHEMA_CURRENT + ' (added ' + added + ' default(s)).', 'ok');
+  } catch (e) {
+    __maintLog('schemaCheck', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintSchemaStatus', 'failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+// =========================================================================
+// Routine #8: Reset to defaults (DESTRUCTIVE — triple confirm)
+// =========================================================================
+async function maintResetDefaults() {
+  __maintSetStatus('maintResetStatus', '');
+  try {
+    const ok1 = await __popupConfirm({
+      title: 'Reset settings to defaults?',
+      body: 'Wipes ALL feature flags + UI preferences in gam_settings.\n\n'
+          + 'PRESERVED: your team token + lead token.\n'
+          + 'WIPED: every other gam_settings entry (display prefs, learned selectors, intel cache, etc.).\n\n'
+          + 'You will need to reload any open GAW tabs after.\n\nProceed to confirmation #2?',
+      okLabel: 'Continue',
+      cancelLabel: 'Cancel'
+    });
+    if (!ok1) { __maintSetStatus('maintResetStatus', 'cancelled.'); return; }
+    const ok2 = await __popupConfirm({
+      title: 'CONFIRM #2 of 3',
+      body: 'Are you sure? This cannot be undone.',
+      okLabel: 'Yes, continue',
+      cancelLabel: 'No'
+    });
+    if (!ok2) { __maintSetStatus('maintResetStatus', 'cancelled.'); return; }
+    const finalText = await __popupAskText({
+      title: 'CONFIRM #3 of 3',
+      label: 'Type RESET to proceed',
+      placeholder: 'RESET',
+      max: 16,
+      validate: function (v) { return v === 'RESET' ? '' : 'Type RESET (uppercase) exactly.'; }
+    });
+    if (finalText !== 'RESET') { __maintSetStatus('maintResetStatus', 'cancelled.'); return; }
+    // Preserve tokens, wipe everything else.
+    const cur = await chrome.storage.local.get('gam_settings');
+    const s = (cur && cur.gam_settings) || {};
+    const preserved = {
+      workerModToken: s.workerModToken || '',
+      leadModToken: s.leadModToken || '',
+      isLeadMod: !!s.isLeadMod,
+      [MAINT_SCHEMA_KEY]: MAINT_SCHEMA_CURRENT
+    };
+    // Remove every owned non-token key + learned selectors + intel cache.
+    const keysToRemove = OWNED_KEYS.filter(k => k !== K.SETTINGS).concat(['gam_learned_selectors']);
+    await chrome.storage.local.remove(keysToRemove);
+    await chrome.storage.local.set({ gam_settings: { ...preserved, ...MAINT_DEFAULT_SETTINGS } });
+    __maintLog('resetDefaults', 'ok', { preserved: Object.keys(preserved) });
+    __maintSetStatus('maintResetStatus',
+      '✓ reset complete. Tokens preserved. Reload GAW tabs.', 'ok');
+  } catch (e) {
+    __maintLog('resetDefaults', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintResetStatus', 'failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+// =========================================================================
+// Routine #9 (LEAD): Audit chain verify
+// =========================================================================
+async function maintAuditVerify() {
+  __maintSetStatus('maintAuditVerifyStatus', 'verifying...');
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: 'rpc', name: 'adminAuditVerify',
+      args: { limit: 5000, from: 0 }
+    });
+    if (!r || !r.ok || !r.data) {
+      __maintLog('auditVerify', 'err', { status: r && r.status, error: r && r.error });
+      __maintSetStatus('maintAuditVerifyStatus',
+        'verify failed (HTTP ' + (r && r.status || '?') + ')'
+        + (r && r.status === 403 ? ' -- lead-only' : ''), 'err');
+      return;
+    }
+    const d = r.data;
+    const ok = !!d.ok;
+    const summary = (ok ? '✓ chain valid' : '✗ chain BROKEN')
+      + ' -- verified ' + (d.verified || 0) + ' of ' + (d.total || 0)
+      + (d.last_verified_at ? ' (last: ' + d.last_verified_at + ')' : '')
+      + (d.entry_hmac_null_post_boundary ? ' [NULL HMAC ROWS DETECTED]' : '');
+    __maintLog('auditVerify', ok ? 'ok' : 'err', d);
+    __maintSetStatus('maintAuditVerifyStatus', summary, ok ? 'ok' : 'err');
+  } catch (e) {
+    __maintLog('auditVerify', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintAuditVerifyStatus', 'failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+// =========================================================================
+// Routine #10 (LEAD): Full health report
+// =========================================================================
+async function maintFullReport() {
+  __maintSetStatus('maintFullReportStatus', 'running 9 routines...');
+  const t0 = Date.now();
+  const report = {
+    generatedAt: new Date().toISOString(),
+    extensionVersion: chrome.runtime.getManifest().version,
+    routines: {}
+  };
+  // Helper that captures the post-routine status text.
+  async function step(name, fn, statusId) {
+    try { await fn(); }
+    catch (e) { /* fn writes its own status; capture below */ }
+    const s = $(statusId);
+    report.routines[name] = s ? s.textContent : '(no status)';
+  }
+  await step('clearCookies-skipped', async () => {}, 'maintCookiesStatus'); // destructive: skip
+  await step('storageProbe', maintStorageProbe, 'maintStorageStatus');
+  await step('tokenProbe', maintTokenProbe, 'maintTokenStatus');
+  await step('selectorDrift', maintSelectorDriftReport, 'maintSelectorDriftStatus');
+  await step('forceRehydrate', maintForceRehydrate, 'maintRehydrateAliasStatus');
+  await step('diagStatus', maintDiagStatus, 'maintDiagStatus');
+  await step('schemaCheck', maintSchemaCheck, 'maintSchemaStatus');
+  await step('auditVerify', maintAuditVerify, 'maintAuditVerifyStatus');
+  await step('migrationDebt', maintMigrationDebt, 'maintMigrationDebtStatus');
+  report.elapsedMs = Date.now() - t0;
+  const json = JSON.stringify(report, null, 2);
+  try { await navigator.clipboard.writeText(json); } catch (_) {}
+  // Also offer download.
+  try {
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'modtools-health-report-'
+      + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (_) {}
+  __maintLog('fullReport', 'ok', { elapsedMs: report.elapsedMs });
+  __maintSetStatus('maintFullReportStatus',
+    '✓ ran 9 routines in ' + report.elapsedMs + 'ms -- copied to clipboard + downloaded.', 'ok');
+}
+
+// =========================================================================
+// Routine #11 (LEAD): Roster staleness audit
+// =========================================================================
+async function maintRosterStaleness() {
+  __maintSetStatus('maintRosterStalenessStatus', 'loading roster...');
+  const panel = $('maintRosterStalenessPanel');
+  if (panel) { panel.style.display = 'none'; panel.replaceChildren(); }
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'adminListMods' });
+    if (!r || !r.ok || !r.data) {
+      __maintLog('rosterStaleness', 'err', { status: r && r.status, error: r && r.error });
+      __maintSetStatus('maintRosterStalenessStatus',
+        'roster fetch failed (HTTP ' + (r && r.status || '?') + ')'
+        + (r && r.status === 403 ? ' -- lead-only' : ''), 'err');
+      return;
+    }
+    const mods = (r.data && r.data.mods) || [];
+    let red = 0, yellow = 0, green = 0;
+    if (panel) {
+      panel.replaceChildren();
+      panel.className = 'pop-maint-roster';
+      panel.style.display = 'block';
+      mods.sort((a, b) => {
+        const aT = a.rotated_at ? new Date(a.rotated_at).getTime() : 0;
+        const bT = b.rotated_at ? new Date(b.rotated_at).getTime() : 0;
+        return aT - bT;
+      });
+      for (const m of mods) {
+        const row = document.createElement('div');
+        row.className = 'pop-maint-roster-row';
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = m.mod_username + (m.is_lead ? ' \u{1F451}' : '');
+        const ageSpan = document.createElement('span');
+        ageSpan.className = 'age';
+        let ageDays = -1;
+        if (m.rotated_at) {
+          ageDays = Math.floor((Date.now() - new Date(m.rotated_at).getTime()) / 86400000);
+          if (ageDays < 30) { ageSpan.classList.add('green'); green++; }
+          else if (ageDays < 90) { ageSpan.classList.add('yellow'); yellow++; }
+          else { ageSpan.classList.add('red'); red++; }
+          ageSpan.textContent = ageDays + 'd';
+        } else {
+          ageSpan.classList.add('red');
+          ageSpan.textContent = 'never';
+          red++;
+        }
+        row.appendChild(name);
+        row.appendChild(ageSpan);
+        if (!m.is_lead) {
+          const btn = document.createElement('button');
+          btn.className = 'pop-btn pop-btn-ghost';
+          btn.textContent = 'Rotate';
+          btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            btn.textContent = '...';
+            try {
+              const ri = await chrome.runtime.sendMessage({
+                type: 'rpc', name: 'adminIssueInvite',
+                args: { username: m.mod_username }
+              });
+              if (ri && ri.ok && ri.data && ri.data.code) {
+                const url = 'https://greatawakening.win/?mt_invite=' + encodeURIComponent(ri.data.code);
+                try { await navigator.clipboard.writeText(url); } catch (_) {}
+                btn.textContent = '✓ link copied';
+              } else {
+                btn.textContent = 'failed';
+              }
+            } catch (e) { btn.textContent = 'err'; }
+          });
+          row.appendChild(btn);
+        } else {
+          row.appendChild(document.createElement('span'));
+        }
+        panel.appendChild(row);
+      }
+    }
+    __maintLog('rosterStaleness', 'ok', { total: mods.length, red, yellow, green });
+    __maintSetStatus('maintRosterStalenessStatus',
+      mods.length + ' mods -- ' + green + ' green, ' + yellow + ' yellow, ' + red + ' red.',
+      red > 0 ? 'warn' : 'ok');
+  } catch (e) {
+    __maintLog('rosterStaleness', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintRosterStalenessStatus', 'failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+// =========================================================================
+// Routine #12 (LEAD): Migration debt scanner
+// =========================================================================
+async function maintMigrationDebt() {
+  __maintSetStatus('maintMigrationDebtStatus', 'scanning...');
+  try {
+    const findings = [];
+    // 1) Legacy claim path? Check for mt_invite_legacy in storage as a marker.
+    const cur = await chrome.storage.local.get(null);
+    const cs = cur.gam_settings || {};
+    const legacyKeys = Object.keys(cs).filter(k => /legacy|deprecated|_old$/.test(k));
+    if (legacyKeys.length > 0) {
+      findings.push({ kind: 'legacy_settings_keys', count: legacyKeys.length, detail: legacyKeys, location: 'gam_settings' });
+    }
+    // 2) Learned selectors -- if many keys present, GAW layout is drifting
+    if (cur.gam_learned_selectors && Object.keys(cur.gam_learned_selectors).length >= 3) {
+      findings.push({
+        kind: 'learned_selectors',
+        count: Object.keys(cur.gam_learned_selectors).length,
+        detail: 'high drift may indicate GAW DOM refactor',
+        location: 'modtools.js:_SEL_FB (line ~167)'
+      });
+    }
+    // 3) Stale rotation timestamps in roster (ask worker)
+    let staleRoster = 0;
+    try {
+      const rr = await chrome.runtime.sendMessage({ type: 'rpc', name: 'adminListMods' });
+      if (rr && rr.ok && rr.data && Array.isArray(rr.data.mods)) {
+        const cutoff = Date.now() - 90 * 86400000;
+        staleRoster = rr.data.mods.filter(m => !m.is_lead
+          && (!m.rotated_at || new Date(m.rotated_at).getTime() < cutoff)).length;
+        if (staleRoster > 0) {
+          findings.push({
+            kind: 'stale_roster',
+            count: staleRoster,
+            detail: 'mods rotated >90d ago (or never)',
+            location: 'worker /admin/mod/list'
+          });
+        }
+      }
+    } catch (_) { /* lead RPC may have failed */ }
+    // 4) Diag log size
+    const dl = cur[MAINT_DIAG_KEY] || [];
+    if (dl.length >= MAINT_DIAG_MAX * 0.9) {
+      findings.push({
+        kind: 'diag_log_full',
+        count: dl.length,
+        detail: 'within 10% of cap (' + MAINT_DIAG_MAX + '); use Purge 50%',
+        location: 'popup.js:maintDiagPurge'
+      });
+    }
+    // 5) Audit-chain NULL hmac flag (check via verify)
+    try {
+      const av = await chrome.runtime.sendMessage({
+        type: 'rpc', name: 'adminAuditVerify', args: { limit: 1, from: 0 }
+      });
+      if (av && av.ok && av.data && av.data.entry_hmac_null_post_boundary) {
+        findings.push({
+          kind: 'audit_null_hmac',
+          count: 1,
+          detail: 'post-boundary rows missing entry_hmac',
+          location: 'worker /admin/audit/verify'
+        });
+      }
+    } catch (_) {}
+    __maintLog('migrationDebt', 'ok', { findings });
+    if (findings.length === 0) {
+      __maintSetStatus('maintMigrationDebtStatus', '✓ no migration debt detected.', 'ok');
+    } else {
+      const summary = findings.length + ' debt item(s): '
+        + findings.map(f => f.kind + '(' + f.count + ')').join(', ');
+      __maintSetStatus('maintMigrationDebtStatus', summary, 'warn');
+      try { console.warn('[maint] migration debt', findings); } catch (_) {}
+    }
+  } catch (e) {
+    __maintLog('migrationDebt', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintMigrationDebtStatus', 'failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+// =========================================================================
+// Wire all maintenance buttons + warning chip + banner
+// =========================================================================
+function __maintWire(id, fn, label) {
+  const b = $(id);
+  if (!b) return;
+  b.addEventListener('click', () => withLoading(b, label || 'running...', fn));
+}
+__maintWire('maintCookies', maintClearCookies, 'clearing...');
+__maintWire('maintStorage', maintStorageProbe, 'probing...');
+__maintWire('maintToken', maintTokenProbe, 'probing...');
+__maintWire('maintSelectorDrift', maintSelectorDriftReport, 'reading...');
+__maintWire('maintRehydrateAlias', maintForceRehydrate, 'rehydrating...');
+__maintWire('maintDiag', maintDiagStatus, 'reading...');
+__maintWire('maintSchema', maintSchemaCheck, 'checking...');
+__maintWire('maintReset', maintResetDefaults, 'resetting...');
+__maintWire('maintAuditVerify', maintAuditVerify, 'verifying...');
+__maintWire('maintFullReport', maintFullReport, 'running...');
+__maintWire('maintRosterStaleness', maintRosterStaleness, 'loading...');
+__maintWire('maintMigrationDebt', maintMigrationDebt, 'scanning...');
+
+// Header chip + banner consumer for gam_maint_warning. Reads on popup open;
+// if flag present, surface a yellow chip in the header AND a banner above
+// the maintenance section. Click chip = scroll-into-view of the banner.
+async function __maintLoadWarning() {
+  try {
+    const r = await chrome.storage.local.get(MAINT_WARNING_KEY);
+    const w = r[MAINT_WARNING_KEY];
+    const chip = $('maintWarningChip');
+    const banner = $('maintWarningBanner');
+    if (w && typeof w === 'object' && w.reason) {
+      if (chip) {
+        chip.style.display = '';
+        chip.textContent = '⚠ maint';
+        chip.title = w.reason + ' (since ' + (w.firstSeenAt || w.at || 'recent') + ')';
+        chip.addEventListener('click', () => {
+          if (banner) banner.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, { once: true });
+      }
+      if (banner) {
+        banner.style.display = '';
+        banner.textContent = '⚠ ' + w.reason
+          + (w.detail ? ' -- ' + w.detail : '');
+        if (w.severity === 'danger') banner.classList.add('danger');
+      }
+    } else {
+      if (chip) chip.style.display = 'none';
+      if (banner) banner.style.display = 'none';
+    }
+  } catch (e) { /* fail silent */ }
+}
+__maintLoadWarning();

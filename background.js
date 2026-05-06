@@ -29,6 +29,26 @@ const ALARM_PERIOD_MIN = 30;
 // only; harmless 403 for un-allowlisted mods.
 const BUG_POLL_ALARM = 'gam_bug_poll';
 const BUG_POLL_PERIOD_MIN = 5;
+// v9.5.0 MAINTENANCE MODE alarms. None is destructive: each writes a flag /
+// trims a cache. Click-only routines (cookie clear, reset to defaults) stay
+// click-only, never alarm-driven.
+const MAINT_QUOTA_ALARM = 'gam_maint_quota_check';
+const MAINT_QUOTA_PERIOD_MIN = 360;            // every 6h
+const MAINT_TOKEN_AGE_ALARM = 'gam_maint_token_age';
+const MAINT_TOKEN_AGE_PERIOD_MIN = 1440;       // every 24h
+const MAINT_DIAG_ROTATE_ALARM = 'gam_maint_diag_rotate';
+const MAINT_DIAG_ROTATE_PERIOD_MIN = 1440;     // every 24h
+const MAINT_INTEL_EVICT_ALARM = 'gam_maint_intel_evict';
+const MAINT_INTEL_EVICT_PERIOD_MIN = 30;       // every 30 min
+// Storage / log shape constants kept in sync with popup.js + modtools.js.
+const MAINT_DIAG_KEY = 'gam_diag_log';
+const MAINT_DIAG_MAX = 500;
+const MAINT_INTEL_KEY = 'gam_profile_intel';
+const MAINT_INTEL_MAX_AGE_MS = 48 * 60 * 60 * 1000;  // 48h
+const MAINT_QUOTA_BYTES = 5 * 1024 * 1024;
+const MAINT_QUOTA_THRESHOLD_PCT = 80;
+const MAINT_TOKEN_AGE_WARN_DAYS = 60;
+const MAINT_WARNING_KEY = 'gam_maint_warning';
 // v9.3.14 (Vanguard C-3): if a banner has been ignored for >7d, escalate
 // from silent storage flag to a console.warn so a forensic check sees it.
 const UPDATE_NAG_WARN_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
@@ -113,6 +133,11 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   try {
     chrome.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
     chrome.alarms.create(BUG_POLL_ALARM, { periodInMinutes: BUG_POLL_PERIOD_MIN });
+    // v9.5.0 maintenance alarms.
+    chrome.alarms.create(MAINT_QUOTA_ALARM, { periodInMinutes: MAINT_QUOTA_PERIOD_MIN });
+    chrome.alarms.create(MAINT_TOKEN_AGE_ALARM, { periodInMinutes: MAINT_TOKEN_AGE_PERIOD_MIN });
+    chrome.alarms.create(MAINT_DIAG_ROTATE_ALARM, { periodInMinutes: MAINT_DIAG_ROTATE_PERIOD_MIN });
+    chrome.alarms.create(MAINT_INTEL_EVICT_ALARM, { periodInMinutes: MAINT_INTEL_EVICT_PERIOD_MIN });
   } catch (e) { console.warn('[ModTools] alarm create failed', e); }
   // v8.6.9: AWAIT __ensureSessionAccess so subsequent storage calls don't
   // fire before the session-area access level is set. Pre-fix race: the
@@ -130,6 +155,19 @@ chrome.runtime.onStartup?.addListener(async () => {
     });
     chrome.alarms.get(BUG_POLL_ALARM, (a) => {
       if (!a) chrome.alarms.create(BUG_POLL_ALARM, { periodInMinutes: BUG_POLL_PERIOD_MIN });
+    });
+    // v9.5.0 maintenance alarms — ensure alive on SW wake.
+    chrome.alarms.get(MAINT_QUOTA_ALARM, (a) => {
+      if (!a) chrome.alarms.create(MAINT_QUOTA_ALARM, { periodInMinutes: MAINT_QUOTA_PERIOD_MIN });
+    });
+    chrome.alarms.get(MAINT_TOKEN_AGE_ALARM, (a) => {
+      if (!a) chrome.alarms.create(MAINT_TOKEN_AGE_ALARM, { periodInMinutes: MAINT_TOKEN_AGE_PERIOD_MIN });
+    });
+    chrome.alarms.get(MAINT_DIAG_ROTATE_ALARM, (a) => {
+      if (!a) chrome.alarms.create(MAINT_DIAG_ROTATE_ALARM, { periodInMinutes: MAINT_DIAG_ROTATE_PERIOD_MIN });
+    });
+    chrome.alarms.get(MAINT_INTEL_EVICT_ALARM, (a) => {
+      if (!a) chrome.alarms.create(MAINT_INTEL_EVICT_ALARM, { periodInMinutes: MAINT_INTEL_EVICT_PERIOD_MIN });
     });
   } catch (e) {}
   // v8.6.9: AWAIT both bootstrap calls so the SW is fully ready before
@@ -270,8 +308,154 @@ async function _bugPollAndBadge() {
   }
 }
 
+// =========================================================================
+// v9.5.0 MAINTENANCE alarm handlers
+// =========================================================================
+// Each is non-destructive and only writes the gam_maint_warning flag (or
+// trims caches). The flag is a separate concern from gam_update_available;
+// the popup surfaces it via a yellow chip in the header (NOT the existing
+// update banner) so they don't misfire each other.
+
+async function _maintAppendDiag(routine, result, extra) {
+  try {
+    const r = await chrome.storage.local.get(MAINT_DIAG_KEY);
+    const log = (r[MAINT_DIAG_KEY] || []).slice(-(MAINT_DIAG_MAX - 1));
+    log.push({
+      ts: Date.now(),
+      iso: new Date().toISOString(),
+      cat: 'maint',
+      msg: String(routine || ''),
+      extra: { result, ...(extra || null) },
+      stack: null,
+      v: chrome.runtime.getManifest().version
+    });
+    await chrome.storage.local.set({ [MAINT_DIAG_KEY]: log });
+  } catch (e) { /* fire-and-forget */ }
+}
+
+async function _maintSetWarning(payload) {
+  try {
+    if (!payload) {
+      await chrome.storage.local.remove(MAINT_WARNING_KEY);
+      return;
+    }
+    // Preserve firstSeenAt across re-fires of the same warning.
+    const cur = await chrome.storage.local.get(MAINT_WARNING_KEY);
+    const prev = cur[MAINT_WARNING_KEY];
+    const firstSeenAt = (prev && prev.reason === payload.reason && prev.firstSeenAt)
+      ? prev.firstSeenAt : new Date().toISOString();
+    await chrome.storage.local.set({
+      [MAINT_WARNING_KEY]: {
+        ...payload,
+        at: new Date().toISOString(),
+        firstSeenAt
+      }
+    });
+  } catch (e) { /* fire-and-forget */ }
+}
+
+async function _maintQuotaCheck() {
+  try {
+    const total = await new Promise((resolve, reject) => {
+      try { chrome.storage.local.getBytesInUse(null, n => resolve(n)); }
+      catch (e) { reject(e); }
+    });
+    const pct = total / MAINT_QUOTA_BYTES * 100;
+    if (pct >= MAINT_QUOTA_THRESHOLD_PCT) {
+      await _maintSetWarning({
+        reason: 'Storage quota high (' + pct.toFixed(1) + '%)',
+        detail: 'open Maintenance > Storage health probe > Trim now',
+        severity: pct >= 95 ? 'danger' : 'warn'
+      });
+    } else {
+      // Auto-clear if storage was previously high but is now OK.
+      const cur = await chrome.storage.local.get(MAINT_WARNING_KEY);
+      const w = cur[MAINT_WARNING_KEY];
+      if (w && /Storage quota high/.test(w.reason || '')) {
+        await chrome.storage.local.remove(MAINT_WARNING_KEY);
+      }
+    }
+    await _maintAppendDiag('alarm.quotaCheck', 'ok', { total, pct });
+  } catch (e) {
+    await _maintAppendDiag('alarm.quotaCheck', 'err', { error: String(e && e.message || e) });
+  }
+}
+
+async function _maintTokenAgeCheck() {
+  try {
+    const r = await chrome.storage.local.get('gam_settings');
+    const s = (r && r.gam_settings) || {};
+    const rotatedAt = s.rotated_at;
+    if (!rotatedAt) {
+      await _maintAppendDiag('alarm.tokenAge', 'noop', { reason: 'no rotated_at stamp' });
+      return;
+    }
+    const ageDays = Math.floor((Date.now() - new Date(rotatedAt).getTime()) / 86400000);
+    if (ageDays > MAINT_TOKEN_AGE_WARN_DAYS) {
+      await _maintSetWarning({
+        reason: 'Token rotation due (' + ageDays + 'd old)',
+        detail: 'rotate via popup token panel',
+        severity: ageDays > 90 ? 'danger' : 'warn'
+      });
+    } else {
+      const cur = await chrome.storage.local.get(MAINT_WARNING_KEY);
+      const w = cur[MAINT_WARNING_KEY];
+      if (w && /Token rotation due/.test(w.reason || '')) {
+        await chrome.storage.local.remove(MAINT_WARNING_KEY);
+      }
+    }
+    await _maintAppendDiag('alarm.tokenAge', 'ok', { ageDays });
+  } catch (e) {
+    await _maintAppendDiag('alarm.tokenAge', 'err', { error: String(e && e.message || e) });
+  }
+}
+
+async function _maintDiagRotate() {
+  try {
+    const r = await chrome.storage.local.get(MAINT_DIAG_KEY);
+    const log = r[MAINT_DIAG_KEY] || [];
+    if (log.length <= MAINT_DIAG_MAX) {
+      await _maintAppendDiag('alarm.diagRotate', 'noop', { count: log.length });
+      return;
+    }
+    const trimmed = log.slice(-MAINT_DIAG_MAX);
+    await chrome.storage.local.set({ [MAINT_DIAG_KEY]: trimmed });
+    await _maintAppendDiag('alarm.diagRotate', 'ok',
+      { dropped: log.length - MAINT_DIAG_MAX, kept: MAINT_DIAG_MAX });
+  } catch (e) {
+    try { console.warn('[maint] diagRotate failed', e); } catch (_) {}
+  }
+}
+
+async function _maintIntelEvict() {
+  try {
+    const r = await chrome.storage.local.get(MAINT_INTEL_KEY);
+    const intel = r[MAINT_INTEL_KEY] || {};
+    const cutoff = Date.now() - MAINT_INTEL_MAX_AGE_MS;
+    let evicted = 0;
+    const next = {};
+    for (const [k, v] of Object.entries(intel)) {
+      const ts = (v && (v.ts || v.cachedAt)) || 0;
+      if (ts && ts >= cutoff) next[k] = v;
+      else evicted++;
+    }
+    if (evicted > 0) {
+      await chrome.storage.local.set({ [MAINT_INTEL_KEY]: next });
+    }
+    await _maintAppendDiag('alarm.intelEvict', 'ok',
+      { evicted, kept: Object.keys(next).length });
+  } catch (e) {
+    try { console.warn('[maint] intelEvict failed', e); } catch (_) {}
+  }
+}
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === BUG_POLL_ALARM) { await _bugPollAndBadge(); return; }
+  // v9.5.0 maintenance alarms.
+  if (alarm.name === MAINT_QUOTA_ALARM)        { await _maintQuotaCheck();    return; }
+  if (alarm.name === MAINT_TOKEN_AGE_ALARM)    { await _maintTokenAgeCheck(); return; }
+  if (alarm.name === MAINT_DIAG_ROTATE_ALARM)  { await _maintDiagRotate();    return; }
+  if (alarm.name === MAINT_INTEL_EVICT_ALARM)  { await _maintIntelEvict();    return; }
   if (alarm.name !== ALARM_NAME) return;
   try {
     const resp = await fetch(VERSION_JSON_URL, { cache: 'no-store' });

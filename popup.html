@@ -22,6 +22,10 @@
   <div class="pop-header">
     <span class="pop-brand">&#x1F6E1; ModTools</span>
     <span class="pop-ver" id="ver">v5.2.8</span>
+    <!-- v9.5.0: maintenance warning chip. Set by the alarms in background.js
+         when storage quota >80% or token age >60d. Click opens the Maintenance
+         section. Hidden by default; shown when gam_maint_warning is present. -->
+    <span id="maintWarningChip" class="pop-maint-chip" style="display:none" title="Maintenance attention needed"></span>
   </div>
 
   <!-- v9.4.5: stat cards are clickable. data-drill key routes to renderDrillDown(key)
@@ -113,6 +117,72 @@
   </div>
   <div id="crawlStatus" class="pop-token-status" style="padding: 0 12px 4px;"></div>
 
+  <!-- v9.5.0: Maintenance Mode. One-click self-heal routines for non-tech mods.
+       Each row is a separate routine (#1-8 below); each logs to gam_diag_log via
+       the modtools.js content-script handler. Lead-tier maintenance rows live
+       inside #leadSection (rendered further down) so the existing __applyLeadGate
+       in popup.js handles visibility — no separate gate is added here. -->
+  <div class="pop-section-label">&#x1F527; Maintenance</div>
+  <div id="maintWarningBanner" class="pop-maint-banner" style="display:none"></div>
+  <div class="pop-maint">
+    <div class="pop-maint-row">
+      <button id="maintCookies" class="pop-btn pop-btn-ghost"
+              title="Clears stuck XSRF/session/cf_* cookies on greatawakening.win plus per-tab localStorage. Use when GAW gives 403/CSRF errors.">
+        &#x1F36A; Clear stuck cookies + localStorage
+      </button>
+      <div id="maintCookiesStatus" class="pop-token-status pop-maint-status"></div>
+    </div>
+    <div class="pop-maint-row">
+      <button id="maintStorage" class="pop-btn pop-btn-ghost"
+              title="Reads chrome.storage.local usage + top-5 largest keys. Trim button evicts oldest 50% of intel cache + caps diag log.">
+        &#x1F4CA; Storage health probe
+      </button>
+      <div id="maintStorageStatus" class="pop-token-status pop-maint-status"></div>
+    </div>
+    <div class="pop-maint-row">
+      <button id="maintToken" class="pop-btn pop-btn-ghost"
+              title="Pings worker /mod/whoami, reports token age + lead status. Color-coded by age (green &lt;60d / yellow 60-90d / red &gt;90d).">
+        &#x1F511; Token health probe
+      </button>
+      <div id="maintTokenStatus" class="pop-token-status pop-maint-status"></div>
+    </div>
+    <div class="pop-maint-row">
+      <button id="maintSelectorDrift" class="pop-btn pop-btn-ghost"
+              title="Lists learned-selector promotions from gam_learned_selectors so you can see if GAW changed their layout. Surfaced for awareness.">
+        &#x1FA7A; Selector drift report
+      </button>
+      <div id="maintSelectorDriftStatus" class="pop-token-status pop-maint-status"></div>
+    </div>
+    <div class="pop-maint-row">
+      <button id="maintRehydrateAlias" class="pop-btn pop-btn-ghost"
+              title="Forces the SW token vault to re-read chrome.storage.local. Use after a token rotation or auth-desynced snack. Same handler as the original Force re-hydrate up top.">
+        &#x21BB; Force re-hydrate (token vault)
+      </button>
+      <div id="maintRehydrateAliasStatus" class="pop-token-status pop-maint-status"></div>
+    </div>
+    <div class="pop-maint-row">
+      <button id="maintDiag" class="pop-btn pop-btn-ghost"
+              title="Counts diag log entries. Buttons: Export (clipboard, redacted JSON) and Purge oldest 50%.">
+        &#x1F4DC; Diag log status + purge
+      </button>
+      <div id="maintDiagStatus" class="pop-token-status pop-maint-status"></div>
+    </div>
+    <div class="pop-maint-row">
+      <button id="maintSchema" class="pop-btn pop-btn-ghost"
+              title="Compares stored gam_settings.schema_version against the code-side constant. If mismatch, runs additive migration (safe defaults).">
+        &#x2699; Schema migration check
+      </button>
+      <div id="maintSchemaStatus" class="pop-token-status pop-maint-status"></div>
+    </div>
+    <div class="pop-maint-row">
+      <button id="maintReset" class="pop-btn pop-btn-ghost"
+              title="DESTRUCTIVE. Wipes gam_settings feature flags (preserves tokens). Triple-confirms before running. Use only when 'everything seems weird'.">
+        &#x1F198; Reset settings to defaults
+      </button>
+      <div id="maintResetStatus" class="pop-token-status pop-maint-status"></div>
+    </div>
+  </div>
+
   <div class="pop-token">
     <label for="tokenInput">&#x1F511; Team Mod Token</label>
     <div class="pop-token-hint">Required for all mod actions (crawl, ban, notes, cross-mod sync)</div>
@@ -184,6 +254,42 @@
       <button id="bugVisSave" class="pop-btn pop-btn-ghost" style="font-size:11px;padding:4px 8px">Save</button>
     </div>
     <div id="bugVisStatus" class="pop-token-status"></div>
+
+    <!-- v9.5.0: Lead-tier Maintenance. Heavier diagnostics that depend on
+         lead-only worker endpoints. Inside #leadSection so the existing
+         __applyLeadGate (whoami-driven) handles visibility automatically. -->
+    <div class="pop-section-label" style="margin-top:8px">&#x1F527; Maintenance (lead)</div>
+    <div class="pop-maint">
+      <div class="pop-maint-row">
+        <button id="maintAuditVerify" class="pop-btn pop-btn-ghost"
+                title="Calls /admin/audit/verify and surfaces last verified ts + next required boundary. Red badge if entry_hmac_null_post_boundary is set.">
+          &#x1F50D; Audit chain verify
+        </button>
+        <div id="maintAuditVerifyStatus" class="pop-token-status pop-maint-status"></div>
+      </div>
+      <div class="pop-maint-row">
+        <button id="maintFullReport" class="pop-btn pop-btn-ghost"
+                title="Runs every user-tier routine + audit verify in sequence. ~5s. Outputs single JSON to clipboard + downloads file.">
+          &#x1F6E1; Full health report
+        </button>
+        <div id="maintFullReportStatus" class="pop-token-status pop-maint-status"></div>
+      </div>
+      <div class="pop-maint-row">
+        <button id="maintRosterStaleness" class="pop-btn pop-btn-ghost"
+                title="Pulls /admin/mod/list and color-codes by days_since_rotated. Click Rotate per-row to issue a 72h invite.">
+          &#x1F4CB; Roster staleness audit
+        </button>
+        <div id="maintRosterStalenessStatus" class="pop-token-status pop-maint-status"></div>
+      </div>
+      <div id="maintRosterStalenessPanel" style="display:none"></div>
+      <div class="pop-maint-row">
+        <button id="maintMigrationDebt" class="pop-btn pop-btn-ghost"
+                title="Scans for known-deferred legacy items (legacy claim path, MOD_TOKEN env-var still configured, NULL hmac legacy rows). Reports counts.">
+          &#x1F4E6; Migration debt scanner
+        </button>
+        <div id="maintMigrationDebtStatus" class="pop-token-status pop-maint-status"></div>
+      </div>
+    </div>
   </div>
 
   <!-- v7.2 Platform Hardening: Claim invite button. When platformHardening is
