@@ -290,6 +290,46 @@
         <div id="maintMigrationDebtStatus" class="pop-token-status pop-maint-status"></div>
       </div>
     </div>
+
+    <!-- v9.5.0: Autonomous weekly maintenance + Llama analysis. Lead-only
+         surface. Toggles team-wide autonomous-uploads on/off via
+         team_settings.maintenance_autonomous_enabled, plus a list view of
+         the last 14 days of reports across all mods. -->
+    <div class="pop-section-label" style="margin-top:8px">&#x1F916; Autonomous maintenance (Llama)</div>
+    <div class="pop-tools" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <label for="maintAutoToggle" style="font-size:11px;color:#aaa;flex:1 1 auto">
+        Auto-run weekly + LLM analysis
+      </label>
+      <select id="maintAutoToggle"
+              style="padding:4px 8px;background:#11131a;color:#e5e9f0;border:1px solid #3b414d;border-radius:4px;font:inherit;font-size:11px">
+        <option value="1">enabled</option>
+        <option value="0">disabled</option>
+      </select>
+      <button id="maintAutoSave" class="pop-btn pop-btn-ghost"
+              style="font-size:11px;padding:4px 8px">Save</button>
+    </div>
+    <div id="maintAutoStatus" class="pop-token-status"></div>
+    <div class="pop-tools" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
+      <button id="maintReportsList" class="pop-btn pop-btn-ghost"
+              title="Lists last 14 days of weekly maintenance reports across all mods. Click row to expand the raw routine output and the Llama analysis JSON.">
+        &#x1F4CA; Maintenance reports (14d)
+      </button>
+      <select id="maintReportsSeverity"
+              style="padding:4px 8px;background:#11131a;color:#e5e9f0;border:1px solid #3b414d;border-radius:4px;font:inherit;font-size:11px">
+        <option value="">all severities</option>
+        <option value="ok">ok</option>
+        <option value="info">info</option>
+        <option value="warning">warning</option>
+        <option value="critical">critical</option>
+      </select>
+      <button id="maintRunNow" class="pop-btn pop-btn-ghost"
+              style="font-size:11px;padding:4px 8px"
+              title="Force a weekly run right now (development / smoke test).">
+        &#x26A1; Run now
+      </button>
+    </div>
+    <div id="maintReportsStatus" class="pop-token-status"></div>
+    <div id="maintReportsPanel" style="display:none;max-height:360px;overflow:auto;background:#11131a;border:1px solid #3b414d;border-radius:4px;padding:6px;margin:6px 0;font-size:11px"></div>
   </div>
 
   <!-- v7.2 Platform Hardening: Claim invite button. When platformHardening is

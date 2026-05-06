@@ -4157,6 +4157,30 @@
           });
           return true;
         }
+        // v9.5.0: autonomous weekly maintenance snack. Background SW fires
+        // this after the weekly Llama analysis completes. severity=ok is
+        // never sent (silent success); only info/warning/critical land here.
+        if (msg?.type === 'maintenanceSnack') {
+          try {
+            const sev = String(msg.severity || 'info');
+            const summary = String(msg.summary || '').slice(0, 160);
+            const recs = Array.isArray(msg.recommendations) ? msg.recommendations : [];
+            const kindMap = { info: 'info', warning: 'warn', critical: 'error' };
+            const kind = kindMap[sev] || 'info';
+            // Critical / token-rotation severity gets a "click to open
+            // ModTools" hint so the mod can act on the recommendation. We
+            // can't directly chrome.action.openPopup() from a content
+            // script, but suffixing the text guides them.
+            const needsAction = sev === 'critical'
+              || recs.some(r => r && (r.action_id === 'rotate_token_soon'
+                                  || r.action_id === 'investigate_audit_gap'));
+            const tail = needsAction ? ' — open ModTools' : '';
+            const text = '\u{1F527} Maintenance: ' + summary + tail;
+            try { snack(text, kind); } catch (_) {}
+          } catch (_) {}
+          sendResponse({ ok: true });
+          return true;
+        }
       });
     }
   } catch (e) {}

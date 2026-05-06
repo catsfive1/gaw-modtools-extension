@@ -3073,3 +3073,181 @@ async function __maintLoadWarning() {
   } catch (e) { /* fail silent */ }
 }
 __maintLoadWarning();
+
+// =========================================================================
+// v9.5.0: Autonomous maintenance reports — lead-only surface
+// =========================================================================
+// Toggle reads team_settings.maintenance_autonomous_enabled (default '1').
+// Reports list calls /admin/maintenance/reports (lead-only) and renders
+// click-to-expand rows. "Run now" forces a weekly run from the SW alarm
+// path so we can smoke-test the full upload + Llama loop without waiting
+// 7 days.
+
+async function __maintLoadAutoToggle() {
+  const sel = $('maintAutoToggle');
+  const status = $('maintAutoStatus');
+  if (!sel) return;
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modSettingsRead' });
+    if (!r || !r.ok || !r.data) {
+      if (status) { status.textContent = '(could not read team settings)'; }
+      return;
+    }
+    const v = r.data && r.data.settings && r.data.settings.maintenance_autonomous_enabled;
+    sel.value = (v == null ? '1' : (String(v).trim() === '0' ? '0' : '1'));
+    if (status) {
+      const promptVer = (r.data.settings && r.data.settings.maintenance_prompt_version) || 'v1';
+      status.textContent = 'prompt: ' + promptVer + ' — saved';
+      status.classList.remove('err');
+    }
+  } catch (e) {
+    if (status) status.textContent = 'load failed: ' + (e && e.message || e);
+  }
+}
+
+async function __maintSaveAutoToggle() {
+  const sel = $('maintAutoToggle');
+  const status = $('maintAutoStatus');
+  if (!sel || !status) return;
+  status.textContent = 'saving...';
+  status.classList.remove('err');
+  try {
+    const value = sel.value === '0' ? '0' : '1';
+    const r = await chrome.runtime.sendMessage({
+      type: 'rpc',
+      name: 'adminSettingsWrite',
+      args: { key: 'maintenance_autonomous_enabled', value }
+    });
+    if (!r || !r.ok) {
+      status.textContent = 'save failed: ' + (r && r.error || 'unknown');
+      status.classList.add('err');
+      return;
+    }
+    status.textContent = '✓ saved (autonomous=' + value + ')';
+  } catch (e) {
+    status.textContent = 'save failed: ' + (e && e.message || e);
+    status.classList.add('err');
+  }
+}
+
+function __maintRenderReports(reports) {
+  const panel = $('maintReportsPanel');
+  if (!panel) return;
+  panel.replaceChildren();
+  panel.style.display = 'block';
+  if (!reports || reports.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'padding:6px;color:#aaa';
+    empty.textContent = 'No reports in window.';
+    panel.appendChild(empty);
+    return;
+  }
+  for (const r of reports) {
+    const row = document.createElement('div');
+    row.style.cssText = 'border-bottom:1px solid #2a2d36;padding:4px 0;cursor:pointer';
+    const head = document.createElement('div');
+    const sev = r.severity || 'info';
+    const sevColor = sev === 'critical' ? '#ff5555'
+                  : sev === 'warning'  ? '#ffaa33'
+                  : sev === 'info'     ? '#66a8ff'
+                  : '#88cc88';
+    let summary = '';
+    try {
+      const llm = JSON.parse(r.llm_analysis_json || '{}');
+      summary = llm && llm.summary ? llm.summary : '';
+    } catch (_) {}
+    const ts = new Date(r.ts).toLocaleString();
+    head.innerHTML =
+      '<span style="color:' + sevColor + ';font-weight:600">[' + sev + ']</span> '
+      + '<span style="color:#bbb">' + (r.mod_username || '?') + '</span> '
+      + '<span style="color:#888">v' + (r.extension_version || '?') + '</span> '
+      + '<span style="color:#888;float:right">' + ts + '</span>'
+      + (summary ? '<div style="color:#ccc;margin-top:2px">' + summary.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</div>' : '');
+    row.appendChild(head);
+    const detail = document.createElement('pre');
+    detail.style.cssText = 'display:none;color:#ccc;background:#0a0c12;padding:4px;margin:4px 0;border-radius:3px;overflow:auto;max-height:280px;font-size:10px';
+    let resultsParsed, llmParsed;
+    try { resultsParsed = JSON.parse(r.results_json || '{}'); } catch (_) { resultsParsed = r.results_json; }
+    try { llmParsed = JSON.parse(r.llm_analysis_json || '{}'); } catch (_) { llmParsed = r.llm_analysis_json; }
+    detail.textContent = JSON.stringify(
+      { id: r.id, prompt_version: r.prompt_version, results: resultsParsed, llm: llmParsed }, null, 2
+    );
+    row.appendChild(detail);
+    row.addEventListener('click', () => {
+      detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+    });
+    panel.appendChild(row);
+  }
+}
+
+async function __maintLoadReports() {
+  const status = $('maintReportsStatus');
+  const sevSel = $('maintReportsSeverity');
+  if (!status) return;
+  status.textContent = 'loading...';
+  status.classList.remove('err');
+  try {
+    const sev = sevSel ? sevSel.value : '';
+    const r = await chrome.runtime.sendMessage({
+      type: 'rpc',
+      name: 'adminMaintenanceReportsList',
+      args: { days: 14, limit: 100, severity: sev }
+    });
+    if (!r || !r.ok) {
+      status.textContent = 'load failed: ' + (r && r.error || 'HTTP ' + (r && r.status));
+      status.classList.add('err');
+      return;
+    }
+    const reports = (r.data && r.data.reports) || [];
+    status.textContent = reports.length + ' report(s)' + (sev ? ' (sev=' + sev + ')' : '');
+    __maintRenderReports(reports);
+  } catch (e) {
+    status.textContent = 'load failed: ' + (e && e.message || e);
+    status.classList.add('err');
+  }
+}
+
+async function __maintRunNow() {
+  const status = $('maintReportsStatus');
+  if (!status) return;
+  status.textContent = 'running weekly probe + LLM analysis...';
+  status.classList.remove('err');
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'maintenanceRunNow' });
+    if (!r || !r.ok) {
+      status.textContent = 'run failed: ' + (r && r.error || 'unknown');
+      status.classList.add('err');
+      return;
+    }
+    const d = r.data;
+    if (!d) { status.textContent = 'run completed but no report payload returned'; return; }
+    const sev = (d.llm && d.llm.severity) || 'unknown';
+    const summary = (d.llm && d.llm.summary) || '(no summary)';
+    status.textContent = '✓ ' + sev + ' — ' + summary;
+    // Refresh the list so the new row shows up.
+    setTimeout(__maintLoadReports, 600);
+  } catch (e) {
+    status.textContent = 'run failed: ' + (e && e.message || e);
+    status.classList.add('err');
+  }
+}
+
+(function __maintWireAutonomous() {
+  const saveBtn = $('maintAutoSave');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', () => withLoading(saveBtn, 'saving...', __maintSaveAutoToggle));
+  }
+  const listBtn = $('maintReportsList');
+  if (listBtn) {
+    listBtn.addEventListener('click', () => withLoading(listBtn, 'loading...', __maintLoadReports));
+  }
+  const sevSel = $('maintReportsSeverity');
+  if (sevSel) sevSel.addEventListener('change', __maintLoadReports);
+  const runBtn = $('maintRunNow');
+  if (runBtn) {
+    runBtn.addEventListener('click', () => withLoading(runBtn, 'running...', __maintRunNow));
+  }
+  // Auto-load the toggle state on popup open (lead-gated by __applyLeadGate
+  // hiding #leadSection on non-leads, so this is a no-op for non-leads).
+  __maintLoadAutoToggle();
+})();

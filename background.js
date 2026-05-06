@@ -40,6 +40,13 @@ const MAINT_DIAG_ROTATE_ALARM = 'gam_maint_diag_rotate';
 const MAINT_DIAG_ROTATE_PERIOD_MIN = 1440;     // every 24h
 const MAINT_INTEL_EVICT_ALARM = 'gam_maint_intel_evict';
 const MAINT_INTEL_EVICT_PERIOD_MIN = 30;       // every 30 min
+// v9.5.0 autonomous weekly maintenance run. Fires the non-destructive
+// subset of the popup's 12 routines AND uploads the aggregate report to the
+// worker for Llama analysis. Hard-coded 7d cadence (10080 min). Click-only
+// destructive routines (cookie clear, reset to defaults, schema migrate,
+// log purge) are NEVER fired by this handler.
+const MAINT_WEEKLY_ALARM = 'gam_maint_weekly_run';
+const MAINT_WEEKLY_PERIOD_MIN = 60 * 24 * 7;   // every 7 days
 // Storage / log shape constants kept in sync with popup.js + modtools.js.
 const MAINT_DIAG_KEY = 'gam_diag_log';
 const MAINT_DIAG_MAX = 500;
@@ -138,6 +145,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     chrome.alarms.create(MAINT_TOKEN_AGE_ALARM, { periodInMinutes: MAINT_TOKEN_AGE_PERIOD_MIN });
     chrome.alarms.create(MAINT_DIAG_ROTATE_ALARM, { periodInMinutes: MAINT_DIAG_ROTATE_PERIOD_MIN });
     chrome.alarms.create(MAINT_INTEL_EVICT_ALARM, { periodInMinutes: MAINT_INTEL_EVICT_PERIOD_MIN });
+    chrome.alarms.create(MAINT_WEEKLY_ALARM, { periodInMinutes: MAINT_WEEKLY_PERIOD_MIN });
   } catch (e) { console.warn('[ModTools] alarm create failed', e); }
   // v8.6.9: AWAIT __ensureSessionAccess so subsequent storage calls don't
   // fire before the session-area access level is set. Pre-fix race: the
@@ -168,6 +176,9 @@ chrome.runtime.onStartup?.addListener(async () => {
     });
     chrome.alarms.get(MAINT_INTEL_EVICT_ALARM, (a) => {
       if (!a) chrome.alarms.create(MAINT_INTEL_EVICT_ALARM, { periodInMinutes: MAINT_INTEL_EVICT_PERIOD_MIN });
+    });
+    chrome.alarms.get(MAINT_WEEKLY_ALARM, (a) => {
+      if (!a) chrome.alarms.create(MAINT_WEEKLY_ALARM, { periodInMinutes: MAINT_WEEKLY_PERIOD_MIN });
     });
   } catch (e) {}
   // v8.6.9: AWAIT both bootstrap calls so the SW is fully ready before
@@ -449,6 +460,304 @@ async function _maintIntelEvict() {
   }
 }
 
+// =========================================================================
+// v9.5.0 AUTONOMOUS WEEKLY MAINTENANCE RUN
+// =========================================================================
+// Fires every 7 days. Runs ONLY the non-destructive subset of the user-tier
+// + lead-tier routines, aggregates results into a single payload, posts to
+// the worker for Llama 3 analysis, and writes the LLM verdict back into a
+// local notification flag (`gam_maint_last_report`) that the content script
+// reads to render a one-line snack.
+//
+// HARD CONSTRAINTS (non-negotiable, encoded here so future edits respect):
+//   * Never fires destructive routines (cookie clear, reset to defaults,
+//     schema migration, log purge). Those stay click-only.
+//   * Lead-only routines (audit-chain verify, roster staleness audit) are
+//     skipped on non-lead installs (whoami short-circuits the gate).
+//   * Worker upload is gated by team_settings.maintenance_autonomous_enabled.
+//     If disabled, local routines still run (so gam_maint_warning chip
+//     stays accurate) but the worker call is skipped.
+//   * Allow-list of fields in the payload — no tokens, no PII beyond
+//     the worker-derived mod_username (which the worker already knows).
+
+const MAINT_LAST_REPORT_KEY = 'gam_maint_last_report';
+const MAINT_AUTONOMOUS_FLAG = 'maintenance_autonomous_enabled';
+const MAINT_PROMPT_VERSION_KEY = 'maintenance_prompt_version';
+const MAINT_DEFAULT_PROMPT_VERSION = 'v1';
+
+// Storage / quota helpers (read-only probes that mirror the popup's
+// maintStorageProbe / maintTokenProbe / maintSelectorDriftReport / etc. but
+// run without touching the DOM).
+async function _autoStorageProbe() {
+  try {
+    const total = await new Promise((resolve) => {
+      try { chrome.storage.local.getBytesInUse(null, n => resolve(n || 0)); }
+      catch (_) { resolve(0); }
+    });
+    const pct = total / MAINT_QUOTA_BYTES * 100;
+    const all = await chrome.storage.local.get(null);
+    const sizes = Object.entries(all).map(([k, v]) => {
+      let s; try { s = JSON.stringify(v).length; } catch (_) { s = 0; }
+      return [k, s];
+    }).sort((a, b) => b[1] - a[1]);
+    const top5 = sizes.slice(0, 5).map(([k, s]) => ({ key: k, bytes: s }));
+    return { ok: true, total_bytes: total, pct: Number(pct.toFixed(2)), top_keys: top5 };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+async function _autoTokenProbe() {
+  try {
+    const t0 = Date.now();
+    const r = await _rpcWorkerCall('POST', '/mod/whoami', null);
+    const latency = Date.now() - t0;
+    if (!r || !r.ok || !r.data) {
+      return { ok: false, latency_ms: latency, status: r && r.status, error: r && r.error };
+    }
+    const username = r.data.username || '?';
+    const isLead = !!r.data.is_lead;
+    const settings = await chrome.storage.local.get('gam_settings');
+    const s = (settings && settings.gam_settings) || {};
+    let token_age_days = null;
+    if (s.rotated_at) {
+      try { token_age_days = Math.floor((Date.now() - new Date(s.rotated_at).getTime()) / 86400000); }
+      catch (_) {}
+    }
+    return { ok: true, mod_username: username, is_lead: isLead, latency_ms: latency, token_age_days };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+async function _autoSelectorDrift() {
+  try {
+    const r = await chrome.storage.local.get('gam_learned_selectors');
+    const learned = (r && r.gam_learned_selectors) || {};
+    const keys = Object.keys(learned);
+    return { ok: true, drift_count: keys.length, keys: keys.slice(0, 8) };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+async function _autoDiagStatus() {
+  try {
+    const r = await chrome.storage.local.get(MAINT_DIAG_KEY);
+    const log = (r && r[MAINT_DIAG_KEY]) || [];
+    let recent_errors = 0;
+    const cutoff = Date.now() - 7 * 86400000;
+    for (const e of log) {
+      if (e && e.ts >= cutoff && e.extra && (e.extra.result === 'err' || e.extra.error)) {
+        recent_errors++;
+      }
+    }
+    return {
+      ok: true,
+      log_count: log.length,
+      log_cap: MAINT_DIAG_MAX,
+      pct_of_cap: Number((log.length / MAINT_DIAG_MAX * 100).toFixed(1)),
+      recent_errors_7d: recent_errors
+    };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+async function _autoSchemaCheck() {
+  // Read-only: compares stored schema_version vs the popup's MAINT_SCHEMA_CURRENT
+  // (kept in sync via constants below). NEVER migrates here; click-only.
+  const MAINT_SCHEMA_KEY = 'gam_settings_schema_version';
+  const MAINT_SCHEMA_CURRENT = 3;
+  try {
+    const r = await chrome.storage.local.get('gam_settings');
+    const s = (r && r.gam_settings) || {};
+    const stored = parseInt(s[MAINT_SCHEMA_KEY], 10) || 1;
+    return {
+      ok: true,
+      stored_version: stored,
+      code_version: MAINT_SCHEMA_CURRENT,
+      drift: stored !== MAINT_SCHEMA_CURRENT,
+      drift_kind: stored === MAINT_SCHEMA_CURRENT ? 'none' :
+                  (stored > MAINT_SCHEMA_CURRENT ? 'downgrade' : 'pending_migrate')
+    };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+async function _autoAuditVerify(isLead) {
+  if (!isLead) return { skipped: true, reason: 'non_lead' };
+  try {
+    const r = await _rpcWorkerCall('POST', '/admin/audit/verify', { limit: 5000, from: 0 }, { asLead: true });
+    if (!r || !r.ok || !r.data) {
+      return { ok: false, status: r && r.status, error: r && r.error };
+    }
+    return {
+      ok: true,
+      chain_ok: !!r.data.ok,
+      verified: r.data.verified || 0,
+      total: r.data.total || 0,
+      null_hmac_post_boundary: !!r.data.entry_hmac_null_post_boundary
+    };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+async function _autoRosterStaleness(isLead) {
+  if (!isLead) return { skipped: true, reason: 'non_lead' };
+  try {
+    const r = await _rpcWorkerCall('GET', '/admin/mod/list', undefined, { asLead: true });
+    if (!r || !r.ok || !r.data || !Array.isArray(r.data.mods)) {
+      return { ok: false, status: r && r.status, error: r && r.error };
+    }
+    let red = 0, yellow = 0, green = 0, never_rotated = 0;
+    for (const m of r.data.mods) {
+      if (m.is_lead) continue;
+      if (!m.rotated_at) { red++; never_rotated++; continue; }
+      const ageDays = Math.floor((Date.now() - new Date(m.rotated_at).getTime()) / 86400000);
+      if (ageDays < 30) green++;
+      else if (ageDays < 90) yellow++;
+      else red++;
+    }
+    return { ok: true, total: r.data.mods.length, green, yellow, red, never_rotated };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+// Read team_settings.maintenance_autonomous_enabled. Defaults to '1' (on).
+// Cached via /mod/settings — any authed mod can read.
+async function _autoIsAutonomousEnabled() {
+  try {
+    const r = await _rpcWorkerCall('GET', '/mod/settings', undefined);
+    if (!r || !r.ok || !r.data || !r.data.settings) return true; // default-on if unreachable
+    const v = r.data.settings[MAINT_AUTONOMOUS_FLAG];
+    if (v == null) return true;
+    return String(v).trim() !== '0';
+  } catch (_) { return true; }
+}
+
+async function _maintWeeklyRun() {
+  const startedAt = Date.now();
+  await _maintAppendDiag('alarm.weeklyRun', 'start', { startedAt });
+  try {
+    // SW may have been evicted; re-hydrate secretCache from session/local
+    // storage before any worker call.
+    try { await loadSecrets(); } catch (_) {}
+    if (!secretCache || !secretCache.workerModToken) {
+      await _maintAppendDiag('alarm.weeklyRun', 'noop',
+        { reason: 'no worker token (mod not yet onboarded)' });
+      return;
+    }
+    // 1) Determine identity (drives lead-only routine gating).
+    const tokenInfo = await _autoTokenProbe();
+    const isLead = !!(tokenInfo && tokenInfo.ok && tokenInfo.is_lead);
+
+    // 2) Run all non-destructive routines in parallel where independent.
+    const [storage, selectorDrift, diag, schema, auditVerify, roster] = await Promise.all([
+      _autoStorageProbe(),
+      _autoSelectorDrift(),
+      _autoDiagStatus(),
+      _autoSchemaCheck(),
+      _autoAuditVerify(isLead),
+      _autoRosterStaleness(isLead)
+    ]);
+
+    const results = {
+      storage_health: storage,
+      token_health: tokenInfo,
+      selector_drift: selectorDrift,
+      diag_log_status: diag,
+      schema_migration_check: schema,
+      audit_chain_verify: auditVerify,
+      roster_staleness_audit: roster
+    };
+
+    // 3) Persist a local copy regardless of upload outcome, so the popup can
+    //    show "last weekly run" even if the worker is unreachable.
+    const localPayload = {
+      ts: startedAt,
+      iso: new Date(startedAt).toISOString(),
+      extension_version: chrome.runtime.getManifest().version,
+      results,
+      uploaded: false,
+      llm: null
+    };
+
+    // 4) Check the lead kill switch. If autonomous uploads are disabled,
+    //    skip the worker call but keep the local snapshot.
+    const autonomousOn = await _autoIsAutonomousEnabled();
+    if (!autonomousOn) {
+      await chrome.storage.local.set({ [MAINT_LAST_REPORT_KEY]: localPayload });
+      await _maintAppendDiag('alarm.weeklyRun', 'skipped_upload',
+        { reason: 'team_settings.maintenance_autonomous_enabled=0' });
+      return;
+    }
+
+    // 5) Upload to the worker. Worker handles Llama analysis + audit-chain
+    //    append + D1 persistence; reply contains severity/summary/recs.
+    let upload = { ok: false };
+    try {
+      upload = await _rpcWorkerCall('POST', '/maintenance/report', {
+        extension_version: localPayload.extension_version,
+        results,
+        ts: startedAt
+      });
+    } catch (e) {
+      upload = { ok: false, error: String(e && e.message || e) };
+    }
+
+    if (upload && upload.ok && upload.data) {
+      localPayload.uploaded = true;
+      localPayload.llm = {
+        report_id: upload.data.report_id || null,
+        severity: upload.data.severity || 'info',
+        summary: upload.data.summary || '',
+        recommendations: Array.isArray(upload.data.recommendations) ? upload.data.recommendations : [],
+        prompt_version: upload.data.prompt_version || null
+      };
+      await _maintAppendDiag('alarm.weeklyRun', 'ok', {
+        report_id: localPayload.llm.report_id,
+        severity: localPayload.llm.severity
+      });
+    } else {
+      await _maintAppendDiag('alarm.weeklyRun', 'upload_failed', {
+        status: upload && upload.status,
+        error: upload && upload.error
+      });
+    }
+
+    await chrome.storage.local.set({ [MAINT_LAST_REPORT_KEY]: localPayload });
+
+    // 6) Fire a content-script snack on the active GAW tab (if any). Silent
+    //    on severity=ok per spec; non-blocking — no tab is fine.
+    try {
+      const sev = (localPayload.llm && localPayload.llm.severity) || 'ok';
+      if (sev !== 'ok') {
+        const tabs = await chrome.tabs.query({
+          url: ['https://greatawakening.win/*', 'https://*.greatawakening.win/*']
+        });
+        for (const t of tabs) {
+          try {
+            await chrome.tabs.sendMessage(t.id, {
+              type: 'maintenanceSnack',
+              severity: sev,
+              summary: (localPayload.llm && localPayload.llm.summary) || '',
+              recommendations: (localPayload.llm && localPayload.llm.recommendations) || []
+            });
+          } catch (_) { /* tab may be sleeping or content script not ready */ }
+        }
+      }
+    } catch (_) {}
+  } catch (e) {
+    await _maintAppendDiag('alarm.weeklyRun', 'err', {
+      error: String(e && e.message || e)
+    });
+  }
+}
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === BUG_POLL_ALARM) { await _bugPollAndBadge(); return; }
   // v9.5.0 maintenance alarms.
@@ -456,6 +765,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === MAINT_TOKEN_AGE_ALARM)    { await _maintTokenAgeCheck(); return; }
   if (alarm.name === MAINT_DIAG_ROTATE_ALARM)  { await _maintDiagRotate();    return; }
   if (alarm.name === MAINT_INTEL_EVICT_ALARM)  { await _maintIntelEvict();    return; }
+  if (alarm.name === MAINT_WEEKLY_ALARM)       { await _maintWeeklyRun();     return; }
   if (alarm.name !== ALARM_NAME) return;
   try {
     const resp = await fetch(VERSION_JSON_URL, { cache: 'no-store' });
@@ -1561,6 +1871,36 @@ const RPC_HANDLERS = {
     allowed_callers: [RPC_CALLER_POPUP],
     async handler() {
       return { ok: false, status: 501, error: 'phase-2-pending: auth_epoch lands with mods table' };
+    }
+  },
+
+  // v9.5.0 autonomous maintenance: lead-tier RPC for the Maintenance Reports
+  // sub-section in the popup. Fetches recent reports across all mods.
+  adminMaintenanceReportsList: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const days = Math.min(90, Math.max(1, parseInt(args && args.days, 10) || 14));
+      const limit = Math.min(500, Math.max(1, parseInt(args && args.limit, 10) || 100));
+      const sev = String(args && args.severity || '').trim();
+      const qs = ['days=' + days, 'limit=' + limit];
+      if (sev) qs.push('severity=' + encodeURIComponent(sev));
+      return await _rpcWorkerCall('GET', '/admin/maintenance/reports?' + qs.join('&'), undefined, { asLead: true });
+    }
+  },
+  // v9.5.0 autonomous maintenance: any-mod RPC for the local "Run weekly
+  // health check now" button. Re-uses the same worker upload path the
+  // alarm uses; popup wraps + reads chrome.storage.local for last_report
+  // afterward.
+  maintenanceRunNow: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler() {
+      try {
+        await _maintWeeklyRun();
+        const r = await chrome.storage.local.get(MAINT_LAST_REPORT_KEY);
+        return { ok: true, data: r && r[MAINT_LAST_REPORT_KEY] || null };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
     }
   }
 };
