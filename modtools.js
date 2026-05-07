@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.6.2';
+  const VERSION = 'v9.6.3';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -13361,26 +13361,52 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     async function openPanel(){
+      // v9.6.3: every call is labeled so when one throws we know WHICH one.
+      // Pre-fix all we got was "data is not defined" with no path -- couldn't
+      // tell whether buildPanel, rpcCall, ingestMessages, renderConvList,
+      // renderThread or startOpenPolling was the source. Now: errors are
+      // tagged with the function name.
+      function _step(name, fn){
+        try { return fn(); }
+        catch(e){ throw new Error('[' + name + '] ' + (e && e.message || e)); }
+      }
+      async function _stepAsync(name, fn){
+        try { return await fn(); }
+        catch(e){ throw new Error('[' + name + '] ' + (e && e.message || e)); }
+      }
       if (!isEnabled()){
         try { snack('Mod Chat is disabled in Settings', 'warn'); } catch(e){}
         return;
       }
-      injectStyles();
-      const panel = buildPanel();
+      _step('injectStyles', injectStyles);
+      const panel = _step('buildPanel', buildPanel);
       requestAnimationFrame(()=> panel.classList.add('gam-mc-open'));
       // Default to ALL on first open.
       if (!STATE.selectedConv) STATE.selectedConv = 'ALL';
       // Refresh mods list (composer) + full inbox sync on open.
-      refreshModsList();
-      const r = await rpcCall('modMessageInbox', {});
-      if (r && r.ok && r.data && Array.isArray(r.data.data)){
-        ingestMessages(r.data.data);
+      // v9.6.3: refreshModsList no longer awaited here -- it runs in the
+      // background and renderRecipientOptions is idempotent. Pre-fix the
+      // await coupled the panel-open latency to a network round-trip.
+      _stepAsync('refreshModsList', () => refreshModsList()).catch(e =>
+        console.warn('[modchat] refreshModsList background', e));
+      const r = await _stepAsync('rpcCall_inbox', () => rpcCall('modMessageInbox', {}));
+      // v9.6.3: defensive parse. The worker returns {ok:true, data:[...]},
+      // which after rpcCall wrap becomes r = {ok, status, data: <body>}, so
+      // r.data.data is the inbox array. Handle both shapes (legacy and
+      // current) so a worker shape change can't take chat down again.
+      if (r && r.ok && r.data){
+        let inbox = null;
+        if (Array.isArray(r.data.data)) inbox = r.data.data;
+        else if (Array.isArray(r.data)) inbox = r.data;
+        if (Array.isArray(inbox)){
+          _step('ingestMessages', () => ingestMessages(inbox));
+        }
       }
-      computeUnread();
-      updateBadge();
-      renderConvList();
-      renderThread();
-      startOpenPolling();
+      _step('computeUnread', computeUnread);
+      _step('updateBadge', updateBadge);
+      _step('renderConvList', renderConvList);
+      _step('renderThread', renderThread);
+      _step('startOpenPolling', startOpenPolling);
       try { STATE.textarea && STATE.textarea.focus(); } catch(e){}
     }
 
@@ -15708,26 +15734,39 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         // Strip the URL FIRST so the stale param doesn't survive a refused
         // confirm (otherwise reload + Yes would commit late).
         cleanUrl();
-        // v9.3.15 (Vanguard Round-2 ER2-C-2): the prior selector accepted
-        // ANY `<a href="/u/...">` in document order \u2014 including anchors
-        // inside attacker-authored post bodies. On post-detail pages with
-        // slow nav rehydration, an attacker-crafted post link could be the
-        // first match in the DOM, dictating the value of `_me` and lying
-        // to the victim about which identity the stage was bound to. Now
-        // we strictly scope to header/nav containers AND validate the
-        // matched anchor's bounding-rect Y is in the top 200px of the
-        // viewport (visual sanity \u2014 header is always near the top).
+        // v9.3.15 (Vanguard Round-2 ER2-C-2) + v9.6.3 relax: previously the
+        // selector chain was overly strict (header/nav only AND rect.top
+        // <= 200px). On theme variations, mobile breakpoints, or when GAW's
+        // top nav re-renders during hydration, the strict matchers missed
+        // even on legitimate logged-in mods -- silently dropping the invite
+        // and showing only a snack the user couldn't see (snack container
+        // not built yet on first page load). Commander rolling out v9.6.2
+        // to a new mod hit this -- "URL invite link did not work, but
+        // entering the ID manually succeeded".
+        //
+        // Fix: try strict selectors first (defense against attacker-crafted
+        // post bodies); if all miss, fall back to a SCREEN-ANCHORED scan:
+        // any `a[href^="/u/"]` whose bounding rect is in the top 120px AND
+        // is to the right of viewport center (where the user dropdown
+        // lives on every GAW theme). Still scoped enough that a post-body
+        // link can't impersonate. If THAT also misses, surface an
+        // alert() (not just snack) so the user sees the failure.
         const _meCandidates = [
           'header .nav-user .inner a[href^="/u/"]',
           'header a.brand-desktop-profile',
           'nav .nav-user .inner a[href^="/u/"]',
-          '.brand-desktop-profile[href^="/u/"]'
+          '.brand-desktop-profile[href^="/u/"]',
+          // v9.6.3: broader header anchors (theme/SPA variants).
+          'header a[href^="/u/"]',
+          'nav a[href^="/u/"]',
+          '.header a[href^="/u/"]',
+          '.navbar a[href^="/u/"]',
+          '.top-nav a[href^="/u/"]'
         ];
         let _meLink = null;
         for (const sel of _meCandidates) {
           const el = document.querySelector(sel);
           if (!el) continue;
-          // Validate it's near the top of the viewport (header position).
           try {
             const rect = el.getBoundingClientRect();
             if (rect.top > 200) continue;
@@ -15735,12 +15774,39 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           _meLink = el;
           break;
         }
+        // v9.6.3 fallback: screen-anchored sweep across ALL profile anchors.
+        // Pick the one in the top 120px and right of the horizontal center
+        // (where every GAW theme parks the user dropdown). Still rejects
+        // attacker post-body anchors (those are below the fold).
+        if (!_meLink){
+          try {
+            const cx = (window.innerWidth || 1200) / 2;
+            const all = document.querySelectorAll('a[href^="/u/"]');
+            let best = null, bestY = Infinity;
+            for (const a of all){
+              const rect = a.getBoundingClientRect();
+              if (rect.top < 0 || rect.top > 120) continue;
+              if (rect.left < cx) continue; // user link is on the right side
+              if (rect.top < bestY){ best = a; bestY = rect.top; }
+            }
+            if (best) _meLink = best;
+          } catch(_){}
+        }
         const _me = _meLink
           ? (_meLink.textContent.trim() || (_meLink.getAttribute('href')||'').match(/\/u\/([^\/]+)/)?.[1] || null)
           : null;
         if (!_me){
-          // No GAW identity in HEADER/NAV = no way to verify intent. Refuse to stage.
+          // v9.6.3: visible alert() because snack may not be visible yet
+          // on first page load before init() builds the bar.
           try { snack('\u{1F6AB} Invite ignored \u2014 log in to GAW first (header user link not found).', 'warn'); } catch(_){}
+          try {
+            alert('GAW ModTools detected an invite code in this URL but ' +
+              'could not find your GAW header user link. Make sure you are ' +
+              'logged in to greatawakening.win, then click the invite link ' +
+              'again.\n\nAlternatively, open the GAW ModTools popup and ' +
+              'paste the invite code manually using the rotation invite ' +
+              'entry field.');
+          } catch(_){}
           return;
         }
         const _confirmed = window.confirm(
