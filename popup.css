@@ -203,6 +203,12 @@ html, body {
   border-color: #f04040;
   color: #f04040;
 }
+/* v9.6.0: macro tab active state */
+.gam-macro-tab-active {
+  background: rgba(74,158,255,.18) !important;
+  border-color: #4A9EFF !important;
+  color: #4A9EFF !important;
+}
 /* v8.5.3: in-flight state */
 .pop-btn-ghost:disabled,
 .pop-btn-ghost.loading {

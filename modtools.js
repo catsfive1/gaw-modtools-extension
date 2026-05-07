@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.5.3';
+  const VERSION = 'v9.6.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -289,7 +289,7 @@
         // stay display:none until the next mutation. The MutationObserver
         // root may also have been detached. So we call applyUpvoteAgeFilter
         // directly in _handleNav, which triggers its built-in defensive un-hide.
-        user:        /^\/u\/[^/]+(?:\/(?:posts|saved|upvoted|downvoted))?\/?$/.test(path),
+        user:        /^\/u\/[^/]+(?:\/(?:posts|comments|saved|upvoted|downvoted))?\/?$/.test(path),
       };
     }
 
@@ -347,7 +347,7 @@
             let sweepN = 0;
             const sweepIv = setInterval(()=>{
               if (++sweepN > 5) { clearInterval(sweepIv); return; }
-              if (!/^\/u\/[^/]+(?:\/(?:posts|saved|upvoted|downvoted))?\/?$/.test(location.pathname)) {
+              if (!/^\/u\/[^/]+(?:\/(?:posts|comments|saved|upvoted|downvoted))?\/?$/.test(location.pathname)) {
                 clearInterval(sweepIv); return;
               }
               const stuck = document.querySelectorAll('.post[data-gam-age-hidden="1"]');
@@ -7012,6 +7012,12 @@ Analyze this comment against the community rules. Then write a brief, profession
         <input type="text" class="gam-input" id="mc-ban-subj" placeholder="Subject line...">
       </div>
       <div class="gam-mc-field">
+        <label>\u{1F4DD} Team macros (shared) <span style="color:#666;font-weight:400;font-size:10px">\u2014 manage in popup</span></label>
+        <select class="gam-input" id="mc-ban-macro-pick">
+          <option value="">-- Pick a team macro --</option>
+        </select>
+      </div>
+      <div class="gam-mc-field">
         <label>Message \u2014 post URL auto-prepended${evidenceLink ? ' \u2713' : ' (no URL found)'}</label>
         <textarea class="gam-input gam-textarea" id="mc-ban-msg" rows="7">${evidenceLink ? escapeHtml(urlPrefix) : ''}</textarea>
       </div>
@@ -7071,6 +7077,33 @@ Analyze this comment against the community rules. Then write a brief, profession
       ? evidenceLink + '\n\n(ban reason here...)'
       : 'Ban reason / message to user...';
     const customHistEl = root.querySelector('#mc-ban-custom-hist');
+
+    // v9.6.0: team macros dropdown — pulls shared ban_msg macros from worker.
+    // Selecting a macro replaces the textarea contents (preserving URL prefix).
+    // Fires macroUse to bump the use_count for popularity ranking.
+    const macroPick = root.querySelector('#mc-ban-macro-pick');
+    if (macroPick){
+      rpcCall('macrosList', { kind:'ban_msg' }).then(r => {
+        if (r && r.ok && r.data && Array.isArray(r.data.macros)){
+          r.data.macros.forEach(function(m){
+            const o = document.createElement('option');
+            o.value = String(m.id);
+            o.textContent = m.label + (m.use_count ? '  (' + m.use_count + 'x)' : '');
+            o.dataset.body = m.body;
+            macroPick.appendChild(o);
+          });
+        }
+      }).catch(function(){});
+      macroPick.addEventListener('change', function(){
+        const opt = macroPick.options[macroPick.selectedIndex];
+        if (!opt || !opt.value) return;
+        const body = opt.dataset.body || '';
+        if (msgIn) msgIn.value = (evidenceLink ? urlPrefix : '') + body;
+        // Track usage for popularity sort.
+        rpcCall('macroUse', { id: parseInt(opt.value, 10) }).catch(function(){});
+      });
+    }
+
     const aiEngSel = root.querySelector('#mc-ban-ai-engine');
     const aiGoBtn = root.querySelector('#mc-ban-ai-go');
     const aiOut = root.querySelector('#mc-ban-ai-out');
@@ -10832,6 +10865,23 @@ Analyze this comment against the community rules. Then write a brief, profession
       badge.querySelector('.gam-t-cluster-clear').addEventListener('click', ()=>{ triageFilter='all'; triageSelected.clear(); refreshTriageConsole(); });
       tbEl.appendChild(badge);
     }
+    // v9.6.0: Force-AI-scan button. Lets a lead bypass the same-day cooldown
+    // when "Possible Tards" looks empty (Commander's "I'm not seeing
+    // suggestions lately" complaint). Tooltip explains why a previous run
+    // may have stamped the date with zero scans.
+    const aiBtn = document.createElement('button');
+    aiBtn.className = 'gam-t-filter';
+    aiBtn.style.marginLeft = 'auto';
+    aiBtn.title = 'Run AI tard scan now (bypass same-day cooldown). Requires features.ai consent ON in Settings.';
+    aiBtn.innerHTML = '\u{1F916} AI scan now';
+    aiBtn.addEventListener('click', async () => {
+      aiBtn.disabled = true;
+      aiBtn.textContent = '\u{1F916} Scanning...';
+      try { await runDailyAiScanIfDue({ force:true }); } catch(e){ snack('AI scan failed: ' + (e && e.message || e), 'error'); }
+      aiBtn.disabled = false;
+      aiBtn.innerHTML = '\u{1F916} AI scan now';
+    });
+    tbEl.appendChild(aiBtn);
   }
 
   function renderTriageBatchBar(container){
@@ -11337,16 +11387,29 @@ Analyze this comment against the community rules. Then write a brief, profession
   }
 
   // v5.1.9: Daily AI scan. Runs once per UTC day on first /users visit.
-  async function runDailyAiScanIfDue(){
+  // v9.6.0: added `force` param so the new triage-console "Force AI scan"
+  // button can bypass the same-day cooldown without clearing storage.
+  async function runDailyAiScanIfDue(opts){
+    const force = !!(opts && opts.force);
     if (!getModToken()) return;
-    if (!consentEnabled('features.ai')) return;
+    if (!consentEnabled('features.ai')) {
+      if (force) snack('AI scan skipped: features.ai is disabled in Settings (consent toggle)', 'warn');
+      return;
+    }
     const today = new Date().toISOString().slice(0, 10);
-    if (getSetting('lastAiScanDate', '') === today) return;
+    if (!force && getSetting('lastAiScanDate', '') === today) return;
 
     const candidates = Object.values(getRoster())
       .filter(r => r && r.status === 'new' && r.name)
       .slice(0, 50).map(r => r.name);
-    if (candidates.length === 0){ setSetting('lastAiScanDate', today); return; }
+    // v9.6.0 BUG FIX: pre-fix this branch stamped today's date even when
+    // zero candidates were found. Result: scan didn't retry until the next
+    // UTC day, even though nothing was actually scanned. Now: only stamp
+    // when scan succeeded with non-empty candidates (lower in the function).
+    if (candidates.length === 0){
+      if (force) snack('No "new"-status users in roster to scan. Run a /users page refresh first.', 'info');
+      return;
+    }
 
     console.log(`[modtools] daily AI scan: ${candidates.length} usernames`);
     try {
@@ -12254,10 +12317,15 @@ Analyze this comment against the community rules. Then write a brief, profession
   function _isProfileViewNow(){
     const p = window.location.pathname;
     // /u/<name>, /u/<name>/, /u/<name>/posts, /u/<name>/saved,
-    // /u/<name>/upvoted, /u/<name>/downvoted — ALL audit surfaces, never filter.
-    // /u/<name>/comments is intentionally excluded: comments don't render as
-    // .post elements anyway, so the filter naturally no-ops there.
-    return /^\/u\/[^/]+(?:\/(?:posts|saved|upvoted|downvoted))?\/?$/.test(p);
+    // /u/<name>/upvoted, /u/<name>/downvoted, /u/<name>/comments
+    // ALL audit surfaces, never filter.
+    // v9.6.0: previously /comments was wrongly excluded with a comment claiming
+    // "comments don't render as .post elements anyway". That was WRONG -- GAW
+    // renders comment cards as .post[data-type="comment"] (see SELECTORS.post
+    // line 144). Result: every comment with score>0 and age>cutoff was
+    // display:none on /u/<name>/comments. This was the lurking bug behind
+    // ~12 sessions of "still hiding posts/comments" reports.
+    return /^\/u\/[^/]+(?:\/(?:posts|comments|saved|upvoted|downvoted))?\/?$/.test(p);
   }
   // v9.2.1: one-shot proof in DevTools console when the gate fires. Lets
   // the operator confirm the patch is actually loaded without typing
@@ -12298,7 +12366,12 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (cutoffH === 0) return;
     const cutoffMs = cutoffH * 3600 * 1000;
     const now = Date.now();
-    document.querySelectorAll('.post').forEach(p=>{
+    // v9.6.0 defense-in-depth: select only actual posts, never comment cards.
+    // GAW renders comment items as .post[data-type="comment"] -- bare `.post`
+    // selector here was the second half of the hidden-comments bug. Even if a
+    // future GAW route slips past _isProfileViewNow's regex, comments stay
+    // visible because the selector excludes them by data-type.
+    document.querySelectorAll('.post:not([data-type="comment"])').forEach(p=>{
       // Stickies NEVER hidden
       if (p.matches('.stickied, .sticky') || p.querySelector('.stickied')) return;
       const t = p.querySelector('time[datetime]');
@@ -13254,8 +13327,26 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     function togglePanel(){
-      if (isPanelOpen()) closePanel();
-      else openPanel();
+      try {
+        if (isPanelOpen()) {
+          closePanel();
+          return;
+        }
+        // v9.6.0: openPanel can throw if buildPanel hits a TDZ / schema /
+        // missing-token edge case. Pre-fix the throw was swallowed and the
+        // user saw nothing -- "I clicked chat and nothing happened".
+        // Now: any error becomes a visible snack so Commander knows why.
+        const ret = openPanel();
+        if (ret && typeof ret.catch === 'function'){
+          ret.catch(err => {
+            try { snack('ModChat open failed: ' + (err && err.message || err), 'error'); } catch(_){}
+            try { console.error('[modchat] openPanel rejected', err); } catch(_){}
+          });
+        }
+      } catch(err){
+        try { snack('ModChat open failed: ' + (err && err.message || err), 'error'); } catch(_){}
+        try { console.error('[modchat] togglePanel threw', err); } catch(_){}
+      }
     }
 
     function createStatusBarButton(){
@@ -13293,10 +13384,128 @@ Analyze this comment against the community rules. Then write a brief, profession
       applyServerMessageUpdate
     };
   })();
+
+  // v9.6.0: SHIELD click -> site health popover. Pulls a quick rollup of
+  // metrics that matter to a mod on shift: DR queue size, last-24h actions,
+  // watchlist size, AI scan freshness, worker reachability, recent SUS adds.
+  // Designed to load instantly from local stores then asynchronously
+  // refresh the worker-health line.
+  function _showSiteHealthPopover(anchor){
+    const existing = document.getElementById('gam-site-health-popover');
+    if (existing){ existing.remove(); return; }
+    const since24h = Date.now() - 86400_000;
+    const log = lsGet(K.LOG, []);
+    const recent = log.filter(e => e && e.ts && new Date(e.ts).getTime() >= since24h);
+    const bans24 = recent.filter(e => e.type === 'ban').length;
+    const dr24 = recent.filter(e => e.type === 'deathrow').length;
+    const approves24 = recent.filter(e => e.type === 'approve').length;
+    const removes24 = recent.filter(e => e.type === 'remove').length;
+    const drQueue = (getDeathRow() || []).length;
+    const watchlist = Object.keys(getWatchlist() || {}).length;
+    const susCount = (_susState && _susState.rows && _susState.rows.size) || 0;
+    const lastAi = getSetting('lastAiScanDate', '');
+    const today = new Date().toISOString().slice(0,10);
+    const aiFresh = lastAi === today ? 'yes' : (lastAi || 'never');
+    const aiOn = !!consentEnabled('features.ai');
+    const fhActive = !!getSetting('firehose.active', false);
+
+    const pop = document.createElement('div');
+    pop.id = 'gam-site-health-popover';
+    function row(k, v, color){
+      return `<div class="gam-sh-row"><span class="gam-sh-key">${escapeHtml(k)}</span><span class="gam-sh-val"${color?' style="color:'+color+'"':''}>${escapeHtml(String(v))}</span></div>`;
+    }
+    pop.innerHTML =
+      `<h4>\u{1F6E1} Site Health <span style="font-weight:400;color:${C.TEXT3};font-size:10px;margin-left:auto">${VERSION}</span></h4>` +
+      row('DR queue', drQueue, drQueue > 50 ? C.WARN : drQueue > 20 ? C.ACCENT : C.GREEN) +
+      row('Watchlist', watchlist) +
+      row('Mark SUS users', susCount, susCount > 5 ? C.WARN : C.TEXT) +
+      row('Bans (24h)', bans24, bans24 > 20 ? C.WARN : C.TEXT) +
+      row('DR adds (24h)', dr24) +
+      row('Approves (24h)', approves24) +
+      row('Removes (24h)', removes24) +
+      row('Firehose', fhActive ? 'ON' : 'OFF', fhActive ? C.GREEN : C.TEXT3) +
+      row('AI scan today', aiFresh, aiFresh === 'yes' ? C.GREEN : aiOn ? C.WARN : C.TEXT3) +
+      row('AI feature', aiOn ? 'enabled' : 'disabled (Settings)', aiOn ? C.GREEN : C.WARN) +
+      `<div id="gam-sh-worker-line" class="gam-sh-row"><span class="gam-sh-key">Worker</span><span class="gam-sh-val">probing...</span></div>` +
+      `<div class="gam-sh-foot"><span>Click anywhere to dismiss</span><span>${new Date().toLocaleTimeString()}</span></div>`;
+    // Position above the anchor (bar is at bottom of viewport, popover floats above).
+    const r = anchor.getBoundingClientRect();
+    pop.style.left = Math.max(8, r.left) + 'px';
+    pop.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+    document.body.appendChild(pop);
+    // Probe worker reachability async.
+    rpcCall('modWhoami', {}).then(resp => {
+      const line = pop.querySelector('#gam-sh-worker-line .gam-sh-val');
+      if (!line) return;
+      if (resp && resp.ok && resp.data && resp.data.username){
+        line.textContent = '✓ ' + resp.data.username + (resp.data.is_lead ? ' (lead)' : '');
+        line.style.color = C.GREEN;
+      } else {
+        const code = resp && resp.code === 'EXT_CONTEXT_INVALIDATED' ? 'reload page' : (resp && resp.error || 'no answer');
+        line.textContent = '✗ ' + code;
+        line.style.color = C.RED;
+      }
+    }).catch(e => {
+      const line = pop.querySelector('#gam-sh-worker-line .gam-sh-val');
+      if (line){ line.textContent = '✗ ' + (e && e.message || e); line.style.color = C.RED; }
+    });
+    // Click-outside dismiss.
+    const dismiss = (e)=>{
+      if (pop.contains(e.target) || anchor.contains(e.target)) return;
+      pop.remove();
+      document.removeEventListener('click', dismiss, true);
+    };
+    setTimeout(()=>document.addEventListener('click', dismiss, true), 0);
+  }
   // v9.3.10: expose ModChat on window so out-of-IIFE handlers (the right-click
   // context menu) can apply server-confirmed updates without re-implementing
   // STATE.msgById mutation.
   try { window.__GAM_MOD_CHAT = ModChat; } catch(_){}
+
+  // v9.6.0: Modmail hints panel. Floating reference card on /modmail/*
+  // surfaces. Lists shortcuts + hints to speed up triage. Collapsible (small
+  // ?-tab when minimized). State persisted via setSetting.
+  function installModmailHintsPanel(){
+    if (document.getElementById('gam-mm-hints')) return;
+    const collapsed = !!getSetting('mm.hints.collapsed', false);
+    const wrap = document.createElement('div');
+    wrap.id = 'gam-mm-hints';
+    wrap.setAttribute('data-collapsed', collapsed ? '1' : '0');
+    wrap.innerHTML = `
+      <div class="gam-mm-hints-tab" title="Show modmail hints">?</div>
+      <div class="gam-mm-hints-body">
+        <div class="gam-mm-hints-head">
+          <span class="gam-mm-hints-title">\u{1F4EC} Modmail Shortcuts</span>
+          <button class="gam-mm-hints-min" title="Minimize">–</button>
+        </div>
+        <div class="gam-mm-hints-section">
+          <div class="gam-mm-hints-row"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd><span>Archive current modmail</span></div>
+          <div class="gam-mm-hints-row"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd><span>Mod Console on sender</span></div>
+          <div class="gam-mm-hints-row"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd><span>Ban tab on sender</span></div>
+          <div class="gam-mm-hints-row"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd><span>Intel tab on sender</span></div>
+          <div class="gam-mm-hints-row"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd><span>Message tab (reply)</span></div>
+          <div class="gam-mm-hints-row"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd><span>File a bug report</span></div>
+          <div class="gam-mm-hints-row"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd><span>Full keybinds help</span></div>
+        </div>
+        <div class="gam-mm-hints-section">
+          <div class="gam-mm-hints-tip">\u{1F4A1} Hover the envelope on the bar for quick actions popover</div>
+          <div class="gam-mm-hints-tip">\u{1F4A1} Right-click any sender name for context menu</div>
+          <div class="gam-mm-hints-tip">\u{1F4A1} Macros: type / in the reply box for canned responses (v9.6.0+)</div>
+        </div>
+        <div class="gam-mm-hints-foot">
+          <a href="#" class="gam-mm-hints-help">Show full help</a>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    function setCollapsed(v){
+      wrap.setAttribute('data-collapsed', v ? '1' : '0');
+      try { setSetting('mm.hints.collapsed', !!v); } catch(_){}
+    }
+    wrap.querySelector('.gam-mm-hints-tab').addEventListener('click', () => setCollapsed(false));
+    wrap.querySelector('.gam-mm-hints-min').addEventListener('click', () => setCollapsed(true));
+    const helpLink = wrap.querySelector('.gam-mm-hints-help');
+    if (helpLink) helpLink.addEventListener('click', (e) => { e.preventDefault(); try { openHelp(); } catch(_){} });
+  }
 
   function buildStatusBar(){
     // v5.2.1: icon-only compact bar. Text labels gone; native `title` gives tooltips.
@@ -13445,12 +13654,26 @@ Analyze this comment against the community rules. Then write a brief, profession
       });
     }
 
+    // v9.6.0: SHIELD brand is now a clickable button -> site-health snapshot
+    // popover. Pre-fix it was a passive <span> with only an easter-egg
+    // 7-click handler. Click now opens a useful site-health summary.
+    const brandBtn = el('button', {
+      cls:'gam-bar-brand gam-bar-icon-brand',
+      title:`GAW ModTools ${VERSION} \u2014 click for site health`
+    }, '\u{1F6E1}');
+    brandBtn.addEventListener('click', ()=>{
+      try { _showSiteHealthPopover(brandBtn); } catch(err){
+        try { snack('Site health probe failed: ' + (err && err.message || err), 'error'); } catch(_){}
+      }
+    });
+    // v9.6.0: GEAR moved to far-right of bar per Commander 2026-05-07.
+    const gearBtn = el('button',{ cls:'gam-bar-icon', onclick:openSettings, title:'Settings' }, '\u2699\uFE0F');
+
     const bar = el('div', { id:'gam-status-bar' },
-      el('span', { cls:'gam-bar-brand', title:`GAW ModTools ${VERSION}` }, '\u{1F6E1}'),
+      brandBtn,
       el('span', { cls:'gam-bar-sep' }),
       el('button',{ cls:'gam-bar-icon', onclick:openModLog, title:'Mod log (Ctrl+Shift+L)' }, '\u{1F4CB}'),
       el('button',{ cls:'gam-bar-icon', onclick:openHelp, title:'Help (Ctrl+Shift+H)' }, '\u2753'),
-      el('button',{ cls:'gam-bar-icon', onclick:openSettings, title:'Settings' }, '\u2699\uFE0F'),
       el('button',{ cls:'gam-bar-icon', onclick:downloadDebugSnapshot, title:'Debug snapshot (redacted export)' }, '\u{1F41E}'),
       // v7.1.2: team-sharable bug report (distinct from 🐞 local export above).
       el('button',{ cls:'gam-bar-icon', onclick:openBugReportModal, title:'Report a bug (sends to team)' }, '\u{1F41B}'),
@@ -13473,7 +13696,10 @@ Analyze this comment against the community rules. Then write a brief, profession
       mmBtn,
       c5Btn,
       IS_USERS_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.ACCENT, cursor:'default'}, title:'Triage Console active' }, '\u{1F4CA}') : null,
-      IS_BAN_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.RED, cursor:'default'}, title:'/ban page enhancer active' }, '\u{1F528}') : null
+      IS_BAN_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.RED, cursor:'default'}, title:'/ban page enhancer active' }, '\u{1F528}') : null,
+      // v9.6.0: GEAR moved to far right per Commander UX request 2026-05-07
+      el('span', { cls:'gam-bar-sep' }),
+      gearBtn
     );
     document.body.appendChild(bar);
     updateDeathRowCounter();
@@ -14033,6 +14259,42 @@ Analyze this comment against the community rules. Then write a brief, profession
 /* ── Loop-3: status bar pill refinement ── */
 #gam-status-bar{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);height:28px;background:rgba(12,14,18,.95);backdrop-filter:blur(16px) saturate(1.4);border:1px solid ${C.BORDER2};border-radius:14px;z-index:9999980;display:inline-flex;align-items:center;padding:0 10px;gap:6px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT2};box-shadow:0 2px 12px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.03)}
 .gam-bar-brand{font-weight:800;color:${C.ACCENT};letter-spacing:.1px;font-size:13px}
+/* v9.6.0: shield is now an interactive button (site-health popover) -- match
+   .gam-bar-icon dimensions and lock the color so the harmonized-theme
+   override doesn't tint it orange (was: data-gam-harmonized rule at the
+   bottom of GAM_CSS used --gam-accent which GAW's site-CSS sets to a
+   saffron/orange, leaking through). */
+.gam-bar-icon-brand{background:none;border:none;width:22px;height:22px;border-radius:11px;cursor:pointer;font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;transition:background .1s,color .1s,transform .1s;padding:0;color:${C.ACCENT} !important}
+.gam-bar-icon-brand:hover{background:rgba(74,158,255,.18);transform:scale(1.12)}
+.gam-bar-icon-brand:active{transform:scale(.94)}
+/* v9.6.0: Modmail hints panel — floating reference card on modmail surfaces */
+#gam-mm-hints{position:fixed;right:12px;top:50%;transform:translateY(-50%);z-index:9999970;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}
+#gam-mm-hints[data-collapsed="1"] .gam-mm-hints-body{display:none}
+#gam-mm-hints[data-collapsed="0"] .gam-mm-hints-tab{display:none}
+.gam-mm-hints-tab{width:28px;height:28px;border-radius:14px;background:rgba(74,158,255,.92);color:#fff;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;transition:transform .12s}
+.gam-mm-hints-tab:hover{transform:scale(1.1);background:${C.ACCENT}}
+.gam-mm-hints-body{background:${C.BG};border:1px solid ${C.BORDER2};border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.55);padding:10px 12px;max-width:300px;color:${C.TEXT2}}
+.gam-mm-hints-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid ${C.BORDER}}
+.gam-mm-hints-title{font-size:12px;font-weight:700;color:${C.TEXT}}
+.gam-mm-hints-min{background:none;border:1px solid ${C.BORDER};color:${C.TEXT3};border-radius:3px;width:20px;height:20px;cursor:pointer;font:inherit;line-height:1;padding:0;font-size:14px}
+.gam-mm-hints-min:hover{color:${C.TEXT};border-color:${C.BORDER2}}
+.gam-mm-hints-section{margin:6px 0}
+.gam-mm-hints-row{display:flex;align-items:center;gap:6px;padding:2px 0;line-height:1.45}
+.gam-mm-hints-row span{color:${C.TEXT2};margin-left:auto;font-size:11px}
+.gam-mm-hints-row kbd{background:${C.BG2};border:1px solid ${C.BORDER};border-bottom-width:2px;border-radius:3px;padding:1px 4px;font:10px monospace;color:${C.TEXT};min-width:14px;text-align:center}
+.gam-mm-hints-tip{padding:2px 0;color:${C.TEXT3};font-size:10.5px;line-height:1.45}
+.gam-mm-hints-foot{margin-top:6px;padding-top:6px;border-top:1px solid ${C.BORDER};text-align:right}
+.gam-mm-hints-help{color:${C.ACCENT};text-decoration:none;font-size:10.5px}
+.gam-mm-hints-help:hover{text-decoration:underline}
+
+/* v9.6.0: site-health popover anchored above the shield brand */
+#gam-site-health-popover{position:fixed;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:8px;box-shadow:0 10px 32px rgba(0,0,0,.6);padding:14px 16px;min-width:340px;max-width:420px;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT2};z-index:9999985}
+#gam-site-health-popover h4{margin:0 0 8px;color:${C.TEXT};font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px}
+#gam-site-health-popover .gam-sh-row{display:flex;justify-content:space-between;padding:4px 0;border-top:1px dashed ${C.BORDER};color:${C.TEXT2}}
+#gam-site-health-popover .gam-sh-row:first-of-type{border-top:none}
+#gam-site-health-popover .gam-sh-key{color:${C.TEXT3};font-weight:600;font-size:11px}
+#gam-site-health-popover .gam-sh-val{color:${C.TEXT};font-weight:600;font-size:12px;font-variant-numeric:tabular-nums}
+#gam-site-health-popover .gam-sh-foot{margin-top:8px;padding-top:6px;border-top:1px solid ${C.BORDER};color:${C.TEXT3};font-size:10px;display:flex;justify-content:space-between}
 .gam-bar-sep{width:1px;height:12px;background:${C.BORDER};opacity:.6}
 .gam-bar-btn{background:none;border:none;color:${C.TEXT2};padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;font-family:inherit;transition:background .15s,color .15s}
 .gam-bar-btn:hover{background:${C.BG2};color:${C.TEXT}}
@@ -14630,7 +14892,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       }
     }
     /* v5.2.2: when theme-harmony is on, accent-driven elements use the complement. */
-    :root[data-gam-harmonized] #gam-status-bar .gam-bar-brand,
+    /* v9.6.0: removed .gam-bar-brand from this rule -- the shield brand is
+       now ALWAYS modtools blue, never harmonized to GAW's orange/saffron
+       site theme. Commander reported "shield is orange" -- this rule was
+       the culprit because GAW's --gam-accent var sniffs the site theme. */
     :root[data-gam-harmonized] .gam-mc-tab-active,
     :root[data-gam-harmonized] .gam-modal-pin:hover { color: var(--gam-accent, ${C.ACCENT}) !important; }
     :root[data-gam-harmonized] .gam-mc-tab-active { border-bottom-color: var(--gam-accent, ${C.ACCENT}) !important; }
@@ -16829,6 +17094,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       if (consentEnabled('features.modmail')){
         try { startInboxIntelPoller(); } catch(e){ console.warn('[modtools] inbox intel start', e); }
       }
+    }
+
+    // v9.6.0: modmail hints/shortcuts panel. Mounts on ANY modmail surface
+    // (list + thread). Minimizable, dismissible, persistent state via
+    // gam_setting 'mm.hints.collapsed'.
+    if (/^\/modmail\b/.test(location.pathname)){
+      try { installModmailHintsPanel(); } catch(e){ console.warn('[modtools] modmail hints panel skip', e); }
     }
 
     buildStatusBar();

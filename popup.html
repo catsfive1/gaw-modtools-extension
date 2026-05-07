@@ -183,6 +183,33 @@
     </div>
   </div>
 
+  <!-- v9.6.0: Team Macros (shared canned messages) — visible to ALL mods,
+       any mod can add/edit/delete; sync'd across team via worker. -->
+  <div class="pop-token" id="macrosSection">
+    <label>&#x1F4DD; Team Macros — shared canned messages</label>
+    <div class="pop-token-hint">Custom ban messages + modmail responses, sync'd across all mods. Pick from your ban modal / modmail reply.</div>
+    <div class="pop-tools" style="margin-top:6px;display:flex;gap:4px">
+      <button class="pop-btn pop-btn-ghost gam-macro-tab gam-macro-tab-active" data-kind="ban_msg" style="flex:1">&#x1F528; Ban messages</button>
+      <button class="pop-btn pop-btn-ghost gam-macro-tab" data-kind="mm_reply" style="flex:1">&#x1F4EC; Modmail replies</button>
+    </div>
+    <div id="macrosList" style="margin-top:8px;max-height:240px;overflow:auto;border:1px solid #2a2d33;border-radius:4px;background:#0e1115">
+      <div style="padding:10px;color:#888;font-size:11px;text-align:center">Loading...</div>
+    </div>
+    <div class="pop-tools" style="margin-top:6px">
+      <button id="macroAddBtn" class="pop-btn pop-btn-ghost" style="width:100%">&#x2795; Add new macro</button>
+    </div>
+    <div id="macroEditWrap" style="display:none;margin-top:8px;padding:8px;background:#0e1115;border:1px solid #2a2d33;border-radius:4px">
+      <input type="hidden" id="macroEditId" value="">
+      <input id="macroEditLabel" placeholder="Label (max 80 chars)" maxlength="80" style="width:100%;padding:6px 8px;background:#161a20;color:#dcdcdc;border:1px solid #2a2d33;border-radius:3px;font:11px inherit;margin-bottom:6px">
+      <textarea id="macroEditBody" placeholder="Body of the macro..." maxlength="4000" rows="4" style="width:100%;padding:6px 8px;background:#161a20;color:#dcdcdc;border:1px solid #2a2d33;border-radius:3px;font:12px inherit;resize:vertical"></textarea>
+      <div class="pop-tools" style="margin-top:6px;display:flex;gap:4px">
+        <button id="macroSaveBtn" class="pop-btn pop-btn-ghost" style="flex:1">Save</button>
+        <button id="macroCancelBtn" class="pop-btn pop-btn-ghost" style="flex:1">Cancel</button>
+      </div>
+    </div>
+    <div id="macrosStatus" class="pop-token-status"></div>
+  </div>
+
   <div class="pop-token">
     <label for="tokenInput">&#x1F511; Team Mod Token</label>
     <div class="pop-token-hint">Required for all mod actions (crawl, ban, notes, cross-mod sync)</div>

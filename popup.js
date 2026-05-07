@@ -1975,6 +1975,155 @@ async function loadBugVisibility() {
 loadBugVisibility();
 
 // =========================================================================
+// v9.6.0: Team macros (shared ban_msg + mm_reply CRUD)
+// =========================================================================
+let __macroKind = 'ban_msg';
+let __macroEditing = null;
+
+function __macroSetStatus(msg, cls){
+  const el = document.getElementById('macrosStatus');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.className = 'pop-token-status' + (cls ? ' ' + cls : '');
+}
+
+async function loadMacros(){
+  const list = document.getElementById('macrosList');
+  if (!list) return;
+  list.innerHTML = '<div style="padding:10px;color:#888;font-size:11px;text-align:center">Loading...</div>';
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: 'rpc', name: 'macrosList', args: { kind: __macroKind }
+    });
+    if (!r || !r.ok || !r.data || !Array.isArray(r.data.macros)){
+      list.innerHTML = '<div style="padding:10px;color:#f04040;font-size:11px;text-align:center">Failed to load: ' + ((r && r.error) || 'no response') + '</div>';
+      return;
+    }
+    if (r.data.macros.length === 0){
+      list.innerHTML = '<div style="padding:10px;color:#888;font-size:11px;text-align:center">No macros yet. Click "Add new macro" below.</div>';
+      return;
+    }
+    list.innerHTML = '';
+    r.data.macros.forEach(function(m){
+      const row = document.createElement('div');
+      row.className = 'gam-macro-row';
+      row.style.cssText = 'padding:6px 8px;border-bottom:1px solid #1f2227;display:flex;flex-direction:column;gap:2px';
+      const top = document.createElement('div');
+      top.style.cssText = 'display:flex;align-items:center;gap:6px';
+      const lbl = document.createElement('div');
+      lbl.style.cssText = 'flex:1;font-weight:600;color:#dcdcdc;font-size:12px';
+      lbl.textContent = m.label;
+      const useCount = document.createElement('span');
+      useCount.style.cssText = 'color:#666;font-size:10px';
+      useCount.textContent = (m.use_count || 0) + 'x';
+      const editBtn = document.createElement('button');
+      editBtn.className = 'pop-btn pop-btn-ghost';
+      editBtn.style.cssText = 'padding:2px 6px;font-size:10px';
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', function(){ __macroStartEdit(m); });
+      const delBtn = document.createElement('button');
+      delBtn.className = 'pop-btn pop-btn-ghost';
+      delBtn.style.cssText = 'padding:2px 6px;font-size:10px;color:#f04040';
+      delBtn.textContent = 'Delete';
+      delBtn.addEventListener('click', function(){ __macroDelete(m); });
+      top.appendChild(lbl);
+      top.appendChild(useCount);
+      top.appendChild(editBtn);
+      top.appendChild(delBtn);
+      const body = document.createElement('div');
+      body.style.cssText = 'color:#999;font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:50px;overflow:hidden';
+      body.textContent = m.body;
+      const meta = document.createElement('div');
+      meta.style.cssText = 'color:#555;font-size:9.5px';
+      meta.textContent = 'by ' + (m.created_by || '?') + (m.updated_by ? ' (edited by ' + m.updated_by + ')' : '');
+      row.appendChild(top);
+      row.appendChild(body);
+      row.appendChild(meta);
+      list.appendChild(row);
+    });
+  } catch(e){
+    list.innerHTML = '<div style="padding:10px;color:#f04040;font-size:11px;text-align:center">Error: ' + (e && e.message || e) + '</div>';
+  }
+}
+
+function __macroStartEdit(m){
+  __macroEditing = m || { id: null, label: '', body: '' };
+  document.getElementById('macroEditId').value = m && m.id ? String(m.id) : '';
+  document.getElementById('macroEditLabel').value = m && m.label ? m.label : '';
+  document.getElementById('macroEditBody').value = m && m.body ? m.body : '';
+  document.getElementById('macroEditWrap').style.display = '';
+  try { document.getElementById('macroEditLabel').focus(); } catch(_){}
+}
+
+function __macroCancelEdit(){
+  __macroEditing = null;
+  document.getElementById('macroEditWrap').style.display = 'none';
+}
+
+async function __macroSave(){
+  const idRaw = document.getElementById('macroEditId').value;
+  const id = idRaw ? parseInt(idRaw, 10) : null;
+  const label = (document.getElementById('macroEditLabel').value || '').trim();
+  const body = (document.getElementById('macroEditBody').value || '').trim();
+  if (!label || !body){ __macroSetStatus('label + body required', 'err'); return; }
+  if (label.length > 80){ __macroSetStatus('label too long (max 80)', 'err'); return; }
+  if (body.length > 4000){ __macroSetStatus('body too long (max 4000)', 'err'); return; }
+  __macroSetStatus('saving...');
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: 'rpc', name: 'macroUpsert', args: { id: id, kind: __macroKind, label: label, body: body }
+    });
+    if (r && r.ok && r.data && r.data.ok){
+      __macroSetStatus('✓ ' + (r.data.action || 'saved'), 'ok');
+      __macroCancelEdit();
+      loadMacros();
+    } else {
+      __macroSetStatus('save failed: ' + ((r && r.data && r.data.error) || (r && r.error) || 'unknown'), 'err');
+    }
+  } catch(e){
+    __macroSetStatus('error: ' + (e && e.message || e), 'err');
+  }
+}
+
+async function __macroDelete(m){
+  if (!m || !m.id) return;
+  if (!window.confirm('Delete macro "' + m.label + '"? This is sync\'d across the team.')) return;
+  __macroSetStatus('deleting...');
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: 'rpc', name: 'macroDelete', args: { id: m.id }
+    });
+    if (r && r.ok && r.data && r.data.ok){
+      __macroSetStatus('✓ deleted', 'ok');
+      loadMacros();
+    } else {
+      __macroSetStatus('delete failed: ' + ((r && r.data && r.data.error) || (r && r.error) || 'unknown'), 'err');
+    }
+  } catch(e){
+    __macroSetStatus('error: ' + (e && e.message || e), 'err');
+  }
+}
+
+{
+  // Tab switching
+  document.querySelectorAll('.gam-macro-tab').forEach(function(t){
+    t.addEventListener('click', function(){
+      __macroKind = t.getAttribute('data-kind') || 'ban_msg';
+      document.querySelectorAll('.gam-macro-tab').forEach(function(t2){ t2.classList.toggle('gam-macro-tab-active', t2 === t); });
+      __macroCancelEdit();
+      loadMacros();
+    });
+  });
+  const addBtn = document.getElementById('macroAddBtn');
+  if (addBtn) addBtn.addEventListener('click', function(){ __macroStartEdit(null); });
+  const saveBtn = document.getElementById('macroSaveBtn');
+  if (saveBtn) saveBtn.addEventListener('click', function(){ withLoading(saveBtn, 'saving...', __macroSave); });
+  const cancelBtn = document.getElementById('macroCancelBtn');
+  if (cancelBtn) cancelBtn.addEventListener('click', __macroCancelEdit);
+}
+loadMacros();
+
+// =========================================================================
 // v9.4.5: Stat-card drill-downs
 // =========================================================================
 // Each of the 6 stat cards in the popup has a `data-drill="<key>"` attribute.
@@ -2755,22 +2904,44 @@ async function maintResetDefaults() {
       validate: function (v) { return v === 'RESET' ? '' : 'Type RESET (uppercase) exactly.'; }
     });
     if (finalText !== 'RESET') { __maintSetStatus('maintResetStatus', 'cancelled.'); return; }
-    // Preserve tokens, wipe everything else.
+    // v9.6.0: PRESERVE onboarding markers + UX preferences in addition to
+    // tokens. Pre-fix this routine wiped tokenOnboardedOnce/chat.dock/
+    // hideSidebar/upvoteAgeFilter/consentShown -- net effect was the
+    // onboarding modal re-appeared, dock layout reset, filter reverted to
+    // 'off', and consent banner re-showed. Commander hit this between two
+    // debug snapshots on 2026-05-07. Defaults reset is meant to clear
+    // feature flags + caches, NOT undo the user's UX choices.
     const cur = await chrome.storage.local.get('gam_settings');
     const s = (cur && cur.gam_settings) || {};
     const preserved = {
+      // Identity / auth — non-negotiable
       workerModToken: s.workerModToken || '',
       leadModToken: s.leadModToken || '',
       isLeadMod: !!s.isLeadMod,
-      [MAINT_SCHEMA_KEY]: MAINT_SCHEMA_CURRENT
+      [MAINT_SCHEMA_KEY]: MAINT_SCHEMA_CURRENT,
+      // Onboarding markers — preserve so we don't re-trigger first-run flows
+      tokenOnboardedOnce: !!s.tokenOnboardedOnce,
+      consentShown: !!s.consentShown,
+      isModBrowser: !!s.isModBrowser,
+      // UX preferences — preserve so layout doesn't snap back
+      'chat.dock': s['chat.dock'] || undefined,
+      'chat.width': s['chat.width'] || undefined,
+      hideSidebar: !!s.hideSidebar,
+      cleanUi: !!s.cleanUi,
+      mailHoverHighlight: s.mailHoverHighlight !== false,
+      upvoteAgeFilter: s.upvoteAgeFilter || 'off',
+      // Easter eggs (toggleable; preserve so reset doesn't re-enable surprises)
+      easterEggsEnabled: s.easterEggsEnabled !== false
     };
+    // Strip undefined keys (chrome.storage rejects them)
+    Object.keys(preserved).forEach(k => preserved[k] === undefined && delete preserved[k]);
     // Remove every owned non-token key + learned selectors + intel cache.
     const keysToRemove = OWNED_KEYS.filter(k => k !== K.SETTINGS).concat(['gam_learned_selectors']);
     await chrome.storage.local.remove(keysToRemove);
     await chrome.storage.local.set({ gam_settings: { ...preserved, ...MAINT_DEFAULT_SETTINGS } });
     __maintLog('resetDefaults', 'ok', { preserved: Object.keys(preserved) });
     __maintSetStatus('maintResetStatus',
-      '✓ reset complete. Tokens preserved. Reload GAW tabs.', 'ok');
+      '✓ reset complete. Tokens + UX prefs preserved. Reload GAW tabs.', 'ok');
   } catch (e) {
     __maintLog('resetDefaults', 'err', { error: String(e && e.message || e) });
     __maintSetStatus('maintResetStatus', 'failed: ' + (e && e.message || e), 'err');
@@ -2838,7 +3009,18 @@ async function maintFullReport() {
   report.elapsedMs = Date.now() - t0;
   const json = JSON.stringify(report, null, 2);
   try { await navigator.clipboard.writeText(json); } catch (_) {}
-  // Also offer download.
+  // v9.6.0: render an HTML report alongside the JSON. Commander asked for
+  // human-readable summary instead of opaque JSON dumps. Heuristic top-issues
+  // section surfaces the things a lead actually needs to react to.
+  try {
+    const html = __maintRenderHealthReportHtml(report);
+    const htmlBlob = new Blob([html], { type: 'text/html' });
+    const htmlUrl = URL.createObjectURL(htmlBlob);
+    try { window.open(htmlUrl, '_blank'); } catch(_){}
+    // Don't revoke immediately -- the new tab needs the URL alive for a moment
+    setTimeout(() => { try { URL.revokeObjectURL(htmlUrl); } catch(_){} }, 30_000);
+  } catch (e) { console.warn('[maint] html render failed', e); }
+  // Also offer JSON download (still useful for support / agent dumps).
   try {
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -2851,7 +3033,83 @@ async function maintFullReport() {
   } catch (_) {}
   __maintLog('fullReport', 'ok', { elapsedMs: report.elapsedMs });
   __maintSetStatus('maintFullReportStatus',
-    '✓ ran 9 routines in ' + report.elapsedMs + 'ms -- copied to clipboard + downloaded.', 'ok');
+    '✓ ran 9 routines in ' + report.elapsedMs + 'ms -- HTML report opened, JSON copied + downloaded.', 'ok');
+}
+
+// v9.6.0: render the maintenance health report as a styled HTML page.
+// Heuristic "top issues" section surfaces the most actionable problems.
+function __maintRenderHealthReportHtml(report) {
+  const r = report.routines || {};
+  // Heuristic top-issues classifier.
+  const issues = [];
+  const probe = String(r.storageProbe || '');
+  const sizeM = probe.match(/([0-9.]+)\s*KB\s*\(([0-9.]+)%/);
+  if (sizeM){
+    const pct = parseFloat(sizeM[2]);
+    if (pct > 80) issues.push({ sev:'crit', msg: 'Storage at ' + pct + '% of 5MB. Run "Trim now" or maintenance routine #1.' });
+    else if (pct > 50) issues.push({ sev:'warn', msg: 'Storage at ' + pct + '% — monitor.' });
+  }
+  const tok = String(r.tokenProbe || '');
+  if (/✗|FAIL|fail/.test(tok)) issues.push({ sev:'crit', msg: 'Token probe FAILED: ' + tok });
+  else if (!/✓/.test(tok)) issues.push({ sev:'warn', msg: 'Token probe inconclusive: ' + tok });
+  if (/^✗|fail|invalid|expired/i.test(String(r.schemaCheck || ''))) issues.push({ sev:'crit', msg: 'Schema mismatch: ' + r.schemaCheck });
+  const audit = String(r.auditVerify || '');
+  if (audit.startsWith('verify failed') && !/lead-only/.test(audit)) issues.push({ sev:'crit', msg: 'Audit chain verify FAILED: ' + audit });
+  const mig = String(r.migrationDebt || '');
+  if (/debt|pending|behind/i.test(mig) && !/✓|no migration/i.test(mig)) issues.push({ sev:'warn', msg: 'Migration debt detected: ' + mig });
+  const diag = String(r.diagStatus || '');
+  const diagM = diag.match(/(\d+)\s*entries/);
+  if (diagM && parseInt(diagM[1], 10) > 400) issues.push({ sev:'warn', msg: 'Diag log nearing cap (' + diagM[1] + '/500). Click Purge 50%.' });
+  const drift = String(r.selectorDrift || '');
+  if (/promoted/.test(drift)) issues.push({ sev:'info', msg: 'Selector self-healed: ' + drift + ' (no action needed).' });
+  if (issues.length === 0) issues.push({ sev:'info', msg: '✓ All routines passed cleanly. No action required.' });
+
+  // Sort: crit > warn > info
+  const sevOrder = { crit:0, warn:1, info:2 };
+  issues.sort((a,b) => sevOrder[a.sev] - sevOrder[b.sev]);
+
+  const esc = function(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); };
+  const sevColor = { crit:'#f04040', warn:'#f0a040', info:'#3dd68c' };
+  const sevLabel = { crit:'CRITICAL', warn:'WARN', info:'INFO' };
+  const issuesHtml = issues.map(function(i){
+    return '<li style="border-left:3px solid ' + sevColor[i.sev] + ';padding:8px 12px;margin-bottom:6px;background:#1a1d22;list-style:none">'
+         + '<span style="display:inline-block;background:' + sevColor[i.sev] + ';color:#000;font-weight:700;font-size:10px;padding:1px 6px;border-radius:3px;margin-right:8px">' + sevLabel[i.sev] + '</span>'
+         + esc(i.msg)
+         + '</li>';
+  }).join('');
+
+  const routinesHtml = Object.keys(r).map(function(k){
+    const v = String(r[k] || '');
+    const ok = /^✓/.test(v);
+    const fail = /^✗|fail/i.test(v);
+    const cls = ok ? '#3dd68c' : fail ? '#f04040' : '#888';
+    return '<tr><td style="padding:6px 10px;color:#aaa;font-weight:600;border-bottom:1px solid #1f2227">' + esc(k) + '</td>'
+         + '<td style="padding:6px 10px;color:' + cls + ';border-bottom:1px solid #1f2227">' + esc(v.slice(0, 200)) + '</td></tr>';
+  }).join('');
+
+  return [
+    '<!doctype html><html><head><meta charset="utf-8">',
+    '<title>ModTools Health Report — ' + esc(report.generatedAt) + '</title>',
+    '<style>',
+    'body{font:13px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;background:#0c0e12;color:#dcdcdc;margin:0;padding:24px;max-width:920px;margin-left:auto;margin-right:auto}',
+    'h1{font-size:18px;margin:0 0 4px;display:flex;align-items:center;gap:8px}',
+    'h2{font-size:14px;margin:24px 0 8px;color:#e8eaed;font-weight:700;border-bottom:1px solid #2a2d33;padding-bottom:4px}',
+    '.meta{color:#888;font-size:11px}',
+    'ul{margin:0;padding:0}',
+    'table{border-collapse:collapse;width:100%;font-size:12px;background:#0e1115;border:1px solid #2a2d33;border-radius:6px;overflow:hidden}',
+    'tr:last-child td{border-bottom:none}',
+    'a{color:#4A9EFF}',
+    '.foot{color:#666;font-size:10.5px;margin-top:24px;padding-top:8px;border-top:1px solid #2a2d33}',
+    '</style></head><body>',
+    '<h1>🛡 GAW ModTools Health Report</h1>',
+    '<div class="meta">Extension v', esc(report.extensionVersion), ' · ', esc(report.generatedAt), ' · ', String(report.elapsedMs || 0), 'ms</div>',
+    '<h2>📌 Top issues (', String(issues.length), ')</h2>',
+    '<ul>', issuesHtml, '</ul>',
+    '<h2>🔬 Routine results</h2>',
+    '<table>', routinesHtml, '</table>',
+    '<div class="foot">Generated by GAW ModTools maintenance routines. Lead-only routines may show "lead-only" if your token isn\'t flagged as lead. JSON copy of this report has been downloaded alongside.</div>',
+    '</body></html>'
+  ].join('');
 }
 
 // =========================================================================

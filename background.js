@@ -1220,6 +1220,50 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('POST', '/admin/bug-reports/visibility', { visible_to });
     }
   },
+  // v9.6.0: Team-shared macros (custom ban messages + modmail responses)
+  // Any mod can read/write via x-mod-token. Sync'd across team via worker.
+  // Endpoints under /macros/* (NOT /admin/*) so EXTENSION_ID_ALLOWLIST gate
+  // doesn't apply -- routine mod usage from any popup origin.
+  macrosList: {
+    allowed_callers: [RPC_CALLER_POPUP, RPC_CALLER_CONTENT],
+    async handler(args) {
+      const kind = String(args && args.kind || '');
+      if (kind !== 'ban_msg' && kind !== 'mm_reply') return { ok:false, status:0, error:'invalid_kind' };
+      return await _rpcWorkerCall('GET', '/macros/list?kind=' + encodeURIComponent(kind), undefined);
+    }
+  },
+  macroUpsert: {
+    allowed_callers: [RPC_CALLER_POPUP, RPC_CALLER_CONTENT],
+    async handler(args) {
+      const kind = String(args && args.kind || '');
+      const label = String(args && args.label || '').trim();
+      const body = String(args && args.body || '').trim();
+      if (kind !== 'ban_msg' && kind !== 'mm_reply') return { ok:false, status:0, error:'invalid_kind' };
+      if (!label || !body) return { ok:false, status:0, error:'label_and_body_required' };
+      if (label.length > 80) return { ok:false, status:0, error:'label_too_long' };
+      if (body.length > 4000) return { ok:false, status:0, error:'body_too_long' };
+      const payload = { kind, label, body };
+      const id = args && args.id;
+      if (Number.isFinite(id) && id > 0) payload.id = id;
+      return await _rpcWorkerCall('POST', '/macros/upsert', payload);
+    }
+  },
+  macroDelete: {
+    allowed_callers: [RPC_CALLER_POPUP, RPC_CALLER_CONTENT],
+    async handler(args) {
+      const id = parseInt(args && args.id, 10);
+      if (!Number.isFinite(id) || id <= 0) return { ok:false, status:0, error:'missing_id' };
+      return await _rpcWorkerCall('POST', '/macros/delete', { id });
+    }
+  },
+  macroUse: {
+    allowed_callers: [RPC_CALLER_POPUP, RPC_CALLER_CONTENT],
+    async handler(args) {
+      const id = parseInt(args && args.id, 10);
+      if (!Number.isFinite(id) || id <= 0) return { ok:false, status:0, error:'missing_id' };
+      return await _rpcWorkerCall('POST', '/macros/use', { id });
+    }
+  },
 
   // ---- modSus: cross-mod-visible "Mark SUS" flag (P1-3, v9.3.4) ----------
   // Worker: POST /mod/user/sus (any mod), GET /mod/user/sus, DELETE same.
