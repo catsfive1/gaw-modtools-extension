@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.6.4';
+  const VERSION = 'v9.6.5';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -12668,14 +12668,20 @@ Analyze this comment against the community rules. Then write a brief, profession
 /* v9.3.9 (P1-8) / v9.3.11: chat panel — dockable left/right, three widths.
    Default dock=right, width=md (480px). data-* attrs persisted via
    gam_settings.chat.dock + .chat.width.
-   v9.3.11 ID-COLLISION FIX: rule below scoped to `[data-dock]` because the
+   v9.3.11 ID-COLLISION FIX: rule below scoped to [data-dock] because the
    Mod Console modal also opens with id="gam-mc-panel" (legacy). Without the
    qualifier, the chat-panel rule's z-index:9999988 won via ID specificity
    over .gam-modal{z-index:9999995}, parking the modal BELOW #gam-backdrop
    (z-9999990) — which is what produced the recurring "BAN HAMMER / USER
    INFO / NOTES blurred" bug. With [data-dock] only the actual chat panel
    matches; the modal falls through to .gam-modal at z-9999995 and renders
-   correctly above the backdrop. */
+   correctly above the backdrop.
+   v9.6.5 BUGFIX: removed backticks around [data-dock] in this comment.
+   The outer s.textContent is a JS template literal. Inner backticks
+   closed it early, the parser then tried to evaluate the dropped-out
+   chunk as code, hit data as an undeclared identifier, and threw
+   ReferenceError on every chat-icon click since v9.3.11. Six versions
+   to find -- bug is invisible in source until the parser sees it. */
 #gam-mc-panel[data-dock]{position:fixed;top:0;bottom:0;max-width:95vw;background:${C.BG};z-index:9999988;display:flex;flex-direction:column;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};transition:transform .2s ease-out,width .2s ease-out}
 #gam-mc-panel[data-width="sm"]{width:320px}
 #gam-mc-panel[data-width="md"]{width:480px}
