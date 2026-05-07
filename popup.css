@@ -209,6 +209,19 @@ html, body {
   border-color: #4A9EFF !important;
   color: #4A9EFF !important;
 }
+/* v9.6.0 UX iter 4: macro row hover affordance + body fade-out for long text */
+.gam-macro-row:hover {
+  background: rgba(74,158,255,.06);
+}
+.gam-macro-row {
+  position: relative;
+}
+/* Visual fade on overflowing bodies so users know there's more without scrollbar bling */
+.gam-macro-row > div:nth-child(2) {
+  position: relative;
+  mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
+}
 /* v8.5.3: in-flight state */
 .pop-btn-ghost:disabled,
 .pop-btn-ghost.loading {

@@ -13672,11 +13672,11 @@ Analyze this comment against the community rules. Then write a brief, profession
     const bar = el('div', { id:'gam-status-bar' },
       brandBtn,
       el('span', { cls:'gam-bar-sep' }),
-      el('button',{ cls:'gam-bar-icon', onclick:openModLog, title:'Mod log (Ctrl+Shift+L)' }, '\u{1F4CB}'),
-      el('button',{ cls:'gam-bar-icon', onclick:openHelp, title:'Help (Ctrl+Shift+H)' }, '\u2753'),
-      el('button',{ cls:'gam-bar-icon', onclick:downloadDebugSnapshot, title:'Debug snapshot (redacted export)' }, '\u{1F41E}'),
+      el('button',{ cls:'gam-bar-icon', onclick:openModLog, title:'Mod log + Death Row queue \u2014 your action history (Ctrl+Shift+L)' }, '\u{1F4CB}'),
+      el('button',{ cls:'gam-bar-icon', onclick:openHelp, title:'Keybinds + commands cheatsheet (Ctrl+Shift+H)' }, '\u2753'),
+      el('button',{ cls:'gam-bar-icon', onclick:downloadDebugSnapshot, title:'Debug snapshot \u2014 redacted JSON export of local state for support' }, '\u{1F41E}'),
       // v7.1.2: team-sharable bug report (distinct from 🐞 local export above).
-      el('button',{ cls:'gam-bar-icon', onclick:openBugReportModal, title:'Report a bug (sends to team)' }, '\u{1F41B}'),
+      el('button',{ cls:'gam-bar-icon', onclick:openBugReportModal, title:'File a bug report — sends to the team\'s GitHub via worker (auto-strips PII)' }, '\u{1F41B}'),
       // v8.2: Mod Chat launcher. Shows 💬 with a red unread badge when the
       // inbox has unseen messages. Gated on features.modChat (default ON).
       ModChat.createStatusBarButton(),
@@ -14257,7 +14257,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 
 /* Status Bar */
 /* ── Loop-3: status bar pill refinement ── */
-#gam-status-bar{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);height:28px;background:rgba(12,14,18,.95);backdrop-filter:blur(16px) saturate(1.4);border:1px solid ${C.BORDER2};border-radius:14px;z-index:9999980;display:inline-flex;align-items:center;padding:0 10px;gap:6px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT2};box-shadow:0 2px 12px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.03)}
+/* v9.6.0 UX iter 1: bar bottom 10 -> 14px so popovers have room to breathe
+   above it without crowding the screen edge. Subtle but improves readability
+   when the site-health popover or modmail popover renders above the bar. */
+#gam-status-bar{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);height:28px;background:rgba(12,14,18,.95);backdrop-filter:blur(16px) saturate(1.4);border:1px solid ${C.BORDER2};border-radius:14px;z-index:9999980;display:inline-flex;align-items:center;padding:0 10px;gap:6px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT2};box-shadow:0 2px 12px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.03)}
 .gam-bar-brand{font-weight:800;color:${C.ACCENT};letter-spacing:.1px;font-size:13px}
 /* v9.6.0: shield is now an interactive button (site-health popover) -- match
    .gam-bar-icon dimensions and lock the color so the harmonized-theme
@@ -14268,7 +14271,11 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-bar-icon-brand:hover{background:rgba(74,158,255,.18);transform:scale(1.12)}
 .gam-bar-icon-brand:active{transform:scale(.94)}
 /* v9.6.0: Modmail hints panel — floating reference card on modmail surfaces */
-#gam-mm-hints{position:fixed;right:12px;top:50%;transform:translateY(-50%);z-index:9999970;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}
+/* v9.6.0 UX iter 3: slide-in animation on first mount + nudged to top:30%
+   so it sits in the upper-right quadrant where it doesn't overlap the
+   reply textarea (which lives in the bottom half of the page). */
+@keyframes gam-mm-hints-in { from { opacity:0; transform:translate(8px,-50%) } to { opacity:1; transform:translate(0,-50%) } }
+#gam-mm-hints{position:fixed;right:12px;top:30%;transform:translateY(-50%);z-index:9999970;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;animation:gam-mm-hints-in .35s ease-out}
 #gam-mm-hints[data-collapsed="1"] .gam-mm-hints-body{display:none}
 #gam-mm-hints[data-collapsed="0"] .gam-mm-hints-tab{display:none}
 .gam-mm-hints-tab{width:28px;height:28px;border-radius:14px;background:rgba(74,158,255,.92);color:#fff;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;transition:transform .12s}
@@ -14302,6 +14309,11 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-bar-icon{background:none;border:none;color:${C.TEXT2};width:22px;height:22px;border-radius:11px;cursor:pointer;font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;transition:background .1s,color .1s,transform .1s;padding:0}
 .gam-bar-icon:hover{background:rgba(255,255,255,.08);color:${C.TEXT};transform:scale(1.12)}
 .gam-bar-icon:active{transform:scale(.94)}
+/* v9.6.0 UX iter 2: visible keyboard-focus state. Pre-fix tabbing through
+   bar buttons gave no signal which was active. Now: blue ring on :focus-visible
+   so keyboard users see exactly which icon they're on. */
+.gam-bar-icon:focus-visible,
+.gam-bar-icon-brand:focus-visible{outline:2px solid ${C.ACCENT};outline-offset:2px}
 select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text-align:center;font-size:12px}
 #gam-sess-pill{font-size:11px}
 #gam-dr-count{width:auto;padding:0 6px;font-size:11px;font-weight:600}
