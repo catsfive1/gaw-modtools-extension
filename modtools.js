@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.6.3';
+  const VERSION = 'v9.6.4';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -13361,18 +13361,37 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     async function openPanel(){
-      // v9.6.3: every call is labeled so when one throws we know WHICH one.
-      // Pre-fix all we got was "data is not defined" with no path -- couldn't
-      // tell whether buildPanel, rpcCall, ingestMessages, renderConvList,
-      // renderThread or startOpenPolling was the source. Now: errors are
-      // tagged with the function name.
+      // v9.6.4: aggressive instrumentation. Every step logs to console
+      // BEFORE it runs AND on success. If a step throws, the caught error
+      // is logged with FULL STACK TRACE plus the labeled snack. NO step
+      // is allowed to abort the rest of openPanel -- worst case the panel
+      // opens with degraded state, but the user sees something rather
+      // than nothing.
+      const _vbuild = 'v9.6.4';
+      try { console.log('%c[modchat ' + _vbuild + '] openPanel begin', 'color:#3dd68c;font-weight:700'); } catch(_){}
       function _step(name, fn){
-        try { return fn(); }
-        catch(e){ throw new Error('[' + name + '] ' + (e && e.message || e)); }
+        try {
+          console.log('[modchat] step:', name);
+          const out = fn();
+          console.log('[modchat] step ok:', name);
+          return out;
+        } catch(e){
+          console.error('[modchat] step FAILED:', name, e, e && e.stack);
+          try { snack('ModChat ' + name + ' failed: ' + (e && e.message || e), 'error'); } catch(_){}
+          return null; // do NOT abort -- continue with degraded state
+        }
       }
       async function _stepAsync(name, fn){
-        try { return await fn(); }
-        catch(e){ throw new Error('[' + name + '] ' + (e && e.message || e)); }
+        try {
+          console.log('[modchat] async step:', name);
+          const out = await fn();
+          console.log('[modchat] async step ok:', name);
+          return out;
+        } catch(e){
+          console.error('[modchat] async step FAILED:', name, e, e && e.stack);
+          try { snack('ModChat ' + name + ' failed: ' + (e && e.message || e), 'error'); } catch(_){}
+          return null;
+        }
       }
       if (!isEnabled()){
         try { snack('Mod Chat is disabled in Settings', 'warn'); } catch(e){}
@@ -13380,26 +13399,28 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       _step('injectStyles', injectStyles);
       const panel = _step('buildPanel', buildPanel);
-      requestAnimationFrame(()=> panel.classList.add('gam-mc-open'));
+      if (panel) {
+        requestAnimationFrame(()=> { try { panel.classList.add('gam-mc-open'); } catch(e){ console.error('[modchat] add gam-mc-open failed', e); } });
+      } else {
+        console.error('[modchat] buildPanel returned null/undefined -- aborting open');
+        try { snack('ModChat panel build returned null', 'error'); } catch(_){}
+        return;
+      }
       // Default to ALL on first open.
       if (!STATE.selectedConv) STATE.selectedConv = 'ALL';
-      // Refresh mods list (composer) + full inbox sync on open.
-      // v9.6.3: refreshModsList no longer awaited here -- it runs in the
-      // background and renderRecipientOptions is idempotent. Pre-fix the
-      // await coupled the panel-open latency to a network round-trip.
-      _stepAsync('refreshModsList', () => refreshModsList()).catch(e =>
-        console.warn('[modchat] refreshModsList background', e));
+      // refreshModsList runs in background -- panel open latency not gated by network.
+      _stepAsync('refreshModsList', () => refreshModsList());
       const r = await _stepAsync('rpcCall_inbox', () => rpcCall('modMessageInbox', {}));
-      // v9.6.3: defensive parse. The worker returns {ok:true, data:[...]},
-      // which after rpcCall wrap becomes r = {ok, status, data: <body>}, so
-      // r.data.data is the inbox array. Handle both shapes (legacy and
-      // current) so a worker shape change can't take chat down again.
+      console.log('[modchat] inbox response shape:', r && Object.keys(r), 'data type:', r && typeof r.data, 'data isArray:', r && Array.isArray(r.data));
+      // Defensive parse: accept BOTH r.data.data and r.data array shapes.
       if (r && r.ok && r.data){
         let inbox = null;
         if (Array.isArray(r.data.data)) inbox = r.data.data;
         else if (Array.isArray(r.data)) inbox = r.data;
         if (Array.isArray(inbox)){
           _step('ingestMessages', () => ingestMessages(inbox));
+        } else {
+          console.warn('[modchat] inbox response has neither r.data.data nor r.data array; skipping ingest');
         }
       }
       _step('computeUnread', computeUnread);
@@ -13408,6 +13429,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       _step('renderThread', renderThread);
       _step('startOpenPolling', startOpenPolling);
       try { STATE.textarea && STATE.textarea.focus(); } catch(e){}
+      try { console.log('%c[modchat ' + _vbuild + '] openPanel complete', 'color:#3dd68c'); } catch(_){}
     }
 
     function closePanel(){
