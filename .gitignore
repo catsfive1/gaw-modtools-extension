@@ -1,6 +1,8 @@
 # Tokens / secrets — MUST NEVER be committed
 *.token
 *.key
+*.pem
+.keys/
 *-token-*.txt
 *_token.txt
 mod-token-*.txt
