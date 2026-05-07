@@ -195,8 +195,9 @@
     <div id="macrosList" style="margin-top:8px;max-height:240px;overflow:auto;border:1px solid #2a2d33;border-radius:4px;background:#0e1115">
       <div style="padding:10px;color:#888;font-size:11px;text-align:center">Loading...</div>
     </div>
-    <div class="pop-tools" style="margin-top:6px">
-      <button id="macroAddBtn" class="pop-btn pop-btn-ghost" style="width:100%">&#x2795; Add new macro</button>
+    <div class="pop-tools" style="margin-top:6px;display:flex;gap:4px">
+      <button id="macroAddBtn" class="pop-btn pop-btn-ghost" style="flex:1">&#x2795; Add custom</button>
+      <button id="macroAiSeedBtn" class="pop-btn pop-btn-ghost" style="flex:1" title="Generate 5 starter macros with AI (Llama). Uses your daily AI budget.">&#x2728; Generate with AI</button>
     </div>
     <div id="macroEditWrap" style="display:none;margin-top:8px;padding:8px;background:#0e1115;border:1px solid #2a2d33;border-radius:4px">
       <input type="hidden" id="macroEditId" value="">
@@ -226,12 +227,19 @@
     <div id="rotateStatus" class="pop-token-status"></div>
   </div>
 
-  <div class="pop-token" id="leadSection" style="display:none">
+  <!-- v9.6.1: leadSection always visible so user can paste lead token before
+       team token is saved. Pre-fix the section was display:none until
+       __applyLeadGate confirmed is_lead via /mod/whoami, but whoami needs
+       the team token saved first -- chicken-and-egg. Now: token input is
+       always visible; only the lead-only tools (#leadOnlyTools) hide. -->
+  <div class="pop-token" id="leadSection">
     <label for="leadInput">&#x1F451; Lead Mod Token</label>
     <div class="pop-token-hint">Lead-only: rotation roster, invite generation, mod HUD</div>
     <input id="leadInput" type="password" placeholder="lead-mod token — enables HUD + invites">
     <button id="leadSave" class="pop-btn pop-btn-ghost">Save</button>
     <div id="leadStatus" class="pop-token-status"></div>
+    <!-- v9.6.1: lead-only tools wrapped here. Gated by __applyLeadGate. -->
+    <div id="leadOnlyTools" style="display:none">
     <!-- v9.4.4: margin-top 8 -> 4 across lead sub-rows. -->
     <div class="pop-tools" style="margin-top:4px">
       <button id="inviteBtn" class="pop-btn pop-btn-ghost">&#x1F4E8; Generate invite link</button>
@@ -357,7 +365,8 @@
     </div>
     <div id="maintReportsStatus" class="pop-token-status"></div>
     <div id="maintReportsPanel" style="display:none;max-height:360px;overflow:auto;background:#11131a;border:1px solid #3b414d;border-radius:4px;padding:6px;margin:6px 0;font-size:11px"></div>
-  </div>
+    </div><!-- /#leadOnlyTools -->
+  </div><!-- /#leadSection -->
 
   <!-- v7.2 Platform Hardening: Claim invite button. When platformHardening is
        on, URL-detected invite codes are staged into chrome.storage.session by

@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.6.0';
+  const VERSION = 'v9.6.1';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -7078,28 +7078,93 @@ Analyze this comment against the community rules. Then write a brief, profession
       : 'Ban reason / message to user...';
     const customHistEl = root.querySelector('#mc-ban-custom-hist');
 
-    // v9.6.0: team macros dropdown — pulls shared ban_msg macros from worker.
-    // Selecting a macro replaces the textarea contents (preserving URL prefix).
-    // Fires macroUse to bump the use_count for popularity ranking.
+    // v9.6.1: smart team macros dropdown.
+    //  - "+ Add custom" at TOP of the list (Commander spec)
+    //  - "✨ Generate with AI" surfaces directly from the ban modal
+    //  - Existing macros sorted by use_count DESC (worker-side)
+    //  - Selecting a macro replaces textarea (preserves URL prefix)
+    //  - macroUse fires for popularity ranking
     const macroPick = root.querySelector('#mc-ban-macro-pick');
+    function __mcMacroRefill(macros){
+      if (!macroPick) return;
+      macroPick.innerHTML = '';
+      // Static top entries
+      const optHead = document.createElement('option');
+      optHead.value = ''; optHead.textContent = '— Pick a team macro —'; optHead.disabled = true; optHead.selected = true;
+      macroPick.appendChild(optHead);
+      const optAdd = document.createElement('option');
+      optAdd.value = '__add__'; optAdd.textContent = '➕  Add custom (save to team)';
+      macroPick.appendChild(optAdd);
+      const optAi = document.createElement('option');
+      optAi.value = '__ai__'; optAi.textContent = '✨  Generate with AI…';
+      macroPick.appendChild(optAi);
+      const sep = document.createElement('option');
+      sep.value = ''; sep.textContent = '──────────'; sep.disabled = true;
+      macroPick.appendChild(sep);
+      // Existing macros
+      (macros || []).forEach(function(m){
+        const o = document.createElement('option');
+        o.value = String(m.id);
+        o.textContent = m.label + (m.use_count ? '  (' + m.use_count + 'x)' : '');
+        o.dataset.body = m.body;
+        macroPick.appendChild(o);
+      });
+    }
     if (macroPick){
       rpcCall('macrosList', { kind:'ban_msg' }).then(r => {
-        if (r && r.ok && r.data && Array.isArray(r.data.macros)){
-          r.data.macros.forEach(function(m){
-            const o = document.createElement('option');
-            o.value = String(m.id);
-            o.textContent = m.label + (m.use_count ? '  (' + m.use_count + 'x)' : '');
-            o.dataset.body = m.body;
-            macroPick.appendChild(o);
-          });
-        }
-      }).catch(function(){});
-      macroPick.addEventListener('change', function(){
+        const macros = (r && r.ok && r.data && Array.isArray(r.data.macros)) ? r.data.macros : [];
+        __mcMacroRefill(macros);
+      }).catch(function(){ __mcMacroRefill([]); });
+
+      macroPick.addEventListener('change', async function(){
         const opt = macroPick.options[macroPick.selectedIndex];
         if (!opt || !opt.value) return;
+        // "+ Add custom" — inline prompt, save to team, refresh dropdown
+        if (opt.value === '__add__'){
+          macroPick.value = '';
+          const label = window.prompt('Label for the new ban macro (max 80 chars):', '');
+          if (!label) return;
+          const body = window.prompt('Body of the macro (max 4000 chars):\n\nThis will be sync\'d to all mods.', msgIn ? (msgIn.value || '').replace(urlPrefix, '') : '');
+          if (!body) return;
+          const ur = await rpcCall('macroUpsert', { kind:'ban_msg', label: label.trim(), body: body.trim() });
+          if (ur && ur.ok && ur.data && ur.data.ok){
+            try { snack('✓ Macro saved to team', 'success'); } catch(_){}
+            // Reload list
+            const r2 = await rpcCall('macrosList', { kind:'ban_msg' });
+            __mcMacroRefill((r2 && r2.ok && r2.data && r2.data.macros) || []);
+          } else {
+            try { snack('Save failed: ' + ((ur && ur.data && ur.data.error) || (ur && ur.error) || 'unknown'), 'error'); } catch(_){}
+          }
+          return;
+        }
+        // "✨ Generate with AI" — call AI-suggest, prompt to accept all
+        if (opt.value === '__ai__'){
+          macroPick.value = '';
+          try { snack('✨ Asking AI for ban-message suggestions...', 'info'); } catch(_){}
+          const ar = await rpcCall('macroAiSuggest', { kind:'ban_msg', count: 5 });
+          if (!ar || !ar.ok || !ar.data || !ar.data.ok || !Array.isArray(ar.data.suggestions) || ar.data.suggestions.length === 0){
+            const reason = (ar && ar.data && ar.data.error) || (ar && ar.error) || 'unknown';
+            try { snack('AI suggest failed: ' + reason, 'error'); } catch(_){}
+            return;
+          }
+          const sug = ar.data.suggestions;
+          const preview = sug.map(function(s,i){ return (i+1) + '. ' + s.label; }).join('\n');
+          if (!window.confirm('AI proposed ' + sug.length + ' ban macros:\n\n' + preview + '\n\nAccept all and save to team? (You can edit/delete individually after.)')) return;
+          let saved = 0, failed = 0;
+          for (const s of sug) {
+            try {
+              const ur = await rpcCall('macroUpsert', { kind:'ban_msg', label:s.label, body:s.body });
+              if (ur && ur.ok && ur.data && ur.data.ok) saved++; else failed++;
+            } catch(_){ failed++; }
+          }
+          try { snack('✓ Saved ' + saved + (failed ? ' (' + failed + ' failed)' : ''), 'success'); } catch(_){}
+          const r3 = await rpcCall('macrosList', { kind:'ban_msg' });
+          __mcMacroRefill((r3 && r3.ok && r3.data && r3.data.macros) || []);
+          return;
+        }
+        // Real macro selection: populate textarea + bump use_count
         const body = opt.dataset.body || '';
         if (msgIn) msgIn.value = (evidenceLink ? urlPrefix : '') + body;
-        // Track usage for popularity sort.
         rpcCall('macroUse', { id: parseInt(opt.value, 10) }).catch(function(){});
       });
     }
@@ -13669,8 +13734,13 @@ Analyze this comment against the community rules. Then write a brief, profession
     // v9.6.0: GEAR moved to far-right of bar per Commander 2026-05-07.
     const gearBtn = el('button',{ cls:'gam-bar-icon', onclick:openSettings, title:'Settings' }, '\u2699\uFE0F');
 
+    // v9.6.1: GEAR moved from far-right to immediately after SHIELD (left
+    // side of the bar) per Commander correction 2026-05-07. Original ask was
+    // "move the GEAR panel" -- I misread "far right" and shipped it on the
+    // right. Commander clarified: gear should be left, just after shield.
     const bar = el('div', { id:'gam-status-bar' },
       brandBtn,
+      gearBtn,
       el('span', { cls:'gam-bar-sep' }),
       el('button',{ cls:'gam-bar-icon', onclick:openModLog, title:'Mod log + Death Row queue \u2014 your action history (Ctrl+Shift+L)' }, '\u{1F4CB}'),
       el('button',{ cls:'gam-bar-icon', onclick:openHelp, title:'Keybinds + commands cheatsheet (Ctrl+Shift+H)' }, '\u2753'),
@@ -13696,10 +13766,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       mmBtn,
       c5Btn,
       IS_USERS_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.ACCENT, cursor:'default'}, title:'Triage Console active' }, '\u{1F4CA}') : null,
-      IS_BAN_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.RED, cursor:'default'}, title:'/ban page enhancer active' }, '\u{1F528}') : null,
-      // v9.6.0: GEAR moved to far right per Commander UX request 2026-05-07
-      el('span', { cls:'gam-bar-sep' }),
-      gearBtn
+      IS_BAN_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.RED, cursor:'default'}, title:'/ban page enhancer active' }, '\u{1F528}') : null
     );
     document.body.appendChild(bar);
     updateDeathRowCounter();

@@ -1264,6 +1264,19 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('POST', '/macros/use', { id });
     }
   },
+  // v9.6.1: AI-generated macro suggestions. Calls /macros/ai-suggest which
+  // hits Workers AI Llama. Returns suggestion list WITHOUT inserting --
+  // the popup decides which to upsert. Counts against per-mod AI budget.
+  macroAiSuggest: {
+    allowed_callers: [RPC_CALLER_POPUP, RPC_CALLER_CONTENT],
+    async handler(args) {
+      const kind = String(args && args.kind || '');
+      if (kind !== 'ban_msg' && kind !== 'mm_reply') return { ok:false, status:0, error:'invalid_kind' };
+      const count = Math.min(8, Math.max(3, parseInt(args && args.count, 10) || 5));
+      const context = String(args && args.context || '').slice(0, 800);
+      return await _rpcWorkerCall('POST', '/macros/ai-suggest', { kind, count, context });
+    }
+  },
 
   // ---- modSus: cross-mod-visible "Mark SUS" flag (P1-3, v9.3.4) ----------
   // Worker: POST /mod/user/sus (any mod), GET /mod/user/sus, DELETE same.

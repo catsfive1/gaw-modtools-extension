@@ -595,14 +595,19 @@ async function loadLead() {
 // regular mod (PresidentialSeal etc.) NEVER sees the lead surface even
 // if the popup loads before the network call returns.
 async function __applyLeadGate() {
-  const sec = $('leadSection');
-  if (!sec) return;
+  // v9.6.1: gate moved from #leadSection (entire block) to #leadOnlyTools
+  // (sub-block holding rotation roster, invite gen, team settings, lead
+  // maintenance, etc.). The token-input row stays always visible so a fresh
+  // user can paste their lead token without first having to save a team
+  // token (chicken-and-egg fix).
+  const tools = $('leadOnlyTools');
+  if (!tools) return;
   // Default hidden until proven lead.
-  sec.style.display = 'none';
+  tools.style.display = 'none';
   try {
     const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modWhoami' });
     if (r && r.ok && r.data && r.data.is_lead === true) {
-      sec.style.display = '';
+      tools.style.display = '';
     }
   } catch (_) {
     // Network/auth failure \u2192 stay hidden (fail-closed).
@@ -2104,6 +2109,52 @@ async function __macroDelete(m){
   }
 }
 
+// v9.6.1: AI-seed flow. Calls /macros/ai-suggest, presents the returned
+// suggestions in a confirm dialog (label + body preview), and upserts
+// each accepted suggestion. Per Commander: "canned replies that the AI
+// wrote for us to start with".
+async function __macroAiSeed(){
+  const btn = document.getElementById('macroAiSeedBtn');
+  const orig = btn ? btn.textContent : '';
+  if (btn){ btn.disabled = true; btn.textContent = '✨ Generating...'; }
+  __macroSetStatus('asking AI for ' + __macroKind + ' suggestions...');
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type:'rpc', name:'macroAiSuggest', args:{ kind: __macroKind, count: 5 }
+    });
+    if (!r || !r.ok || !r.data || !r.data.ok || !Array.isArray(r.data.suggestions)){
+      const errReason = (r && r.data && r.data.error) || (r && r.error) || 'unknown';
+      __macroSetStatus('AI suggestion failed: ' + errReason, 'err');
+      return;
+    }
+    const sugg = r.data.suggestions;
+    if (sugg.length === 0){ __macroSetStatus('AI returned 0 suggestions', 'err'); return; }
+    // Confirm with full preview
+    const previewLines = sugg.map((s,i) => (i+1) + '. ' + s.label).join('\n');
+    if (!window.confirm('AI proposed ' + sugg.length + ' ' + __macroKind + ' macros:\n\n' + previewLines + '\n\nAccept all and save? (You can edit/delete individually after.)')) {
+      __macroSetStatus('cancelled', 'info');
+      return;
+    }
+    let saved = 0, failed = 0;
+    for (const s of sugg) {
+      try {
+        const upsert = await chrome.runtime.sendMessage({
+          type:'rpc', name:'macroUpsert',
+          args:{ kind: __macroKind, label: s.label, body: s.body }
+        });
+        if (upsert && upsert.ok && upsert.data && upsert.data.ok) saved++;
+        else failed++;
+      } catch(_){ failed++; }
+    }
+    __macroSetStatus('✓ saved ' + saved + (failed ? ' (' + failed + ' failed)' : ''), 'ok');
+    loadMacros();
+  } catch(e){
+    __macroSetStatus('error: ' + (e && e.message || e), 'err');
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = orig; }
+  }
+}
+
 {
   // Tab switching
   document.querySelectorAll('.gam-macro-tab').forEach(function(t){
@@ -2116,6 +2167,8 @@ async function __macroDelete(m){
   });
   const addBtn = document.getElementById('macroAddBtn');
   if (addBtn) addBtn.addEventListener('click', function(){ __macroStartEdit(null); });
+  const aiBtn = document.getElementById('macroAiSeedBtn');
+  if (aiBtn) aiBtn.addEventListener('click', __macroAiSeed);
   const saveBtn = document.getElementById('macroSaveBtn');
   if (saveBtn) saveBtn.addEventListener('click', function(){ withLoading(saveBtn, 'saving...', __macroSave); });
   const cancelBtn = document.getElementById('macroCancelBtn');
