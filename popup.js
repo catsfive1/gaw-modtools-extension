@@ -600,6 +600,12 @@ async function __applyLeadGate() {
   // maintenance, etc.). The token-input row stays always visible so a fresh
   // user can paste their lead token without first having to save a team
   // token (chicken-and-egg fix).
+  // v9.6.2: when the team token already returns is_lead=true (catsfive's
+  // case), surface a hint above the lead-token input that it's now OPTIONAL
+  // -- the worker accepts either x-lead-token OR x-mod-token+is_lead for
+  // every admin endpoint except dual-factor sensitive ops (audit backfill,
+  // health/extended, key rotation). So the lead input is only useful for
+  // those rare dual-factor calls.
   const tools = $('leadOnlyTools');
   if (!tools) return;
   // Default hidden until proven lead.
@@ -608,6 +614,20 @@ async function __applyLeadGate() {
     const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modWhoami' });
     if (r && r.ok && r.data && r.data.is_lead === true) {
       tools.style.display = '';
+      // v9.6.2 UX hint: badge the lead-token input as OPTIONAL since the
+      // team token already works for most lead operations.
+      try {
+        const hintHost = $('leadStatus');
+        const lbl = document.querySelector('label[for="leadInput"]');
+        if (lbl && !document.getElementById('lead-optional-hint')){
+          const hint = document.createElement('div');
+          hint.id = 'lead-optional-hint';
+          hint.style.cssText = 'font-size:10.5px;color:#3dd68c;margin:2px 0 4px;';
+          hint.innerHTML = '\u2713 Your team token (' + (r.data.username || 'this account') + ') already authenticates you as lead. ' +
+            'This field is OPTIONAL \u2014 only needed for dual-factor ops (audit backfill, health/extended).';
+          lbl.parentNode.insertBefore(hint, lbl.nextSibling);
+        }
+      } catch(_){}
     }
   } catch (_) {
     // Network/auth failure \u2192 stay hidden (fail-closed).
