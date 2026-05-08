@@ -490,11 +490,12 @@ async function loadToken() {
     $('tokenInput').value = '';
     const statusEl = $('tokenStatus');
     if (t) {
-      statusEl.className = 'pop-token-status';
-      statusEl.textContent = 'stored (' + t.length + ' chars) \u2014 paste a new value to replace';
+      statusEl.className = 'pop-token-status ok';
+      statusEl.textContent = '\u2713 stored (' + t.length + ' chars) \u2014 paste a new value to replace';
     } else {
-      // v9.3.6: clearer first-run guidance per noob-rollout audit.
-      statusEl.textContent = '\u{1F44B} First time? Click \u{1F4E8} Claim invite below if you have a link, OR \u{1F4E5} I have a rotation invite to enter the code manually.';
+      // v9.20.0 - much louder first-run guidance. Pre-fix message buried.
+      statusEl.className = 'pop-token-status warn';
+      statusEl.innerHTML = '<div style="background:#0a0a0b;border:2px solid #ff9933;padding:10px 12px;margin:6px 0;color:#ff9933;font-weight:600;letter-spacing:0.04em">\u{1F449} PASTE YOUR TEAM MOD TOKEN BELOW <br><br><span style="color:#9b9892;font-weight:400;font-size:10.5px;text-transform:none;letter-spacing:0">Or if you have an invite LINK, click \u{1F4E8} Claim invite further down. The popup will detect either an invite code OR a token in this field.</span></div>';
     }
   } catch (e) {}
 }
@@ -1743,12 +1744,41 @@ loadLead();
   document.querySelectorAll('.pop-tab').forEach(btn => {
     btn.addEventListener('click', () => setTab(btn.dataset.tab));
   });
-  // Restore last tab or default to stats
-  const initial = (function() {
+  // v9.20.0 - first-run UX: if no team token saved, default to TOKENS tab
+  // (where the input lives) rather than STATS (which shows zeros and looks
+  // broken). Returning users with a saved token still get their last tab.
+  // Adds a red-dot indicator on the TOKENS tab when no team token saved.
+  async function detectInitialTab() {
+    let hasToken = false;
+    try {
+      const out = await chrome.storage.local.get('gam_settings');
+      const s = (out && out.gam_settings) || {};
+      hasToken = !!(s.workerModToken && String(s.workerModToken).length >= 32);
+    } catch (_) {}
+    if (!hasToken) {
+      // Mark TOKENS tab with a visible "action needed" dot
+      const tokensBtn = document.querySelector('.pop-tab[data-tab="tokens"]');
+      if (tokensBtn && !tokensBtn.querySelector('.pop-tab-alert-dot')) {
+        const dot = document.createElement('span');
+        dot.className = 'pop-tab-alert-dot';
+        dot.style.cssText = 'display:inline-block;width:6px;height:6px;background:#ff3b3b;border-radius:50%;margin-left:4px;vertical-align:middle;animation:gam-tab-dot-pulse 1.5s ease-in-out infinite';
+        tokensBtn.appendChild(dot);
+      }
+      // Inject pulse keyframes once
+      if (!document.getElementById('gam-tab-dot-style')) {
+        const st = document.createElement('style');
+        st.id = 'gam-tab-dot-style';
+        st.textContent = '@keyframes gam-tab-dot-pulse{0%,100%{opacity:1}50%{opacity:0.45}}';
+        document.head.appendChild(st);
+      }
+      return 'tokens';
+    }
     try { return localStorage.getItem('gam_popup_active_tab') || 'stats'; }
     catch (_) { return 'stats'; }
-  })();
-  setTab(['stats','tokens','tools','lead'].includes(initial) ? initial : 'stats');
+  }
+  detectInitialTab().then(initial => {
+    setTab(['stats','tokens','tools','lead'].includes(initial) ? initial : 'stats');
+  }).catch(() => setTab('stats'));
 })();
 
 // =========================================================================

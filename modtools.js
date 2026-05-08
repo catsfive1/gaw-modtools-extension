@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.19.0';
+  const VERSION = 'v9.20.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
