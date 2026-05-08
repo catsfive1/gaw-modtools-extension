@@ -1281,6 +1281,73 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('POST', '/macros/ai-suggest', { kind, count, context, existing_labels });
     }
   },
+  // v9.23.0 SECURITY HOTFIX (Opus audit CRIT NEW-1): IDB auth backup
+  // moved to SW (extension origin) from content script (page origin).
+  // Page-origin IDB = exfil risk via GAW XSS. SW-origin IDB = isolated
+  // to chrome-extension://<id>, no page can access.
+  authBackupGet: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const key = String(args && args.key || '');
+      if (!key || (key !== 'workerModToken' && key !== 'leadModToken')) {
+        return { ok:false, status:0, error:'invalid_key' };
+      }
+      try {
+        const db = await new Promise((resolve, reject) => {
+          const r = indexedDB.open('gam_auth_backup', 1);
+          r.onupgradeneeded = e => {
+            const d = e.target.result;
+            if (!d.objectStoreNames.contains('tokens')) d.createObjectStore('tokens', { keyPath:'key' });
+          };
+          r.onsuccess = () => resolve(r.result);
+          r.onerror = () => reject(r.error);
+        });
+        const value = await new Promise((resolve) => {
+          const tx = db.transaction('tokens', 'readonly');
+          const req = tx.objectStore('tokens').get(key);
+          req.onsuccess = () => resolve(req.result ? req.result.value : null);
+          req.onerror = () => resolve(null);
+        });
+        return { ok:true, status:200, data:{ value } };
+      } catch (e) {
+        return { ok:false, status:0, error:String(e && e.message || e) };
+      }
+    }
+  },
+  authBackupPut: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const key = String(args && args.key || '');
+      const value = String(args && args.value || '');
+      if (!key || (key !== 'workerModToken' && key !== 'leadModToken')) {
+        return { ok:false, status:0, error:'invalid_key' };
+      }
+      // Token shape validation (same as setTokens) before persisting
+      if (value && !/^[A-Za-z0-9_-]{32,256}$/.test(value)) {
+        return { ok:false, status:0, error:'invalid_shape' };
+      }
+      try {
+        const db = await new Promise((resolve, reject) => {
+          const r = indexedDB.open('gam_auth_backup', 1);
+          r.onupgradeneeded = e => {
+            const d = e.target.result;
+            if (!d.objectStoreNames.contains('tokens')) d.createObjectStore('tokens', { keyPath:'key' });
+          };
+          r.onsuccess = () => resolve(r.result);
+          r.onerror = () => reject(r.error);
+        });
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction('tokens', 'readwrite');
+          tx.objectStore('tokens').put({ key, value, ts: Date.now() });
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        return { ok:true, status:200 };
+      } catch (e) {
+        return { ok:false, status:0, error:String(e && e.message || e) };
+      }
+    }
+  },
   // v9.14.0 - list recent modmail threads from modmail_threads (Commander #44).
   modmailRecent: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],

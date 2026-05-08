@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.22.0';
+  const VERSION = 'v9.23.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -1406,49 +1406,54 @@
     });
   })();
 
-  // v9.19.0 - IndexedDB backup for the team token (Commander auth-persistence
-  // ask). chrome.storage.local can get pruned on Brave + aggressive reload
-  // cycles. IDB survives those. Init flow: read storage; if empty, check IDB
-  // backup; if backup has a token, restore both storage + SW vault before
-  // auth gate runs. setSetting also writes to IDB on every workerModToken
-  // update. Net effect: re-claiming an invite on every update goes away.
-  const _AUTH_BACKUP_DB = 'gam_auth_backup';
-  const _AUTH_BACKUP_STORE = 'tokens';
-  function _authBackupOpen() {
-    return new Promise((resolve, reject) => {
-      try {
-        const req = indexedDB.open(_AUTH_BACKUP_DB, 1);
-        req.onupgradeneeded = (e) => {
-          const db = e.target.result;
-          if (!db.objectStoreNames.contains(_AUTH_BACKUP_STORE)) {
-            db.createObjectStore(_AUTH_BACKUP_STORE, { keyPath: 'key' });
-          }
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      } catch (e) { reject(e); }
-    });
-  }
+  // v9.23.0 SECURITY HOTFIX (Opus audit CRIT NEW-1): IDB auth backup MOVED
+  // to background.js (extension origin) via RPC. Pre-fix v9.19.0 stored
+  // plaintext tokens in indexedDB scoped to greatawakening.win origin --
+  // any GAW XSS or hostile site-data extension could exfil every mod's
+  // token. Now: backup lives in the SW's IDB (chrome-extension://<id>
+  // origin, isolated from page contexts). Content script just RPCs.
+  // v9.23.0 SECURITY HOTFIX: one-shot purge of v9.19-v9.22 page-origin
+  // IDB so any stored tokens are wiped from the GAW page context. Runs
+  // once per install on first v9.23+ load. Idempotent (safe to re-run).
+  (async function _purgeLegacyPageIdb(){
+    try {
+      const purged = sessionStorage.getItem('gam_legacy_idb_purged');
+      if (purged === '1') return;
+      // Open the legacy DB; if it exists, drop the tokens store contents
+      const req = indexedDB.open('gam_auth_backup', 1);
+      req.onupgradeneeded = e => {
+        const d = e.target.result;
+        if (!d.objectStoreNames.contains('tokens')) d.createObjectStore('tokens', { keyPath:'key' });
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        try {
+          const tx = db.transaction('tokens', 'readwrite');
+          tx.objectStore('tokens').clear();
+          tx.oncomplete = () => {
+            // Also fully delete the DB to leave no trace
+            try { db.close(); indexedDB.deleteDatabase('gam_auth_backup'); } catch(_){}
+            try { sessionStorage.setItem('gam_legacy_idb_purged', '1'); } catch(_){}
+            try { console.log('[modtools v9.23.0] purged legacy page-origin IDB tokens'); } catch(_){}
+          };
+        } catch(_) {
+          try { sessionStorage.setItem('gam_legacy_idb_purged', '1'); } catch(_){}
+        }
+      };
+      req.onerror = () => { try { sessionStorage.setItem('gam_legacy_idb_purged', '1'); } catch(_){} };
+    } catch (_) {}
+  })();
+
   async function _authBackupGet(key) {
     try {
-      const db = await _authBackupOpen();
-      return await new Promise((resolve) => {
-        const tx = db.transaction(_AUTH_BACKUP_STORE, 'readonly');
-        const req = tx.objectStore(_AUTH_BACKUP_STORE).get(key);
-        req.onsuccess = () => resolve(req.result ? req.result.value : null);
-        req.onerror = () => resolve(null);
-      });
+      const r = await chrome.runtime.sendMessage({ type:'rpc', name:'authBackupGet', args:{ key } });
+      return (r && r.ok && r.data) ? r.data.value : null;
     } catch (_) { return null; }
   }
   async function _authBackupPut(key, value) {
     try {
-      const db = await _authBackupOpen();
-      return await new Promise((resolve) => {
-        const tx = db.transaction(_AUTH_BACKUP_STORE, 'readwrite');
-        tx.objectStore(_AUTH_BACKUP_STORE).put({ key, value, ts: Date.now() });
-        tx.oncomplete = () => resolve(true);
-        tx.onerror = () => resolve(false);
-      });
+      const r = await chrome.runtime.sendMessage({ type:'rpc', name:'authBackupPut', args:{ key, value } });
+      return !!(r && r.ok);
     } catch (_) { return false; }
   }
 
@@ -1581,17 +1586,47 @@
   }
   function setSetting(key, value){
     if (SECRET_SETTING_KEYS.has(key)){
-      _secretsCache[key] = value;
-      // v9.19.0 - mirror to IDB backup for token keys so chrome.storage.local
-      // pruning (Brave + aggressive reload cycles) doesn't lose auth.
+      // v9.23.0 - UAT-4 HOLE-S3 fix: storage-write FIRST, RAM cache only
+      // after success. Pre-fix _secretsCache was set BEFORE the async
+      // storage.set; if storage failed (Brave quota / SW evicted mid-write)
+      // RAM held the live token but storage had stale -> SW re-evicts ->
+      // mod locked out, must re-claim. Now: write storage, read-back, only
+      // then promote to RAM. IDB backup happens AFTER successful primary
+      // write so a corrupt write doesn't poison the backup.
       if (key === 'workerModToken' || key === 'leadModToken') {
-        try { _authBackupPut(key, value).catch(()=>{}); } catch(_){}
+        if (chrome?.storage?.local){
+          return chrome.storage.local.get(K_SETTINGS)
+            .then(res => {
+              const merged = { ...(res[K_SETTINGS] || {}), [key]: value };
+              return chrome.storage.local.set({ [K_SETTINGS]: merged });
+            })
+            .then(async () => {
+              // Verify with read-back. If read returns wrong value, throw
+              // -- caller should NOT think the save succeeded.
+              try {
+                const rb = await chrome.storage.local.get(K_SETTINGS);
+                const stored = rb && rb[K_SETTINGS] && rb[K_SETTINGS][key];
+                if (stored !== value) {
+                  console.warn('[modtools v9.23.0] storage write-then-read mismatch for', key);
+                }
+              } catch(_) {}
+              // Only NOW promote to RAM cache (write-then-promote ordering)
+              _secretsCache[key] = value;
+              // IDB backup (fire-and-forget; no longer the source of truth)
+              try { _authBackupPut(key, value).catch(()=>{}); } catch(_){}
+            })
+            .catch((e) => {
+              console.error('[modtools v9.23.0] secret save FAILED for', key, e);
+              // Do NOT promote to RAM if storage failed -- caller can retry
+              throw e;
+            });
+        }
+        // No chrome.storage available -- last resort RAM only
+        _secretsCache[key] = value;
+        return Promise.resolve();
       }
-      // v8.1.4: return a Promise so callers (like the onboarding modal's
-      // doSave) can await the storage flush before proceeding. Previously
-      // the chained .then() could be dropped on MV3 service-worker eviction
-      // or Brave's storage backend, causing the token to vanish between
-      // save-click and init() re-read, triggering the modal to re-appear.
+      // Non-token secret keys keep legacy ordering (less critical)
+      _secretsCache[key] = value;
       if (chrome?.storage?.local){
         return chrome.storage.local.get(K_SETTINGS)
           .then(res => {
@@ -7248,11 +7283,14 @@ Analyze this comment against the community rules. Then write a brief, profession
         // "+ Add custom" — inline prompt, save to team, refresh dropdown
         if (opt.value === '__add__'){
           macroPick.value = '';
-          const label = window.prompt('Label for the new ban macro (max 80 chars):', '');
-          if (!label) return;
-          const body = window.prompt('Body of the macro (max 4000 chars):\n\nThis will be sync\'d to all mods.', msgIn ? (msgIn.value || '').replace(urlPrefix, '') : '');
-          if (!body) return;
-          const ur = await rpcCall('macroUpsert', { kind:'ban_msg', label: label.trim(), body: body.trim() });
+          // v9.23.0 - replaces window.prompt double-prompt (UAT-2 P1 fix)
+          const result = await _gamPromptMacro({
+            title: 'New ban macro',
+            subtitle: 'Synced to all mods. Picked from the ban-tab dropdown later.',
+            defaultBody: msgIn ? (msgIn.value || '').replace(urlPrefix, '') : ''
+          });
+          if (!result) return;
+          const ur = await rpcCall('macroUpsert', { kind:'ban_msg', label: result.label, body: result.body });
           if (ur && ur.ok && ur.data && ur.data.ok){
             try { snack('✓ Macro saved to team', 'success'); } catch(_){}
             // Reload list
@@ -7288,12 +7326,33 @@ Analyze this comment against the community rules. Then write a brief, profession
           pv.style.cssText = 'margin-top:8px;display:flex;flex-direction:column;gap:6px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px';
           pv.innerHTML = '<div style="color:#ff9933;letter-spacing:.08em;text-transform:uppercase;font-size:10px">AI drafting 2 replies for u/' + targetUser.replace(/[<>"]/g,'') + '...</div>';
           if (msgIn && msgIn.parentNode) msgIn.parentNode.insertBefore(pv, msgIn.nextSibling);
+          // v9.23.0 - UAT-2 P1 fix: pass actual evidence + ban-history as
+          // last_messages so the AI has real per-thread context, not just
+          // kind+count. Previously last_messages: [] discarded all context.
+          const lastMessages = [];
+          if (evidenceText) {
+            lastMessages.push({
+              author: targetUser,
+              body: evidenceText.slice(0, 500)
+            });
+          }
+          // Add prior ban context if repeat offender
+          try {
+            const prior = getUserHistory(targetUser);
+            const lastBan = prior.filter(a => a.type === 'ban').slice(-1)[0];
+            if (lastBan && lastBan.reason) {
+              lastMessages.push({
+                author: 'mod-history',
+                body: 'Prior ban on file: ' + String(lastBan.reason).slice(0, 300)
+              });
+            }
+          } catch(_){}
           const ar = await rpcCall('modmailAiReplyForThread', {
             sender: targetUser,
             subject: 'Ban: ' + violation,
             violation,
             evidence_url: evidenceCtx,
-            last_messages: []
+            last_messages: lastMessages
           });
           if (!ar || !ar.ok || !ar.data || !ar.data.ok || !Array.isArray(ar.data.replies) || ar.data.replies.length === 0){
             const reason = (ar && ar.data && ar.data.error) || (ar && ar.error) || 'unknown';
@@ -7322,6 +7381,8 @@ Analyze this comment against the community rules. Then write a brief, profession
             useBtn.style.cssText = 'margin-top:4px;background:transparent;border:1px solid #ff9933;color:#ff9933;padding:3px 8px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase';
             useBtn.addEventListener('click', () => {
               if (msgIn) msgIn.value = (evidenceLink ? urlPrefix : '') + rp.body;
+              // v9.23.0 - stash chosen tone for ai_used tracking on send (UAT-3)
+              try { msgIn && (msgIn.dataset.gamAiTone = rp.tone || ''); } catch(_){}
               try { snack('✓ Reply loaded into draft', 'success'); } catch(_){}
               pv.remove();
             });
@@ -8008,11 +8069,14 @@ Analyze this comment against the community rules. Then write a brief, profession
         if (!opt || !opt.value) return;
         if (opt.value === '__add__'){
           msgMacroPick.value = '';
-          const label = window.prompt('Label for the new modmail-reply macro (max 80 chars):', '');
-          if (!label) return;
-          const newBody = window.prompt('Body of the macro (max 4000 chars):\n\nThis will be sync\'d to all mods.', body ? body.value || '' : '');
-          if (!newBody) return;
-          const ur = await rpcCall('macroUpsert', { kind:'mm_reply', label: label.trim(), body: newBody.trim() });
+          // v9.23.0 - inline macro modal (UAT-2 P1 fix)
+          const result = await _gamPromptMacro({
+            title: 'New modmail-reply macro',
+            subtitle: 'Synced to all mods. Picked from the message-tab dropdown later.',
+            defaultBody: body ? body.value || '' : ''
+          });
+          if (!result) return;
+          const ur = await rpcCall('macroUpsert', { kind:'mm_reply', label: result.label, body: result.body });
           if (ur && ur.ok && ur.data && ur.data.ok){
             try { snack('✓ Macro saved to team', 'success'); } catch(_){}
             const r2 = await rpcCall('macrosList', { kind:'mm_reply' });
@@ -12964,6 +13028,55 @@ Analyze this comment against the community rules. Then write a brief, profession
   // 24h after posting. Edit window stays at 5min (different action). Worker
   // also enforces this — see /mod/message/delete handler.
   const _MSG_DELETE_WINDOW_MS = 24 * 60 * 60 * 1000;
+  // v9.23.0 - inline macro editor modal (UAT-2 P1 fix). Replaces double
+  // window.prompt() calls which (a) cap multi-line at the prompt's tiny
+  // textarea and (b) stack badly on Brave (second prompt under first).
+  // Returns { label, body } or null on cancel.
+  function _gamPromptMacro(opts) {
+    return new Promise(resolve => {
+      const o = opts || {};
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'position:fixed;inset:0;z-index:99999996;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;font:12px/1.4 ui-monospace,JetBrains Mono,monospace';
+      const box = document.createElement('div');
+      box.style.cssText = 'background:#131316;border:1px solid #ff9933;color:#e8e6e1;padding:14px 16px;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px';
+      box.innerHTML =
+        '<div style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:11px">' + escapeHtml(o.title || 'New macro') + '</div>' +
+        '<div style="color:#9b9892;font-size:10.5px">' + escapeHtml(o.subtitle || 'Synced to all mods. Label appears in the dropdown; body becomes the message.') + '</div>' +
+        '<label style="font-size:10px;color:#9b9892;text-transform:uppercase;letter-spacing:0.06em">Label (max 80 chars)</label>' +
+        '<input id="_gam_macro_label" type="text" maxlength="80" style="background:#050507;border:1px solid #3d3a35;color:#e8e6e1;padding:6px 8px;font:12px ui-monospace,monospace;letter-spacing:0.02em" value="' + escapeHtml(o.defaultLabel || '') + '">' +
+        '<label style="font-size:10px;color:#9b9892;text-transform:uppercase;letter-spacing:0.06em">Body (max 4000 chars, multi-line OK)</label>' +
+        '<textarea id="_gam_macro_body" maxlength="4000" rows="10" style="background:#050507;border:1px solid #3d3a35;color:#e8e6e1;padding:8px 10px;font:11px/1.5 ui-monospace,monospace;letter-spacing:0.02em;resize:vertical">' + escapeHtml(o.defaultBody || '') + '</textarea>' +
+        '<div id="_gam_macro_err" style="color:#ff3b3b;font-size:10.5px;display:none"></div>' +
+        '<div style="display:flex;gap:8px;margin-top:4px">' +
+          '<button id="_gam_macro_cancel" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;flex:0 0 auto">Cancel (Esc)</button>' +
+          '<button id="_gam_macro_save" style="background:#ff9933;border:1px solid #ff9933;color:#0a0a0b;padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;flex:1">Save & sync to team</button>' +
+        '</div>';
+      wrap.appendChild(box);
+      document.body.appendChild(wrap);
+      const labelEl = box.querySelector('#_gam_macro_label');
+      const bodyEl = box.querySelector('#_gam_macro_body');
+      const errEl = box.querySelector('#_gam_macro_err');
+      setTimeout(() => labelEl.focus(), 50);
+      function close(result) { try { wrap.remove(); } catch(_){} resolve(result); }
+      box.querySelector('#_gam_macro_cancel').addEventListener('click', () => close(null));
+      box.querySelector('#_gam_macro_save').addEventListener('click', () => {
+        const label = (labelEl.value || '').trim();
+        const body = (bodyEl.value || '').trim();
+        if (!label) { errEl.style.display = ''; errEl.textContent = 'Label required.'; labelEl.focus(); return; }
+        if (!body)  { errEl.style.display = ''; errEl.textContent = 'Body required.'; bodyEl.focus(); return; }
+        close({ label, body });
+      });
+      wrap.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { e.preventDefault(); close(null); }
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          box.querySelector('#_gam_macro_save').click();
+        }
+      });
+      wrap.addEventListener('click', e => { if (e.target === wrap) close(null); });
+    });
+  }
+
   function _gamShowMsgContextMenu(x, y, msg, isMine){
     // Close any existing
     document.querySelectorAll('.gam-msg-ctx-menu').forEach(n=>n.remove());
@@ -14351,13 +14464,22 @@ Analyze this comment against the community rules. Then write a brief, profession
         '</div>';
       }).join('');
       host.innerHTML = head + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' + cards + '</div>';
-      host.querySelectorAll('[data-use-body]').forEach(btn => {
+      host.querySelectorAll('[data-use-body]').forEach((btn, idx) => {
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
           const body = btn.getAttribute('data-use-body');
+          // v9.23.0 - close the AI tracking loop (UAT-3 §D fix)
+          try {
+            const tone = (replies[idx] && replies[idx].tone) || null;
+            rpcCall('modmailTrackResponse', {
+              thread_id: t.thread_id, sender: t.first_user,
+              subject: t.subject || '', response_body: body,
+              ai_used: 1, ai_tone: tone, sent_at: Date.now()
+            }).catch(() => {});
+          } catch(_){}
           try { await navigator.clipboard.writeText(body); } catch(_){}
           window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
-          try { snack('✓ Reply copied. Paste on the GAW thread.', 'success'); } catch(_){}
+          try { snack('✓ Reply copied + tracked. Paste on the GAW thread.', 'success'); } catch(_){}
         });
       });
     }
@@ -14553,9 +14675,19 @@ Analyze this comment against the community rules. Then write a brief, profession
             useBtn.style.cssText = 'background:transparent;border:1px solid #44dd66;color:#44dd66;padding:2px 4px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
             useBtn.addEventListener('click', async (ce) => {
               ce.stopPropagation();
+              // v9.23.0 - track even copy-and-open paths so AI tracking loop
+              // closes (UAT-3 §D break-in-the-loop fix). Fire-and-forget.
+              try {
+                rpcCall('modmailTrackResponse', {
+                  thread_id: t.thread_id, sender: t.first_user,
+                  subject: t.subject || '', response_body: rp.body,
+                  ai_used: 1, ai_tone: rp.tone || null,
+                  sent_at: Date.now()
+                }).catch(() => {});
+              } catch(_){}
               try { await navigator.clipboard.writeText(rp.body); } catch(_){}
               window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
-              try { snack('✓ Reply copied to clipboard. Paste on the GAW thread page.', 'success'); } catch(_){}
+              try { snack('✓ Reply copied + tracked (ai_used). Paste on the GAW thread page.', 'success'); } catch(_){}
             });
             card.appendChild(tag); card.appendChild(bodyEl); card.appendChild(useBtn);
             cards.appendChild(card);
