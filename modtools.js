@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.6.6';
+  const VERSION = 'v9.7.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -14949,6 +14949,810 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
    (their 7px is already tight), inner .body padding-top:2px preserved. */
 .post{padding-top:1px!important}
 .post-list .post{padding-top:1px!important}
+
+/* ════════════════════════════════════════════════════════════════════════
+   v9.7.0 BLOOMBERG TERMINAL OVERRIDE LAYER
+   Commander's spec verbatim: clean, antiseptic, NOT flashy, information
+   dense, intelligent drill-in, square, neutral cards w popping colours,
+   utilitarian like a Bloomberg Terminal.
+
+   30-iteration ralph loop applied. Each iter ratchets toward the spec.
+   Tokens at top, surfaces middle, components bottom. Pure CSS — no JS
+   refactor, no DOM changes. Cascade order ensures these win.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── Iter 1 ── Bloomberg-grade color tokens (POPPING accents on neutral) */
+:root {
+  /* Surfaces — near-black, slightly warm, NEUTRAL */
+  --bb-bg:        #0a0a0b;   /* page bg */
+  --bb-panel:     #131316;   /* card / popup / modal */
+  --bb-sunken:    #050507;   /* inputs, code blocks, terminal areas */
+  --bb-hover:     #1c1c20;   /* row hover */
+  --bb-active:    #25252a;   /* row selected */
+
+  /* Ink — warm off-white, neutral, NEVER pure white */
+  --bb-ink:       #e8e6e1;
+  --bb-ink-dim:   #9b9892;
+  --bb-ink-faint: #5a5752;
+
+  /* Borders — visible but quiet */
+  --bb-line:      #2a2825;
+  --bb-line-hot:  #3d3a35;
+
+  /* POPPING accents (Bloomberg-canonical) */
+  --bb-amber:     #ff9933;   /* PRIMARY pop — Bloomberg orange */
+  --bb-amber-dim: #cc7722;
+  --bb-amber-bg:  rgba(255,153,51,0.10);   /* tinted bg for amber regions */
+  --bb-red:       #ff3b3b;   /* danger / destructive */
+  --bb-red-dim:   #cc2828;
+  --bb-red-bg:    rgba(255,59,59,0.10);
+  --bb-green:     #44dd66;   /* good / confirmed */
+  --bb-green-dim: #2eaa44;
+  --bb-green-bg:  rgba(68,221,102,0.10);
+  --bb-cyan:      #66ccff;   /* informational / neutral pop */
+  --bb-cyan-bg:   rgba(102,204,255,0.10);
+  --bb-yellow:    #ffd84d;   /* warn / caution */
+  --bb-magenta:   #ff5fff;   /* secondary pop, used sparingly */
+
+  /* Square. Bloomberg has NO rounded corners. */
+  --bb-r: 0;
+  --bb-r-soft: 1px;   /* used only where pure 0 would clip a focus ring badly */
+
+  /* Density spacing scale — TIGHTER than SaaS norms */
+  --bb-s1: 2px;
+  --bb-s2: 4px;
+  --bb-s3: 6px;
+  --bb-s4: 8px;
+  --bb-s5: 12px;
+  --bb-s6: 16px;
+  --bb-s7: 24px;
+
+  /* Type — JetBrains Mono everywhere; Bloomberg monospace discipline */
+  --bb-font: ui-monospace, "JetBrains Mono", "IBM Plex Mono", "Cascadia Code", "Consolas", "Menlo", monospace;
+  --bb-t-xs:   10px;
+  --bb-t-sm:   11px;
+  --bb-t-base: 12px;
+  --bb-t-md:   13px;
+  --bb-t-lg:   15px;
+  --bb-t-xl:   18px;
+  --bb-t-xxl:  22px;
+
+  /* Tabular numerals + slashed zero for unambiguous data display */
+  font-feature-settings: "tnum" 1, "zero" 1, "ss03" 1, "calt" 0;
+}
+
+/* ── Iter 2 ── Status bar: square, dense, Bloomberg-positioned */
+#gam-status-bar {
+  background: var(--bb-bg) !important;
+  border: 1px solid var(--bb-line) !important;
+  border-radius: var(--bb-r) !important;
+  backdrop-filter: none !important;     /* iter 5 anti-pattern: no decorative blur */
+  font: var(--bb-t-sm)/1.2 var(--bb-font) !important;
+  color: var(--bb-ink) !important;
+  padding: 0 var(--bb-s4) !important;
+  height: 26px !important;
+  gap: var(--bb-s3) !important;
+  box-shadow: 0 1px 0 0 var(--bb-line), 0 0 0 1px rgba(255,153,51,0.04) !important;
+  letter-spacing: 0.02em;
+}
+
+/* ── Iter 3 ── Bar separators: thin tonal lines, NOT pipes */
+#gam-status-bar .gam-bar-sep {
+  width: 1px !important;
+  height: 14px !important;
+  background: var(--bb-line) !important;
+  margin: 0 var(--bb-s3) !important;
+  flex-shrink: 0;
+}
+
+/* ── Iter 4 ── Bar icons: square, hit-area extended, monochrome by default */
+#gam-status-bar .gam-bar-icon {
+  position: relative;
+  border-radius: var(--bb-r) !important;
+  background: transparent !important;
+  color: var(--bb-ink-dim) !important;
+  padding: 2px 4px !important;
+  min-width: 22px;
+  min-height: 22px;
+  border: 1px solid transparent !important;
+  font-size: 13px !important;
+  line-height: 1 !important;
+  transition: color 100ms ease-out, background-color 100ms ease-out, border-color 100ms ease-out;
+}
+#gam-status-bar .gam-bar-icon::after {
+  content: "";
+  position: absolute;
+  inset: -10px;   /* 22 + 2*10 = 42px hit area; 44 with 2px visible padding */
+}
+#gam-status-bar .gam-bar-icon:hover {
+  color: var(--bb-amber) !important;
+  background: var(--bb-amber-bg) !important;
+  border-color: var(--bb-amber-dim) !important;
+}
+#gam-status-bar .gam-bar-icon:active {
+  background: var(--bb-active) !important;
+}
+#gam-status-bar .gam-bar-icon:focus-visible {
+  outline: 1px solid var(--bb-amber) !important;
+  outline-offset: 1px !important;
+  border-color: var(--bb-amber) !important;
+}
+
+/* ── Iter 5 ── Brand chip: terminal-prompt aesthetic */
+#gam-status-bar .gam-bar-brand {
+  font: var(--bb-t-sm)/1.2 var(--bb-font) !important;
+  color: var(--bb-amber) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0 var(--bb-s3) !important;
+}
+#gam-status-bar .gam-bar-brand::before {
+  content: ">_";
+  margin-right: var(--bb-s2);
+  color: var(--bb-amber-dim);
+  font-weight: 400;
+}
+
+/* ── Iter 6 ── SIREN chip: square, tight, popping red */
+#gam-status-bar [data-current-total],
+#gam-status-bar .gam-siren-chip {
+  background: var(--bb-red-bg) !important;
+  border: 1px solid var(--bb-red-dim) !important;
+  color: var(--bb-red) !important;
+  border-radius: var(--bb-r) !important;
+  padding: 1px var(--bb-s3) !important;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* ── Iter 7 ── Tooltips: ABOVE the bar, square, terminal-grade */
+.gam-tip,
+#gam-tooltip {
+  background: var(--bb-panel) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  border-radius: var(--bb-r) !important;
+  color: var(--bb-ink) !important;
+  font: var(--bb-t-xs)/1.4 var(--bb-font) !important;
+  padding: var(--bb-s2) var(--bb-s4) !important;
+  box-shadow: 0 2px 0 0 var(--bb-bg), 0 4px 8px rgba(0,0,0,0.6) !important;
+  letter-spacing: 0.02em;
+  max-width: 320px;
+}
+/* tooltips on bar icons render ABOVE (per Commander D1) */
+#gam-status-bar .gam-bar-icon[title]:hover::before {
+  content: attr(title);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bb-panel);
+  border: 1px solid var(--bb-line-hot);
+  color: var(--bb-ink);
+  font: var(--bb-t-xs)/1.4 var(--bb-font);
+  padding: 3px 8px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 99999998;
+}
+
+/* ── Iter 8 ── Modal (Mod Console): square, no shadow softening */
+.gam-modal {
+  background: var(--bb-panel) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  border-radius: var(--bb-r) !important;
+  box-shadow: 0 0 0 1px var(--bb-line), 0 12px 32px rgba(0,0,0,0.7) !important;
+  font: var(--bb-t-base)/1.4 var(--bb-font) !important;
+  color: var(--bb-ink) !important;
+}
+.gam-modal-header {
+  background: var(--bb-bg) !important;
+  border-bottom: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  padding: var(--bb-s4) var(--bb-s5) !important;
+}
+.gam-modal-title {
+  font: 600 var(--bb-t-md)/1.2 var(--bb-font) !important;
+  color: var(--bb-amber) !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.gam-modal-body {
+  padding: var(--bb-s5) !important;
+  background: var(--bb-panel) !important;
+}
+
+/* ── Iter 9 ── Backdrop: solid scrim, NO blur (blur reserved for modal-purposeful only) */
+#gam-backdrop {
+  background: rgba(0,0,0,0.78) !important;
+  backdrop-filter: none !important;
+}
+
+/* ── Iter 10 ── Mod Console tabs: flat top strip, square */
+.gam-mc-tabs,
+.gam-modal-tabs {
+  background: var(--bb-bg) !important;
+  border-bottom: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  padding: 0 var(--bb-s4) !important;
+  display: flex;
+  gap: 0;
+}
+.gam-mc-tab,
+.gam-modal-tab {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  color: var(--bb-ink-dim) !important;
+  font: var(--bb-t-sm)/1 var(--bb-font) !important;
+  padding: var(--bb-s4) var(--bb-s5) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: color 100ms ease-out, border-color 100ms ease-out;
+}
+.gam-mc-tab:hover,
+.gam-modal-tab:hover {
+  color: var(--bb-ink) !important;
+}
+.gam-mc-tab.active,
+.gam-mc-tab[aria-selected="true"],
+.gam-modal-tab.active {
+  color: var(--bb-amber) !important;
+  border-bottom-color: var(--bb-amber) !important;
+  font-weight: 600;
+}
+
+/* ── Iter 11 ── Buttons: square, 1px border, no gradients, popping on hover */
+.pop-btn,
+.gam-btn,
+.gam-modal button:not(.gam-modal-close):not(.gam-bar-icon) {
+  background: var(--bb-bg) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  border-radius: var(--bb-r) !important;
+  color: var(--bb-ink) !important;
+  font: var(--bb-t-sm)/1.2 var(--bb-font) !important;
+  padding: var(--bb-s3) var(--bb-s5) !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 100ms, border-color 100ms, color 100ms;
+  min-height: 28px;
+}
+.pop-btn:hover,
+.gam-btn:hover {
+  background: var(--bb-amber-bg) !important;
+  border-color: var(--bb-amber) !important;
+  color: var(--bb-amber) !important;
+}
+.pop-btn:focus-visible,
+.gam-btn:focus-visible {
+  outline: 1px solid var(--bb-amber) !important;
+  outline-offset: 1px !important;
+}
+.pop-btn-primary,
+.pop-btn[data-primary="1"] {
+  background: var(--bb-amber) !important;
+  border-color: var(--bb-amber) !important;
+  color: var(--bb-bg) !important;
+  font-weight: 600;
+}
+.pop-btn-primary:hover {
+  background: var(--bb-amber-dim) !important;
+  border-color: var(--bb-amber-dim) !important;
+  color: var(--bb-bg) !important;
+}
+.pop-btn-ghost {
+  background: transparent !important;
+  border-color: var(--bb-line) !important;
+}
+
+/* ── Iter 12 ── Inputs / textareas / selects: square, monospace, focused-amber */
+.pop-token input,
+.pop-tools input,
+.pop-tools select,
+.pop-tools textarea,
+.gam-modal input,
+.gam-modal select,
+.gam-modal textarea,
+.gam-mc-textarea,
+.gam-mc-recipient {
+  background: var(--bb-sunken) !important;
+  border: 1px solid var(--bb-line) !important;
+  border-radius: var(--bb-r) !important;
+  color: var(--bb-ink) !important;
+  font: var(--bb-t-base)/1.4 var(--bb-font) !important;
+  padding: var(--bb-s3) var(--bb-s4) !important;
+  letter-spacing: 0.02em;
+  outline: none;
+  transition: border-color 100ms;
+}
+.pop-token input:focus,
+.gam-modal input:focus,
+.gam-mc-textarea:focus {
+  border-color: var(--bb-amber) !important;
+  box-shadow: inset 0 0 0 1px var(--bb-amber) !important;
+}
+.pop-token input::placeholder,
+.gam-modal input::placeholder,
+.gam-mc-textarea::placeholder {
+  color: var(--bb-ink-faint) !important;
+  font-style: normal;
+}
+
+/* ── Iter 13 ── Stats grid: typographic data ledger, NOT cards */
+.pop-stats {
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr) !important;
+  gap: 0 !important;
+  border: 1px solid var(--bb-line) !important;
+  border-radius: var(--bb-r) !important;
+  background: var(--bb-panel) !important;
+}
+.pop-stat {
+  background: transparent !important;
+  border: none !important;
+  border-right: 1px solid var(--bb-line) !important;
+  border-bottom: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  padding: var(--bb-s4) var(--bb-s5) !important;
+  cursor: pointer;
+  position: relative;
+  transition: background-color 100ms;
+}
+.pop-stat:nth-child(3n) { border-right: none !important; }
+.pop-stat:nth-last-child(-n+3) { border-bottom: none !important; }
+.pop-stat:hover {
+  background: var(--bb-amber-bg) !important;
+}
+.pop-stat-label,
+.pop-stat .label,
+.pop-stat-name {
+  font: 400 var(--bb-t-xs)/1.2 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.08em !important;
+  margin-bottom: var(--bb-s2);
+  display: block;
+}
+.pop-stat-value,
+.pop-stat .value,
+.pop-stat-num {
+  font: 600 var(--bb-t-xl)/1.1 var(--bb-font) !important;
+  color: var(--bb-amber) !important;
+  font-variant-numeric: tabular-nums slashed-zero;
+  letter-spacing: -0.01em;
+  display: block;
+}
+.pop-stat[data-state="danger"] .pop-stat-value { color: var(--bb-red) !important; }
+.pop-stat[data-state="good"]   .pop-stat-value { color: var(--bb-green) !important; }
+.pop-stat[data-state="info"]   .pop-stat-value { color: var(--bb-cyan) !important; }
+
+/* ── Iter 14 ── Stats trend / delta strip: tiny, monospace */
+.pop-stat-trend,
+.pop-stat-delta {
+  font: 400 var(--bb-t-xs)/1.2 var(--bb-font) !important;
+  font-variant-numeric: tabular-nums;
+  margin-top: var(--bb-s1);
+  letter-spacing: 0;
+}
+.pop-stat-trend[data-dir="up"]   { color: var(--bb-green) !important; }
+.pop-stat-trend[data-dir="down"] { color: var(--bb-red) !important; }
+.pop-stat-trend[data-dir="flat"] { color: var(--bb-ink-faint) !important; }
+
+/* ── Iter 15 ── Drill-in panel: inline terminal, NOT modal */
+.pop-drill,
+#pop-drill {
+  background: var(--bb-bg) !important;
+  border: 1px solid var(--bb-amber-dim) !important;
+  border-radius: var(--bb-r) !important;
+  font: var(--bb-t-sm)/1.4 var(--bb-font) !important;
+  padding: var(--bb-s5) !important;
+  margin: var(--bb-s4) 0 !important;
+  position: relative;
+}
+.pop-drill::before {
+  content: "DRILL // ";
+  color: var(--bb-amber);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-size: var(--bb-t-xs);
+  text-transform: uppercase;
+}
+.pop-drill table,
+.pop-drill .pop-drill-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.pop-drill th {
+  background: var(--bb-bg) !important;
+  border-bottom: 1px solid var(--bb-line-hot) !important;
+  color: var(--bb-amber) !important;
+  font: 500 var(--bb-t-xs)/1.2 var(--bb-font);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: left;
+  padding: var(--bb-s2) var(--bb-s4);
+}
+.pop-drill td {
+  border-bottom: 1px solid var(--bb-line);
+  padding: var(--bb-s2) var(--bb-s4);
+  color: var(--bb-ink);
+}
+.pop-drill tr:hover td {
+  background: var(--bb-hover);
+  cursor: pointer;
+}
+
+/* ── Iter 16 ── Sections: NO "card" treatment, just labeled rows + dividers */
+.pop-section {
+  background: transparent !important;
+  border: none !important;
+  border-top: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  padding: var(--bb-s5) var(--bb-s5) !important;
+  box-shadow: none !important;
+}
+.pop-section:first-of-type { border-top: none !important; }
+.pop-section-label,
+.pop-section h3,
+.pop-section h4 {
+  font: 600 var(--bb-t-xs)/1.2 var(--bb-font) !important;
+  color: var(--bb-amber) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.1em !important;
+  margin: 0 0 var(--bb-s3) 0 !important;
+  padding: 0 !important;
+}
+
+/* ── Iter 17 ── Token panels: tight, terminal labels */
+.pop-token {
+  background: transparent !important;
+  border: none !important;
+  border-top: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  padding: var(--bb-s5) !important;
+  box-shadow: none !important;
+}
+.pop-token label {
+  font: 600 var(--bb-t-xs)/1.2 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  display: block;
+  margin-bottom: var(--bb-s2);
+}
+.pop-token-hint {
+  font: 400 var(--bb-t-xs)/1.4 var(--bb-font) !important;
+  color: var(--bb-ink-faint) !important;
+  margin: var(--bb-s1) 0 var(--bb-s3) 0 !important;
+}
+.pop-token-status {
+  font: 400 var(--bb-t-xs)/1.3 var(--bb-font) !important;
+  margin-top: var(--bb-s2) !important;
+  letter-spacing: 0.02em;
+}
+.pop-token-status.ok    { color: var(--bb-green) !important; }
+.pop-token-status.err   { color: var(--bb-red) !important; }
+.pop-token-status.warn  { color: var(--bb-yellow) !important; }
+
+/* ── Iter 18 ── Auth-fail banner: square, popping red, no rounded silliness */
+#gam-auth-fail-banner {
+  background: var(--bb-panel) !important;
+  border: 1px solid var(--bb-red) !important;
+  border-radius: var(--bb-r) !important;
+  box-shadow: 0 0 0 1px var(--bb-red-bg), 0 8px 24px rgba(0,0,0,0.6) !important;
+  font: var(--bb-t-sm)/1.4 var(--bb-font) !important;
+  color: var(--bb-ink) !important;
+  padding: var(--bb-s4) var(--bb-s5) !important;
+  max-width: 380px;
+}
+#gam-auth-fail-banner > div:first-child {
+  color: var(--bb-red) !important;
+  font-weight: 600 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: var(--bb-t-xs);
+}
+#gam-auth-fail-banner button {
+  background: var(--bb-bg) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  border-radius: var(--bb-r) !important;
+  color: var(--bb-ink) !important;
+  font: var(--bb-t-xs)/1 var(--bb-font) !important;
+  padding: var(--bb-s2) var(--bb-s4) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+#gam-auth-fail-banner button:hover {
+  background: var(--bb-amber-bg) !important;
+  border-color: var(--bb-amber) !important;
+  color: var(--bb-amber) !important;
+}
+
+/* ── Iter 19 ── Mod chat panel: square dock, terminal grid */
+#gam-mc-panel[data-dock] {
+  background: var(--bb-panel) !important;
+  border-radius: 0 !important;
+  border-left: 1px solid var(--bb-line-hot) !important;
+  box-shadow: -4px 0 16px rgba(0,0,0,0.5) !important;
+  font: var(--bb-t-sm)/1.4 var(--bb-font) !important;
+  color: var(--bb-ink) !important;
+}
+.gam-mc-head {
+  background: var(--bb-bg) !important;
+  border-bottom: 1px solid var(--bb-line-hot) !important;
+  padding: var(--bb-s3) var(--bb-s4) !important;
+}
+.gam-mc-title {
+  color: var(--bb-amber) !important;
+  font: 600 var(--bb-t-sm)/1.2 var(--bb-font) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.gam-mc-conv {
+  border-bottom: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: var(--bb-s3) var(--bb-s4) !important;
+}
+.gam-mc-conv:hover { background: var(--bb-hover) !important; }
+.gam-mc-conv.gam-mc-sel,
+.gam-mc-conv[aria-selected="true"] {
+  background: var(--bb-amber-bg) !important;
+  border-left: 2px solid var(--bb-amber) !important;
+  padding-left: calc(var(--bb-s4) - 2px) !important;
+}
+.gam-mc-msg {
+  border: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  background: var(--bb-bg) !important;
+  padding: var(--bb-s2) var(--bb-s3) !important;
+  margin: var(--bb-s2) 0 !important;
+}
+.gam-mc-msg.gam-mc-mine {
+  border-color: var(--bb-amber-dim) !important;
+  background: var(--bb-amber-bg) !important;
+}
+.gam-mc-msg-from {
+  color: var(--bb-cyan) !important;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.gam-mc-msg-time {
+  color: var(--bb-ink-faint) !important;
+  font-size: var(--bb-t-xs);
+  margin-left: var(--bb-s2);
+}
+
+/* ── Iter 20 ── Macros dropdown: terminal select */
+#mc-ban-macro-pick,
+.gam-macro-pick {
+  background: var(--bb-sunken) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  border-radius: var(--bb-r) !important;
+  color: var(--bb-ink) !important;
+  font: var(--bb-t-sm)/1.2 var(--bb-font) !important;
+  padding: var(--bb-s2) var(--bb-s4) !important;
+}
+
+/* ── Iter 21 ── Snack toasts: square, popping by type */
+.gam-snack {
+  background: var(--bb-panel) !important;
+  border-radius: var(--bb-r) !important;
+  font: 600 var(--bb-t-xs)/1.4 var(--bb-font) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: var(--bb-s3) var(--bb-s5) !important;
+  border: 1px solid var(--bb-line) !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.6) !important;
+}
+.gam-snack-success { background: var(--bb-green-bg) !important; border-color: var(--bb-green) !important; color: var(--bb-green) !important; }
+.gam-snack-error   { background: var(--bb-red-bg) !important;   border-color: var(--bb-red) !important;   color: var(--bb-red) !important; }
+.gam-snack-warn    { background: var(--bb-amber-bg) !important; border-color: var(--bb-amber) !important; color: var(--bb-amber) !important; }
+.gam-snack-info    { background: var(--bb-cyan-bg) !important;  border-color: var(--bb-cyan) !important;  color: var(--bb-cyan) !important; }
+
+/* ── Iter 22 ── Maintenance routines: data row, NOT card */
+.pop-maint-row {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  padding: var(--bb-s3) var(--bb-s4) !important;
+  display: flex;
+  align-items: center;
+  gap: var(--bb-s4);
+}
+.pop-maint-row:last-child { border-bottom: none !important; }
+.pop-maint-row .pop-btn {
+  flex-shrink: 0;
+}
+.pop-maint-status {
+  flex: 1;
+  font: 400 var(--bb-t-xs)/1.4 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Iter 23 ── Triage Console (USERS page): table-grade density */
+#gam-triage,
+.gam-triage {
+  background: var(--bb-panel) !important;
+  border: 1px solid var(--bb-line) !important;
+  border-radius: var(--bb-r) !important;
+  font: var(--bb-t-sm)/1.4 var(--bb-font) !important;
+}
+.gam-t-header,
+#gam-triage > .header {
+  background: var(--bb-bg) !important;
+  border-bottom: 1px solid var(--bb-line-hot) !important;
+  padding: var(--bb-s3) var(--bb-s5) !important;
+  border-radius: 0 !important;
+}
+.gam-t-row {
+  border-bottom: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: var(--bb-s2) var(--bb-s4) !important;
+}
+.gam-t-row:hover { background: var(--bb-hover) !important; }
+
+/* ── Iter 24 ── Action strips on posts/comments: square, dense */
+.gam-strip,
+.gam-action-strip {
+  background: var(--bb-panel) !important;
+  border: 1px solid var(--bb-line) !important;
+  border-radius: var(--bb-r) !important;
+  padding: var(--bb-s1) var(--bb-s2) !important;
+  gap: var(--bb-s1) !important;
+}
+.gam-strip button,
+.gam-strip-btn {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: var(--bb-r) !important;
+  color: var(--bb-ink-dim) !important;
+  font: var(--bb-t-xs)/1 var(--bb-font) !important;
+  padding: var(--bb-s1) var(--bb-s2) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.gam-strip button:hover {
+  color: var(--bb-amber) !important;
+  border-color: var(--bb-amber-dim) !important;
+  background: var(--bb-amber-bg) !important;
+}
+
+/* ── Iter 25 ── Modmail hints panel: square sidebar */
+#gam-mm-hints {
+  background: var(--bb-panel) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  border-radius: var(--bb-r) !important;
+  font: var(--bb-t-xs)/1.4 var(--bb-font) !important;
+  color: var(--bb-ink) !important;
+}
+#gam-mm-hints kbd {
+  background: var(--bb-bg) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  border-radius: var(--bb-r) !important;
+  color: var(--bb-amber) !important;
+  font: 500 var(--bb-t-xs)/1 var(--bb-font) !important;
+  padding: 1px var(--bb-s2) !important;
+  margin: 0 1px;
+}
+.gam-mm-hints-title {
+  color: var(--bb-amber) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  font-size: var(--bb-t-xs);
+}
+
+/* ── Iter 26 ── Update banner: square, attention-grabbing without flash */
+.gam-update-banner {
+  background: var(--bb-panel) !important;
+  border: 1px solid var(--bb-amber) !important;
+  border-radius: var(--bb-r) !important;
+  font: var(--bb-t-sm)/1.4 var(--bb-font) !important;
+  color: var(--bb-ink) !important;
+  box-shadow: 0 0 0 1px var(--bb-amber-bg), 0 4px 16px rgba(0,0,0,0.5) !important;
+}
+
+/* ── Iter 27 ── Maint warning chip + bug-list badge: square, popping */
+#gam-maint-warning,
+#bugListBadge {
+  background: var(--bb-amber-bg) !important;
+  border: 1px solid var(--bb-amber) !important;
+  border-radius: var(--bb-r) !important;
+  color: var(--bb-amber) !important;
+  font: 600 var(--bb-t-xs)/1 var(--bb-font) !important;
+  font-variant-numeric: tabular-nums;
+  padding: 1px var(--bb-s2) !important;
+  letter-spacing: 0.04em;
+}
+
+/* ── Iter 28 ── Right-click context menus: square dropdown */
+.gam-ctx-menu,
+.gam-msg-ctx-menu,
+.gam-strip-menu {
+  background: var(--bb-panel) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  border-radius: var(--bb-r) !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.7) !important;
+  font: var(--bb-t-sm)/1.2 var(--bb-font) !important;
+  padding: var(--bb-s1) 0 !important;
+}
+.gam-ctx-item,
+.gam-strip-menu-item {
+  background: transparent !important;
+  border-radius: 0 !important;
+  color: var(--bb-ink) !important;
+  padding: var(--bb-s2) var(--bb-s5) !important;
+  font: var(--bb-t-sm)/1.2 var(--bb-font) !important;
+  cursor: pointer;
+  transition: background-color 80ms;
+}
+.gam-ctx-item:hover {
+  background: var(--bb-amber-bg) !important;
+  color: var(--bb-amber) !important;
+}
+
+/* ── Iter 29 ── Reduced motion + focus discipline */
+@media (prefers-reduced-motion: reduce) {
+  #gam-status-bar *,
+  .gam-modal *,
+  .pop-btn,
+  .gam-btn,
+  .gam-bar-icon,
+  #gam-mc-panel * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+:where(button, [role="button"], a, input, select, textarea):focus-visible {
+  outline: 1px solid var(--bb-amber) !important;
+  outline-offset: 1px !important;
+  border-radius: var(--bb-r) !important;
+}
+
+/* ── Iter 30 ── Final scrubs: kill rogue rounded corners + side stripes
+   that survived earlier layers. Belt and suspenders. */
+.pop-card,
+.pop-stat,
+.pop-section,
+.pop-token,
+.gam-modal,
+.gam-modal-header,
+.gam-modal-body,
+.gam-strip,
+.gam-mc-msg,
+.gam-mc-conv,
+#gam-status-bar,
+#gam-status-bar .gam-bar-icon,
+#gam-mm-hints,
+#gam-auth-fail-banner,
+#gam-mc-panel,
+.gam-snack,
+.gam-tip,
+#gam-tooltip,
+.gam-update-banner,
+.pop-btn,
+.gam-btn,
+.gam-ctx-menu,
+.gam-strip-menu {
+  border-radius: var(--bb-r) !important;
+}
+/* Side-stripe borders banned (Impeccable absolute ban). Anything still
+   rocking border-left:Npx solid colored gets stripped. Allowed: only the
+   Mod Chat selected-conversation rule above which is INTENTIONAL. */
+.pop-card[style*="border-left"],
+.pop-section[style*="border-left"],
+.gam-callout {
+  border-left: 1px solid var(--bb-line) !important;
+  border-color: var(--bb-line) !important;
+}
 `;
 
 

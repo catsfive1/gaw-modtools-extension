@@ -636,3 +636,472 @@ html, body {
   font-size: 10px;
   padding: 2px 8px;
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   v9.7.0 BLOOMBERG TERMINAL OVERRIDE LAYER (popup.css)
+   Mirrors the modtools.js content-script overrides. Cascade order means
+   these tokens + rules win over the legacy popup styles above.
+   ════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --bb-bg:        #0a0a0b;
+  --bb-panel:     #131316;
+  --bb-sunken:    #050507;
+  --bb-hover:     #1c1c20;
+  --bb-active:    #25252a;
+  --bb-ink:       #e8e6e1;
+  --bb-ink-dim:   #9b9892;
+  --bb-ink-faint: #5a5752;
+  --bb-line:      #2a2825;
+  --bb-line-hot:  #3d3a35;
+  --bb-amber:     #ff9933;
+  --bb-amber-dim: #cc7722;
+  --bb-amber-bg:  rgba(255,153,51,0.10);
+  --bb-red:       #ff3b3b;
+  --bb-red-dim:   #cc2828;
+  --bb-red-bg:    rgba(255,59,59,0.10);
+  --bb-green:     #44dd66;
+  --bb-green-dim: #2eaa44;
+  --bb-green-bg:  rgba(68,221,102,0.10);
+  --bb-cyan:      #66ccff;
+  --bb-cyan-bg:   rgba(102,204,255,0.10);
+  --bb-yellow:    #ffd84d;
+  --bb-r: 0;
+  --bb-s1: 2px; --bb-s2: 4px; --bb-s3: 6px; --bb-s4: 8px;
+  --bb-s5: 12px; --bb-s6: 16px; --bb-s7: 24px;
+  --bb-font: ui-monospace, "JetBrains Mono", "IBM Plex Mono", "Cascadia Code", "Consolas", "Menlo", monospace;
+  --bb-t-xs: 10px; --bb-t-sm: 11px; --bb-t-base: 12px;
+  --bb-t-md: 13px; --bb-t-lg: 15px; --bb-t-xl: 18px; --bb-t-xxl: 22px;
+}
+
+/* Iter 1-2: body / global */
+body {
+  background: var(--bb-bg) !important;
+  color: var(--bb-ink) !important;
+  font: var(--bb-t-base)/1.4 var(--bb-font) !important;
+  font-feature-settings: "tnum" 1, "zero" 1, "ss03" 1, "calt" 0 !important;
+  letter-spacing: 0.02em;
+  margin: 0;
+  width: 380px;
+}
+
+/* Iter 3: header / brand */
+.pop-header,
+.pop-brand,
+header.pop-header {
+  background: var(--bb-bg) !important;
+  border-bottom: 1px solid var(--bb-line-hot) !important;
+  border-radius: 0 !important;
+  padding: var(--bb-s4) var(--bb-s5) !important;
+  font: 600 var(--bb-t-sm)/1.2 var(--bb-font) !important;
+  color: var(--bb-amber) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.pop-header h1, .pop-brand h1 {
+  font: 600 var(--bb-t-md)/1.2 var(--bb-font) !important;
+  color: var(--bb-amber) !important;
+  margin: 0;
+  letter-spacing: 0.06em;
+}
+.pop-version {
+  color: var(--bb-ink-faint) !important;
+  font: 400 var(--bb-t-xs)/1 var(--bb-font) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Iter 4: section dividers — no cards, just labeled rows */
+.pop-section, .pop-token, .pop-tools-section {
+  background: transparent !important;
+  border: none !important;
+  border-top: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  padding: var(--bb-s5) !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+}
+.pop-section:first-of-type,
+.pop-token:first-of-type { border-top: none !important; }
+
+/* Iter 5: section labels */
+.pop-section-label,
+.pop-section h2, .pop-section h3, .pop-section h4,
+.pop-token label {
+  font: 600 var(--bb-t-xs)/1.2 var(--bb-font) !important;
+  color: var(--bb-amber) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.1em !important;
+  margin: 0 0 var(--bb-s3) 0 !important;
+  padding: 0 !important;
+  display: block;
+}
+.pop-token-hint {
+  font: 400 var(--bb-t-xs)/1.4 var(--bb-font) !important;
+  color: var(--bb-ink-faint) !important;
+  margin: 0 0 var(--bb-s3) 0 !important;
+}
+
+/* Iter 6: inputs — square, monospace, focused-amber */
+.pop-token input,
+input[type="text"], input[type="password"], input[type="number"],
+textarea, select {
+  background: var(--bb-sunken) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  border-radius: 0 !important;
+  color: var(--bb-ink) !important;
+  font: var(--bb-t-base)/1.4 var(--bb-font) !important;
+  padding: var(--bb-s3) var(--bb-s4) !important;
+  letter-spacing: 0.02em;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+input::placeholder, textarea::placeholder {
+  color: var(--bb-ink-faint) !important;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--bb-amber) !important;
+  box-shadow: inset 0 0 0 1px var(--bb-amber) !important;
+}
+
+/* Iter 7: buttons — square, uppercase, popping on hover */
+.pop-btn, button {
+  background: var(--bb-bg) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  border-radius: 0 !important;
+  color: var(--bb-ink) !important;
+  font: var(--bb-t-sm)/1.2 var(--bb-font) !important;
+  padding: var(--bb-s3) var(--bb-s5) !important;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  min-height: 28px;
+  transition: background-color 100ms, border-color 100ms, color 100ms;
+}
+.pop-btn:hover, button:hover {
+  background: var(--bb-amber-bg) !important;
+  border-color: var(--bb-amber) !important;
+  color: var(--bb-amber) !important;
+}
+.pop-btn-ghost { background: transparent !important; border-color: var(--bb-line) !important; }
+.pop-btn:focus-visible, button:focus-visible {
+  outline: 1px solid var(--bb-amber) !important;
+  outline-offset: 1px !important;
+}
+.pop-btn-primary {
+  background: var(--bb-amber) !important;
+  border-color: var(--bb-amber) !important;
+  color: var(--bb-bg) !important;
+  font-weight: 600;
+}
+.pop-btn-primary:hover {
+  background: var(--bb-amber-dim) !important;
+  border-color: var(--bb-amber-dim) !important;
+  color: var(--bb-bg) !important;
+}
+
+/* Iter 8: status colors */
+.pop-token-status { font: 400 var(--bb-t-xs)/1.3 var(--bb-font) !important; margin-top: var(--bb-s2) !important; letter-spacing: 0.02em; }
+.pop-token-status.ok   { color: var(--bb-green) !important; }
+.pop-token-status.err  { color: var(--bb-red) !important; }
+.pop-token-status.warn { color: var(--bb-yellow) !important; }
+
+/* Iter 9: stats grid — typographic ledger, NOT cards */
+.pop-stats {
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr) !important;
+  gap: 0 !important;
+  border: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  background: var(--bb-panel) !important;
+  margin: var(--bb-s3) 0 !important;
+}
+.pop-stat {
+  background: transparent !important;
+  border: none !important;
+  border-right: 1px solid var(--bb-line) !important;
+  border-bottom: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  padding: var(--bb-s4) var(--bb-s5) !important;
+  cursor: pointer;
+  transition: background-color 100ms;
+  position: relative;
+}
+.pop-stat:nth-child(3n) { border-right: none !important; }
+.pop-stat:nth-last-child(-n+3) { border-bottom: none !important; }
+.pop-stat:hover { background: var(--bb-amber-bg) !important; }
+.pop-stat .label, .pop-stat-label {
+  font: 400 var(--bb-t-xs)/1.2 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.08em !important;
+  display: block;
+  margin-bottom: var(--bb-s2);
+}
+.pop-stat .value, .pop-stat-value, .pop-stat-num {
+  font: 600 var(--bb-t-xl)/1.1 var(--bb-font) !important;
+  color: var(--bb-amber) !important;
+  font-variant-numeric: tabular-nums slashed-zero;
+  letter-spacing: -0.01em;
+  display: block;
+}
+.pop-stat[data-state="danger"] .value { color: var(--bb-red) !important; }
+.pop-stat[data-state="good"]   .value { color: var(--bb-green) !important; }
+.pop-stat[data-state="info"]   .value { color: var(--bb-cyan) !important; }
+.pop-stat-trend, .pop-stat-delta {
+  font: 400 var(--bb-t-xs)/1.2 var(--bb-font) !important;
+  font-variant-numeric: tabular-nums;
+  margin-top: var(--bb-s1);
+}
+.pop-stat-trend[data-dir="up"]   { color: var(--bb-green) !important; }
+.pop-stat-trend[data-dir="down"] { color: var(--bb-red) !important; }
+
+/* Iter 10: drill-in panel — terminal inline */
+#pop-drill, .pop-drill {
+  background: var(--bb-bg) !important;
+  border: 1px solid var(--bb-amber-dim) !important;
+  border-radius: 0 !important;
+  font: var(--bb-t-sm)/1.4 var(--bb-font) !important;
+  padding: var(--bb-s5) !important;
+  margin: var(--bb-s4) 0 !important;
+}
+#pop-drill::before, .pop-drill::before {
+  content: "DRILL // ";
+  color: var(--bb-amber);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-size: var(--bb-t-xs);
+  text-transform: uppercase;
+}
+#pop-drill table, .pop-drill table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+#pop-drill th, .pop-drill th {
+  background: var(--bb-bg) !important;
+  border-bottom: 1px solid var(--bb-line-hot) !important;
+  color: var(--bb-amber) !important;
+  font: 500 var(--bb-t-xs)/1.2 var(--bb-font);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: left;
+  padding: var(--bb-s2) var(--bb-s4);
+}
+#pop-drill td, .pop-drill td {
+  border-bottom: 1px solid var(--bb-line);
+  padding: var(--bb-s2) var(--bb-s4);
+  color: var(--bb-ink);
+}
+#pop-drill tr:hover td, .pop-drill tr:hover td {
+  background: var(--bb-hover);
+  cursor: pointer;
+}
+
+/* Iter 11: maintenance routines — data row, NOT card */
+.pop-maint, .pop-maint-section {
+  border: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  background: var(--bb-panel) !important;
+}
+.pop-maint-row {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  padding: var(--bb-s3) var(--bb-s4) !important;
+  display: flex;
+  align-items: center;
+  gap: var(--bb-s4);
+}
+.pop-maint-row:last-child { border-bottom: none !important; }
+.pop-maint-status {
+  font: 400 var(--bb-t-xs)/1.4 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
+  font-variant-numeric: tabular-nums;
+  flex: 1;
+}
+
+/* Iter 12: rotation roster */
+.pop-maint-roster-row {
+  border-bottom: 1px solid var(--bb-line) !important;
+  padding: var(--bb-s3) var(--bb-s4) !important;
+  background: transparent !important;
+  font: var(--bb-t-sm)/1.2 var(--bb-font) !important;
+  font-variant-numeric: tabular-nums;
+}
+.pop-maint-roster-row:hover { background: var(--bb-hover) !important; }
+.pop-maint-roster-row .name { color: var(--bb-cyan) !important; font-weight: 600; }
+.pop-maint-roster-row .age.green  { color: var(--bb-green) !important; }
+.pop-maint-roster-row .age.yellow { color: var(--bb-amber) !important; }
+.pop-maint-roster-row .age.red    { color: var(--bb-red) !important; font-weight: 700; }
+
+/* Iter 13: bug list panel */
+#bugListPanel, .pop-bug-list {
+  background: var(--bb-bg) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  border-radius: 0 !important;
+  font: var(--bb-t-sm)/1.4 var(--bb-font) !important;
+}
+#bugListBadge {
+  background: var(--bb-red-bg) !important;
+  border: 1px solid var(--bb-red) !important;
+  border-radius: 0 !important;
+  color: var(--bb-red) !important;
+  font: 600 var(--bb-t-xs)/1 var(--bb-font) !important;
+  font-variant-numeric: tabular-nums;
+  padding: 1px var(--bb-s2) !important;
+  letter-spacing: 0.04em;
+}
+
+/* Iter 14: macros panel */
+.gam-macro-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--bb-line-hot) !important;
+}
+.gam-macro-tab {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  color: var(--bb-ink-dim) !important;
+  font: 500 var(--bb-t-xs)/1 var(--bb-font) !important;
+  padding: var(--bb-s3) var(--bb-s5) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.gam-macro-tab-active, .gam-macro-tab.active {
+  color: var(--bb-amber) !important;
+  border-bottom-color: var(--bb-amber) !important;
+}
+.gam-macro-list {
+  border: 1px solid var(--bb-line) !important;
+  background: var(--bb-panel) !important;
+  border-radius: 0 !important;
+}
+.gam-macro-item {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  padding: var(--bb-s3) var(--bb-s4) !important;
+  font: var(--bb-t-sm)/1.4 var(--bb-font) !important;
+}
+.gam-macro-item:hover { background: var(--bb-hover) !important; }
+.gam-macro-item-label {
+  color: var(--bb-amber) !important;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--bb-t-xs);
+}
+.gam-macro-item-body {
+  color: var(--bb-ink-dim) !important;
+  font-size: var(--bb-t-xs);
+  margin-top: var(--bb-s1);
+}
+.gam-macro-item-meta {
+  color: var(--bb-ink-faint) !important;
+  font-size: var(--bb-t-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Iter 15: tools row buttons sit tight */
+.pop-tools {
+  display: flex;
+  gap: var(--bb-s2);
+  margin: var(--bb-s2) 0;
+}
+.pop-tools button { flex: 1; }
+
+/* Iter 16: lead section divider */
+#leadSection {
+  background: var(--bb-bg) !important;
+  border-top: 2px solid var(--bb-amber-dim) !important;
+  border-radius: 0 !important;
+  padding: var(--bb-s5) !important;
+  margin-top: var(--bb-s5) !important;
+}
+#leadSection > .pop-token-hint::before {
+  content: "[LEAD]";
+  color: var(--bb-amber);
+  font-weight: 600;
+  margin-right: var(--bb-s2);
+  letter-spacing: 0.08em;
+}
+#leadOnlyTools {
+  border-top: 1px dashed var(--bb-line-hot);
+  margin-top: var(--bb-s4);
+  padding-top: var(--bb-s4);
+}
+
+/* Iter 17: lead optional hint */
+#lead-optional-hint {
+  background: var(--bb-green-bg) !important;
+  border: 1px solid var(--bb-green-dim) !important;
+  color: var(--bb-green) !important;
+  padding: var(--bb-s2) var(--bb-s4) !important;
+  font: var(--bb-t-xs)/1.4 var(--bb-font) !important;
+  margin: var(--bb-s2) 0 var(--bb-s3) 0 !important;
+  border-radius: 0 !important;
+  letter-spacing: 0.02em;
+}
+
+/* Iter 18: scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bb-bg); }
+::-webkit-scrollbar-thumb { background: var(--bb-line-hot); border: 2px solid var(--bb-bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--bb-amber-dim); }
+
+/* Iter 19: code / kbd */
+code, kbd, pre {
+  background: var(--bb-sunken) !important;
+  border: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  color: var(--bb-amber) !important;
+  font: var(--bb-t-xs)/1.4 var(--bb-font) !important;
+  padding: 1px var(--bb-s2) !important;
+}
+
+/* Iter 20: links */
+a {
+  color: var(--bb-cyan) !important;
+  text-decoration: none;
+  border-bottom: 1px dotted var(--bb-cyan);
+}
+a:hover {
+  color: var(--bb-amber) !important;
+  border-bottom-color: var(--bb-amber);
+}
+
+/* Iter 21: kill rounded corners everywhere as final scrub */
+*, *::before, *::after {
+  border-radius: 0 !important;
+}
+input[type="checkbox"], input[type="radio"] {
+  appearance: none;
+  background: var(--bb-sunken);
+  border: 1px solid var(--bb-line-hot);
+  width: 14px; height: 14px;
+  margin-right: var(--bb-s2);
+  position: relative;
+  cursor: pointer;
+}
+input[type="checkbox"]:checked { background: var(--bb-amber); border-color: var(--bb-amber); }
+input[type="checkbox"]:checked::after {
+  content: "X";
+  color: var(--bb-bg);
+  font-weight: 700;
+  position: absolute;
+  inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* Iter 22: reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
