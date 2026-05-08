@@ -117,41 +117,58 @@ Say "  wrote $versionTxtPath"
 $installMd = @"
 # GAW ModTools -- Install Guide
 
-## First-time install
+## First-time install (EASY PATH -- recommended)
+
+1. Make sure Google Drive desktop sync is running and this folder has
+   fully synced to your computer.
+2. Open Chrome. Go to ``chrome://extensions``.
+3. Top-right, turn on **Developer mode**.
+4. Top-left, click **Load unpacked**.
+5. Navigate INTO this folder, then INTO the ``unpacked`` subfolder.
+   Click **Select folder**. The extension installs.
+6. Pin it: click the puzzle icon (top right of Chrome), find
+   **GAW ModTools**, click the pin icon next to its name.
+7. Visit ``https://greatawakening.win`` while logged in.
+8. Click the GAW ModTools icon in the toolbar to open the popup.
+9. Click the invite link your lead sent you, OR paste your team token
+   in the **Team Mod Token** field and click **Save**.
+10. Refresh greatawakening.win. The status bar appears at the bottom.
+
+**IMPORTANT**: Do NOT pick the parent ``mod-tools`` folder in step 5.
+Pick the ``unpacked`` subfolder INSIDE it. The parent folder doesn't
+contain ``manifest.json`` directly; the ``unpacked`` subfolder does.
+
+## First-time install (offline / no Drive sync)
 
 1. Download **gaw-modtools-LATEST.zip** from this folder.
-2. Right-click the ZIP and choose **Extract All...** to a folder you'll
-   keep around (e.g. ``C:\Tools\gaw-modtools``). DO NOT delete this folder
-   later -- Chrome reads from it on every launch.
-3. Open Chrome. Go to ``chrome://extensions``.
-4. Top-right, turn on **Developer mode**.
-5. Top-left, click **Load unpacked**.
-6. Pick the folder where you extracted the ZIP. The extension appears.
-7. Pin it to your toolbar: click the puzzle icon (top right of Chrome),
-   find **GAW ModTools**, click the pin icon next to its name.
-8. Visit ``https://greatawakening.win`` while logged in.
-9. Click the GAW ModTools icon in the toolbar to open the popup.
-10. Click your invite link from the lead, OR paste your team token in the
-    ? **Team Mod Token** field and click **Save**.
-11. Refresh greatawakening.win. The status bar appears at the bottom.
+2. Right-click the ZIP and choose **Extract All...** to a folder you
+   keep around (e.g. ``C:\Tools\gaw-modtools``). DO NOT delete that
+   folder later -- Chrome reads from it on every launch.
+3. Continue from step 2 of the EASY PATH above, but in step 5 select
+   the folder you extracted to.
 
 ## Updating to a newer version
 
-1. Download the new **gaw-modtools-LATEST.zip** from this folder.
-2. Extract it OVER your existing folder (replacing all files), OR delete
-   the old folder and extract fresh.
-3. Go to ``chrome://extensions`` and click the **? reload** icon on
-   GAW ModTools.
-4. Hard-refresh greatawakening.win (Ctrl+Shift+R).
+If you used the EASY PATH (Drive ``unpacked`` folder):
+1. Wait for Drive sync to pull down the latest ``unpacked/`` contents.
+2. Go to ``chrome://extensions`` and click the **reload** icon (curved
+   arrow) on the GAW ModTools tile.
+3. Hard-refresh greatawakening.win (Ctrl+Shift+R).
 
-That's it. Your token, settings, and chat history persist across updates
-because the Chrome extension ID is fixed via ``manifest.key``.
+If you used the offline path:
+1. Download the new **gaw-modtools-LATEST.zip**.
+2. Extract it OVER your existing folder (replace all files).
+3. Reload as above.
+
+Your token, settings, and chat history persist across updates because
+the Chrome extension ID is pinned via ``manifest.key``.
 
 ## What's in this folder
 
-| File | What |
+| Item | What |
 |---|---|
-| ``gaw-modtools-LATEST.zip`` | Newest build -- always download this one |
+| ``unpacked/`` | Extracted extension -- POINT CHROME LOAD-UNPACKED HERE |
+| ``gaw-modtools-LATEST.zip`` | Same files in a ZIP if you prefer |
 | ``gaw-modtools-chrome-store-vN.N.N.zip`` | Versioned snapshot, kept for rollback |
 | ``VERSION.txt`` | Current version, sha256, build timestamp |
 | ``CHANGELOG.md`` | Recent commits -- what changed in the last few releases |
@@ -163,10 +180,20 @@ because the Chrome extension ID is fixed via ``manifest.key``.
 2. Hard-refresh greatawakening.win (Ctrl+Shift+R).
 3. If the bar disappears or auth fails, open the popup -> click
    **Force re-hydrate**.
-4. Still broken? Click the ? **bug** icon in the status bar to file a
-   report -- it auto-attaches a redacted debug snapshot.
-5. Last resort: extract a previous versioned ZIP from this folder, point
-   chrome://extensions at it via "Load unpacked".
+4. Still broken? Click the bug icon in the status bar to file a report
+   -- it auto-attaches a redacted debug snapshot.
+5. Last resort: extract a previous versioned ZIP from this folder,
+   point chrome://extensions at it via Load-unpacked.
+
+## Common gotchas
+
+- **"Manifest file is missing or unreadable"**: you pointed Chrome at
+  the ``mod-tools`` parent folder, not the ``unpacked`` subfolder. Try
+  again -- pick ``unpacked`` (which contains ``manifest.json`` directly).
+- **"Worker rejected token (HTTP 401)"** while pasting into Team Mod
+  Token: you pasted an INVITE CODE not a TOKEN. The popup will detect
+  this and auto-route you to the Claim flow with a glowing button.
+  Click Claim, enter your GAW username, done.
 
 -- catsfive
 "@
@@ -198,6 +225,36 @@ Copy-Item -Path $latestZip.FullName -Destination $verDest -Force
 Say "  $verDest"
 Copy-Item -Path $latestZip.FullName -Destination $latestDest -Force
 Say "  $latestDest"
+
+# --- Step 4b: extract ZIP to an `unpacked/` folder so mods can ----------
+# point chrome://extensions Load-unpacked directly at it without manually
+# extracting. This eliminates the "Manifest file missing" error when a mod
+# accidentally points Chrome at the parent folder.
+Say ""
+Say "=== Step 4b: extract to unpacked/ folder ====================" 'Yellow'
+$unpackedDir = Join-Path $DriveRoot 'unpacked'
+if (Test-Path $unpackedDir) {
+    try {
+        Remove-Item -Path $unpackedDir -Recurse -Force -ErrorAction Stop
+        Say "  cleared existing $unpackedDir"
+    } catch {
+        Say "  could not clear $unpackedDir : $_" 'Yellow'
+    }
+}
+try {
+    Expand-Archive -Path $latestZip.FullName -DestinationPath $unpackedDir -Force
+    $unpackedManifest = Join-Path $unpackedDir 'manifest.json'
+    if (Test-Path $unpackedManifest) {
+        Say "  extracted to $unpackedDir"
+        $unpackedFiles = (Get-ChildItem -Path $unpackedDir -File).Count
+        Say "  $unpackedFiles file(s) ready for chrome://extensions Load-unpacked"
+    } else {
+        Say "  WARNING: manifest.json not found in $unpackedDir after extract" 'Red'
+    }
+} catch {
+    Say "  extract failed: $_" 'Red'
+    Say "  mods will need to extract gaw-modtools-LATEST.zip manually" 'Yellow'
+}
 
 # --- Step 5: cleanup old versioned ZIPs (keep last 5) ------------------
 Say ""
