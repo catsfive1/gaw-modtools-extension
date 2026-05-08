@@ -1691,6 +1691,62 @@ refreshSniffLabel();
 loadToken();
 loadLead();
 
+// v9.15.0 - tab nav (Commander #30: eliminate vertical scrollbars). Maps
+// existing top-level sections to one of 4 tabs and toggles visibility on
+// click. Default tab: stats. Special handling for #leadSection (shared
+// across tokens + lead tabs) and #leadOnlyTools (only on lead tab).
+(function wireTabNav() {
+  const TAB_MAP = {
+    stats:  ['.pop-stats', '#pop-drill', '.pop-alert', '#dr-alert', '#firstrun-banner'],
+    tokens: ['#claimInviteWrap', '.pop-token:not(#macrosSection):not(#leadSection)'],
+    tools:  ['.pop-actions', '#macrosSection', '.pop-tools', '.pop-section-label',
+             '.pop-maint', '#maintRosterStalenessPanel', '#bugListPanel',
+             '#maintReportsPanel', '#maintTardSuggestPanel', '#maintStickyScanPanel'],
+    lead:   []  // lead-only tools handled specially below
+  };
+  // Tag sections with data-tab so the toggle is fast + visible in DevTools
+  Object.entries(TAB_MAP).forEach(([tab, sels]) => {
+    sels.forEach(sel => {
+      try {
+        document.querySelectorAll(sel).forEach(el => {
+          if (!el.dataset.tab) el.dataset.tab = tab;
+        });
+      } catch (_) {}
+    });
+  });
+
+  function setTab(name) {
+    // Hide all tagged sections, then show the matching ones
+    document.querySelectorAll('[data-tab]').forEach(el => {
+      el.style.display = (el.dataset.tab === name) ? '' : 'none';
+    });
+    // Special case: leadSection contains both the lead token input AND
+    // leadOnlyTools. Visible on tokens tab AND lead tab, but the
+    // lead-only-tools child only on lead tab.
+    const leadSec = document.getElementById('leadSection');
+    const leadTools = document.getElementById('leadOnlyTools');
+    if (leadSec) leadSec.style.display = (name === 'tokens' || name === 'lead') ? '' : 'none';
+    if (leadTools) leadTools.style.display = (name === 'lead') ? '' : 'none';
+    // Update active tab indicator
+    document.querySelectorAll('.pop-tab').forEach(b => {
+      const active = b.dataset.tab === name;
+      b.classList.toggle('pop-tab-active', active);
+      b.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    // Persist last-active tab so refresh restores user position
+    try { localStorage.setItem('gam_popup_active_tab', name); } catch (_) {}
+  }
+  document.querySelectorAll('.pop-tab').forEach(btn => {
+    btn.addEventListener('click', () => setTab(btn.dataset.tab));
+  });
+  // Restore last tab or default to stats
+  const initial = (function() {
+    try { return localStorage.getItem('gam_popup_active_tab') || 'stats'; }
+    catch (_) { return 'stats'; }
+  })();
+  setTab(['stats','tokens','tools','lead'].includes(initial) ? initial : 'stats');
+})();
+
 // =========================================================================
 // v9.3.1 (P0-4): team-wide settings — username flag TTL.
 // Worker enforces the filter on /flags/read; here we only present + write.

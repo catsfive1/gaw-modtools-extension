@@ -685,6 +685,41 @@ body {
   width: 380px;
 }
 
+/* v9.15.0 - tab nav (Commander #30) */
+.pop-tabnav {
+  display: flex !important;
+  gap: 0 !important;
+  background: var(--bb-bg) !important;
+  border-bottom: 1px solid var(--bb-line-hot) !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+.pop-tab {
+  flex: 1 1 auto !important;
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  color: var(--bb-ink-dim) !important;
+  font: 600 11px/1.2 var(--bb-font) !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  padding: 8px 4px !important;
+  cursor: pointer;
+  transition: color 100ms ease-out, border-color 100ms ease-out, background-color 100ms ease-out;
+  min-height: 0 !important;
+}
+.pop-tab:hover { color: var(--bb-ink) !important; background: rgba(255,153,51,0.05) !important; }
+.pop-tab.pop-tab-active {
+  color: var(--bb-amber) !important;
+  border-bottom-color: var(--bb-amber) !important;
+  background: rgba(255,153,51,0.08) !important;
+}
+.pop-tab:focus-visible {
+  outline: 1px solid var(--bb-amber) !important;
+  outline-offset: -1px !important;
+}
+
 /* Iter 3: header / brand */
 .pop-header,
 .pop-brand,

@@ -28,6 +28,16 @@
     <span id="maintWarningChip" class="pop-maint-chip" style="display:none" title="Maintenance attention needed"></span>
   </div>
 
+  <!-- v9.15.0 - tabbed nav (Commander #30: eliminate vertical scrollbars
+       unless absolutely necessary). 4 tabs map sections to focused screens.
+       Each tab toggles the [data-tab="X"] sections via popup.js wireTabNav. -->
+  <nav class="pop-tabnav" role="tablist" aria-label="ModTools navigation">
+    <button class="pop-tab pop-tab-active" data-tab="stats" role="tab" aria-selected="true">Stats</button>
+    <button class="pop-tab" data-tab="tokens" role="tab" aria-selected="false">Tokens</button>
+    <button class="pop-tab" data-tab="tools" role="tab" aria-selected="false">Tools</button>
+    <button class="pop-tab" data-tab="lead" role="tab" aria-selected="false">Lead</button>
+  </nav>
+
   <!-- v9.4.5: stat cards are clickable. data-drill key routes to renderDrillDown(key)
        in popup.js. Tooltip text in title= attribute (browser-native hover). -->
   <div class="pop-stats">

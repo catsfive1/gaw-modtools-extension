@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.14.0';
+  const VERSION = 'v9.15.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -14005,6 +14005,56 @@ Analyze this comment against the community rules. Then write a brief, profession
   // watchlist size, AI scan freshness, worker reachability, recent SUS adds.
   // Designed to load instantly from local stores then asynchronously
   // refresh the worker-health line.
+  // v9.15.0 - ambient AI pre-fetch (Commander #47-full). Every 10 min,
+  // walks /modmail/recent and pre-drafts replies for any thread that
+  // doesn't already have a cached draft. Drafts cached in
+  // chrome.storage.session.gam_modmail_drafts. _showModmailPopover
+  // surfaces cached drafts immediately on open (no AI wait); click
+  // ✨ button still fires fresh on demand.
+  async function _ambientModmailPrefetch() {
+    if (!getModToken()) return;
+    if (document.visibilityState === 'hidden') return;
+    try {
+      const rec = await rpcCall('modmailRecent', { limit: 5 });
+      if (!rec || !rec.ok || !rec.data || !rec.data.ok) return;
+      const threads = rec.data.threads || [];
+      if (threads.length === 0) return;
+      // Read existing cache
+      let cache = {};
+      try {
+        const out = await chrome.storage.session.get('gam_modmail_drafts');
+        cache = (out && out.gam_modmail_drafts) || {};
+      } catch (_) { /* fall through with empty */ }
+      const FRESH_MS = 30 * 60 * 1000;
+      const now = Date.now();
+      const need = threads.filter(t => {
+        if (!t.thread_id) return false;
+        const cur = cache[t.thread_id];
+        if (cur && (now - (cur.cachedAt || 0)) < FRESH_MS) return false;
+        return true;
+      }).slice(0, 3);  // pre-fetch at most 3 per cycle (AI budget)
+      for (const t of need) {
+        try {
+          const ar = await rpcCall('modmailAiReplyForThread', {
+            thread_id: t.thread_id,
+            sender:    t.first_user,
+            subject:   t.subject || '',
+            last_messages: t.last_body ? [{ author: t.last_from || t.first_user, body: t.last_body }] : []
+          });
+          if (ar && ar.ok && ar.data && ar.data.ok && Array.isArray(ar.data.replies)) {
+            cache[t.thread_id] = { replies: ar.data.replies, cachedAt: now };
+          }
+        } catch (_) { /* swallow individual failures */ }
+      }
+      try {
+        await chrome.storage.session.set({ gam_modmail_drafts: cache });
+      } catch (_) {}
+    } catch (_e) { /* never throw from ambient task */ }
+  }
+  // Run once on page load (after a short settle), then every 10 min.
+  setTimeout(() => { try { _ambientModmailPrefetch(); } catch(_){} }, 15000);
+  setInterval(() => { try { _ambientModmailPrefetch(); } catch(_){} }, 10 * 60 * 1000);
+
   // v9.14.0 - dedicated MODMAIL popover (Commander #44 UI separation,
   // #47 ambient AI ready replies). Lists last N modmail threads. Per
   // thread, shows sender + subject + first-line preview + [✨ AI replies]
@@ -14041,6 +14091,13 @@ Analyze this comment against the community rules. Then write a brief, profession
     }, 0);
 
     const body = pop.querySelector('#gam-modmail-body');
+    // v9.15.0 - load ambient pre-fetched drafts cache for instant rendering
+    let __draftCache = {};
+    try {
+      chrome.storage.session.get('gam_modmail_drafts').then(out => {
+        __draftCache = (out && out.gam_modmail_drafts) || {};
+      }).catch(() => {});
+    } catch (_) {}
     rpcCall('modmailRecent', { limit: 15 }).then(res => {
       if (!res || !res.ok || !res.data || !res.data.ok) {
         const err = (res && res.data && res.data.error) || (res && res.error) || 'unknown';
@@ -14097,6 +14154,48 @@ Analyze this comment against the community rules. Then write a brief, profession
         const draftHost = document.createElement('div');
         draftHost.style.cssText = 'margin-top:6px';
         row.appendChild(draftHost);
+        // v9.15.0 - if ambient pre-fetch already drafted this thread, render
+        // the cards immediately (collapsed by default; user can expand).
+        function __renderDrafts(replies) {
+          draftHost.innerHTML = '';
+          const banner = document.createElement('div');
+          banner.style.cssText = 'color:#44dd66;font-size:9px;letter-spacing:0.04em;text-transform:uppercase;margin-bottom:3px';
+          banner.textContent = '✓ Drafts ready';
+          draftHost.appendChild(banner);
+          const cards = document.createElement('div');
+          cards.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px';
+          replies.forEach(rp => {
+            const card = document.createElement('div');
+            card.style.cssText = 'background:#0a0a0b;border:1px solid #3d3a35;padding:4px 6px;display:flex;flex-direction:column;gap:3px';
+            const tag = document.createElement('div');
+            const toneColor = { firm:'#ff3b3b', empathetic:'#66ccff', brief:'#ffd84d', escalate:'#ff9933' };
+            tag.style.cssText = 'color:' + (toneColor[rp.tone] || '#9b9892') + ';font-weight:600;letter-spacing:0.04em;text-transform:uppercase;font-size:9px';
+            tag.textContent = rp.tone || 'reply';
+            const bodyEl = document.createElement('div');
+            bodyEl.style.cssText = 'color:#e8e6e1;font-size:10px;line-height:1.3;white-space:pre-wrap;max-height:80px;overflow-y:auto';
+            bodyEl.textContent = rp.body;
+            const useBtn = document.createElement('button');
+            useBtn.textContent = 'Copy + open';
+            useBtn.style.cssText = 'background:transparent;border:1px solid #44dd66;color:#44dd66;padding:2px 4px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
+            useBtn.addEventListener('click', async (ce) => {
+              ce.stopPropagation();
+              try { await navigator.clipboard.writeText(rp.body); } catch(_){}
+              window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
+              try { snack('✓ Reply copied. Paste on the GAW thread.', 'success'); } catch(_){}
+            });
+            card.appendChild(tag); card.appendChild(bodyEl); card.appendChild(useBtn);
+            cards.appendChild(card);
+          });
+          draftHost.appendChild(cards);
+          aiBtn.style.borderColor = '#44dd66';
+          aiBtn.style.color = '#44dd66';
+          aiBtn.textContent = '✓ AI drafts ready';
+        }
+        // Check cache (populated by ambient pre-fetch)
+        const cached = __draftCache && __draftCache[t.thread_id];
+        if (cached && Array.isArray(cached.replies) && cached.replies.length > 0) {
+          __renderDrafts(cached.replies);
+        }
         aiBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
           aiBtn.disabled = true;
