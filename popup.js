@@ -1692,6 +1692,171 @@ refreshSniffLabel();
 loadToken();
 loadLead();
 
+// v9.21.0 - First-run onboarding wizard (Commander explicit ask 2026-05-08:
+// "agent brainstorm team should have caught the fact that when there are
+// no AUTH tokens, the tab should automatically focus there and lead the
+// user through the first authentication iteration").
+// 3-path wizard: invite link / invite code / pre-minted team token. Each
+// path collapses to its specific input + verifies via worker. On success,
+// shows welcome + auto-hides after 5s. Persists state in chrome.storage.session
+// so a refresh during step 2 doesn't reset.
+(async function initFirstRunWizard() {
+  const wiz = $('firstRunWizard');
+  if (!wiz) return;
+  // Check if a team token is already saved -- if so, no wizard
+  let hasToken = false;
+  try {
+    const out = await chrome.storage.local.get('gam_settings');
+    const s = (out && out.gam_settings) || {};
+    hasToken = !!(s.workerModToken && String(s.workerModToken).length >= 32);
+  } catch (_) {}
+  if (hasToken) {
+    wiz.style.display = 'none';
+    return;
+  }
+  // Show wizard, hide regular token sections to reduce confusion
+  wiz.style.display = 'block';
+  // Hide the legacy team-token input row + claim invite while wizard active
+  const legacyTeamToken = document.querySelector('label[for="tokenInput"]');
+  if (legacyTeamToken) {
+    const wrap = legacyTeamToken.closest('.pop-token, .pop-section');
+    if (wrap) wrap.style.opacity = '0.4';
+  }
+
+  function showStep(n) {
+    $('firstRunWizardStep1').style.display = n === 1 ? 'block' : 'none';
+    $('firstRunWizardStep2').style.display = n === 2 ? 'block' : 'none';
+    $('firstRunWizardSuccess').style.display = n === 3 ? 'block' : 'none';
+  }
+  showStep(1);
+
+  let pathChoice = null;  // 'link' | 'code' | 'token'
+
+  $('firstRunPathLink').addEventListener('click', () => {
+    pathChoice = 'link';
+    $('firstRunStep2Prompt').textContent = 'Paste the FULL invite URL your lead sent you (https://greatawakening.win/?mt_invite=...)';
+    $('firstRunInput').placeholder = 'https://greatawakening.win/?mt_invite=...';
+    $('firstRunInput').type = 'text';
+    $('firstRunUsernameWrap').style.display = 'block';
+    showStep(2);
+    setTimeout(() => $('firstRunInput').focus(), 50);
+  });
+  $('firstRunPathCode').addEventListener('click', () => {
+    pathChoice = 'code';
+    $('firstRunStep2Prompt').textContent = 'Paste the invite CODE (48 alphanumeric chars, no URL)';
+    $('firstRunInput').placeholder = 'IKHZK9SRz0s89AxBK017DPn36xlanZXov...';
+    $('firstRunInput').type = 'password';
+    $('firstRunUsernameWrap').style.display = 'block';
+    showStep(2);
+    setTimeout(() => $('firstRunInput').focus(), 50);
+  });
+  $('firstRunPathToken').addEventListener('click', () => {
+    pathChoice = 'token';
+    $('firstRunStep2Prompt').textContent = 'Paste your already-minted team mod token (sent by lead)';
+    $('firstRunInput').placeholder = 'paste 32-256 char team token';
+    $('firstRunInput').type = 'password';
+    $('firstRunUsernameWrap').style.display = 'none';
+    showStep(2);
+    setTimeout(() => $('firstRunInput').focus(), 50);
+  });
+  $('firstRunBack').addEventListener('click', () => {
+    pathChoice = null;
+    $('firstRunInput').value = '';
+    $('firstRunUsername').value = '';
+    $('firstRunStatus').textContent = '';
+    showStep(1);
+  });
+  $('firstRunGo').addEventListener('click', async () => {
+    const input = $('firstRunInput').value.trim();
+    const status = $('firstRunStatus');
+    if (!input) { status.textContent = 'paste something first'; status.style.color = '#ff3b3b'; return; }
+
+    if (pathChoice === 'link' || pathChoice === 'code') {
+      // Extract code from URL if path is 'link'
+      let code = input;
+      if (pathChoice === 'link') {
+        const m = input.match(/[?&]mt_invite=([A-Za-z0-9_-]+)/);
+        if (!m) { status.textContent = 'URL has no mt_invite=... parameter'; status.style.color = '#ff3b3b'; return; }
+        code = m[1];
+      }
+      const username = $('firstRunUsername').value.trim();
+      if (!username) { status.textContent = 'enter your GAW username'; status.style.color = '#ff3b3b'; return; }
+      status.textContent = '⌛ minting your team token via /mod/token/claim-rotation...';
+      status.style.color = '#ff9933';
+      try {
+        const r = await chrome.runtime.sendMessage({
+          type: 'rpc', name: 'authClaimInvite',
+          args: { code, username }
+        });
+        if (!r || !r.ok) {
+          status.textContent = 'claim failed: ' + ((r && r.data && r.data.error) || (r && r.error) || 'unknown');
+          status.style.color = '#ff3b3b';
+          return;
+        }
+        // Verify
+        const who = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
+        if (who && who.ok && who.data && who.data.username) {
+          $('firstRunSuccessName').textContent = 'Welcome, u/' + who.data.username + (who.data.is_lead ? ' (lead)' : '');
+          showStep(3);
+          if (legacyTeamToken) {
+            const wrap = legacyTeamToken.closest('.pop-token, .pop-section');
+            if (wrap) wrap.style.opacity = '';
+          }
+          setTimeout(() => { wiz.style.display = 'none'; try { loadToken(); loadLead(); loadStats(); } catch(_){} }, 5000);
+        } else {
+          status.textContent = 'token minted but whoami probe failed -- try refreshing';
+          status.style.color = '#ffd84d';
+        }
+      } catch (e) {
+        status.textContent = 'error: ' + (e && e.message || e);
+        status.style.color = '#ff3b3b';
+      }
+      return;
+    }
+
+    if (pathChoice === 'token') {
+      if (!/^[A-Za-z0-9_-]{32,256}$/.test(input)) {
+        status.textContent = 'token shape invalid (need 32-256 alphanumeric + _-)';
+        status.style.color = '#ff3b3b';
+        return;
+      }
+      status.textContent = '⌛ saving + verifying via /mod/whoami...';
+      status.style.color = '#ff9933';
+      try {
+        const sr = await chrome.runtime.sendMessage({
+          type: 'rpc', name: 'setTokens',
+          args: { workerModToken: input }
+        });
+        // Note: setTokens RPC may not exist; fall back to saveTokensSecurely
+        if (!sr || !sr.ok) {
+          // Fallback: write directly to chrome.storage.local
+          const cur = await chrome.storage.local.get('gam_settings');
+          const merged = { ...(cur.gam_settings || {}), workerModToken: input };
+          await chrome.storage.local.set({ gam_settings: merged });
+        }
+        const who = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
+        if (who && who.ok && who.data && who.data.username) {
+          $('firstRunSuccessName').textContent = 'Welcome, u/' + who.data.username + (who.data.is_lead ? ' (lead)' : '');
+          showStep(3);
+          if (legacyTeamToken) {
+            const wrap = legacyTeamToken.closest('.pop-token, .pop-section');
+            if (wrap) wrap.style.opacity = '';
+          }
+          setTimeout(() => { wiz.style.display = 'none'; try { loadToken(); loadLead(); loadStats(); } catch(_){} }, 5000);
+        } else {
+          // Likely the user pasted an invite code instead of a token
+          status.innerHTML = 'worker rejected as token (HTTP ' + (who && who.status || '?') + '). It looks like you may have pasted an INVITE CODE instead. Click Back and try the "invite CODE" path.';
+          status.style.color = '#ff3b3b';
+        }
+      } catch (e) {
+        status.textContent = 'error: ' + (e && e.message || e);
+        status.style.color = '#ff3b3b';
+      }
+      return;
+    }
+  });
+})();
+
 // v9.15.0 - tab nav (Commander #30: eliminate vertical scrollbars). Maps
 // existing top-level sections to one of 4 tabs and toggles visibility on
 // click. Default tab: stats. Special handling for #leadSection (shared

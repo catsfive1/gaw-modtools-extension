@@ -272,6 +272,41 @@
     <div id="rotateStatus" class="pop-token-status"></div>
   </div>
 
+  <!-- v9.21.0 - First-run onboarding wizard (Commander explicit ask).
+       Replaces the implicit "land on TOKENS tab + see banner" with a
+       proper 3-path guided flow. Hidden when a team token is saved.
+       Shown above the regular token inputs when no token. -->
+  <div id="firstRunWizard" style="display:none;background:#0a0a0b;border:2px solid #ff9933;padding:14px;margin:8px;font:11px/1.4 ui-monospace,JetBrains Mono,monospace">
+    <div id="firstRunWizardStep1" style="display:none">
+      <div style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:11px;margin-bottom:8px">✨ First-run setup · Step 1 of 2</div>
+      <div style="color:#e8e6e1;margin-bottom:12px">Welcome. Pick how your lead sent you in:</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button id="firstRunPathLink" class="pop-btn" style="text-align:left;padding:10px 12px">📨 &nbsp;I have an invite LINK <span style="color:#5a5752;font-weight:400">(https://greatawakening.win/?mt_invite=...)</span></button>
+        <button id="firstRunPathCode" class="pop-btn" style="text-align:left;padding:10px 12px">🔢 &nbsp;I have an invite CODE <span style="color:#5a5752;font-weight:400">(48-char alphanumeric)</span></button>
+        <button id="firstRunPathToken" class="pop-btn" style="text-align:left;padding:10px 12px">🔑 &nbsp;I have a TEAM TOKEN <span style="color:#5a5752;font-weight:400">(already minted)</span></button>
+      </div>
+    </div>
+    <div id="firstRunWizardStep2" style="display:none">
+      <div style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:11px;margin-bottom:8px">✨ First-run setup · Step 2 of 2</div>
+      <div id="firstRunStep2Prompt" style="color:#e8e6e1;margin-bottom:8px"></div>
+      <input id="firstRunInput" type="password" placeholder="paste here" style="width:100%;background:#050507;border:1px solid #3d3a35;color:#e8e6e1;padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.02em;margin-bottom:8px">
+      <div id="firstRunUsernameWrap" style="display:none;margin-bottom:8px">
+        <label style="color:#9b9892;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px">Your GAW username</label>
+        <input id="firstRunUsername" type="text" placeholder="e.g. catsfive" style="width:100%;background:#050507;border:1px solid #3d3a35;color:#e8e6e1;padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace">
+      </div>
+      <div style="display:flex;gap:6px">
+        <button id="firstRunBack" class="pop-btn pop-btn-ghost" style="flex:0 0 auto">← Back</button>
+        <button id="firstRunGo" class="pop-btn" style="flex:1;background:#ff9933;color:#0a0a0b;border-color:#ff9933;font-weight:600">Save & verify</button>
+      </div>
+      <div id="firstRunStatus" style="margin-top:8px;color:#9b9892;font-size:10px;line-height:1.4"></div>
+    </div>
+    <div id="firstRunWizardSuccess" style="display:none">
+      <div style="color:#44dd66;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:12px;margin-bottom:8px">✓ Authenticated</div>
+      <div style="color:#e8e6e1;margin-bottom:12px" id="firstRunSuccessName">Welcome, u/...</div>
+      <div style="color:#9b9892;font-size:10.5px;line-height:1.5">Refresh greatawakening.win to see the status bar at the bottom. Your token is stored in IndexedDB backup so it survives extension reloads.</div>
+    </div>
+  </div>
+
   <!-- v9.6.1: leadSection always visible so user can paste lead token before
        team token is saved. Pre-fix the section was display:none until
        __applyLeadGate confirmed is_lead via /mod/whoami, but whoami needs
