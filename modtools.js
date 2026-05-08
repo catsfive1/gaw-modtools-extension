@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.18.0';
+  const VERSION = 'v9.19.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -1406,12 +1406,79 @@
     });
   })();
 
+  // v9.19.0 - IndexedDB backup for the team token (Commander auth-persistence
+  // ask). chrome.storage.local can get pruned on Brave + aggressive reload
+  // cycles. IDB survives those. Init flow: read storage; if empty, check IDB
+  // backup; if backup has a token, restore both storage + SW vault before
+  // auth gate runs. setSetting also writes to IDB on every workerModToken
+  // update. Net effect: re-claiming an invite on every update goes away.
+  const _AUTH_BACKUP_DB = 'gam_auth_backup';
+  const _AUTH_BACKUP_STORE = 'tokens';
+  function _authBackupOpen() {
+    return new Promise((resolve, reject) => {
+      try {
+        const req = indexedDB.open(_AUTH_BACKUP_DB, 1);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(_AUTH_BACKUP_STORE)) {
+            db.createObjectStore(_AUTH_BACKUP_STORE, { keyPath: 'key' });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      } catch (e) { reject(e); }
+    });
+  }
+  async function _authBackupGet(key) {
+    try {
+      const db = await _authBackupOpen();
+      return await new Promise((resolve) => {
+        const tx = db.transaction(_AUTH_BACKUP_STORE, 'readonly');
+        const req = tx.objectStore(_AUTH_BACKUP_STORE).get(key);
+        req.onsuccess = () => resolve(req.result ? req.result.value : null);
+        req.onerror = () => resolve(null);
+      });
+    } catch (_) { return null; }
+  }
+  async function _authBackupPut(key, value) {
+    try {
+      const db = await _authBackupOpen();
+      return await new Promise((resolve) => {
+        const tx = db.transaction(_AUTH_BACKUP_STORE, 'readwrite');
+        tx.objectStore(_AUTH_BACKUP_STORE).put({ key, value, ts: Date.now() });
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+      });
+    } catch (_) { return false; }
+  }
+
   async function preloadSecrets(){
     try {
       let stored = null;
       if (chrome?.storage?.local) {
         const localOut = await chrome.storage.local.get(K_SETTINGS);
         stored = localOut && localOut[K_SETTINGS];
+      }
+      // v9.19.0 redundancy: if storage has no team token, try IDB backup.
+      // Restore to chrome.storage.local on hit so future reads are fast and
+      // the SW vault sync also picks it up.
+      if ((!stored || !stored.workerModToken) && typeof indexedDB !== 'undefined') {
+        const backupTeam = await _authBackupGet('workerModToken');
+        const backupLead = await _authBackupGet('leadModToken');
+        if (backupTeam) {
+          stored = stored || {};
+          stored.workerModToken = backupTeam;
+          if (backupLead) stored.leadModToken = backupLead;
+          if (chrome?.storage?.local) {
+            try {
+              const cur = await chrome.storage.local.get(K_SETTINGS);
+              const merged = { ...(cur[K_SETTINGS] || {}), workerModToken: backupTeam };
+              if (backupLead) merged.leadModToken = backupLead;
+              await chrome.storage.local.set({ [K_SETTINGS]: merged });
+              console.log('[modtools v9.19.0] auth restored from IDB backup');
+            } catch (_) {}
+          }
+        }
       }
 
       // Recovery path: older hardening builds could stash tokens only in
@@ -1515,6 +1582,11 @@
   function setSetting(key, value){
     if (SECRET_SETTING_KEYS.has(key)){
       _secretsCache[key] = value;
+      // v9.19.0 - mirror to IDB backup for token keys so chrome.storage.local
+      // pruning (Brave + aggressive reload cycles) doesn't lose auth.
+      if (key === 'workerModToken' || key === 'leadModToken') {
+        try { _authBackupPut(key, value).catch(()=>{}); } catch(_){}
+      }
       // v8.1.4: return a Promise so callers (like the onboarding modal's
       // doSave) can await the storage flush before proceeding. Previously
       // the chained .then() could be dropped on MV3 service-worker eviction
