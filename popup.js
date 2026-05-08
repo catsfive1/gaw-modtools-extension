@@ -1716,8 +1716,12 @@ loadLead();
   });
 
   function setTab(name) {
-    // Hide all tagged sections, then show the matching ones
-    document.querySelectorAll('[data-tab]').forEach(el => {
+    // v9.18.0 CRITICAL FIX: exclude .pop-tab nav buttons from the toggle.
+    // Pre-fix: tab BUTTONS have data-tab="tokens|tools|lead" (their TARGET).
+    // setTab hid every non-matching data-tab element including the buttons
+    // themselves, leaving only the active tab button visible. User saw a
+    // popup with no way to navigate anywhere — orphaned on Stats tab.
+    document.querySelectorAll('[data-tab]:not(.pop-tab)').forEach(el => {
       el.style.display = (el.dataset.tab === name) ? '' : 'none';
     });
     // Special case: leadSection contains both the lead token input AND
