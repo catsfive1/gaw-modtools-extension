@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.16.0';
+  const VERSION = 'v9.17.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -14114,6 +14114,185 @@ Analyze this comment against the community rules. Then write a brief, profession
   setTimeout(() => { try { _ambientModmailPrefetch(); } catch(_){} }, 15000);
   setInterval(() => { try { _ambientModmailPrefetch(); } catch(_){} }, 10 * 60 * 1000);
 
+  // v9.17.0 - full-screen MODMAIL panel (Commander #44-deep). Promoted from
+  // the popover via [↗ EXPAND] button. Right-docked, mirrors the ModChat
+  // panel structure (header + 2-column body: thread list + thread detail).
+  // ESC closes. Persists open state in chrome.storage.session so re-open
+  // restores selection.
+  function _showModmailPanel() {
+    const existing = document.getElementById('gam-modmail-panel');
+    if (existing) { existing.remove(); return; }
+    const panel = document.createElement('div');
+    panel.id = 'gam-modmail-panel';
+    panel.style.cssText = 'position:fixed;top:0;right:0;bottom:0;width:680px;max-width:95vw;z-index:9999988;background:#131316;border-left:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;display:flex;flex-direction:column;box-shadow:-8px 0 30px rgba(0,0,0,0.55);transform:translateX(100%);transition:transform 0.2s ease-out';
+    panel.innerHTML =
+      '<div style="background:#0a0a0b;border-bottom:1px solid #3d3a35;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0">' +
+        '<span style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:12px">\u{1F4E5} Modmail</span>' +
+        '<span style="color:#5a5752;font-size:10px">— full panel</span>' +
+        '<span style="flex:1"></span>' +
+        '<button data-refresh="1" title="Refresh" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:3px 8px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">⟳ Refresh</button>' +
+        '<button data-close="1" title="Close (ESC)" style="background:transparent;border:none;color:#5a5752;padding:2px 8px;cursor:pointer;font-size:18px;line-height:1">×</button>' +
+      '</div>' +
+      '<div style="flex:1 1 auto;display:flex;overflow:hidden">' +
+        '<div id="gam-mmp-list" style="width:280px;flex-shrink:0;border-right:1px solid #2a2825;overflow-y:auto">loading...</div>' +
+        '<div id="gam-mmp-detail" style="flex:1;overflow-y:auto;padding:14px;color:#9b9892">' +
+          '<div style="text-align:center;padding:40px 20px">' +
+            '<div style="color:#5a5752;font-size:11px;letter-spacing:0.08em;text-transform:uppercase">Select a thread</div>' +
+            '<div style="color:#5a5752;font-size:10px;margin-top:6px">Pick a thread on the left to see messages + AI reply candidates.</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(panel);
+    requestAnimationFrame(() => { panel.style.transform = 'translateX(0)'; });
+
+    panel.addEventListener('click', e => {
+      if (e.target.closest('[data-close]')) { e.stopPropagation(); panel.remove(); return; }
+      if (e.target.closest('[data-refresh]')) { e.stopPropagation(); loadList(); return; }
+    });
+    document.addEventListener('keydown', function escHandler(ev) {
+      if (ev.key === 'Escape') {
+        document.removeEventListener('keydown', escHandler);
+        if (panel.parentNode) panel.remove();
+      }
+    });
+
+    const list = panel.querySelector('#gam-mmp-list');
+    const detail = panel.querySelector('#gam-mmp-detail');
+    let currentThreads = [];
+
+    async function loadList() {
+      list.innerHTML = '<div style="padding:14px;color:#9b9892">loading...</div>';
+      const res = await rpcCall('modmailRecent', { limit: 30 });
+      if (!res || !res.ok || !res.data || !res.data.ok) {
+        list.innerHTML = '<div style="padding:14px;color:#ff3b3b">Failed to load: ' + escapeHtml(String((res && res.data && res.data.error) || (res && res.error) || 'unknown')) + '</div>';
+        return;
+      }
+      currentThreads = res.data.threads || [];
+      const note = res.data.note || '';
+      if (currentThreads.length === 0) {
+        list.innerHTML = '<div style="padding:14px;color:#9b9892;font-size:10px">No recent modmail. ' + (note ? '<br><br>' + escapeHtml(note) : 'Backfill via Maintenance > Backfill modmail history.') + '</div>';
+        return;
+      }
+      list.innerHTML = '';
+      currentThreads.forEach(t => {
+        const row = document.createElement('div');
+        row.style.cssText = 'border-bottom:1px solid #2a2825;padding:8px 12px;cursor:pointer;transition:background-color 80ms';
+        row.dataset.threadId = t.thread_id;
+        row.addEventListener('mouseenter', () => row.style.background = '#1c1c20');
+        row.addEventListener('mouseleave', () => { if (row.dataset.selected !== '1') row.style.background = ''; });
+        row.addEventListener('click', () => {
+          // Mark selected
+          list.querySelectorAll('[data-thread-id]').forEach(r => { r.dataset.selected = ''; r.style.background = ''; });
+          row.dataset.selected = '1';
+          row.style.background = 'rgba(255,153,51,0.12)';
+          row.style.borderLeft = '2px solid #ff9933';
+          row.style.paddingLeft = '10px';
+          renderDetail(t);
+        });
+        const head = document.createElement('div');
+        head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:3px';
+        const who = document.createElement('span');
+        who.style.cssText = 'color:#66ccff;font-weight:600;font-size:11px;flex:0 0 auto';
+        who.textContent = 'u/' + (t.first_user || '?');
+        const status = document.createElement('span');
+        const sc = { new:'#ff3b3b', claimed:'#ffd84d', replied:'#66ccff', resolved:'#44dd66', awaiting:'#9b9892', archived:'#5a5752' };
+        status.style.cssText = 'color:' + (sc[t.status] || '#9b9892') + ';font-size:9px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600';
+        status.textContent = t.status || 'new';
+        head.appendChild(who); head.appendChild(status);
+        const subj = document.createElement('div');
+        subj.style.cssText = 'color:#e8e6e1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:2px';
+        subj.textContent = t.subject || '(no subject)';
+        const preview = document.createElement('div');
+        preview.style.cssText = 'color:#9b9892;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        preview.textContent = (t.last_body || '').slice(0, 80);
+        row.appendChild(head); row.appendChild(subj); row.appendChild(preview);
+        list.appendChild(row);
+      });
+    }
+
+    async function renderDetail(t) {
+      detail.innerHTML =
+        '<div style="margin-bottom:14px">' +
+          '<div style="color:#ff9933;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px">Thread</div>' +
+          '<div style="color:#e8e6e1;font-size:13px;font-weight:600;margin-bottom:6px">' + escapeHtml(t.subject || '(no subject)') + '</div>' +
+          '<div style="color:#9b9892;font-size:11px">From: <span style="color:#66ccff">u/' + escapeHtml(t.first_user) + '</span> · ' + (t.message_count || 1) + ' messages · status: ' + escapeHtml(t.status || 'new') + '</div>' +
+        '</div>' +
+        '<div style="margin-bottom:14px">' +
+          '<div style="color:#ff9933;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px">Most recent message</div>' +
+          '<div style="background:#0a0a0b;border:1px solid #2a2825;padding:10px;color:#e8e6e1;font-size:11px;line-height:1.5;white-space:pre-wrap">' + escapeHtml(t.last_body || '(empty)') + '</div>' +
+        '</div>' +
+        '<div id="gam-mmp-ai-host"></div>' +
+        '<div style="display:flex;gap:8px;margin-top:12px">' +
+          '<button data-open="' + escapeHtml(t.thread_id) + '" style="background:transparent;border:1px solid #ff9933;color:#ff9933;padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Open thread on GAW ↗</button>' +
+        '</div>';
+
+      // Wire open button
+      detail.querySelector('[data-open]').addEventListener('click', e => {
+        e.stopPropagation();
+        const id = e.target.getAttribute('data-open');
+        window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(id), '_blank');
+      });
+
+      // Render AI candidates from cache OR fire fresh
+      const aiHost = detail.querySelector('#gam-mmp-ai-host');
+      let cached = null;
+      try {
+        const out = await chrome.storage.session.get('gam_modmail_drafts');
+        const cache = (out && out.gam_modmail_drafts) || {};
+        cached = cache[t.thread_id];
+      } catch (_) {}
+      if (cached && Array.isArray(cached.replies) && cached.replies.length > 0) {
+        renderAICards(aiHost, cached.replies, t, false);
+      } else {
+        aiHost.innerHTML = '<div style="margin-bottom:6px"><button data-ai-fire="1" style="background:transparent;border:1px solid #ff9933;color:#ff9933;padding:5px 12px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">✨ Generate 4 AI replies</button></div>';
+        aiHost.querySelector('[data-ai-fire]').addEventListener('click', async (e) => {
+          e.stopPropagation();
+          aiHost.innerHTML = '<div style="color:#9b9892;font-size:11px;padding:8px 0">⌛ AI drafting (4 calls in parallel, ~3-5s)...</div>';
+          const ar = await rpcCall('modmailAiReplyForThread', {
+            thread_id: t.thread_id,
+            sender:    t.first_user,
+            subject:   t.subject || '',
+            last_messages: t.last_body ? [{ author: t.last_from || t.first_user, body: t.last_body }] : []
+          });
+          if (!ar || !ar.ok || !ar.data || !ar.data.ok || !Array.isArray(ar.data.replies)) {
+            const reason = (ar && ar.data && ar.data.error) || 'unknown';
+            aiHost.innerHTML = '<div style="color:#ff3b3b;font-size:11px">AI failed: ' + escapeHtml(String(reason)) + '</div>';
+            return;
+          }
+          renderAICards(aiHost, ar.data.replies, t, true);
+        });
+      }
+    }
+
+    function renderAICards(host, replies, t, fresh) {
+      const head = '<div style="color:#ff9933;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:6px">' +
+        (fresh ? '✨ Generated' : '✓ Pre-fetched') + ' AI reply candidates</div>';
+      const cards = replies.map(rp => {
+        const toneColor = { firm:'#ff3b3b', empathetic:'#66ccff', brief:'#ffd84d', escalate:'#ff9933' };
+        const c = toneColor[rp.tone] || '#9b9892';
+        return '<div style="background:#0a0a0b;border:1px solid #3d3a35;padding:10px;display:flex;flex-direction:column;gap:6px">' +
+          '<div style="color:' + c + ';font-weight:600;letter-spacing:0.06em;text-transform:uppercase;font-size:10px">' + escapeHtml(rp.tone || 'reply') + ' · ' + escapeHtml(rp.label || '') + '</div>' +
+          '<div style="color:#e8e6e1;font-size:11px;line-height:1.5;white-space:pre-wrap">' + escapeHtml(rp.body) + '</div>' +
+          '<div style="display:flex;gap:6px;margin-top:4px">' +
+            '<button data-use-body="' + escapeHtml(rp.body) + '" style="background:transparent;border:1px solid #44dd66;color:#44dd66;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Copy + open thread</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      host.innerHTML = head + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' + cards + '</div>';
+      host.querySelectorAll('[data-use-body]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const body = btn.getAttribute('data-use-body');
+          try { await navigator.clipboard.writeText(body); } catch(_){}
+          window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
+          try { snack('✓ Reply copied. Paste on the GAW thread.', 'success'); } catch(_){}
+        });
+      });
+    }
+
+    loadList();
+  }
+
   // v9.14.0 - dedicated MODMAIL popover (Commander #44 UI separation,
   // #47 ambient AI ready replies). Lists last N modmail threads. Per
   // thread, shows sender + subject + first-line preview + [✨ AI replies]
@@ -14135,10 +14314,22 @@ Analyze this comment against the community rules. Then write a brief, profession
         '<span style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:11px">\u{1F4E5} Modmail</span>' +
         '<span style="color:#5a5752;font-size:10px">(separate from team chat)</span>' +
         '<span style="flex:1"></span>' +
+        '<button data-expand="1" title="Expand to full panel" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:2px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">↗ EXPAND</button>' +
         '<button data-close="1" style="background:transparent;border:none;color:#5a5752;padding:2px 6px;cursor:pointer;font-size:16px;line-height:1">×</button>' +
       '</div>' +
       '<div id="gam-modmail-body" style="flex:1 1 auto;overflow-y:auto;padding:6px 0">loading recent modmail...</div>';
     document.body.appendChild(pop);
+    // v9.17.0 - expand button promotes popover -> full-screen panel (#44-deep)
+    pop.addEventListener('click', e => {
+      if (e.target.closest('[data-expand]')) {
+        e.stopPropagation();
+        pop.remove();
+        try { _showModmailPanel(); } catch (err) {
+          try { snack('Modmail panel failed: ' + (err && err.message || err), 'error'); } catch(_){}
+        }
+        return;
+      }
+    });
 
     pop.addEventListener('click', e => {
       const closeBtn = e.target.closest('[data-close]');
