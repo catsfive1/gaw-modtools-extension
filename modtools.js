@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.7.0';
+  const VERSION = 'v9.8.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -7137,29 +7137,87 @@ Analyze this comment against the community rules. Then write a brief, profession
           }
           return;
         }
-        // "✨ Generate with AI" — call AI-suggest, prompt to accept all
+        // v9.8.0: "✨ Suggest 2 replies" — context-aware per-thread draft.
+        // Was: called /macros/ai-suggest with kind+count only, discarding the
+        // sender/violation/evidence context. Result: same 5 generic macros every
+        // time. Now: calls /modmail/ai-reply-for-thread with sender, violation,
+        // evidence_url. Returns 2 differently-toned replies. Renders inline
+        // preview cards (not window.confirm).
         if (opt.value === '__ai__'){
           macroPick.value = '';
-          try { snack('✨ Asking AI for ban-message suggestions...', 'info'); } catch(_){}
-          const ar = await rpcCall('macroAiSuggest', { kind:'ban_msg', count: 5 });
-          if (!ar || !ar.ok || !ar.data || !ar.data.ok || !Array.isArray(ar.data.suggestions) || ar.data.suggestions.length === 0){
-            const reason = (ar && ar.data && ar.data.error) || (ar && ar.error) || 'unknown';
-            try { snack('AI suggest failed: ' + reason, 'error'); } catch(_){}
+          // Render an inline 2-card preview right below the textarea
+          const targetUser = (typeof user === 'string' && user) || (typeof targetUsername !== 'undefined' && targetUsername) || '';
+          if (!targetUser) {
+            try { snack('No target user — open Mod Console on a specific user first', 'warn'); } catch(_){}
             return;
           }
-          const sug = ar.data.suggestions;
-          const preview = sug.map(function(s,i){ return (i+1) + '. ' + s.label; }).join('\n');
-          if (!window.confirm('AI proposed ' + sug.length + ' ban macros:\n\n' + preview + '\n\nAccept all and save to team? (You can edit/delete individually after.)')) return;
-          let saved = 0, failed = 0;
-          for (const s of sug) {
-            try {
-              const ur = await rpcCall('macroUpsert', { kind:'ban_msg', label:s.label, body:s.body });
-              if (ur && ur.ok && ur.data && ur.data.ok) saved++; else failed++;
-            } catch(_){ failed++; }
+          // Pull violation + evidence from current modal state
+          const violation = (vSel && vSel.value) || '';
+          const evidenceCtx = (typeof evidenceLink === 'string') ? evidenceLink : '';
+          // Mount or replace preview area
+          let pv = root.querySelector('#mc-ai-preview');
+          if (pv) pv.remove();
+          pv = document.createElement('div');
+          pv.id = 'mc-ai-preview';
+          pv.style.cssText = 'margin-top:8px;display:flex;flex-direction:column;gap:6px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px';
+          pv.innerHTML = '<div style="color:#ff9933;letter-spacing:.08em;text-transform:uppercase;font-size:10px">AI drafting 2 replies for u/' + targetUser.replace(/[<>"]/g,'') + '...</div>';
+          if (msgIn && msgIn.parentNode) msgIn.parentNode.insertBefore(pv, msgIn.nextSibling);
+          const ar = await rpcCall('modmailAiReplyForThread', {
+            sender: targetUser,
+            subject: 'Ban: ' + violation,
+            violation,
+            evidence_url: evidenceCtx,
+            last_messages: []
+          });
+          if (!ar || !ar.ok || !ar.data || !ar.data.ok || !Array.isArray(ar.data.replies) || ar.data.replies.length === 0){
+            const reason = (ar && ar.data && ar.data.error) || (ar && ar.error) || 'unknown';
+            pv.innerHTML = '<div style="color:#ff3b3b">AI suggest failed: ' + String(reason).replace(/[<>"]/g,'') + '</div>';
+            return;
           }
-          try { snack('✓ Saved ' + saved + (failed ? ' (' + failed + ' failed)' : ''), 'success'); } catch(_){}
-          const r3 = await rpcCall('macrosList', { kind:'ban_msg' });
-          __mcMacroRefill((r3 && r3.ok && r3.data && r3.data.macros) || []);
+          const replies = ar.data.replies;
+          pv.innerHTML = '';
+          const head = document.createElement('div');
+          head.style.cssText = 'color:#ff9933;letter-spacing:.08em;text-transform:uppercase;font-size:10px;font-weight:600';
+          head.textContent = '✨ AI drafted ' + replies.length + ' candidate replies for u/' + targetUser;
+          pv.appendChild(head);
+          const cards = document.createElement('div');
+          cards.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px';
+          replies.forEach((rp, i) => {
+            const card = document.createElement('div');
+            card.style.cssText = 'background:#0a0a0b;border:1px solid #3d3a35;padding:6px 8px;display:flex;flex-direction:column;gap:4px';
+            const tag = document.createElement('div');
+            tag.style.cssText = 'color:' + (rp.tone === 'firm' ? '#ff3b3b' : rp.tone === 'empathetic' ? '#66ccff' : '#ffd84d') + ';font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:10px';
+            tag.textContent = (rp.tone || 'reply') + ' · ' + (rp.label || ('Option ' + (i+1)));
+            const body = document.createElement('div');
+            body.style.cssText = 'color:#e8e6e1;line-height:1.4;white-space:pre-wrap';
+            body.textContent = rp.body;
+            const useBtn = document.createElement('button');
+            useBtn.textContent = 'Use this';
+            useBtn.style.cssText = 'margin-top:4px;background:transparent;border:1px solid #ff9933;color:#ff9933;padding:3px 8px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase';
+            useBtn.addEventListener('click', () => {
+              if (msgIn) msgIn.value = (evidenceLink ? urlPrefix : '') + rp.body;
+              try { snack('✓ Reply loaded into draft', 'success'); } catch(_){}
+              pv.remove();
+            });
+            card.appendChild(tag);
+            card.appendChild(body);
+            card.appendChild(useBtn);
+            cards.appendChild(card);
+          });
+          pv.appendChild(cards);
+          const actions = document.createElement('div');
+          actions.style.cssText = 'display:flex;gap:6px;margin-top:4px';
+          const regen = document.createElement('button');
+          regen.textContent = 'Regenerate both';
+          regen.style.cssText = 'background:transparent;border:1px solid #2a2825;color:#9b9892;padding:3px 8px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase';
+          regen.addEventListener('click', () => { pv.remove(); macroPick.dispatchEvent(new Event('change')); macroPick.value = '__ai__'; macroPick.dispatchEvent(new Event('change')); });
+          const dismiss = document.createElement('button');
+          dismiss.textContent = 'Dismiss';
+          dismiss.style.cssText = 'background:transparent;border:1px solid #2a2825;color:#5a5752;padding:3px 8px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase';
+          dismiss.addEventListener('click', () => pv.remove());
+          actions.appendChild(regen);
+          actions.appendChild(dismiss);
+          pv.appendChild(actions);
           return;
         }
         // Real macro selection: populate textarea + bump use_count
@@ -7680,10 +7738,19 @@ Analyze this comment against the community rules. Then write a brief, profession
   }
 
   // ── MESSAGE tab ───────────────────────────────────────────────────
+  // v9.8.0: wired up team macros dropdown + AI suggest, mirroring the
+  // ban-tab pattern. Mod eval subagent (2026-05-08) confirmed A2 unfixed
+  // in v9.7.0 and earlier -- only the ban tab had the smart dropdown.
   function renderMessageTab(root, username, item){
     root.innerHTML = `
       <div class="gam-mc-field">
-        <label>Template</label>
+        <label>Team macro</label>
+        <select class="gam-input" id="mc-msg-macro-pick">
+          <option value="" disabled selected>— Pick a team macro —</option>
+        </select>
+      </div>
+      <div class="gam-mc-field">
+        <label>Local template (legacy)</label>
         <select class="gam-input" id="mc-msg-tpl">
           <option value="">-- Choose template --</option>
           ${REPLY_TEMPLATES.map(t=>`<option value="${t.id}">${escapeHtml(t.label)}</option>`).join('')}
@@ -7707,6 +7774,111 @@ Analyze this comment against the community rules. Then write a brief, profession
     const tpl = root.querySelector('#mc-msg-tpl');
     const subj = root.querySelector('#mc-msg-subj');
     const body = root.querySelector('#mc-msg-body');
+
+    // v9.8.0: smart team-macros dropdown for mm_reply (mirrors ban-tab pattern)
+    const msgMacroPick = root.querySelector('#mc-msg-macro-pick');
+    function __msgMacroRefill(macros){
+      if (!msgMacroPick) return;
+      msgMacroPick.innerHTML = '';
+      const optHead = document.createElement('option');
+      optHead.value = ''; optHead.textContent = '— Pick a team macro —'; optHead.disabled = true; optHead.selected = true;
+      msgMacroPick.appendChild(optHead);
+      const optAdd = document.createElement('option');
+      optAdd.value = '__add__'; optAdd.textContent = '➕  Add custom (save to team)';
+      msgMacroPick.appendChild(optAdd);
+      const optAi = document.createElement('option');
+      optAi.value = '__ai__'; optAi.textContent = '✨  Suggest 2 replies (AI, context-aware)…';
+      msgMacroPick.appendChild(optAi);
+      const sep = document.createElement('option');
+      sep.value = ''; sep.textContent = '──────────'; sep.disabled = true;
+      msgMacroPick.appendChild(sep);
+      (macros || []).forEach(m => {
+        const o = document.createElement('option');
+        o.value = String(m.id);
+        o.textContent = m.label + (m.use_count ? '  (' + m.use_count + 'x)' : '');
+        o.dataset.body = m.body;
+        msgMacroPick.appendChild(o);
+      });
+    }
+    if (msgMacroPick){
+      rpcCall('macrosList', { kind:'mm_reply' }).then(r => {
+        const macros = (r && r.ok && r.data && Array.isArray(r.data.macros)) ? r.data.macros : [];
+        __msgMacroRefill(macros);
+      }).catch(() => __msgMacroRefill([]));
+      msgMacroPick.addEventListener('change', async () => {
+        const opt = msgMacroPick.options[msgMacroPick.selectedIndex];
+        if (!opt || !opt.value) return;
+        if (opt.value === '__add__'){
+          msgMacroPick.value = '';
+          const label = window.prompt('Label for the new modmail-reply macro (max 80 chars):', '');
+          if (!label) return;
+          const newBody = window.prompt('Body of the macro (max 4000 chars):\n\nThis will be sync\'d to all mods.', body ? body.value || '' : '');
+          if (!newBody) return;
+          const ur = await rpcCall('macroUpsert', { kind:'mm_reply', label: label.trim(), body: newBody.trim() });
+          if (ur && ur.ok && ur.data && ur.data.ok){
+            try { snack('✓ Macro saved to team', 'success'); } catch(_){}
+            const r2 = await rpcCall('macrosList', { kind:'mm_reply' });
+            __msgMacroRefill((r2 && r2.ok && r2.data && r2.data.macros) || []);
+          } else {
+            try { snack('Save failed', 'error'); } catch(_){}
+          }
+          return;
+        }
+        if (opt.value === '__ai__'){
+          msgMacroPick.value = '';
+          // Inline 2-card preview (per-thread context-aware)
+          let pv = root.querySelector('#mc-msg-ai-preview');
+          if (pv) pv.remove();
+          pv = document.createElement('div');
+          pv.id = 'mc-msg-ai-preview';
+          pv.style.cssText = 'margin-top:8px;display:flex;flex-direction:column;gap:6px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px';
+          pv.innerHTML = '<div style="color:#ff9933;letter-spacing:.08em;text-transform:uppercase;font-size:10px">AI drafting 2 replies for u/' + username.replace(/[<>"]/g,'') + '...</div>';
+          root.querySelector('#mc-msg-status').appendChild(pv);
+          const ar = await rpcCall('modmailAiReplyForThread', {
+            sender: username,
+            subject: subj ? subj.value || '' : '',
+            last_messages: []
+          });
+          if (!ar || !ar.ok || !ar.data || !ar.data.ok || !Array.isArray(ar.data.replies)){
+            const reason = (ar && ar.data && ar.data.error) || 'unknown';
+            pv.innerHTML = '<div style="color:#ff3b3b">AI suggest failed: ' + String(reason).replace(/[<>"]/g,'') + '</div>';
+            return;
+          }
+          pv.innerHTML = '';
+          const head = document.createElement('div');
+          head.style.cssText = 'color:#ff9933;letter-spacing:.08em;text-transform:uppercase;font-size:10px;font-weight:600';
+          head.textContent = '✨ ' + ar.data.replies.length + ' AI reply candidates for u/' + username;
+          pv.appendChild(head);
+          const cards = document.createElement('div');
+          cards.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px';
+          ar.data.replies.forEach((rp, i) => {
+            const card = document.createElement('div');
+            card.style.cssText = 'background:#0a0a0b;border:1px solid #3d3a35;padding:6px 8px;display:flex;flex-direction:column;gap:4px';
+            const tag = document.createElement('div');
+            tag.style.cssText = 'color:' + (rp.tone === 'firm' ? '#ff3b3b' : rp.tone === 'empathetic' ? '#66ccff' : '#ffd84d') + ';font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:10px';
+            tag.textContent = (rp.tone || 'reply') + ' · ' + (rp.label || ('Option ' + (i+1)));
+            const bodyEl = document.createElement('div');
+            bodyEl.style.cssText = 'color:#e8e6e1;line-height:1.4;white-space:pre-wrap';
+            bodyEl.textContent = rp.body;
+            const useBtn = document.createElement('button');
+            useBtn.textContent = 'Use this';
+            useBtn.style.cssText = 'margin-top:4px;background:transparent;border:1px solid #ff9933;color:#ff9933;padding:3px 8px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase';
+            useBtn.addEventListener('click', () => {
+              if (body) body.value = rp.body;
+              try { snack('✓ Reply loaded', 'success'); } catch(_){}
+              pv.remove();
+            });
+            card.appendChild(tag); card.appendChild(bodyEl); card.appendChild(useBtn);
+            cards.appendChild(card);
+          });
+          pv.appendChild(cards);
+          return;
+        }
+        // Real macro selection: populate body + bump use_count
+        if (body) body.value = opt.dataset.body || '';
+        rpcCall('macroUse', { id: parseInt(opt.value, 10) }).catch(() => {});
+      });
+    }
 
     tpl.addEventListener('change', ()=>{
       const t = REPLY_TEMPLATES.find(x=>x.id===tpl.value);
@@ -13802,10 +13974,105 @@ Analyze this comment against the community rules. Then write a brief, profession
     // side of the bar) per Commander correction 2026-05-07. Original ask was
     // "move the GEAR panel" -- I misread "far right" and shipped it on the
     // right. Commander clarified: gear should be left, just after shield.
+    // v9.8.0 \u2014 live-updates ticker. Inline strip after the brand/gear that
+    // shows context-aware status: "X new posts", "Y modmails", "Z queue
+    // items", "site quiet" rotating every 4s. Color-coded by urgency.
+    // Polls firehose state, modmail inbox, queue counter every 30s.
+    // Click \u2192 opens the relevant target (queue page, modmail, etc.)
+    const tickerEl = el('button', {
+      cls: 'gam-bar-icon gam-bar-ticker',
+      id: 'gam-bar-ticker',
+      title: 'Live updates \u2014 click to act'
+    }, 'site quiet');
+    tickerEl.style.cssText = 'min-width:160px;text-align:left;padding-left:8px;font-variant-numeric:tabular-nums;letter-spacing:.04em;text-transform:uppercase;';
+    let __tickerStates = [];
+    let __tickerIdx = 0;
+    function __updateTicker(){
+      const states = [];
+      try {
+        if (typeof _firehoseState === 'object' && _firehoseState && _firehoseState.postsQueued > 0) {
+          states.push({ msg: _firehoseState.postsQueued + ' POSTS Q', color: 'var(--bb-cyan, #66ccff)', target: '/queue' });
+        }
+        if (typeof STATE !== 'undefined' && STATE && typeof STATE.unread === 'number' && STATE.unread > 0) {
+          states.push({ msg: STATE.unread + ' MODMAIL', color: 'var(--bb-amber, #ff9933)', target: '__chat__', pulse: true });
+        }
+        const drCount = (lsGet(K.DEATHROW, []) || []).length;
+        if (drCount > 0) {
+          states.push({ msg: drCount + ' DR PENDING', color: 'var(--bb-yellow, #ffd84d)', target: null });
+        }
+        const susCount = (typeof _susState === 'object' && _susState && _susState.rows) ? _susState.rows.size : 0;
+        if (susCount > 0) {
+          states.push({ msg: susCount + ' SUS', color: 'var(--bb-red, #ff3b3b)', target: '/users' });
+        }
+        if (states.length === 0) {
+          states.push({ msg: 'site quiet', color: 'var(--bb-ink-faint, #5a5752)', target: null });
+        }
+      } catch(_e){ /* swallow */ }
+      __tickerStates = states;
+      __tickerIdx = __tickerIdx % states.length;
+      const cur = states[__tickerIdx];
+      tickerEl.textContent = cur.msg;
+      tickerEl.style.color = cur.color;
+      tickerEl.dataset.target = cur.target || '';
+      tickerEl.classList.toggle('gam-ticker-pulse', !!cur.pulse);
+    }
+    tickerEl.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const t = tickerEl.dataset.target;
+      if (!t) return;
+      if (t === '__chat__') { try { ModChat.openPanel(); } catch(_){} return; }
+      try { window.location.href = t; } catch(_){}
+    });
+    setInterval(__updateTicker, 30_000);
+    setInterval(()=>{ __tickerIdx = (__tickerIdx + 1) % Math.max(1, __tickerStates.length); __updateTicker(); }, 4000);
+    setTimeout(__updateTicker, 800);
+
+    // v9.8.0 \u2014 dedicated MODMAIL INBOX icon. Distinct from the modmail-page
+    // mmBtn (which only renders on /modmail/thread/<id>). This one is always
+    // present in the bar, shows total unread modmail count from STATE, and
+    // pulses when a new modmail arrives. Click opens mod chat (which shows
+    // modmail conversations as ALL/per-mod threads).
+    const inboxBtn = el('button', {
+      cls: 'gam-bar-icon',
+      id: 'gam-bar-inbox',
+      title: 'Modmail inbox \u2014 click to open chat panel'
+    }, '\u{1F4E5}');
+    inboxBtn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      try { ModChat.openPanel(); } catch(_){
+        try { snack('Could not open chat panel', 'error'); } catch(_){}
+      }
+    });
+    let __lastInboxUnread = 0;
+    function __updateInboxBadge(){
+      try {
+        const n = (typeof STATE !== 'undefined' && STATE && typeof STATE.unread === 'number') ? STATE.unread : 0;
+        if (n > 0) {
+          inboxBtn.dataset.count = String(n);
+          inboxBtn.style.color = 'var(--bb-amber, #ff9933)';
+          if (n > __lastInboxUnread) {
+            inboxBtn.classList.add('gam-inbox-arrived');
+            setTimeout(()=>inboxBtn.classList.remove('gam-inbox-arrived'), 2400);
+          }
+          inboxBtn.title = n + ' unread modmail \u2014 click to open chat panel';
+        } else {
+          delete inboxBtn.dataset.count;
+          inboxBtn.style.color = '';
+          inboxBtn.title = 'Modmail inbox \u2014 click to open chat panel';
+        }
+        __lastInboxUnread = n;
+      } catch(_){}
+    }
+    setInterval(__updateInboxBadge, 5000);
+    setTimeout(__updateInboxBadge, 1200);
+
     const bar = el('div', { id:'gam-status-bar' },
       brandBtn,
       gearBtn,
       el('span', { cls:'gam-bar-sep' }),
+      tickerEl,
+      el('span', { cls:'gam-bar-sep' }),
+      inboxBtn,
       el('button',{ cls:'gam-bar-icon', onclick:openModLog, title:'Mod log + Death Row queue \u2014 your action history (Ctrl+Shift+L)' }, '\u{1F4CB}'),
       el('button',{ cls:'gam-bar-icon', onclick:openHelp, title:'Keybinds + commands cheatsheet (Ctrl+Shift+H)' }, '\u2753'),
       el('button',{ cls:'gam-bar-icon', onclick:downloadDebugSnapshot, title:'Debug snapshot \u2014 redacted JSON export of local state for support' }, '\u{1F41E}'),
@@ -13837,6 +14104,58 @@ Analyze this comment against the community rules. Then write a brief, profession
     setInterval(updateDeathRowCounter, 5000);
     pollSessionHealth();
     setInterval(pollSessionHealth, 2 * 60 * 1000);
+
+    // v9.8.0 — custom delegated tooltip system. Replaces native browser
+    // tooltips on bar icons. Native ones render BELOW the bar by OS default,
+    // overlapping the page content the mod is reading. This renders ABOVE
+    // the bar (subagent fix for D1).
+    let __tipEl = null;
+    let __tipShow = null;
+    let __tipHide = null;
+    function __ensureTipEl(){
+      if (__tipEl) return __tipEl;
+      __tipEl = document.createElement('div');
+      __tipEl.className = 'gam-bar-custom-tip';
+      __tipEl.style.left = '0px'; __tipEl.style.top = '0px';
+      document.body.appendChild(__tipEl);
+      return __tipEl;
+    }
+    bar.addEventListener('mouseover', (e) => {
+      const t = e.target.closest('.gam-bar-icon, .gam-bar-brand, .gam-bar-ticker');
+      if (!t || !bar.contains(t)) return;
+      // Pull title from data-tip OR title attribute, then SUPPRESS the native
+      // tooltip by stashing the title on a data attribute and clearing it.
+      let tipText = t.getAttribute('data-tip-text');
+      if (!tipText) {
+        const nativeTitle = t.getAttribute('title');
+        if (nativeTitle) {
+          t.setAttribute('data-tip-text', nativeTitle);
+          t.removeAttribute('title');
+          tipText = nativeTitle;
+        }
+      }
+      if (!tipText) return;
+      const tip = __ensureTipEl();
+      tip.textContent = tipText;
+      const rect = t.getBoundingClientRect();
+      const tipRect = tip.getBoundingClientRect();
+      // Position ABOVE the bar icon with horizontal centering, clamped to viewport
+      let left = rect.left + rect.width / 2 - tipRect.width / 2;
+      const top = rect.top - tipRect.height - 6;
+      left = Math.max(4, Math.min(left, window.innerWidth - tipRect.width - 4));
+      tip.style.left = left + 'px';
+      tip.style.top  = top + 'px';
+      clearTimeout(__tipHide);
+      __tipShow = setTimeout(() => tip.classList.add('gam-tip-show'), 120);
+    });
+    bar.addEventListener('mouseout', (e) => {
+      const t = e.target.closest('.gam-bar-icon, .gam-bar-brand, .gam-bar-ticker');
+      if (!t) return;
+      clearTimeout(__tipShow);
+      __tipHide = setTimeout(() => {
+        if (__tipEl) __tipEl.classList.remove('gam-tip-show');
+      }, 80);
+    });
   }
 
   // v5.2.1: modmail actions as a popover anchored to the envelope icon on the status bar.
@@ -15716,6 +16035,90 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   outline-offset: 1px !important;
   border-radius: var(--bb-r) !important;
 }
+
+/* ── v9.8.0 status bar additions ── */
+
+/* Ticker: subtle inline strip with optional pulse for new modmail */
+#gam-status-bar .gam-bar-ticker {
+  flex-shrink: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  max-width: 200px;
+  font: 600 var(--bb-t-xs)/1 var(--bb-font) !important;
+  letter-spacing: 0.08em !important;
+  color: var(--bb-ink-faint) !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  cursor: pointer;
+  transition: opacity 200ms;
+}
+#gam-status-bar .gam-bar-ticker:hover {
+  border-color: var(--bb-line-hot) !important;
+  background: transparent !important;
+}
+#gam-status-bar .gam-bar-ticker[data-target=""]:hover {
+  border-color: transparent !important;
+  cursor: default;
+}
+@keyframes gam-ticker-pulse-kf {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+#gam-status-bar .gam-ticker-pulse {
+  animation: gam-ticker-pulse-kf 1.5s ease-in-out infinite;
+}
+
+/* Inbox icon with count badge */
+#gam-status-bar #gam-bar-inbox {
+  position: relative;
+}
+#gam-status-bar #gam-bar-inbox[data-count]::after {
+  content: attr(data-count);
+  position: absolute;
+  top: -3px; right: -3px;
+  background: var(--bb-amber);
+  color: var(--bb-bg);
+  font: 700 9px/1 var(--bb-font);
+  font-variant-numeric: tabular-nums;
+  padding: 1px 3px;
+  min-width: 12px;
+  text-align: center;
+  border: 1px solid var(--bb-bg);
+  z-index: 1;
+  letter-spacing: 0;
+}
+@keyframes gam-inbox-arrived-kf {
+  0%   { transform: scale(1);   color: var(--bb-amber); }
+  30%  { transform: scale(1.15); color: var(--bb-yellow); }
+  60%  { transform: scale(1.05); color: var(--bb-amber); }
+  100% { transform: scale(1);   color: var(--bb-amber); }
+}
+#gam-status-bar .gam-inbox-arrived {
+  animation: gam-inbox-arrived-kf 0.7s ease-in-out 3;
+}
+
+/* v9.8.0 — Custom delegated tooltip. Replaces native title= on bar icons.
+   Mod-eval subagent confirmed native browser tooltips render below the
+   cursor by default, overlapping adjacent icons. We render ABOVE with
+   high z-index. */
+.gam-bar-custom-tip {
+  position: fixed;
+  z-index: 99999998;
+  background: var(--bb-panel);
+  border: 1px solid var(--bb-line-hot);
+  color: var(--bb-ink);
+  font: var(--bb-t-xs)/1.4 var(--bb-font);
+  padding: 4px 8px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+  letter-spacing: 0.02em;
+  max-width: 360px;
+  box-shadow: 0 2px 0 0 var(--bb-bg), 0 4px 8px rgba(0,0,0,0.6);
+}
+.gam-bar-custom-tip.gam-tip-show { opacity: 1; }
 
 /* ── Iter 30 ── Final scrubs: kill rogue rounded corners + side stripes
    that survived earlier layers. Belt and suspenders. */

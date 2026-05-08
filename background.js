@@ -1267,6 +1267,7 @@ const RPC_HANDLERS = {
   // v9.6.1: AI-generated macro suggestions. Calls /macros/ai-suggest which
   // hits Workers AI Llama. Returns suggestion list WITHOUT inserting --
   // the popup decides which to upsert. Counts against per-mod AI budget.
+  // v9.8.0: now passes existing_labels[] anti-list to prevent repetition.
   macroAiSuggest: {
     allowed_callers: [RPC_CALLER_POPUP, RPC_CALLER_CONTENT],
     async handler(args) {
@@ -1274,7 +1275,35 @@ const RPC_HANDLERS = {
       if (kind !== 'ban_msg' && kind !== 'mm_reply') return { ok:false, status:0, error:'invalid_kind' };
       const count = Math.min(8, Math.max(3, parseInt(args && args.count, 10) || 5));
       const context = String(args && args.context || '').slice(0, 800);
-      return await _rpcWorkerCall('POST', '/macros/ai-suggest', { kind, count, context });
+      const existing_labels = Array.isArray(args && args.existing_labels)
+        ? args.existing_labels.slice(0, 30).map(s => String(s || '').slice(0, 80))
+        : [];
+      return await _rpcWorkerCall('POST', '/macros/ai-suggest', { kind, count, context, existing_labels });
+    }
+  },
+  // v9.8.0: per-thread modmail reply drafting. Distinct from macroAiSuggest.
+  // Takes the actual thread context and returns 2 candidate replies that
+  // DIFFER in tone (firm vs empathetic). Replaces the "AI suggest" button
+  // in the ban-modal which previously discarded all context.
+  modmailAiReplyForThread: {
+    allowed_callers: [RPC_CALLER_POPUP, RPC_CALLER_CONTENT],
+    async handler(args) {
+      const sender = String(args && args.sender || '').slice(0, 64);
+      if (!sender) return { ok:false, status:0, error:'sender_required' };
+      const payload = {
+        sender,
+        subject:      String(args && args.subject || '').slice(0, 240),
+        thread_id:    String(args && args.thread_id || '').slice(0, 120),
+        violation:    String(args && args.violation || '').slice(0, 120),
+        evidence_url: String(args && args.evidence_url || '').slice(0, 600),
+        last_messages: Array.isArray(args && args.last_messages)
+          ? args.last_messages.slice(-3).map(m => ({
+              author: String(m && m.author || '').slice(0, 64),
+              body:   String(m && m.body || '').slice(0, 600)
+            }))
+          : []
+      };
+      return await _rpcWorkerCall('POST', '/modmail/ai-reply-for-thread', payload);
     }
   },
 

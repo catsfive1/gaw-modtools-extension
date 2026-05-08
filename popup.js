@@ -2139,8 +2139,16 @@ async function __macroAiSeed(){
   if (btn){ btn.disabled = true; btn.textContent = '✨ Generating...'; }
   __macroSetStatus('asking AI for ' + __macroKind + ' suggestions...');
   try {
+    // v9.8.0: pass existing labels as anti-list to prevent repetition
+    let existing_labels = [];
+    try {
+      const lr = await chrome.runtime.sendMessage({ type:'rpc', name:'macrosList', args:{ kind: __macroKind } });
+      if (lr && lr.ok && lr.data && Array.isArray(lr.data.macros)) {
+        existing_labels = lr.data.macros.map(m => String(m.label || '')).filter(Boolean);
+      }
+    } catch(_){}
     const r = await chrome.runtime.sendMessage({
-      type:'rpc', name:'macroAiSuggest', args:{ kind: __macroKind, count: 5 }
+      type:'rpc', name:'macroAiSuggest', args:{ kind: __macroKind, count: 5, existing_labels }
     });
     if (!r || !r.ok || !r.data || !r.data.ok || !Array.isArray(r.data.suggestions)){
       const errReason = (r && r.data && r.data.error) || (r && r.error) || 'unknown';
