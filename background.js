@@ -1281,6 +1281,14 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('POST', '/macros/ai-suggest', { kind, count, context, existing_labels });
     }
   },
+  // v9.14.0 - list recent modmail threads from modmail_threads (Commander #44).
+  modmailRecent: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const limit = Math.min(50, Math.max(5, parseInt(args && args.limit, 10) || 15));
+      return await _rpcWorkerCall('GET', '/modmail/recent?limit=' + limit, undefined);
+    }
+  },
   // v9.13.0 - track a sent modmail response for AI history-awareness.
   // Best-effort, fire-and-forget. Caller passes (thread_id, sender,
   // response_body, optional subject/ai_used/ai_tone). Worker inserts row

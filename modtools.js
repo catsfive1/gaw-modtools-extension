@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.13.0';
+  const VERSION = 'v9.14.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -14005,6 +14005,149 @@ Analyze this comment against the community rules. Then write a brief, profession
   // watchlist size, AI scan freshness, worker reachability, recent SUS adds.
   // Designed to load instantly from local stores then asynchronously
   // refresh the worker-health line.
+  // v9.14.0 - dedicated MODMAIL popover (Commander #44 UI separation,
+  // #47 ambient AI ready replies). Lists last N modmail threads. Per
+  // thread, shows sender + subject + first-line preview + [✨ AI replies]
+  // button that fires /modmail/ai-reply-for-thread in the background and
+  // renders 4 candidate replies inline (firm/empathetic/brief/escalate).
+  // Click a candidate to open the GAW thread in a new tab + copy the
+  // reply to clipboard so the mod can paste it on the GAW page.
+  function _showModmailPopover(anchor) {
+    const existing = document.getElementById('gam-modmail-popover');
+    if (existing) { existing.remove(); return; }
+    const pop = document.createElement('div');
+    pop.id = 'gam-modmail-popover';
+    pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;width:480px;max-height:560px;display:flex;flex-direction:column;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
+    const r = anchor.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(window.innerWidth - 488, r.left - 200)) + 'px';
+    pop.style.bottom = (window.innerHeight - r.top + 6) + 'px';
+    pop.innerHTML =
+      '<div style="background:#0a0a0b;border-bottom:1px solid #2a2825;padding:8px 12px;display:flex;align-items:center;gap:8px;flex-shrink:0">' +
+        '<span style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:11px">\u{1F4E5} Modmail</span>' +
+        '<span style="color:#5a5752;font-size:10px">(separate from team chat)</span>' +
+        '<span style="flex:1"></span>' +
+        '<button data-close="1" style="background:transparent;border:none;color:#5a5752;padding:2px 6px;cursor:pointer;font-size:16px;line-height:1">×</button>' +
+      '</div>' +
+      '<div id="gam-modmail-body" style="flex:1 1 auto;overflow-y:auto;padding:6px 0">loading recent modmail...</div>';
+    document.body.appendChild(pop);
+
+    pop.addEventListener('click', e => {
+      const closeBtn = e.target.closest('[data-close]');
+      if (closeBtn) { e.stopPropagation(); pop.remove(); return; }
+    });
+    setTimeout(() => {
+      const closer = (ev) => { if (!pop.contains(ev.target) && ev.target !== anchor) { pop.remove(); document.removeEventListener('click', closer, true); } };
+      document.addEventListener('click', closer, true);
+    }, 0);
+
+    const body = pop.querySelector('#gam-modmail-body');
+    rpcCall('modmailRecent', { limit: 15 }).then(res => {
+      if (!res || !res.ok || !res.data || !res.data.ok) {
+        const err = (res && res.data && res.data.error) || (res && res.error) || 'unknown';
+        body.innerHTML = '<div style="padding:12px;color:#ff3b3b">Failed to load: ' + escapeHtml(String(err)) + '</div>';
+        return;
+      }
+      const threads = res.data.threads || [];
+      const note = res.data.note || '';
+      if (threads.length === 0) {
+        body.innerHTML = '<div style="padding:12px;color:#9b9892">No recent modmail threads.<br><br>' + (note ? '<span style="color:#5a5752;font-size:10px">' + escapeHtml(note) + '</span>' : 'Threads populate via the inbox-intel firehose ingest. Visit your /modmail page so threads get captured.') + '</div>';
+        return;
+      }
+      body.innerHTML = '';
+      threads.forEach(t => {
+        const row = document.createElement('div');
+        row.style.cssText = 'border-bottom:1px solid #2a2825;padding:8px 12px;cursor:pointer;transition:background-color 80ms';
+        row.addEventListener('mouseenter', () => row.style.background = '#1c1c20');
+        row.addEventListener('mouseleave', () => row.style.background = '');
+        const head = document.createElement('div');
+        head.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:3px';
+        const who = document.createElement('span');
+        who.style.cssText = 'color:#66ccff;font-weight:600;flex:0 0 auto';
+        who.textContent = 'u/' + (t.first_user || '?');
+        const subj = document.createElement('span');
+        subj.style.cssText = 'color:#e8e6e1;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        subj.textContent = t.subject || '(no subject)';
+        const status = document.createElement('span');
+        const statusColors = { new:'#ff3b3b', claimed:'#ffd84d', replied:'#66ccff', resolved:'#44dd66', awaiting:'#9b9892', archived:'#5a5752' };
+        status.style.cssText = 'color:' + (statusColors[t.status] || '#9b9892') + ';font-size:9px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600';
+        status.textContent = t.status || 'new';
+        head.appendChild(who); head.appendChild(subj); head.appendChild(status);
+        row.appendChild(head);
+        if (t.last_body) {
+          const preview = document.createElement('div');
+          preview.style.cssText = 'color:#9b9892;font-size:10px;line-height:1.3;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+          preview.textContent = (t.last_from ? '[' + t.last_from + '] ' : '') + t.last_body;
+          row.appendChild(preview);
+        }
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;gap:6px;margin-top:4px';
+        const aiBtn = document.createElement('button');
+        aiBtn.textContent = '✨ AI reply candidates';
+        aiBtn.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:3px 8px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase';
+        const openBtn = document.createElement('button');
+        openBtn.textContent = 'Open thread';
+        openBtn.style.cssText = 'background:transparent;border:1px solid #2a2825;color:#9b9892;padding:3px 8px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase';
+        openBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
+        });
+        actions.appendChild(aiBtn);
+        actions.appendChild(openBtn);
+        row.appendChild(actions);
+        const draftHost = document.createElement('div');
+        draftHost.style.cssText = 'margin-top:6px';
+        row.appendChild(draftHost);
+        aiBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          aiBtn.disabled = true;
+          aiBtn.textContent = '⌛ AI drafting...';
+          const ar = await rpcCall('modmailAiReplyForThread', {
+            thread_id: t.thread_id,
+            sender:    t.first_user,
+            subject:   t.subject || '',
+            last_messages: t.last_body ? [{ author: t.last_from || t.first_user, body: t.last_body }] : []
+          });
+          aiBtn.disabled = false;
+          aiBtn.textContent = '✨ AI reply candidates';
+          if (!ar || !ar.ok || !ar.data || !ar.data.ok || !Array.isArray(ar.data.replies)) {
+            const reason = (ar && ar.data && ar.data.error) || 'unknown';
+            draftHost.innerHTML = '<div style="color:#ff3b3b;font-size:10px;margin-top:3px">AI failed: ' + escapeHtml(String(reason)) + '</div>';
+            return;
+          }
+          draftHost.innerHTML = '';
+          const cards = document.createElement('div');
+          cards.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px';
+          ar.data.replies.forEach(rp => {
+            const card = document.createElement('div');
+            card.style.cssText = 'background:#0a0a0b;border:1px solid #3d3a35;padding:4px 6px;display:flex;flex-direction:column;gap:3px';
+            const tag = document.createElement('div');
+            const toneColor = { firm:'#ff3b3b', empathetic:'#66ccff', brief:'#ffd84d', escalate:'#ff9933' };
+            tag.style.cssText = 'color:' + (toneColor[rp.tone] || '#9b9892') + ';font-weight:600;letter-spacing:0.04em;text-transform:uppercase;font-size:9px';
+            tag.textContent = rp.tone || 'reply';
+            const bodyEl = document.createElement('div');
+            bodyEl.style.cssText = 'color:#e8e6e1;font-size:10px;line-height:1.3;white-space:pre-wrap;max-height:80px;overflow-y:auto';
+            bodyEl.textContent = rp.body;
+            const useBtn = document.createElement('button');
+            useBtn.textContent = 'Copy + open';
+            useBtn.style.cssText = 'background:transparent;border:1px solid #44dd66;color:#44dd66;padding:2px 4px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
+            useBtn.addEventListener('click', async (ce) => {
+              ce.stopPropagation();
+              try { await navigator.clipboard.writeText(rp.body); } catch(_){}
+              window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
+              try { snack('✓ Reply copied to clipboard. Paste on the GAW thread page.', 'success'); } catch(_){}
+            });
+            card.appendChild(tag); card.appendChild(bodyEl); card.appendChild(useBtn);
+            cards.appendChild(card);
+          });
+          draftHost.appendChild(cards);
+        });
+        body.appendChild(row);
+      });
+    }).catch(err => {
+      body.innerHTML = '<div style="padding:12px;color:#ff3b3b">Network: ' + escapeHtml(String(err && err.message || err)) + '</div>';
+    });
+  }
+
   // v9.9.0 - Active mods popover. Click on 👥 in the bar opens a small
   // panel listing mods seen in /presence/online within a 4h/8h/24h window.
   // Window is selectable inline. Persists last selection via gam_setting.
@@ -14429,10 +14572,14 @@ Analyze this comment against the community rules. Then write a brief, profession
       id: 'gam-bar-inbox',
       title: 'Modmail inbox \u2014 click to open chat panel'
     }, '\u{1F4E5}');
+    // v9.14.0 - inbox icon now opens DEDICATED MODMAIL POPOVER (Commander
+    // #44 UI separation). Pre-fix it opened the team chat panel which is a
+    // different surface (mod-to-mod chat vs user-to-mod modmail). The chat
+    // panel still opens via the 💬 chat icon.
     inboxBtn.addEventListener('click', (e)=>{
       e.stopPropagation();
-      try { ModChat.openPanel(); } catch(_){
-        try { snack('Could not open chat panel', 'error'); } catch(_){}
+      try { _showModmailPopover(inboxBtn); } catch(err) {
+        try { snack('Modmail popover failed: ' + (err && err.message || err), 'error'); } catch(_){}
       }
     });
     let __lastInboxUnread = 0;
