@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.6.5';
+  const VERSION = 'v9.6.6';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -8226,6 +8226,9 @@ Analyze this comment against the community rules. Then write a brief, profession
       .replace(/^(\d+)\s+years?\s+ago$/i,   '$1y ago');
   }
   function compactBylines(){
+    // v9.6.6: Commander's hard rule -- ZERO content massaging on user pages.
+    // No byline rewrite, no broom, no clean-UI, no filter. Just the river.
+    if (typeof _isProfileViewNow === 'function' && _isProfileViewNow()) return;
     // Native GAW bylines live in .details > span.since.
     document.querySelectorAll('.post .details > span.since, .comment .details > span.since').forEach(host => {
       if (host.dataset.gamBylineCompact === '1') return;
@@ -8274,6 +8277,11 @@ Analyze this comment against the community rules. Then write a brief, profession
 
   function injectAllStrips(){
     if (FallbackMode) return; // T4: native UI takes over
+    // v9.6.6: ZERO modification on user profile pages. Commander's hard rule:
+    // user page = pure infinite river of posts, no mod-action strips, no
+    // byline compaction, no badges. The /users (triage) page and /ban page
+    // are different surfaces with their own gates.
+    if (typeof _isProfileViewNow === 'function' && _isProfileViewNow()) return;
     document.querySelectorAll('.post, .comment').forEach(buildActionStrip);
     // v9.3.16: piggyback byline compaction on the universal post-mutation hook
     // so newly-rendered (infinite-scroll, JSON-fetch) posts get the same treatment.
@@ -9911,6 +9919,8 @@ Analyze this comment against the community rules. Then write a brief, profession
 
   function injectBadges(force){
     if(IS_USERS_PAGE || IS_BAN_PAGE) return;
+    // v9.6.6: also no badges on user profile pages -- pure river only.
+    if (typeof _isProfileViewNow === 'function' && _isProfileViewNow()) return;
     $$(SELECTORS.anyItem).forEach(item=>{
       if(!force && item.dataset.gamBadged) return;
       item.querySelectorAll('.gam-inline-badge').forEach(b=>b.remove());
