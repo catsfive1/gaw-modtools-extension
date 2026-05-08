@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.12.0';
+  const VERSION = 'v9.13.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -521,10 +521,30 @@
   }
 
   const apiAddNote        = (u, details) => modPost('/add_note', { target:u, details:details||'', community:COMMUNITY }, false);
-  const apiSendModMessage = (u, subject, message) => modPost('/submit_modmessage', {
-    referrer: `https://greatawakening.win/u/${encodeURIComponent(u)}/`,
-    target: u, subject: subject||'', community: COMMUNITY, message: message||''
-  });
+  // v9.13.0 - apiSendModMessage now also fires modmailTrackResponse RPC
+  // post-send (Commander #4). Best-effort: never blocks the actual send,
+  // never throws to the caller. Used by /modmail/ai-reply-for-thread to
+  // surface past replies as in-prompt examples.
+  const apiSendModMessage = async (u, subject, message, opts) => {
+    const r = await modPost('/submit_modmessage', {
+      referrer: `https://greatawakening.win/u/${encodeURIComponent(u)}/`,
+      target: u, subject: subject||'', community: COMMUNITY, message: message||''
+    });
+    try {
+      if (r && r.ok) {
+        rpcCall('modmailTrackResponse', {
+          thread_id:     (opts && opts.thread_id) || '',
+          sender:        u,
+          subject:       subject || '',
+          response_body: message || '',
+          ai_used:       (opts && opts.ai_used) ? 1 : 0,
+          ai_tone:       (opts && opts.ai_tone) || null,
+          sent_at:       Date.now()
+        }).catch(() => {});  // fire-and-forget
+      }
+    } catch (_) { /* never block the caller */ }
+    return r;
+  };
   const apiBanStatus = (u) => modPost('/ban_status', { target:u, community:COMMUNITY }, false);
   const apiBan       = (u, days, reason) => modPost('/ban', {
     referrer: `https://greatawakening.win/u/${encodeURIComponent(u)}/`,

@@ -1281,6 +1281,24 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('POST', '/macros/ai-suggest', { kind, count, context, existing_labels });
     }
   },
+  // v9.13.0 - track a sent modmail response for AI history-awareness.
+  // Best-effort, fire-and-forget. Caller passes (thread_id, sender,
+  // response_body, optional subject/ai_used/ai_tone). Worker inserts row
+  // into mod_modmail_responses for retrieval in /modmail/ai-reply-for-thread.
+  modmailTrackResponse: {
+    allowed_callers: [RPC_CALLER_CONTENT],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/modmail/track-response', {
+        thread_id:     String(args && args.thread_id || ''),
+        sender:        String(args && args.sender || ''),
+        subject:       String(args && args.subject || ''),
+        response_body: String(args && args.response_body || ''),
+        ai_used:       args && args.ai_used ? 1 : 0,
+        ai_tone:       args && args.ai_tone || null,
+        sent_at:       Number(args && args.sent_at) || Date.now()
+      });
+    }
+  },
   // v9.12.0 - AI sticky-request detector (Commander #17). Scans recent
   // modmail_messages for sticky requests, returns up to 10 with confidence.
   aiStickyDetect: {
