@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.8.0';
+  const VERSION = 'v9.9.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -6393,7 +6393,31 @@
   //   4. Active tab panel contents (input fields, buttons in DOM order)
   //   5. Any action buttons within the active tab (Cancel, Save, Ban, etc.)
   function openModConsole(username, item, tab){
-    if (!username){ snack('No user', 'error'); return; }
+    // v9.9.0 - defensive username detection. Commander reported clicking
+    // the hammer next to a mod's name produced "no username specified" --
+    // probably because some inject paths pass a bad/empty username. Try
+    // multiple fallbacks before giving up.
+    if (!username && item) {
+      try { username = getAuthor(item); } catch(_){}
+    }
+    if (!username) {
+      // Try the page-level URL or visible username
+      const m = location.pathname.match(/\/(?:u|user)\/([^/?]+)/);
+      if (m) username = m[1];
+    }
+    if (!username) {
+      const sel = document.querySelector('[data-gam-current-target], [data-gam-target-user]');
+      if (sel) username = sel.getAttribute('data-gam-current-target') || sel.getAttribute('data-gam-target-user');
+    }
+    if (!username) {
+      snack('Mod Console: could not detect target user. Click on a username or use Ctrl+Shift+M on a post.', 'error');
+      return;
+    }
+    username = String(username).trim();
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(username)) {
+      snack('Mod Console: invalid username shape "' + username.slice(0,40) + '"', 'error');
+      return;
+    }
     tab = tab || TAB_MEMORY[username.toLowerCase()] || 'intel';
 
     const hist = getUserHistory(username);
@@ -7050,9 +7074,17 @@ Analyze this comment against the community rules. Then write a brief, profession
       </div>
       <div class="gam-mc-actions">
         <button class="gam-btn gam-btn-cancel" id="mc-ban-cancel">Cancel</button>
+        <button class="gam-btn" id="mc-ban-unban" style="background:#0a0a0b;color:#44dd66;border:1px solid #2eaa44">\u{1F513} UNBAN</button>
         <button class="gam-btn gam-btn-danger" id="mc-ban-go">\u{1F528} BAN (reason sent as message)</button>
       </div>
       <div id="mc-ban-status"></div>
+      <!-- v9.9.0 - AI ban-summary -> auto-add to user notes (max 15 words). -->
+      <div class="gam-mc-field" id="mc-ban-summary-wrap" style="margin-top:8px;display:none">
+        <label style="font-size:10px;color:#9b9892;text-transform:uppercase;letter-spacing:0.08em">\u{1F916} AI summary (auto-appended to notes after BAN)</label>
+        <div id="mc-ban-summary-preview" style="background:#0a0a0b;border:1px solid #2a2825;padding:6px 8px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px;color:#e8e6e1;line-height:1.4">
+          (the AI will summarize the ban reason into <=15 words and append to ` + JSON.stringify(username) + ` notes after the ban succeeds)
+        </div>
+      </div>
     `;
 
     const vSel = root.querySelector('#mc-ban-viol');
@@ -7482,6 +7514,50 @@ Analyze this comment against the community rules. Then write a brief, profession
     });
 
     root.querySelector('#mc-ban-cancel').addEventListener('click', closeAllPanels);
+
+    // v9.9.0 - UNBAN button (sibling of BAN). Commander asked: when clicking
+    // ban-hammer next to a mod's name (one of his fellow mods), they need to
+    // be un-banned afterward. Why open a separate UI flow? Allow the action
+    // here. Calls apiUnban + clears verified flag + sets roster to cleared.
+    const unbanBtn = root.querySelector('#mc-ban-unban');
+    if (unbanBtn) {
+      unbanBtn.addEventListener('click', async () => {
+        const statusEl = root.querySelector('#mc-ban-status');
+        const ok = await preflight({
+          title: `Unban "${username}"?`,
+          danger: false,
+          armSeconds: 0,
+          rows: [
+            ['Target', username],
+            ['Action', 'Remove active ban -- no message sent to user'],
+            ['Source', 'Mod Console BAN tab UNBAN button']
+          ]
+        });
+        if (!ok) return;
+        unbanBtn.disabled = true;
+        unbanBtn.textContent = '⌛ Unbanning...';
+        statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Unbanning ${escapeHtml(username)}...</div>`;
+        const result = await executeUnban(username);
+        if (result) {
+          rosterSetStatus(username, 'cleared');
+          markVerified(username, false);
+          logAction({ type: 'unban', user: username, source: 'mod-console-ban-tab' });
+          statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-green">✓ ${escapeHtml(username)} unbanned</div>`;
+          unbanBtn.textContent = '✓ Unbanned';
+          snack(`🔓 ${username} unbanned`, 'success');
+          // Append to user notes
+          try {
+            const dateTag = new Date().toISOString().slice(0,10);
+            await apiAddNote(username, `[${dateTag}] UNBAN via Mod Console (action by ${me() || 'unknown'})`);
+          } catch(_) {}
+        } else {
+          unbanBtn.disabled = false;
+          unbanBtn.textContent = '🔓 UNBAN';
+          statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-red">⚠ Unban failed -- check session, try again</div>`;
+          snack('Unban failed', 'error');
+        }
+      });
+    }
     goBtn.addEventListener('click', async ()=>{
       const violation = vSel.value || 'other';
       const subject = subIn.value.trim();
@@ -7557,6 +7633,34 @@ Analyze this comment against the community rules. Then write a brief, profession
       const verified = await verifyBan(username);
       if (verified !== null) markVerified(username, verified);
       rosterSetStatus(username, 'banned');
+
+      // v9.9.0 - AI summary -> user notes (max 15 words). Best-effort, non-blocking.
+      // Builds a one-liner like "[2026-05-08] BAN 7d hate-speech: <14-word summary>"
+      // and appends to the GAW user-notes field via apiAddNote. Subagent-flagged
+      // commander request 2026-05-08.
+      try {
+        const dateTag = new Date().toISOString().slice(0,10);
+        const violLabel = (VIOLATIONS.find(v => v.id === violation) || {}).label || violation || 'rule violation';
+        const durLabel = duration === -1 ? 'PERMA' : (duration + 'h');
+        // Try AI summary; fall back to first 14 words of fullReason.
+        let summary14 = '';
+        try {
+          const ar = await rpcCall('aiSummarizeBan', {
+            username, violation, duration_label: durLabel,
+            reason: fullReason.slice(0, 800),
+            evidence_url: evidenceLink || ''
+          });
+          if (ar && ar.ok && ar.data && typeof ar.data.summary === 'string') {
+            summary14 = String(ar.data.summary).slice(0, 200);
+          }
+        } catch(_aiErr) { /* best-effort */ }
+        if (!summary14) {
+          // Local fallback: take first ~14 words of the message
+          summary14 = String(fullReason).replace(/\s+/g, ' ').trim().split(/\s+/).slice(0, 14).join(' ');
+        }
+        const noteLine = `[${dateTag}] BAN ${durLabel} ${violLabel}: ${summary14}`;
+        try { await apiAddNote(username, noteLine); } catch(_e) { /* swallow - ban already succeeded */ }
+      } catch(_e) { /* swallow - this is auxiliary, never block ban flow */ }
 
       // v5.2.9: save custom message to history if violation was 'other'
       if (violation === 'other'){
@@ -12664,6 +12768,10 @@ Analyze this comment against the community rules. Then write a brief, profession
   // server-returned row so the chat reflects the change INSTANTLY.
   // On Delete success: same path with a synthesized tombstone row.
   const _MSG_EDIT_WINDOW_MS = 5 * 60 * 1000;
+  // v9.9.0 - Commander spec: users can DELETE their own chat messages up to
+  // 24h after posting. Edit window stays at 5min (different action). Worker
+  // also enforces this — see /mod/message/delete handler.
+  const _MSG_DELETE_WINDOW_MS = 24 * 60 * 60 * 1000;
   function _gamShowMsgContextMenu(x, y, msg, isMine){
     // Close any existing
     document.querySelectorAll('.gam-msg-ctx-menu').forEach(n=>n.remove());
@@ -12722,24 +12830,61 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       menu.appendChild(editBtn);
       // --- Delete: NO confirmation, fire-and-update ---
+      // v9.9.0 - 24h self-delete window per Commander.
+      const ageForDelete = Date.now() - (msg.created_at || 0);
+      const deletable = ageForDelete < _MSG_DELETE_WINDOW_MS && !msg.deleted_at;
       if (!msg.deleted_at){
         const delBtn = document.createElement('div');
         delBtn.className = 'gam-ctx-item';
-        delBtn.textContent = '🗑️ Delete';
-        delBtn.style.cssText = 'padding:6px 12px;cursor:pointer;color:#f04040';
-        delBtn.addEventListener('click', async ()=>{
-          menu.remove();
-          // v9.3.10: optimistic delete — patch local state immediately, then
-          // call server. If server rejects, snack the error (worker is the
-          // source of truth; the next poll will revert if needed).
-          _refresh({ id: msg.id, content: '[message deleted]', deleted_at: Date.now(), deleted_by: msg.from_mod });
-          const r = await rpcCall('modMessageDelete', { id: msg.id });
-          if (r && r.ok) snack('🗑️ message deleted', 'success');
-          else snack('Delete failed (HTTP ' + (r && r.status || '?') + ')', 'error');
-        });
+        const hoursLeft = Math.max(0, Math.ceil((_MSG_DELETE_WINDOW_MS - ageForDelete) / 3600000));
+        delBtn.textContent = deletable ? `🗑️ Delete (${hoursLeft}h left)` : '🗑️ Delete (window closed >24h)';
+        delBtn.style.cssText = 'padding:6px 12px;cursor:' + (deletable ? 'pointer' : 'not-allowed') + ';color:' + (deletable ? '#f04040' : '#5c6370');
+        if (deletable) {
+          delBtn.addEventListener('click', async ()=>{
+            menu.remove();
+            _refresh({ id: msg.id, content: '[message deleted]', deleted_at: Date.now(), deleted_by: msg.from_mod });
+            const r = await rpcCall('modMessageDelete', { id: msg.id });
+            if (r && r.ok) snack('🗑️ message deleted', 'success');
+            else snack('Delete failed (HTTP ' + (r && r.status || '?') + ')', 'error');
+          });
+        }
         menu.appendChild(delBtn);
       }
     }
+    // v9.9.0 - Lead-only "Clear all" option. Only catsfive + Qanaut can
+    // wipe the entire chat history. Non-leads never see the option.
+    try {
+      const meName = (typeof me === 'function' && me() || '').toLowerCase();
+      const LEAD_NAMES = ['catsfive', 'qanaut'];
+      if (LEAD_NAMES.includes(meName)) {
+        const sep = document.createElement('div');
+        sep.style.cssText = 'border-top:1px solid #2a2825;margin:4px 0';
+        menu.appendChild(sep);
+        const clearAllBtn = document.createElement('div');
+        clearAllBtn.className = 'gam-ctx-item';
+        clearAllBtn.textContent = '🧹 Clear ENTIRE chat (lead only)';
+        clearAllBtn.style.cssText = 'padding:6px 12px;cursor:pointer;color:#ff9933;font-weight:600;letter-spacing:0.04em';
+        clearAllBtn.addEventListener('click', async () => {
+          menu.remove();
+          if (!window.confirm('LEAD ACTION\n\nThis will wipe the ENTIRE mod chat history server-side, for everyone. Cannot be undone.\n\nProceed?')) return;
+          if (!window.confirm('Are you ABSOLUTELY sure? This deletes all team chat messages permanently.')) return;
+          const r = await rpcCall('modMessageClearAll', {});
+          if (r && r.ok && r.data && r.data.ok) {
+            snack(`🧹 Chat cleared (${r.data.deleted || '?'} messages)`, 'success');
+            try {
+              if (window.__GAM_MOD_CHAT && window.__GAM_MOD_CHAT.STATE) {
+                window.__GAM_MOD_CHAT.STATE.msgById.clear();
+                window.__GAM_MOD_CHAT.STATE.messages = [];
+              }
+            } catch(_){}
+          } else {
+            const err = (r && r.data && r.data.error) || (r && r.error) || 'unknown';
+            snack(`Clear failed: ${err}`, 'error');
+          }
+        });
+        menu.appendChild(clearAllBtn);
+      }
+    } catch(_){}
     document.body.appendChild(menu);
     const close = (ev)=>{
       if (menu.contains(ev.target)) return;
@@ -13691,6 +13836,84 @@ Analyze this comment against the community rules. Then write a brief, profession
   // watchlist size, AI scan freshness, worker reachability, recent SUS adds.
   // Designed to load instantly from local stores then asynchronously
   // refresh the worker-health line.
+  // v9.9.0 - Active mods popover. Click on 👥 in the bar opens a small
+  // panel listing mods seen in /presence/online within a 4h/8h/24h window.
+  // Window is selectable inline. Persists last selection via gam_setting.
+  function _showActiveModsPopover(anchor) {
+    const existing = document.getElementById('gam-active-mods-popover');
+    if (existing) { existing.remove(); return; }
+    const pop = document.createElement('div');
+    pop.id = 'gam-active-mods-popover';
+    pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:280px;max-width:360px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
+    const r = anchor.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(window.innerWidth - 360, r.left)) + 'px';
+    pop.style.top  = (r.bottom + 6) + 'px';
+    pop.innerHTML =
+      '<div style="background:#0a0a0b;border-bottom:1px solid #2a2825;padding:6px 10px;display:flex;align-items:center;gap:8px">' +
+        '<span style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:10px">Active mods</span>' +
+        '<span style="flex:1"></span>' +
+        '<button data-w="4"  style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:2px 6px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.04em">4H</button>' +
+        '<button data-w="8"  style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:2px 6px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.04em">8H</button>' +
+        '<button data-w="24" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:2px 6px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.04em">24H</button>' +
+        '<button data-close="1" style="background:transparent;border:none;color:#5a5752;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1">×</button>' +
+      '</div>' +
+      '<div id="gam-active-mods-body" style="padding:8px 10px;max-height:320px;overflow-y:auto">loading...</div>';
+    document.body.appendChild(pop);
+
+    function highlightWindow(h) {
+      pop.querySelectorAll('button[data-w]').forEach(b => {
+        const on = parseInt(b.getAttribute('data-w'), 10) === h;
+        b.style.color = on ? '#ff9933' : '#9b9892';
+        b.style.borderColor = on ? '#ff9933' : '#2a2825';
+        b.style.background = on ? 'rgba(255,153,51,0.10)' : 'transparent';
+      });
+    }
+    async function loadWindow(hours) {
+      try { setSetting('activeModsWindow', hours); } catch(_){}
+      highlightWindow(hours);
+      const body = pop.querySelector('#gam-active-mods-body');
+      body.innerHTML = '<span style="color:#5a5752">querying...</span>';
+      const cutoff = Date.now() - hours * 3600_000;
+      const res = await rpcCall('presenceOnline', { since: cutoff });
+      if (!res || !res.ok || !res.data) {
+        body.innerHTML = '<span style="color:#ff3b3b">probe failed</span>';
+        return;
+      }
+      const mods = Array.isArray(res.data.mods) ? res.data.mods : (Array.isArray(res.data) ? res.data : []);
+      if (mods.length === 0) {
+        body.innerHTML = '<span style="color:#5a5752">no mods seen in last ' + hours + 'h</span>';
+        return;
+      }
+      const rows = mods.map(m => {
+        const name = m.mod || m.username || m.mod_username || '?';
+        const seen = m.last_seen_at || m.ts || m.at || 0;
+        const ago = seen ? Math.max(0, Math.floor((Date.now() - seen) / 60000)) : null;
+        const agoText = ago == null ? '?' : (ago < 60 ? ago + 'm' : Math.floor(ago/60) + 'h');
+        const page = (m.pagePath || m.currentPage || '').slice(0, 32);
+        return '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid #2a2825">' +
+          '<span style="color:#66ccff;font-weight:600;flex:0 0 auto">' + escapeHtml(name) + '</span>' +
+          '<span style="color:#5a5752;font-size:10px;flex:1;text-align:right">' + escapeHtml(page) + '</span>' +
+          '<span style="color:#9b9892;font-variant-numeric:tabular-nums;flex:0 0 auto">' + agoText + '</span>' +
+        '</div>';
+      });
+      body.innerHTML = rows.join('');
+    }
+    pop.addEventListener('click', e => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      e.stopPropagation();
+      if (btn.dataset.close) { pop.remove(); return; }
+      const w = parseInt(btn.dataset.w, 10);
+      if (Number.isFinite(w)) loadWindow(w);
+    });
+    setTimeout(() => {
+      const close = (ev) => { if (!pop.contains(ev.target) && ev.target !== anchor) { pop.remove(); document.removeEventListener('click', close, true); } };
+      document.addEventListener('click', close, true);
+    }, 0);
+    const initial = getSetting('activeModsWindow', 4) || 4;
+    loadWindow(initial);
+  }
+
   function _showSiteHealthPopover(anchor){
     const existing = document.getElementById('gam-site-health-popover');
     if (existing){ existing.remove(); return; }
@@ -14066,21 +14289,37 @@ Analyze this comment against the community rules. Then write a brief, profession
     setInterval(__updateInboxBadge, 5000);
     setTimeout(__updateInboxBadge, 1200);
 
+    // v9.8.0 - Active mods icon. Click for 4h/8h/24h selectable popover.
+    const peopleBtn = el('button', {
+      cls: 'gam-bar-icon',
+      id: 'gam-bar-people',
+      title: 'Active mods on GAW (click for window)'
+    }, '\u{1F465}');
+    peopleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      try { _showActiveModsPopover(peopleBtn); } catch(err) {
+        try { snack('People probe failed: ' + (err && err.message || err), 'error'); } catch(_){}
+      }
+    });
+    // v9.8.0 STATUS BAR REORDER per Commander 2026-05-08:
+    //   [icons LEFT, ordered by importance] [flex spacer] [chat] [TICKER far right]
+    const barSpacer = el('div', { cls: 'gam-bar-spacer' });
+    barSpacer.style.cssText = 'flex:1 1 auto;min-width:8px';
+    const chatBtn_v980 = ModChat.createStatusBarButton();
+
     const bar = el('div', { id:'gam-status-bar' },
       brandBtn,
       gearBtn,
       el('span', { cls:'gam-bar-sep' }),
-      tickerEl,
-      el('span', { cls:'gam-bar-sep' }),
-      inboxBtn,
       el('button',{ cls:'gam-bar-icon', onclick:openModLog, title:'Mod log + Death Row queue \u2014 your action history (Ctrl+Shift+L)' }, '\u{1F4CB}'),
+      inboxBtn,
+      peopleBtn,
+      el('span', { cls:'gam-bar-sep' }),
       el('button',{ cls:'gam-bar-icon', onclick:openHelp, title:'Keybinds + commands cheatsheet (Ctrl+Shift+H)' }, '\u2753'),
       el('button',{ cls:'gam-bar-icon', onclick:downloadDebugSnapshot, title:'Debug snapshot \u2014 redacted JSON export of local state for support' }, '\u{1F41E}'),
       // v7.1.2: team-sharable bug report (distinct from 🐞 local export above).
       el('button',{ cls:'gam-bar-icon', onclick:openBugReportModal, title:'File a bug report — sends to the team\'s GitHub via worker (auto-strips PII)' }, '\u{1F41B}'),
-      // v8.2: Mod Chat launcher. Shows 💬 with a red unread badge when the
-      // inbox has unseen messages. Gated on features.modChat (default ON).
-      ModChat.createStatusBarButton(),
+      // v9.8.0: ModChat launcher moved to FAR RIGHT (just before tickerEl).
       // v5.4.0: Clean UI broom — hides share/hide/block/set context from action rows
       el('button',{ id:'gam-clean-broom', cls:'gam-bar-icon' + (getSetting('cleanUi', false) ? ' gam-on' : ''), onclick:toggleCleanUi, title:'Clean UI (hide share/hide/block/set context)' }, '\uD83E\uDDF9'),
       // v5.4.0: Lock button — only on single post pages (/p/<id>). Inline regex so we never
@@ -14097,7 +14336,12 @@ Analyze this comment against the community rules. Then write a brief, profession
       mmBtn,
       c5Btn,
       IS_USERS_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.ACCENT, cursor:'default'}, title:'Triage Console active' }, '\u{1F4CA}') : null,
-      IS_BAN_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.RED, cursor:'default'}, title:'/ban page enhancer active' }, '\u{1F528}') : null
+      IS_BAN_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.RED, cursor:'default'}, title:'/ban page enhancer active' }, '\u{1F528}') : null,
+      // v9.8.0 — flex-grow spacer pushes the right group to the far right
+      barSpacer,
+      // v9.8.0 — RIGHT GROUP: chat then ticker (status message far-right)
+      chatBtn_v980,
+      tickerEl
     );
     document.body.appendChild(bar);
     updateDeathRowCounter();
@@ -16038,7 +16282,26 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 
 /* ── v9.8.0 status bar additions ── */
 
-/* Ticker: subtle inline strip with optional pulse for new modmail */
+/* v9.8.0 bar must accommodate left-justified content + flex spacer pushing
+   right group to the right edge. Override any bar layout coming from earlier
+   versions. Bar is now: [icons LEFT] [flex spacer] [chat] [ticker FAR RIGHT] */
+#gam-status-bar {
+  display: inline-flex !important;
+  justify-content: flex-start !important;
+  text-align: left !important;
+  /* v9.8.0 - widened so ticker has room to display its full status text */
+  max-width: 95vw !important;
+  width: auto !important;
+  min-width: 720px;
+}
+#gam-status-bar .gam-bar-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+  background: transparent !important;
+  border: none !important;
+}
+
+/* Ticker: status MESSAGE on the far right, left-justified text per Commander */
 #gam-status-bar .gam-bar-ticker {
   flex-shrink: 0;
   white-space: nowrap;
@@ -16052,6 +16315,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   border: 1px solid transparent !important;
   cursor: pointer;
   transition: opacity 200ms;
+  /* v9.8.0: explicit text-align for the status message */
+  text-align: left !important;
+  margin-left: var(--bb-s3) !important;
 }
 #gam-status-bar .gam-bar-ticker:hover {
   border-color: var(--bb-line-hot) !important;

@@ -1281,6 +1281,31 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('POST', '/macros/ai-suggest', { kind, count, context, existing_labels });
     }
   },
+  // v9.9.0: lead-only mod chat wipe. Posts to /mod/message/clear-all which
+  // enforces lead+name allowlist server-side. Worker logs an audit row.
+  modMessageClearAll: {
+    allowed_callers: [RPC_CALLER_CONTENT],
+    async handler() {
+      return await _rpcWorkerCall('POST', '/mod/message/clear-all', {});
+    }
+  },
+  // v9.9.0: AI ban-reason summary (<=15 words) for auto-append to user notes
+  // after a successful BAN. Best-effort, non-blocking; if AI fails the
+  // caller falls back to first-14-words local truncation.
+  aiSummarizeBan: {
+    allowed_callers: [RPC_CALLER_CONTENT],
+    async handler(args) {
+      const reason = String(args && args.reason || '').slice(0, 800);
+      if (!reason) return { ok:false, status:0, error:'reason_required' };
+      return await _rpcWorkerCall('POST', '/ai/summarize-ban', {
+        username:       String(args.username || '').slice(0, 64),
+        violation:      String(args.violation || '').slice(0, 64),
+        duration_label: String(args.duration_label || '').slice(0, 16),
+        reason,
+        evidence_url:   String(args.evidence_url || '').slice(0, 600)
+      });
+    }
+  },
   // v9.8.0: per-thread modmail reply drafting. Distinct from macroAiSuggest.
   // Takes the actual thread context and returns 2 candidate replies that
   // DIFFER in tone (firm vs empathetic). Replaces the "AI suggest" button
