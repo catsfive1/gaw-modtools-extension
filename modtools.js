@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.23.0';
+  const VERSION = 'v9.24.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -5996,7 +5996,48 @@
   // Kick the sweep on init + every 30s (visibility-gated).
   setTimeout(_gamOrphanBackdropSweep, 1500);
   setInterval(()=>{ if (document.visibilityState === 'visible') _gamOrphanBackdropSweep(); }, 30_000);
+  // v9.24.0 (Commander 2026-05-08): one-shot extension-orphan handler.
+  // After the extension is reloaded, every in-flight ModChat / RPC call in
+  // already-open tabs returns EXT_CONTEXT_INVALIDATED and snacks "Extension
+  // was reloaded -- please refresh this page". Each call snacked. Spammy +
+  // useless. Now: detect the pattern globally, surface a SINGLE sticky top-
+  // of-page banner with a [Reload page] button, and silently swallow every
+  // subsequent matching error snack from any caller.
+  let _gamExtOrphaned = false;
+  function _gamShowExtOrphanedBanner(){
+    if (_gamExtOrphaned) return;
+    _gamExtOrphaned = true;
+    try {
+      if (document.getElementById('gam-ext-orphaned-banner')) return;
+      const b = document.createElement('div');
+      b.id = 'gam-ext-orphaned-banner';
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999999;background:#2a1d10;border-bottom:1px solid #ff9933;color:#ffd84d;font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:8px 14px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 2px 8px rgba(0,0,0,0.6)';
+      b.innerHTML =
+        '<span style="font-size:14px">↻</span>' +
+        '<span><b>ModTools updated.</b> The extension was reloaded — refresh this page to reconnect.</span>' +
+        '<span style="flex:1"></span>' +
+        '<button id="gam-ext-orphaned-reload" style="background:#ff9933;border:none;color:#0a0a0b;padding:4px 12px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Reload page</button>' +
+        '<button id="gam-ext-orphaned-dismiss" style="background:transparent;border:1px solid #5a5752;color:#9b9892;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Dismiss</button>';
+      document.body.appendChild(b);
+      const reload = b.querySelector('#gam-ext-orphaned-reload');
+      const dismiss = b.querySelector('#gam-ext-orphaned-dismiss');
+      if (reload) reload.addEventListener('click', () => { try { location.reload(); } catch(_){} });
+      if (dismiss) dismiss.addEventListener('click', () => { try { b.remove(); } catch(_){} });
+    } catch(_){}
+  }
+  function _gamIsExtOrphanedMsg(s){
+    if (!s) return false;
+    const m = String(s);
+    return /Extension was reloaded|context invalidated|Receiving end does not exist|message port closed/i.test(m);
+  }
+
   function snack(msg, type='info'){
+    // v9.24.0: route EXT_CONTEXT_INVALIDATED noise into the one-time banner
+    // instead of spamming a snack per orphaned RPC call.
+    if (_gamIsExtOrphanedMsg(msg)){
+      _gamShowExtOrphanedBanner();
+      return;
+    }
     // v8.1 ux: announce via aria-live region (flag-gated inside __announce).
     try { __announce(type === 'error' ? 'error' : 'polite', msg); } catch(e){}
     const old=document.getElementById('gam-snack'); if(old) old.remove();
@@ -9677,9 +9718,26 @@ Analyze this comment against the community rules. Then write a brief, profession
     if(IS_USERS_PAGE && k==='escape'){ closeTriagePopover(); return; }
     // v5.2.0 fun fix: Ctrl+Shift+A must work while the modmail reply box is focused.
     // Chrome natively binds this to "search tabs", so preventDefault before the browser grabs it.
+    // v9.24.0 (Commander 2026-05-08 audit): on the modmail LIST page (/modmail
+    // or /modmail/new etc., NOT /modmail/thread/<id>), archiveCurrentMail()
+    // failed because it only knows the READ view (looks for native
+    // [data-action="archive"] button or matches /messages/<id> URL). Now: if
+    // we're on a list page and a mail row is hovered, archive THAT row. If
+    // no hovered row, snack a hint instead of the cryptic "no archive button"
+    // error.
     if (e.ctrlKey && e.shiftKey && !e.altKey && k === 'a'){
       e.preventDefault();
-      archiveCurrentMail();
+      const onThread = /\/modmail\/thread\//.test(location.pathname) || /\/messages?\/[^/]+\/?$/.test(location.pathname);
+      const onModmailList = /^\/modmail(\/|\?|$)/.test(location.pathname) && !onThread;
+      if (onModmailList){
+        if (hoveredMail){
+          archiveMail(hoveredMail);
+        } else {
+          try { snack('Hover a modmail row first, then Ctrl+Shift+A (or use bare A)', 'warn'); } catch(_){}
+        }
+      } else {
+        archiveCurrentMail();
+      }
       return;
     }
     if(inI){
@@ -10207,6 +10265,11 @@ Analyze this comment against the community rules. Then write a brief, profession
 
   // Full pipeline pass: ingest current page, fetch details for any NEW threads, sync.
   // Returns {pageIngested, threadsFetched, synced}.
+  // v9.24.0 (Commander 2026-05-08 — "there should ALWAYS be modmails in
+  // D1, no excuse for this screen to be empty"): when the current page
+  // has no modmail rows to parse (i.e. we're on a non-/modmail surface),
+  // fall back to a 1-page crawl of /modmail so D1 stays fresh on every
+  // active mod session — not gated on an explicit /modmail visit.
   async function runInboxIntelPass(){
     const pageIds = await ingestCurrentModmailPage();
     let threadsFetched = 0;
@@ -10232,7 +10295,28 @@ Analyze this comment against the community rules. Then write a brief, profession
     const syncResult = await syncCapturedToWorker(allThreads, allMessages);
     // Persist sync cursor
     await idbInboxPut('sync_state', { key:'last_pass', ts: Date.now(), synced: !!(syncResult && syncResult.ok), counts: { threads: allThreads.length, messages: allMessages.length } });
-    return { pageIngested: pageIds.length, threadsFetched, synced: !!(syncResult && syncResult.ok) };
+
+    // v9.24.0 fallback: if we ingested nothing from the current page AND
+    // we're not actively on /modmail* (i.e. the page-side scrape had no
+    // rows to find), do a silent 1-page crawl of /modmail. This keeps
+    // D1 fresh on EVERY mod session regardless of which page they're
+    // browsing. Skip if no mod token (background scraping requires auth)
+    // or if a crawl is already underway in this tab.
+    let crawled = 0;
+    try {
+      const onModmail = /^\/modmail(\/|$|\?)/.test(location.pathname);
+      if (!onModmail && pageIds.length === 0 && getModToken() && !window.__GAM_CRAWL_RUNNING) {
+        window.__GAM_CRAWL_RUNNING = true;
+        try {
+          if (typeof crawlModmailHistory === 'function') {
+            const stats = await crawlModmailHistory({ maxPages: 1 });
+            crawled = (stats && stats.threadsIngested) || 0;
+          }
+        } finally { window.__GAM_CRAWL_RUNNING = false; }
+      }
+    } catch(_){}
+
+    return { pageIngested: pageIds.length, threadsFetched, synced: !!(syncResult && syncResult.ok), backgroundCrawled: crawled };
   }
 
   // v9.16.0 - manual modmail history deep-crawl (Commander #6). Walks
@@ -14332,7 +14416,8 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     panel.addEventListener('click', e => {
       if (e.target.closest('[data-close]')) { e.stopPropagation(); panel.remove(); return; }
-      if (e.target.closest('[data-refresh]')) { e.stopPropagation(); loadList(); return; }
+      // v9.24.0 - REFRESH on the full panel also forces firehose now.
+      if (e.target.closest('[data-refresh]')) { e.stopPropagation(); loadList(true); return; }
     });
     document.addEventListener('keydown', function escHandler(ev) {
       if (ev.key === 'Escape') {
@@ -14345,8 +14430,19 @@ Analyze this comment against the community rules. Then write a brief, profession
     const detail = panel.querySelector('#gam-mmp-detail');
     let currentThreads = [];
 
-    async function loadList() {
-      list.innerHTML = '<div style="padding:14px;color:#9b9892">loading...</div>';
+    async function loadList(forceFirehose) {
+      // v9.24.0 (Commander 2026-05-08): refresh = ALSO run the firehose
+      // backfill so the inbox is always fresh, not stale-D1.
+      if (forceFirehose) {
+        list.innerHTML = '<div style="padding:14px;color:#ff9933;font-size:10px">⏳ Running firehose backfill from /modmail (≈5s)…</div>';
+        try {
+          if (typeof window.__GAM_BACKFILL_MODMAIL === 'function') {
+            await window.__GAM_BACKFILL_MODMAIL({ maxPages: 5 });
+          }
+        } catch(_){}
+      } else {
+        list.innerHTML = '<div style="padding:14px;color:#9b9892">loading...</div>';
+      }
       const res = await rpcCall('modmailRecent', { limit: 30 });
       if (!res || !res.ok || !res.data || !res.data.ok) {
         list.innerHTML = '<div style="padding:14px;color:#ff3b3b">Failed to load: ' + escapeHtml(String((res && res.data && res.data.error) || (res && res.error) || 'unknown')) + '</div>';
@@ -14354,8 +14450,19 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       currentThreads = res.data.threads || [];
       const note = res.data.note || '';
+      // v9.24.0 - auto-firehose on empty (Commander 2026-05-08): if 0 threads
+      // on initial open, automatically run the crawl to populate D1.
+      if (currentThreads.length === 0 && !forceFirehose) {
+        list.innerHTML = '<div style="padding:14px;color:#ff9933;font-size:10px">⏳ No threads cached — auto-firing firehose from /modmail (≈5s)…</div>';
+        try {
+          if (typeof window.__GAM_BACKFILL_MODMAIL === 'function') {
+            await window.__GAM_BACKFILL_MODMAIL({ maxPages: 5 });
+          }
+        } catch(_){}
+        return loadList(true);
+      }
       if (currentThreads.length === 0) {
-        list.innerHTML = '<div style="padding:14px;color:#9b9892;font-size:10px">No recent modmail. ' + (note ? '<br><br>' + escapeHtml(note) : 'Backfill via Maintenance > Backfill modmail history.') + '</div>';
+        list.innerHTML = '<div style="padding:14px;color:#9b9892;font-size:10px">No modmail threads after firehose backfill. ' + (note ? '<br><br>' + escapeHtml(note) : 'Check that you are logged into GAW, or run Maintenance > Backfill modmail history with more pages.') + '</div>';
         return;
       }
       list.innerHTML = '';
@@ -14508,6 +14615,10 @@ Analyze this comment against the community rules. Then write a brief, profession
         '<span style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:11px">\u{1F4E5} Modmail</span>' +
         '<span style="color:#5a5752;font-size:10px">(separate from team chat)</span>' +
         '<span style="flex:1"></span>' +
+        // v9.24.0 (Commander 2026-05-08): REFRESH button. Forces re-run of
+        // /modmail/recent + auto-fires the firehose crawl so the inbox is
+        // never stuck on stale cached data.
+        '<button data-refresh="1" title="Refresh + run firehose backfill" style="background:transparent;border:1px solid #ff9933;color:#ff9933;padding:2px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">↻ REFRESH</button>' +
         '<button data-expand="1" title="Expand to full panel" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:2px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">↗ EXPAND</button>' +
         '<button data-close="1" style="background:transparent;border:none;color:#5a5752;padding:2px 6px;cursor:pointer;font-size:16px;line-height:1">×</button>' +
       '</div>' +
@@ -14521,6 +14632,12 @@ Analyze this comment against the community rules. Then write a brief, profession
         try { _showModmailPanel(); } catch (err) {
           try { snack('Modmail panel failed: ' + (err && err.message || err), 'error'); } catch(_){}
         }
+        return;
+      }
+      // v9.24.0 - manual refresh: force-fire the firehose then reload list.
+      if (e.target.closest('[data-refresh]')) {
+        e.stopPropagation();
+        _loadModmailList(true);
         return;
       }
     });
@@ -14542,7 +14659,26 @@ Analyze this comment against the community rules. Then write a brief, profession
         __draftCache = (out && out.gam_modmail_drafts) || {};
       }).catch(() => {});
     } catch (_) {}
-    rpcCall('modmailRecent', { limit: 15 }).then(res => {
+
+    // v9.24.0 (Commander 2026-05-08): wrap the load chain so REFRESH can
+    // re-invoke and so the empty-state path can auto-fire the firehose
+    // backfill before declaring "no threads". Commander: "There should
+    // always be modmails in there, stored via FIREHOSE in D1. There is
+    // NO EXCUSE for this screen to be empty."
+    async function _loadModmailList(forceFirehose){
+      try {
+        if (forceFirehose) {
+          body.innerHTML = '<div style="padding:12px;color:#ff9933">⏳ Running firehose backfill from /modmail (≈3 pages, ~5s)…</div>';
+          try {
+            if (typeof window.__GAM_BACKFILL_MODMAIL === 'function') {
+              await window.__GAM_BACKFILL_MODMAIL({ maxPages: 3 });
+            }
+          } catch(_){}
+        } else {
+          body.innerHTML = '<div style="padding:12px;color:#9b9892">loading recent modmail…</div>';
+        }
+      } catch(_){}
+      return rpcCall('modmailRecent', { limit: 15 }).then(async res => {
       if (!res || !res.ok || !res.data || !res.data.ok) {
         const err = (res && res.data && res.data.error) || (res && res.error) || 'unknown';
         body.innerHTML = '<div style="padding:12px;color:#ff3b3b">Failed to load: ' + escapeHtml(String(err)) + '</div>';
@@ -14550,8 +14686,21 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       const threads = res.data.threads || [];
       const note = res.data.note || '';
+      // v9.24.0 - auto-firehose on empty (Commander 2026-05-08): if D1
+      // returns zero threads on initial load, automatically fire the
+      // crawl-modmail-history backfill and re-render. Mods don't need
+      // to manually visit /modmail anymore.
+      if (threads.length === 0 && !forceFirehose) {
+        body.innerHTML = '<div style="padding:12px;color:#ff9933">⏳ No threads cached yet — auto-firing firehose from /modmail (≈5s)…</div>';
+        try {
+          if (typeof window.__GAM_BACKFILL_MODMAIL === 'function') {
+            await window.__GAM_BACKFILL_MODMAIL({ maxPages: 3 });
+          }
+        } catch(_){}
+        return _loadModmailList(true);
+      }
       if (threads.length === 0) {
-        body.innerHTML = '<div style="padding:12px;color:#9b9892">No recent modmail threads.<br><br>' + (note ? '<span style="color:#5a5752;font-size:10px">' + escapeHtml(note) + '</span>' : 'Threads populate via the inbox-intel firehose ingest. Visit your /modmail page so threads get captured.') + '</div>';
+        body.innerHTML = '<div style="padding:12px;color:#9b9892">No modmail threads after firehose backfill.<br><br>' + (note ? '<span style="color:#5a5752;font-size:10px">' + escapeHtml(note) + '</span>' : 'You may need to visit /modmail directly first to seed the firehose, or check that you are logged into GAW.') + '</div>';
         return;
       }
       body.innerHTML = '';
@@ -14699,6 +14848,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     }).catch(err => {
       body.innerHTML = '<div style="padding:12px;color:#ff3b3b">Network: ' + escapeHtml(String(err && err.message || err)) + '</div>';
     });
+    }  // end _loadModmailList
+    _loadModmailList(false);
   }
 
   // v9.9.0 - Active mods popover. Click on 👥 in the bar opens a small
@@ -15236,17 +15387,20 @@ Analyze this comment against the community rules. Then write a brief, profession
     bar.addEventListener('mouseover', (e) => {
       const t = e.target.closest('.gam-bar-icon, .gam-bar-brand, .gam-bar-ticker');
       if (!t || !bar.contains(t)) return;
-      // Pull title from data-tip OR title attribute, then SUPPRESS the native
-      // tooltip by stashing the title on a data attribute and clearing it.
-      let tipText = t.getAttribute('data-tip-text');
-      if (!tipText) {
-        const nativeTitle = t.getAttribute('title');
-        if (nativeTitle) {
-          t.setAttribute('data-tip-text', nativeTitle);
-          t.removeAttribute('title');
-          tipText = nativeTitle;
-        }
+      // v9.24.0 (Commander 2026-05-08): ALWAYS re-sync title -> data-tip-text
+      // on hover. Pre-fix this ran once-per-element (gated on `!tipText`),
+      // so any caller that updated `el.title` dynamically (siren poll, sess
+      // dot health, inbox unread count, ...) left BOTH the native browser
+      // tooltip AND our custom tooltip showing -- duplicate overlay. Now:
+      // every hover strips the latest native title and stashes to data-tip-
+      // text so the custom tip stays in lockstep with whatever code most
+      // recently wrote to .title.
+      const nativeTitle = t.getAttribute('title');
+      if (nativeTitle) {
+        t.setAttribute('data-tip-text', nativeTitle);
+        t.removeAttribute('title');
       }
+      const tipText = t.getAttribute('data-tip-text');
       if (!tipText) return;
       const tip = __ensureTipEl();
       tip.textContent = tipText;
@@ -17217,6 +17371,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   /* v9.8.0: explicit text-align for the status message */
   text-align: left !important;
   margin-left: var(--bb-s3) !important;
+  /* v9.24.0 (Commander 2026-05-08 audit): the inherited .gam-bar-icon
+     rule sets display:inline-flex with justify-content:center -- which
+     centers the FLEX CHILD ("1 SUS") regardless of text-align:left.
+     Force flex-start so the status message sits flush-left in its
+     min-width container as Commander asked WAY BACK. */
+  justify-content: flex-start !important;
+  align-items: center !important;
 }
 #gam-status-bar .gam-bar-ticker:hover {
   border-color: var(--bb-line-hot) !important;
@@ -17999,8 +18160,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     // caller (bug-report, console submit, force-rehydrate, etc.) surfaces the
     // same "refresh the page" hint instead of the cryptic chrome internals
     // message "Cannot read properties of undefined (reading 'sendMessage')".
+    // v9.24.0: also proactively surface the one-shot banner so even silent-
+    // fail callers (fire-and-forget rpcCall().catch(()=>{})) trigger the UI
+    // affordance. snack() also routes there for callers that DO snack.
     try {
       if (typeof chrome === 'undefined' || !chrome || !chrome.runtime || typeof chrome.runtime.sendMessage !== 'function'){
+        try { _gamShowExtOrphanedBanner(); } catch(_){}
         return {
           ok: false,
           status: 0,
@@ -18009,6 +18174,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         };
       }
     } catch(_e0){
+      try { _gamShowExtOrphanedBanner(); } catch(_){}
       return {
         ok: false,
         status: 0,
@@ -18029,6 +18195,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       //   "The message port closed before a response was received."
       // Coalesce all of these into the same actionable code.
       if (/context invalidated|receiving end does not exist|message port closed|sendMessage/i.test(msg)){
+        try { _gamShowExtOrphanedBanner(); } catch(_){}
         return {
           ok: false,
           status: 0,
