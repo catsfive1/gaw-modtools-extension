@@ -181,6 +181,17 @@
       </button>
       <div id="maintResetStatus" class="pop-token-status pop-maint-status"></div>
     </div>
+    <!-- v9.11.0 - AI tard / sus-pattern suggester (Commander #23/#24).
+         Calls /ai/tards/suggest which scans recent gaw_users via firehose
+         and returns up to 6 patterns Llama identifies as worth flagging. -->
+    <div class="pop-maint-row">
+      <button id="maintTardSuggest" class="pop-btn pop-btn-ghost"
+              title="Llama scans the last 80 usernames seen via firehose and proposes patterns worth flagging (hate speech, troll archetypes, etc.). Counts against your daily AI budget.">
+        &#x2728; AI: suggest tard / sus patterns
+      </button>
+      <div id="maintTardSuggestStatus" class="pop-token-status pop-maint-status"></div>
+    </div>
+    <div id="maintTardSuggestPanel" style="display:none"></div>
   </div>
 
   <!-- v9.6.0: Team Macros (shared canned messages) — visible to ALL mods,

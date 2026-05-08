@@ -3183,6 +3183,40 @@ async function maintFullReport() {
   __maintLog('fullReport', 'ok', { elapsedMs: report.elapsedMs });
   __maintSetStatus('maintFullReportStatus',
     '✓ ran 9 routines in ' + report.elapsedMs + 'ms -- HTML report opened, JSON copied + downloaded.', 'ok');
+
+  // v9.11.0 - AI top-10 issues summary (Commander #21). Pipes the report
+  // through Llama for a lead-grade ranked list of the 10 most actionable
+  // issues. Result appears in the HTML report's "Top issues" panel via
+  // postMessage to the rendered window.
+  try {
+    const ar = await chrome.runtime.sendMessage({
+      type: 'rpc', name: 'aiHealthSummarize', args: { report_json: json.slice(0, 16000) }
+    });
+    if (ar && ar.ok && ar.data && ar.data.ok && Array.isArray(ar.data.top_issues)) {
+      // Surface as a snack so user knows AI summary is ready
+      const status = $('maintFullReportStatus');
+      if (status) {
+        const summary = ar.data.top_issues.slice(0, 10);
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'margin-top:6px;border:1px solid #ff9933;background:rgba(255,153,51,0.08);padding:6px 8px;font:11px/1.4 ui-monospace,JetBrains Mono,monospace';
+        const head = document.createElement('div');
+        head.style.cssText = 'color:#ff9933;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;font-size:10px;margin-bottom:4px';
+        head.textContent = '✨ AI Top-' + summary.length + ' issues for lead review';
+        wrap.appendChild(head);
+        const list = document.createElement('ol');
+        list.style.cssText = 'margin:0;padding-left:18px;color:#e8e6e1;font-variant-numeric:tabular-nums';
+        summary.forEach(s => {
+          const li = document.createElement('li');
+          li.style.cssText = 'margin:2px 0';
+          const sev = s.severity === 'high' ? '🔴' : s.severity === 'med' ? '🟡' : '🟢';
+          li.textContent = sev + ' ' + (s.title || '?') + (s.action ? ' — ' + s.action : '');
+          list.appendChild(li);
+        });
+        wrap.appendChild(list);
+        status.parentNode.insertBefore(wrap, status.nextSibling);
+      }
+    }
+  } catch (_aiErr) { /* non-blocking */ }
 }
 
 // v9.6.0: render the maintenance health report as a styled HTML page.
@@ -3444,6 +3478,91 @@ __maintWire('maintRehydrateAlias', maintForceRehydrate, 'rehydrating...');
 __maintWire('maintDiag', maintDiagStatus, 'reading...');
 __maintWire('maintSchema', maintSchemaCheck, 'checking...');
 __maintWire('maintReset', maintResetDefaults, 'resetting...');
+
+// v9.11.0 - AI tard / sus-pattern suggester wire-up (Commander #23/#24).
+async function maintTardSuggest() {
+  __maintSetStatus('maintTardSuggestStatus', 'AI scanning recent usernames...');
+  const r = await chrome.runtime.sendMessage({ type:'rpc', name:'aiTardsSuggest' });
+  if (!r || !r.ok || !r.data || !r.data.ok) {
+    const reason = (r && r.data && r.data.error) || (r && r.error) || 'unknown';
+    __maintSetStatus('maintTardSuggestStatus', 'AI failed: ' + reason, 'err');
+    return;
+  }
+  const suggestions = Array.isArray(r.data.suggestions) ? r.data.suggestions : [];
+  const scanned = r.data.scanned || 0;
+  const panel = $('maintTardSuggestPanel');
+  if (!panel) return;
+  panel.innerHTML = '';
+  panel.style.display = '';
+  panel.style.cssText = 'display:block;margin:6px 0;padding:6px 8px;background:#0a0a0b;border:1px solid #ff9933;font:11px/1.4 ui-monospace,JetBrains Mono,monospace';
+  const head = document.createElement('div');
+  head.style.cssText = 'color:#ff9933;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;font-size:10px;margin-bottom:6px';
+  head.textContent = '✨ AI proposed ' + suggestions.length + ' patterns (scanned ' + scanned + ' usernames)';
+  panel.appendChild(head);
+  if (suggestions.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.color = '#9b9892';
+    empty.textContent = 'No suspicious patterns detected. (Check firehose is running + gaw_users has data.)';
+    panel.appendChild(empty);
+    __maintSetStatus('maintTardSuggestStatus', '✓ scan complete (0 suggestions)', 'ok');
+    return;
+  }
+  const list = document.createElement('div');
+  list.style.cssText = 'display:flex;flex-direction:column;gap:4px';
+  suggestions.forEach(s => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid #2a2825';
+    const sevColors = { high:'#ff3b3b', medium:'#ffd84d', low:'#9b9892' };
+    const sev = document.createElement('span');
+    sev.style.cssText = 'color:' + (sevColors[s.severity] || '#9b9892') + ';font-weight:700;font-size:9px;letter-spacing:0.04em;text-transform:uppercase';
+    sev.textContent = s.severity || 'low';
+    const meta = document.createElement('div');
+    meta.style.cssText = 'color:#e8e6e1;line-height:1.3';
+    const pat = document.createElement('span');
+    pat.style.cssText = 'color:#ff9933;font-weight:600';
+    pat.textContent = s.pattern;
+    meta.appendChild(pat);
+    const lbl = document.createElement('span');
+    lbl.style.cssText = 'color:#9b9892;margin-left:6px';
+    lbl.textContent = s.label + (s.example ? ' (e.g. ' + s.example + ')' : '');
+    meta.appendChild(lbl);
+    const addBtn = document.createElement('button');
+    addBtn.textContent = '+ DR rule';
+    addBtn.style.cssText = 'background:transparent;border:1px solid #2eaa44;color:#44dd66;padding:2px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
+    addBtn.addEventListener('click', async () => {
+      addBtn.disabled = true;
+      addBtn.textContent = 'adding...';
+      try {
+        const cur = await chrome.storage.local.get('gam_settings');
+        const settings = cur.gam_settings || {};
+        const rules = Array.isArray(settings.autoDeathRowRules) ? settings.autoDeathRowRules.slice() : [];
+        if (rules.some(r => r.pattern === s.pattern)) {
+          addBtn.textContent = 'already added';
+          return;
+        }
+        rules.push({
+          pattern: s.pattern,
+          hours: 72,
+          reason: 'AI-suggested: ' + s.label,
+          enabled: true,
+          added: new Date().toISOString()
+        });
+        settings.autoDeathRowRules = rules;
+        await chrome.storage.local.set({ gam_settings: settings });
+        addBtn.textContent = '✓ added';
+        addBtn.style.color = '#44dd66';
+      } catch (e) {
+        addBtn.textContent = 'fail';
+        addBtn.style.color = '#ff3b3b';
+      }
+    });
+    row.appendChild(sev); row.appendChild(meta); row.appendChild(addBtn);
+    list.appendChild(row);
+  });
+  panel.appendChild(list);
+  __maintSetStatus('maintTardSuggestStatus', '✓ ' + suggestions.length + ' suggestions ready', 'ok');
+}
+__maintWire('maintTardSuggest', maintTardSuggest, 'scanning...');
 __maintWire('maintAuditVerify', maintAuditVerify, 'verifying...');
 __maintWire('maintFullReport', maintFullReport, 'running...');
 __maintWire('maintRosterStaleness', maintRosterStaleness, 'loading...');

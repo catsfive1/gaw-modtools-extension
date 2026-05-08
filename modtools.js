@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.10.0';
+  const VERSION = 'v9.11.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -12894,6 +12894,88 @@ Analyze this comment against the community rules. Then write a brief, profession
     setTimeout(()=>document.addEventListener('click', close, true), 0);
   }
 
+  // v9.11.0 - delegated hover-preview for .gam-mc-link anchors. Single preview
+  // element follows the hovered link. Metadata fetched once via worker
+  // /link/preview endpoint and cached in module memory for the session.
+  const _gamLinkMetaCache = new Map();
+  let _gamLinkPreviewEl = null;
+  let _gamLinkHoverTimer = null;
+  function _gamEnsureLinkPreviewEl() {
+    if (_gamLinkPreviewEl) return _gamLinkPreviewEl;
+    _gamLinkPreviewEl = document.createElement('div');
+    _gamLinkPreviewEl.className = 'gam-mc-link-preview';
+    document.body.appendChild(_gamLinkPreviewEl);
+    return _gamLinkPreviewEl;
+  }
+  function _gamShortHost(url) {
+    try { return new URL(url).host.replace(/^www\./, ''); } catch (_) { return ''; }
+  }
+  async function _gamFetchLinkMeta(url) {
+    if (_gamLinkMetaCache.has(url)) return _gamLinkMetaCache.get(url);
+    let meta = { title: url, desc: '' };
+    try {
+      const r = await rpcCall('linkPreview', { url });
+      if (r && r.ok && r.data && r.data.ok) {
+        meta = {
+          title: String(r.data.title || url).slice(0, 200),
+          desc:  String(r.data.description || '').slice(0, 280)
+        };
+      }
+    } catch (_) { /* fall through with bare URL */ }
+    _gamLinkMetaCache.set(url, meta);
+    return meta;
+  }
+  function _gamShowLinkPreview(anchor, meta) {
+    const el = _gamEnsureLinkPreviewEl();
+    el.innerHTML = '';
+    const t = document.createElement('div');
+    t.className = 'gam-mc-link-preview-title';
+    t.textContent = meta.title || anchor.href;
+    el.appendChild(t);
+    if (meta.desc) {
+      const d = document.createElement('div');
+      d.className = 'gam-mc-link-preview-desc';
+      d.textContent = meta.desc;
+      el.appendChild(d);
+    }
+    const h = document.createElement('div');
+    h.className = 'gam-mc-link-preview-host';
+    h.textContent = _gamShortHost(anchor.href);
+    el.appendChild(h);
+    // Position above the anchor, clamped to viewport
+    const r = anchor.getBoundingClientRect();
+    requestAnimationFrame(() => {
+      const er = el.getBoundingClientRect();
+      let left = r.left + r.width / 2 - er.width / 2;
+      let top  = r.top - er.height - 8;
+      left = Math.max(8, Math.min(left, window.innerWidth - er.width - 8));
+      if (top < 8) top = r.bottom + 8;
+      el.style.left = left + 'px';
+      el.style.top  = top + 'px';
+      el.classList.add('gam-show');
+    });
+  }
+  function _gamHideLinkPreview() {
+    if (_gamLinkPreviewEl) _gamLinkPreviewEl.classList.remove('gam-show');
+  }
+  document.addEventListener('mouseover', (e) => {
+    const a = e.target && e.target.closest && e.target.closest('a.gam-mc-link');
+    if (!a) return;
+    clearTimeout(_gamLinkHoverTimer);
+    _gamLinkHoverTimer = setTimeout(async () => {
+      const url = a.dataset.previewUrl || a.href;
+      if (!/^https?:\/\//i.test(url)) return;
+      const meta = await _gamFetchLinkMeta(url);
+      _gamShowLinkPreview(a, meta);
+    }, 280);
+  }, true);
+  document.addEventListener('mouseout', (e) => {
+    const a = e.target && e.target.closest && e.target.closest('a.gam-mc-link');
+    if (!a) return;
+    clearTimeout(_gamLinkHoverTimer);
+    setTimeout(_gamHideLinkPreview, 80);
+  }, true);
+
   const ModChat = (function(){
     const STATE = {
       inited: false,
@@ -13369,8 +13451,34 @@ Analyze this comment against the community rules. Then write a brief, profession
         }
         box.appendChild(head);
         const body = el('div', { cls:'gam-mc-msg-body' });
-        body.textContent = String(m.content || '');
-        if (isDeleted) body.style.cssText = 'color:#5c6370;font-style:italic';
+        // v9.11.0 - hoverzoom-style URL previews in chat (Commander #38).
+        // Linkifies any URL in the message text. Hovering a link shows a
+        // floating preview card with title + first ~200 chars of og:description
+        // (or first text content if no meta). Cards cached in module memory.
+        const raw = String(m.content || '');
+        if (isDeleted) {
+          body.textContent = raw;
+          body.style.cssText = 'color:#5c6370;font-style:italic';
+        } else {
+          // Linkify URLs and inject hover-preview attribute
+          const urlRe = /(https?:\/\/[^\s)<>"]+)/g;
+          let last = 0, match;
+          while ((match = urlRe.exec(raw)) !== null) {
+            if (match.index > last) body.appendChild(document.createTextNode(raw.slice(last, match.index)));
+            const a = document.createElement('a');
+            a.href = match[1];
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = match[1];
+            a.className = 'gam-mc-link';
+            a.style.cssText = 'color:#66ccff;text-decoration:underline;word-break:break-all';
+            a.dataset.previewUrl = match[1];
+            body.appendChild(a);
+            last = match.index + match[1].length;
+          }
+          if (last < raw.length) body.appendChild(document.createTextNode(raw.slice(last)));
+          if (last === 0) body.textContent = raw;
+        }
         box.appendChild(body);
         STATE.threadEl.appendChild(box);
       });
@@ -16278,6 +16386,36 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   outline: 1px solid var(--bb-amber) !important;
   outline-offset: 1px !important;
   border-radius: var(--bb-r) !important;
+}
+
+/* v9.11.0 - hoverzoom-style link previews in chat (Commander #38).
+   Single fixed-position preview card that follows hover over .gam-mc-link
+   anchors. Card shows og:title + og:description (lazy-fetched + cached). */
+.gam-mc-link-preview {
+  position: fixed; z-index: 99999997;
+  background: var(--bb-panel, #131316);
+  border: 1px solid var(--bb-line-hot, #3d3a35);
+  color: var(--bb-ink, #e8e6e1);
+  font: 11px/1.45 ui-monospace, "JetBrains Mono", monospace;
+  padding: 6px 8px; max-width: 360px;
+  pointer-events: none; opacity: 0;
+  transition: opacity 120ms ease-out;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+}
+.gam-mc-link-preview.gam-show { opacity: 1; }
+.gam-mc-link-preview-title {
+  color: #ff9933; font-weight: 600;
+  letter-spacing: 0.04em; margin-bottom: 3px;
+  word-break: break-word;
+}
+.gam-mc-link-preview-desc {
+  color: #9b9892; word-break: break-word;
+  font-size: 10.5px; line-height: 1.4;
+}
+.gam-mc-link-preview-host {
+  color: #5a5752; font-size: 9.5px;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  margin-top: 4px;
 }
 
 /* ── v9.8.0 status bar additions ── */

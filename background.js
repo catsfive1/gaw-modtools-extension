@@ -1281,6 +1281,26 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('POST', '/macros/ai-suggest', { kind, count, context, existing_labels });
     }
   },
+  // v9.11.0 - AI top-10 health-report summary (Commander #21).
+  aiHealthSummarize: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const report_json = String(args && args.report_json || '').slice(0, 32 * 1024);
+      if (!report_json) return { ok:false, status:0, error:'report_json required' };
+      return await _rpcWorkerCall('POST', '/ai/health-summarize', { report_json });
+    }
+  },
+  // v9.11.0 - link preview metadata fetcher for hoverzoom-style chat
+  // previews. Worker fetches the URL server-side, parses og:title +
+  // og:description, returns to caller. Caches results to avoid hammering.
+  linkPreview: {
+    allowed_callers: [RPC_CALLER_CONTENT],
+    async handler(args) {
+      const url = String(args && args.url || '').slice(0, 1000);
+      if (!url || !/^https?:\/\//i.test(url)) return { ok:false, status:0, error:'invalid url' };
+      return await _rpcWorkerCall('POST', '/link/preview', { url });
+    }
+  },
   // v9.10.0: AI tard / sus-pattern suggester. Scans recent usernames in
   // gaw_users via the worker, returns up to 6 proposed patterns. Used to
   // surface a "Possible tards" panel in the popup / triage console.
