@@ -3563,6 +3563,68 @@ async function maintTardSuggest() {
   __maintSetStatus('maintTardSuggestStatus', '✓ ' + suggestions.length + ' suggestions ready', 'ok');
 }
 __maintWire('maintTardSuggest', maintTardSuggest, 'scanning...');
+
+// v9.12.0 - AI sticky-request detector wire-up (Commander #17).
+async function maintStickyScan() {
+  __maintSetStatus('maintStickyScanStatus', 'AI scanning recent modmails for sticky requests...');
+  const r = await chrome.runtime.sendMessage({ type:'rpc', name:'aiStickyDetect' });
+  if (!r || !r.ok || !r.data || !r.data.ok) {
+    const reason = (r && r.data && r.data.error) || (r && r.error) || 'unknown';
+    __maintSetStatus('maintStickyScanStatus', 'AI failed: ' + reason, 'err');
+    return;
+  }
+  const requests = Array.isArray(r.data.requests) ? r.data.requests : [];
+  const scanned = r.data.scanned || 0;
+  const note = r.data.note || '';
+  const panel = $('maintStickyScanPanel');
+  if (!panel) return;
+  panel.style.cssText = 'display:block;margin:6px 0;padding:6px 8px;background:#0a0a0b;border:1px solid #ff9933;font:11px/1.4 ui-monospace,JetBrains Mono,monospace';
+  panel.innerHTML = '';
+  const head = document.createElement('div');
+  head.style.cssText = 'color:#ff9933;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;font-size:10px;margin-bottom:6px';
+  head.textContent = '✨ ' + requests.length + ' sticky requests (scanned ' + scanned + ' candidates)';
+  panel.appendChild(head);
+  if (requests.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.color = '#9b9892';
+    empty.textContent = note || 'No sticky requests detected.';
+    panel.appendChild(empty);
+    __maintSetStatus('maintStickyScanStatus', '✓ scan complete (0 found)', 'ok');
+    return;
+  }
+  const list = document.createElement('div');
+  list.style.cssText = 'display:flex;flex-direction:column;gap:4px';
+  const confColor = { high:'#ff3b3b', med:'#ffd84d', low:'#9b9892' };
+  requests.forEach(req => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid #2a2825';
+    const conf = document.createElement('span');
+    conf.style.cssText = 'color:' + (confColor[req.confidence] || '#9b9892') + ';font-weight:700;font-size:9px;letter-spacing:0.04em;text-transform:uppercase';
+    conf.textContent = req.confidence;
+    const meta = document.createElement('div');
+    meta.style.cssText = 'color:#e8e6e1;line-height:1.3';
+    const who = document.createElement('span');
+    who.style.cssText = 'color:#66ccff;font-weight:600';
+    who.textContent = 'u/' + req.sender;
+    meta.appendChild(who);
+    const sep = document.createElement('span');
+    sep.style.cssText = 'color:#9b9892;margin-left:6px';
+    sep.textContent = req.reason;
+    meta.appendChild(sep);
+    const openBtn = document.createElement('button');
+    openBtn.textContent = 'Open';
+    openBtn.style.cssText = 'background:transparent;border:1px solid #2a2825;color:#9b9892;padding:2px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
+    openBtn.addEventListener('click', () => {
+      // Open the modmail thread in a new tab
+      window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(req.thread_id), '_blank');
+    });
+    row.appendChild(conf); row.appendChild(meta); row.appendChild(openBtn);
+    list.appendChild(row);
+  });
+  panel.appendChild(list);
+  __maintSetStatus('maintStickyScanStatus', '✓ ' + requests.length + ' sticky requests found', 'ok');
+}
+__maintWire('maintStickyScan', maintStickyScan, 'scanning...');
 __maintWire('maintAuditVerify', maintAuditVerify, 'verifying...');
 __maintWire('maintFullReport', maintFullReport, 'running...');
 __maintWire('maintRosterStaleness', maintRosterStaleness, 'loading...');

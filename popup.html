@@ -192,6 +192,18 @@
       <div id="maintTardSuggestStatus" class="pop-token-status pop-maint-status"></div>
     </div>
     <div id="maintTardSuggestPanel" style="display:none"></div>
+
+    <!-- v9.12.0 - AI sticky-request detector (Commander #17). Scans recent
+         modmail_messages for "sticky pls" / "please sticky" / etc., asks
+         Llama to confirm genuine request, returns up to 10 with confidence. -->
+    <div class="pop-maint-row">
+      <button id="maintStickyScan" class="pop-btn pop-btn-ghost"
+              title="Scans the last 7 days of modmail messages for sticky requests, AI-confirms intent, returns flagged threads.">
+        &#x1F4CC; AI: scan modmail for sticky requests
+      </button>
+      <div id="maintStickyScanStatus" class="pop-token-status pop-maint-status"></div>
+    </div>
+    <div id="maintStickyScanPanel" style="display:none"></div>
   </div>
 
   <!-- v9.6.0: Team Macros (shared canned messages) — visible to ALL mods,

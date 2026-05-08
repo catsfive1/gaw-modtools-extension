@@ -1281,6 +1281,14 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('POST', '/macros/ai-suggest', { kind, count, context, existing_labels });
     }
   },
+  // v9.12.0 - AI sticky-request detector (Commander #17). Scans recent
+  // modmail_messages for sticky requests, returns up to 10 with confidence.
+  aiStickyDetect: {
+    allowed_callers: [RPC_CALLER_POPUP, RPC_CALLER_CONTENT],
+    async handler() {
+      return await _rpcWorkerCall('POST', '/ai/sticky-detect', {});
+    }
+  },
   // v9.11.0 - AI top-10 health-report summary (Commander #21).
   aiHealthSummarize: {
     allowed_callers: [RPC_CALLER_POPUP],

@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.11.0';
+  const VERSION = 'v9.12.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -4030,7 +4030,9 @@
     ROSTER:'gam_users_roster', BANNED:'gam_banned_verified', NOTES:'gam_user_notes',
     INTEL:'gam_profile_intel',
     // v5.1.2 additions
-    SETTINGS:'gam_settings', SNIFF:'gam_sniff_log', FALLBACK:'gam_fallback_mode'
+    SETTINGS:'gam_settings', SNIFF:'gam_sniff_log', FALLBACK:'gam_fallback_mode',
+    // v9.12.0 - autoUnstickyTick durable cooldown (Commander #15)
+    STICKY_COOLDOWNS:'gam_sticky_cooldowns'
   };
   const STORAGE_MAX = 500;
 
@@ -8964,6 +8966,45 @@ Analyze this comment against the community rules. Then write a brief, profession
     // v6.3.0: xAI API key input removed (CWS CRIT-01). Key lives as a CF
     // secret on the worker; extension never sees it.
     addToggle('Deep Analysis on Load', 'deepAnalysisEnabled', 'Auto-run AI conformity check in background for each queue item when the queue page loads.');
+
+    // v9.12.0 - Auto-sticky management (Commander #15/#16). Disabled by default
+    // since the underlying /sticky toggle bug is mitigated by client-side
+    // cooldown but not eliminated. Lead must opt in.
+    addSection('\u{1F4CC} Auto-sticky management (lead)');
+    addToggle('Auto-unsticky old / popular posts', 'autoUnstickyEnabled',
+      'Every 4 min on the home/community pages: unsticky any sticky older than maxHours OR with more than upvoteThreshold upvotes. Per-post 6h cooldown stored in chrome.storage.local prevents re-toggling. Off by default.');
+    // Threshold inputs as a custom row (no addToggle has number support)
+    {
+      const idH = 'gam-set-autoUnstickyMaxHours';
+      const idU = 'gam-set-autoUnstickyUpvoteThreshold';
+      const row = el('div', { cls:'gam-settings-row' });
+      const curH = Number(getSetting('autoUnstickyMaxHours', 12)) || 12;
+      const curU = Number(getSetting('autoUnstickyUpvoteThreshold', 110)) || 110;
+      row.innerHTML =
+        '<div class="gam-settings-info">' +
+        '<label class="gam-settings-lbl">Auto-unsticky thresholds</label>' +
+        '<div class="gam-settings-desc">Maximum sticky age (hours) OR upvote count that triggers auto-unsticky. Either threshold matched fires.</div>' +
+        '<div style="display:flex;gap:8px;margin-top:6px;align-items:center">' +
+          '<label style="font-size:10px;color:#9b9892">max hrs</label>' +
+          '<input id="' + idH + '" type="number" min="1" max="240" value="' + curH + '" style="width:60px;padding:3px 6px;background:#050507;color:#e8e6e1;border:1px solid #3d3a35;font:11px ui-monospace,monospace;font-variant-numeric:tabular-nums">' +
+          '<label style="font-size:10px;color:#9b9892;margin-left:8px">min upvotes</label>' +
+          '<input id="' + idU + '" type="number" min="1" max="10000" value="' + curU + '" style="width:80px;padding:3px 6px;background:#050507;color:#e8e6e1;border:1px solid #3d3a35;font:11px ui-monospace,monospace;font-variant-numeric:tabular-nums">' +
+        '</div>' +
+        '</div>';
+      row.querySelector('#' + idH).addEventListener('change', e => {
+        const v = Math.max(1, Math.min(240, parseInt(e.target.value, 10) || 12));
+        setSetting('autoUnstickyMaxHours', v);
+        e.target.value = v;
+      });
+      row.querySelector('#' + idU).addEventListener('change', e => {
+        const v = Math.max(1, Math.min(10000, parseInt(e.target.value, 10) || 110));
+        setSetting('autoUnstickyUpvoteThreshold', v);
+        e.target.value = v;
+      });
+      c.appendChild(row);
+    }
+    addToggle('AI scan modmail for sticky requests', 'aiStickyDetectorEnabled',
+      'Periodically (every 10 min) scans recent modmails for "sticky pls" / "please sticky" / similar phrasings, asks Llama to confirm intent, surfaces detected requests as a one-click sticky list. No auto-action; lead approves each.');
 
     // v7.1.2: Features section. Each row reads from getFeatureEffective, so a
     // team override (lead-pushed) visibly dominates a local toggle. Lead mods
@@ -18328,37 +18369,79 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     });
     return out;
   }
+  // v9.12.0 - autoUnstickyTick re-enabled per Commander #15 with option (c)
+  // from the v8.6.3 deferral comment: durable client-side dedupe via
+  // chrome.storage.local with a 6-hour cooldown that survives page reloads.
+  // Behavior:
+  //   - Disabled by default (autoUnstickyEnabled). Lead must opt in via
+  //     Settings > Auto-sticky.
+  //   - For each .stickied post in the DOM:
+  //       * Compute age from time[datetime]
+  //       * If age >= autoUnstickyMaxHours (default 12h) OR upvotes >=
+  //         autoUnstickyUpvoteThreshold (default 110) -> candidate.
+  //       * If we've toggled this post id within COOLDOWN_MS, skip
+  //         (assume our previous toggle is still in effect).
+  //       * Else apiSticky() (the toggle endpoint), record timestamp
+  //         in gam_sticky_cooldowns[id] = ts.
+  //   - One post per tick to avoid spamming. Tick every 4 minutes.
   async function autoUnstickyTick(){
-    try { _diagLog('sticky', 'autoUnstickyTick INVOKED -- expected to be no-op since v8.6.4'); } catch(_){}
-    // v8.6.3 EMERGENCY DISABLE.
-    //
-    // GAW's /sticky endpoint is a TOGGLE: server flips whatever the current
-    // state is, regardless of caller intent. apiSticky() and apiUnsticky()
-    // are literally identical functions -- both POST /sticky, both rely on
-    // server-side state to know which direction to flip.
-    //
-    // autoUnstickyTick reads DOM (.stickied class) to decide which posts
-    // are "currently stuck and old enough to unstick". If DOM is stale --
-    // user just unstickied via QSK / action modal but the page hasn't
-    // re-rendered yet, OR a different tab toggled the state -- the cron
-    // tick sees `.stickied` in DOM and calls apiUnsticky. apiUnsticky
-    // POSTs /sticky. Server toggles. Server's actual state was UN-stuck.
-    // Server flips to STUCK. Audit log records "stickied".
-    //
-    // catsfive's 2026-05-03 mod log showed this loop: every ~5 min the
-    // tick re-stickied posts that had just been unstickied, attributing
-    // each toggle to the lead's identity (correct, since the server
-    // derives identity from the auth token).
-    //
-    // Reactivating this feature requires either:
-    //   (a) a non-toggle "set sticky=true/false" worker endpoint, OR
-    //   (b) a server-side state read before each call (POST GET pattern), OR
-    //   (c) durable client-side dedupe (chrome.storage.local) per post id
-    //       with a multi-hour cooldown that survives page reloads.
-    //
-    // Until one of those lands, this function is a no-op.
-    return;
+    if (!getSetting('autoUnstickyEnabled', false)) return;
+    if (document.visibilityState === 'hidden') return;
+    const COOLDOWN_MS = 6 * 60 * 60 * 1000;
+    const maxHours = Number(getSetting('autoUnstickyMaxHours', 12)) || 12;
+    const upvoteThreshold = Number(getSetting('autoUnstickyUpvoteThreshold', 110)) || 110;
+    let cooldowns = lsGet(K.STICKY_COOLDOWNS || 'gam_sticky_cooldowns', {});
+    if (!cooldowns || typeof cooldowns !== 'object') cooldowns = {};
+    // Prune entries older than 24h
+    const now = Date.now();
+    let pruned = 0;
+    for (const k of Object.keys(cooldowns)) {
+      if (now - (cooldowns[k] || 0) > 24 * 60 * 60 * 1000) { delete cooldowns[k]; pruned++; }
+    }
+    if (pruned > 0) lsSet(K.STICKY_COOLDOWNS || 'gam_sticky_cooldowns', cooldowns);
+
+    const stuck = document.querySelectorAll('.post.stickied, .post.sticky');
+    for (const p of stuck) {
+      const id = p.getAttribute('data-id') || (p.id || '').replace(/^post-/, '');
+      if (!id) continue;
+      // Check cooldown
+      if (cooldowns[id] && (now - cooldowns[id]) < COOLDOWN_MS) continue;
+      // Age check
+      const t = p.querySelector('time[datetime]');
+      let ageH = 0;
+      if (t) ageH = (now - new Date(t.getAttribute('datetime')).getTime()) / 3600_000;
+      // Upvote check
+      const countEl = p.querySelector('.vote .count');
+      const upvotes = countEl ? parseInt(countEl.textContent.trim(), 10) || 0 : 0;
+      if (ageH < maxHours && upvotes < upvoteThreshold) continue;
+      // Candidate -- toggle and record
+      try {
+        const r = await apiSticky(id);
+        if (r && r.ok) {
+          cooldowns[id] = now;
+          lsSet(K.STICKY_COOLDOWNS || 'gam_sticky_cooldowns', cooldowns);
+          logAction({
+            type: 'unsticky',
+            contentId: id,
+            ageHours: ageH.toFixed(1),
+            upvotes,
+            source: 'auto-rule',
+            ts: new Date().toISOString(),
+            url: location.href
+          });
+          try { _diagLog('sticky', `auto-unsticky toggled post ${id} age=${ageH.toFixed(1)}h up=${upvotes}`); } catch(_){}
+          // One per tick to avoid bursts.
+          return;
+        }
+      } catch (e) {
+        try { _diagLog('sticky', 'auto-unsticky toggle failed: ' + (e && e.message || e)); } catch(_){}
+      }
+    }
   }
+  // v9.12.0 - kick the tick every 4 min when on home / community / feed.
+  setInterval(() => { try { autoUnstickyTick(); } catch(e){} }, 4 * 60 * 1000);
+  // Initial run on load (small delay to let DOM settle)
+  setTimeout(() => { try { autoUnstickyTick(); } catch(e){} }, 8000);
 
   // QUICK STICKY KEYS (v8.4.0) -- FOXY-style hover-and-press.
   // Hover any post and press:
