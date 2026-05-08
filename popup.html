@@ -214,6 +214,18 @@
       <div id="maintStickyScanStatus" class="pop-token-status pop-maint-status"></div>
     </div>
     <div id="maintStickyScanPanel" style="display:none"></div>
+
+    <!-- v9.16.0 - manual modmail history backfill (Commander #6). Walks
+         /modmail?page=1..N and ingests historical threads + messages into
+         the inbox-intel pipeline. Throttled at 1.5s/page. Use once to seed
+         historical data, then ambient ingest takes over. -->
+    <div class="pop-maint-row">
+      <button id="maintModmailBackfill" class="pop-btn pop-btn-ghost"
+              title="Walks /modmail page 1..10 in your active GAW tab and ingests historical threads + messages. ~15s for 10 pages. Run once.">
+        &#x1F5C2; Backfill modmail history
+      </button>
+      <div id="maintModmailBackfillStatus" class="pop-token-status pop-maint-status"></div>
+    </div>
   </div>
 
   <!-- v9.6.0: Team Macros (shared canned messages) — visible to ALL mods,

@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.15.0';
+  const VERSION = 'v9.16.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -10099,6 +10099,65 @@ Analyze this comment against the community rules. Then write a brief, profession
     return { pageIngested: pageIds.length, threadsFetched, synced: !!(syncResult && syncResult.ok) };
   }
 
+  // v9.16.0 - manual modmail history deep-crawl (Commander #6). Walks
+  // /modmail?page=1..N (default 10 pages), parses each, ingests via the
+  // existing inbox-intel pipeline (same parseModmailListRow + worker
+  // sync as runInboxIntelPass). Throttled at 1.5s/page to avoid hammering.
+  // Lead can fire this once to seed historical modmail_threads + messages.
+  // Exposed on window.__GAM_BACKFILL_MODMAIL for popup triggering.
+  async function crawlModmailHistory(opts) {
+    opts = opts || {};
+    const maxPages = Math.min(50, Math.max(1, parseInt(opts.maxPages, 10) || 10));
+    const throttleMs = 1500;
+    const stats = { pagesCrawled: 0, threadsIngested: 0, messagesIngested: 0, errors: 0 };
+    if (!getModToken()) {
+      throw new Error('Not authenticated -- need a valid mod token to backfill.');
+    }
+    for (let page = 1; page <= maxPages; page++) {
+      try {
+        // Fetch the modmail page HTML
+        const url = page === 1 ? '/modmail' : ('/modmail?page=' + page);
+        const resp = await fetch(url, { credentials: 'include' });
+        if (!resp.ok) { stats.errors++; break; }
+        const html = await resp.text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const rows = doc.querySelectorAll('.mail.standard_page');
+        if (rows.length === 0) break;  // ran out of pages
+        // Parse each row and ingest
+        const allThreads = [];
+        const allMessages = [];
+        for (const row of rows) {
+          try {
+            const parsed = parseModmailListRow(row);
+            if (!parsed) continue;
+            parsed.message.signature = await _sigHash(parsed.thread.thread_id + '|' + parsed.message.body_text);
+            await idbInboxPut('threads', parsed.thread);
+            const existed = await idbInboxHas('messages', parsed.message.message_id);
+            if (!existed) {
+              await idbInboxPut('messages', parsed.message);
+              allThreads.push(parsed.thread);
+              allMessages.push(parsed.message);
+              stats.messagesIngested++;
+            }
+            stats.threadsIngested++;
+          } catch (_) { stats.errors++; }
+        }
+        // Sync to worker
+        if (allThreads.length || allMessages.length) {
+          try { await syncCapturedToWorker(allThreads, allMessages); } catch (_) { stats.errors++; }
+        }
+        stats.pagesCrawled++;
+        if (typeof opts.onProgress === 'function') {
+          try { opts.onProgress({ ...stats, page }); } catch (_) {}
+        }
+      } catch (e) { stats.errors++; }
+      // Throttle before next page
+      if (page < maxPages) await new Promise(r => setTimeout(r, throttleMs));
+    }
+    return stats;
+  }
+  try { window.__GAM_BACKFILL_MODMAIL = crawlModmailHistory; } catch (_) {}
+
   // Background poller — fire on modmail pages or periodically from the status bar.
   const INBOX_INTEL_POLL_MS_DEFAULT = 15 * 60 * 1000;
   let _inboxPollTimer = null;
@@ -19325,6 +19384,14 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         rpcCall('modReportsSummary', {})
           .then(r => sendResponse({ ok:r.ok, data:r.data }))
           .catch(e => sendResponse({ ok:false, error:String(e) }));
+        return true;
+      }
+      // v9.16.0 - manual modmail history backfill (Commander #6)
+      if (msg && msg.type === 'crawlModmailHistory') {
+        const maxPages = Math.min(50, Math.max(1, parseInt(msg.maxPages, 10) || 10));
+        crawlModmailHistory({ maxPages })
+          .then(stats => sendResponse({ ok: true, stats }))
+          .catch(e => sendResponse({ ok: false, error: String(e && e.message || e) }));
         return true;
       }
     });

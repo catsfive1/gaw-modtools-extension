@@ -3681,6 +3681,32 @@ async function maintStickyScan() {
   __maintSetStatus('maintStickyScanStatus', '✓ ' + requests.length + ' sticky requests found', 'ok');
 }
 __maintWire('maintStickyScan', maintStickyScan, 'scanning...');
+
+// v9.16.0 - modmail history backfill wire-up (Commander #6).
+async function maintModmailBackfill() {
+  __maintSetStatus('maintModmailBackfillStatus', 'crawling /modmail pages 1..10 (allow ~15s)...');
+  // Find an active GAW tab to send the message to (content script must run there)
+  const tabs = await chrome.tabs.query({ url: 'https://greatawakening.win/*' });
+  if (!tabs || tabs.length === 0) {
+    __maintSetStatus('maintModmailBackfillStatus', 'no GAW tab open -- visit greatawakening.win first', 'err');
+    return;
+  }
+  // Prefer an active tab if one is on /modmail; otherwise first available
+  const target = tabs.find(t => t.url && t.url.includes('/modmail')) || tabs[0];
+  try {
+    const r = await chrome.tabs.sendMessage(target.id, { type: 'crawlModmailHistory', maxPages: 10 });
+    if (!r || !r.ok) {
+      __maintSetStatus('maintModmailBackfillStatus', 'crawl failed: ' + ((r && r.error) || 'unknown'), 'err');
+      return;
+    }
+    const s = r.stats || {};
+    __maintSetStatus('maintModmailBackfillStatus',
+      '✓ crawled ' + (s.pagesCrawled || 0) + ' pages, ingested ' + (s.threadsIngested || 0) + ' threads / ' + (s.messagesIngested || 0) + ' new messages' + (s.errors ? ' (' + s.errors + ' errs)' : ''), 'ok');
+  } catch (e) {
+    __maintSetStatus('maintModmailBackfillStatus', 'crawl error: ' + (e && e.message || e), 'err');
+  }
+}
+__maintWire('maintModmailBackfill', maintModmailBackfill, 'crawling...');
 __maintWire('maintAuditVerify', maintAuditVerify, 'verifying...');
 __maintWire('maintFullReport', maintFullReport, 'running...');
 __maintWire('maintRosterStaleness', maintRosterStaleness, 'loading...');
