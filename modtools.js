@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.9.1';
+  const VERSION = 'v9.10.0';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -18987,6 +18987,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     if (!ok) return;
     _firehoseState = { active: true, abort: false, pagesCrawled: 0, postsQueued: 0, errors: 0 };
     await setSetting('firehose.active', true);
+    // v9.10.0 - clear the user-explicit-stop flag so always-on auto-start
+    // resumes after a refresh.
+    await setSetting('firehose.user_stopped', false);
     firehoseRefreshPanel();
     firehoseLoop().catch(e => {
       console.error('[firehose] loop failed', e);
@@ -18999,6 +19002,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     _firehoseState.abort = true;
     _firehoseState.active = false;
     await setSetting('firehose.active', false);
+    // v9.10.0 - flag user-explicit stop so always-on auto-start respects intent.
+    // Cleared when user clicks Start.
+    await setSetting('firehose.user_stopped', true);
     firehoseRefreshPanel();
   }
 
@@ -19087,11 +19093,22 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
 
   // Boot 3s after init; auto-resume if previously active.
+  // v9.10.0 - Commander spec: "Firehose should be 'on' at all times."
+  // Pre-fix the firehose started only if BOTH features.firehose was effective
+  // AND firehose.active setting was true (latter required explicit opt-in via
+  // popup Start button). Now: if features.firehose is effective AND the user
+  // hasn't explicitly stopped it (firehose.user_stopped flag), auto-start.
   setTimeout(async () => {
     try {
       injectFirehosePanel();
-      if (await getSetting('firehose.active') && getFeatureEffective('features.firehose', false) === true) {
-        firehoseStart();
+      if (getFeatureEffective('features.firehose', false) === true) {
+        const userStopped = await getSetting('firehose.user_stopped', false);
+        if (!userStopped) {
+          // Mark active and start. Boots automatically on every load.
+          await setSetting('firehose.active', true);
+          firehoseStart();
+          try { console.log('[firehose] auto-started (always-on policy v9.10.0)'); } catch(_){}
+        }
       }
     } catch (e) { console.error('[firehose] boot', e); }
   }, 3000);

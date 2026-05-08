@@ -1281,6 +1281,15 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('POST', '/macros/ai-suggest', { kind, count, context, existing_labels });
     }
   },
+  // v9.10.0: AI tard / sus-pattern suggester. Scans recent usernames in
+  // gaw_users via the worker, returns up to 6 proposed patterns. Used to
+  // surface a "Possible tards" panel in the popup / triage console.
+  aiTardsSuggest: {
+    allowed_callers: [RPC_CALLER_POPUP, RPC_CALLER_CONTENT],
+    async handler() {
+      return await _rpcWorkerCall('POST', '/ai/tards/suggest', {});
+    }
+  },
   // v9.9.0: lead-only mod chat wipe. Posts to /mod/message/clear-all which
   // enforces lead+name allowlist server-side. Worker logs an audit row.
   modMessageClearAll: {
