@@ -1883,20 +1883,41 @@ loadLead();
 
   function setTab(name) {
     // v9.18.0 CRITICAL FIX: exclude .pop-tab nav buttons from the toggle.
-    // Pre-fix: tab BUTTONS have data-tab="tokens|tools|lead" (their TARGET).
-    // setTab hid every non-matching data-tab element including the buttons
-    // themselves, leaving only the active tab button visible. User saw a
-    // popup with no way to navigate anywhere — orphaned on Stats tab.
+    // v9.22.0 FIX: use CSS class .pop-tab-hidden (with display:none
+    // !important) instead of inline el.style.display. The Bloomberg
+    // CSS layer has !important rules on .pop-stats and other section
+    // elements that win over inline display:none. Class-based hide
+    // matches their specificity.
     document.querySelectorAll('[data-tab]:not(.pop-tab)').forEach(el => {
-      el.style.display = (el.dataset.tab === name) ? '' : 'none';
+      if (el.dataset.tab === name) {
+        el.classList.remove('pop-tab-hidden');
+        el.style.display = '';
+      } else {
+        el.classList.add('pop-tab-hidden');
+      }
     });
     // Special case: leadSection contains both the lead token input AND
     // leadOnlyTools. Visible on tokens tab AND lead tab, but the
     // lead-only-tools child only on lead tab.
+    // v9.22.0: class-based hide for !important override.
     const leadSec = document.getElementById('leadSection');
     const leadTools = document.getElementById('leadOnlyTools');
-    if (leadSec) leadSec.style.display = (name === 'tokens' || name === 'lead') ? '' : 'none';
-    if (leadTools) leadTools.style.display = (name === 'lead') ? '' : 'none';
+    if (leadSec) {
+      if (name === 'tokens' || name === 'lead') {
+        leadSec.classList.remove('pop-tab-hidden');
+        leadSec.style.display = '';
+      } else {
+        leadSec.classList.add('pop-tab-hidden');
+      }
+    }
+    if (leadTools) {
+      if (name === 'lead') {
+        leadTools.classList.remove('pop-tab-hidden');
+        leadTools.style.display = '';
+      } else {
+        leadTools.classList.add('pop-tab-hidden');
+      }
+    }
     // Update active tab indicator
     document.querySelectorAll('.pop-tab').forEach(b => {
       const active = b.dataset.tab === name;

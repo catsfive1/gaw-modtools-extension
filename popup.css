@@ -685,6 +685,13 @@ body {
   width: 380px;
 }
 
+/* v9.22.0 - tab-hidden class. JS toggles this class instead of inline
+   display so it can override the v9.7.0 Bloomberg !important rules
+   (e.g. .pop-stats { display: grid !important }). Without this, the
+   stats grid stayed visible on Tokens/Tools/Lead tabs. display:none
+   on parent automatically hides all descendants. */
+.pop-tab-hidden { display: none !important; }
+
 /* v9.15.0 - tab nav (Commander #30) */
 .pop-tabnav {
   display: flex !important;
