@@ -500,23 +500,91 @@ async function loadToken() {
 }
 
 async function saveToken() {
-  const token = $('tokenInput').value.trim();
+  let token = $('tokenInput').value.trim();
   const statusEl = $('tokenStatus');
   statusEl.className = 'pop-token-status';
   statusEl.textContent = 'validating...';
-  // v5.8.1 security fix (INFO-2 + LOW-1 defense-in-depth): validate token
-  // format client-side before sending. Rejects obvious garbage, prevents
-  // malformed values from ever hitting chrome.storage.
+
+  // v9.9.1 - intercept invite URL paste: if user pasted the FULL invite URL
+  // (https://greatawakening.win/?mt_invite=CODE), extract the code and route
+  // through the claim flow instead of trying to save it as a token.
+  // Beta-tester feedback 2026-05-08: "i pasted the token in - no chance to
+  // enter my name, and it said token accepted, but it still failed to
+  // rotate - invalid token". He pasted the INVITE CODE not a TOKEN.
+  const urlMatch = token.match(/^https?:\/\/[^/]+\/\?(?:.*&)?mt_invite=([A-Za-z0-9_-]{16,128})/);
+  if (urlMatch) token = urlMatch[1];
+
+  // v9.9.1 - heuristic: if the input looks like an invite code (not a token),
+  // stage it into chrome.storage.session.gam_pending_invite and route the
+  // user to the Claim Invite button. Tokens and invite codes are both
+  // [A-Za-z0-9_-]{16-256}, so we can't distinguish by regex alone -- but
+  // we CAN ask the worker which it is. First check via /mod/whoami: if 401,
+  // try claiming as invite via /mod/token/claim-rotation. Auto-route.
   if (!/^[A-Za-z0-9_-]{32,256}$/.test(token)) {
+    // Could still be a 16-31 char invite code shape
+    if (/^[A-Za-z0-9_-]{16,128}$/.test(token)) {
+      statusEl.className = 'pop-token-status warn';
+      statusEl.textContent = 'looks like an INVITE CODE (not a token). Staging for Claim flow...';
+      try {
+        if (chrome && chrome.storage && chrome.storage.session) {
+          await chrome.storage.session.set({
+            gam_pending_invite: token,
+            gam_pending_invite_at: Date.now(),
+            gam_pending_invite_for: '__paste_into_token_field__'
+          });
+        }
+        statusEl.textContent = 'INVITE CODE staged. Click "Claim invite" below to mint your token.';
+        try { $('tokenInput').value = ''; } catch(_){}
+        // Surface the claim button visibly
+        const claimBtn = $('claimInviteBtn');
+        if (claimBtn) {
+          claimBtn.scrollIntoView({ behavior:'smooth', block:'center' });
+          claimBtn.style.outline = '2px solid #ff9933';
+          setTimeout(() => { claimBtn.style.outline = ''; }, 4000);
+        }
+      } catch(e) {
+        statusEl.className = 'pop-token-status err';
+        statusEl.textContent = 'failed to stage invite: ' + (e && e.message || e);
+      }
+      return;
+    }
     statusEl.className = 'pop-token-status err';
     statusEl.textContent = 'malformed token (expected 32-256 chars alphanumeric + _-)';
     return;
   }
+
   // v7.2 flag-on: save via background relay, never write tokens into
   // chrome.storage.local from the popup, clear the input after save.
   if (await __hardeningOnPopup()) {
     const r = await saveTokensSecurely({ workerModToken: token });
     if (r && r.ok) {
+      // v9.9.1 - post-save validation: probe /mod/whoami. If the worker
+      // returns 401, the value the user pasted was an INVITE CODE, not a
+      // minted token. Roll back the save, stage as invite, route to Claim.
+      try {
+        const probe = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
+        if (probe && probe.status === 401) {
+          // Roll back: clear the bad token from storage
+          try { await saveTokensSecurely({ workerModToken: '' }); } catch(_){}
+          // Re-stage as invite
+          if (chrome && chrome.storage && chrome.storage.session) {
+            await chrome.storage.session.set({
+              gam_pending_invite: token,
+              gam_pending_invite_at: Date.now(),
+              gam_pending_invite_for: '__paste_into_token_field__'
+            });
+          }
+          statusEl.className = 'pop-token-status warn';
+          statusEl.textContent = 'Worker says that is NOT a token -- it looks like an INVITE CODE. Click "Claim invite" + enter your GAW username.';
+          const claimBtn = $('claimInviteBtn');
+          if (claimBtn) {
+            claimBtn.scrollIntoView({ behavior:'smooth', block:'center' });
+            claimBtn.style.outline = '2px solid #ff9933';
+            setTimeout(() => { claimBtn.style.outline = ''; }, 4000);
+          }
+          return;
+        }
+      } catch(_probeErr) { /* probe failure is non-fatal; user can retry */ }
       statusEl.className = 'pop-token-status ok';
       statusEl.textContent = '\u2713 stored';
       try { $('tokenInput').value = ''; } catch (e) {}

@@ -923,12 +923,44 @@ input:focus, textarea:focus, select:focus {
 }
 
 /* Iter 12: rotation roster */
+/* v9.9.1 - Commander complaint: rotation roster scroll box was constrained
+   to ~40% of popup width. Widening to use full popup width minus tight
+   gutter. The roster panel container, the inside scroll box, and the
+   nested invite-code wrap all need width:100% to fill the popup. */
+#rotateRosterPanel,
+.pop-maint-roster {
+  margin: var(--bb-s2) 0 !important;
+  width: auto !important;
+  max-width: none !important;
+  background: var(--bb-panel) !important;
+  border: 1px solid var(--bb-line) !important;
+  border-radius: 0 !important;
+  /* v9.9.1 - taller cap so users see more rows w/o scrolling */
+  max-height: 360px !important;
+}
+#rotateRosterPanel * { box-sizing: border-box; }
+/* The invite-code text wrap inside each row - was constraining to ~140px */
+#rotateRosterPanel .invite-link,
+#rotateRosterPanel .invite-code,
+#rotateRosterPanel pre,
+#rotateRosterPanel code,
+#rotateRosterPanel .pop-token-status {
+  width: 100% !important;
+  max-width: none !important;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
 .pop-maint-roster-row {
+  display: grid !important;
+  grid-template-columns: minmax(80px, 1fr) auto !important;
+  gap: var(--bb-s3) !important;
+  align-items: center;
   border-bottom: 1px solid var(--bb-line) !important;
   padding: var(--bb-s3) var(--bb-s4) !important;
   background: transparent !important;
   font: var(--bb-t-sm)/1.2 var(--bb-font) !important;
   font-variant-numeric: tabular-nums;
+  width: 100% !important;
 }
 .pop-maint-roster-row:hover { background: var(--bb-hover) !important; }
 .pop-maint-roster-row .name { color: var(--bb-cyan) !important; font-weight: 600; }
