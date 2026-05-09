@@ -1437,3 +1437,23 @@ input[type="checkbox"]:checked::after {
   border-bottom: 1px solid #ff9933;
   color: #ffd84d;
 }
+
+/* ── v10.6.1 HOTFIX: stats panel showing on every tab (Commander asked many times) ──
+   Root cause: .pop-tab-hidden { display:none !important } at L749 has the SAME
+   class-specificity as .pop-stats { display:grid !important } at L913. CSS
+   source-order tiebreaker means the LATER rule (.pop-stats) wins, so adding
+   .pop-tab-hidden never actually hid the stats grid. Fix here uses chained
+   selector .pop-stats.pop-tab-hidden which has 2-class specificity, beating
+   the 1-class rule regardless of source order. Same treatment for the other
+   Bloomberg-themed grid sections that have the same problem. */
+.pop-stats.pop-tab-hidden,
+.pop-actions.pop-tab-hidden,
+.pop-tools.pop-tab-hidden,
+.pop-maint.pop-tab-hidden,
+.pop-token.pop-tab-hidden,
+.pop-section-label.pop-tab-hidden,
+.pop-tabnav .pop-tab-hidden,
+.pop-alert.pop-tab-hidden,
+[data-tab].pop-tab-hidden {
+  display: none !important;
+}

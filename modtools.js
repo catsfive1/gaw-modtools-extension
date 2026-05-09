@@ -31,7 +31,95 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v10.6.0';
+  const VERSION = 'v10.6.1';
+
+  // v10.6.1 HOTFIX: FEATURE_FLAGS must be declared BEFORE any synchronous IIFE
+  // that references it. The earliest reference is __v80ParkUI at line ~3398
+  // which runs synchronously at script load. The original AF-40 placement at
+  // L21971 caused 'Cannot access FEATURE_FLAGS before initialization' TDZ
+  // crash that broke the entire extension boot. Moved here.
+  const FEATURE_FLAGS = Object.freeze({
+    HOT_NOW_PANEL:   true,
+    MODMAIL_3COL:    true,
+    AI_HOLD_QUEUE:   true,
+    UNIVERSAL_UNDO:  true
+  });
+
+  // v10.6.1 HOTFIX: emergency debug dump callable from DevTools console.
+  // Installed at top of IIFE (before any code that might throw) so it's
+  // ALWAYS available even when the rest of the extension is broken.
+  // Usage from GAW page console: __gamDebugDump()
+  // Output: full diagnostic JSON + auto-copies to clipboard.
+  window.__gamDebugDump = async function gamDebugDump(){
+    const out = {
+      version: VERSION,
+      url: location.href,
+      ua: navigator.userAgent,
+      ts: Date.now(),
+      iso: new Date().toISOString(),
+      chrome_runtime_id: (chrome && chrome.runtime && chrome.runtime.id) || null,
+      chrome_runtime_lastError: (chrome && chrome.runtime && chrome.runtime.lastError && chrome.runtime.lastError.message) || null,
+      storage: {},
+      window_flags: {
+        __GAM_MT_LOADED: !!window.__GAM_MT_LOADED,
+        __GAM_AUTH_RESULT: window.__GAM_AUTH_RESULT || null
+      }
+    };
+    try {
+      const keys = ['gam_diag_log','gam_sw_boots','gam_error_counters','gam_maint_warning','gam_settings','gam_show_whats_new','gam_welcomed','gam_fallback_mode','gam_rpc_log'];
+      const r = await chrome.storage.local.get(keys);
+      // Mask token values in gam_settings -- never put tokens on clipboard
+      if (r && r.gam_settings) {
+        const s = Object.assign({}, r.gam_settings);
+        ['workerModToken','leadModToken'].forEach(k => {
+          if (s[k] && typeof s[k] === 'string') {
+            s[k] = '***masked(len=' + s[k].length + ')***';
+          }
+        });
+        r.gam_settings = s;
+      }
+      // Trim diag log to last 50 entries to keep clipboard sane
+      if (r && Array.isArray(r.gam_diag_log)) {
+        r.gam_diag_log = r.gam_diag_log.slice(-50);
+      }
+      // Trim sw_boots to last 20
+      if (r && Array.isArray(r.gam_sw_boots)) {
+        r.gam_sw_boots = r.gam_sw_boots.slice(-20);
+      }
+      // Trim rpc_log to last 30
+      if (r && Array.isArray(r.gam_rpc_log)) {
+        r.gam_rpc_log = r.gam_rpc_log.slice(-30);
+      }
+      out.storage = r;
+    } catch (e) {
+      out.storage_error = String(e && e.message || e);
+    }
+    const json = JSON.stringify(out, null, 2);
+    console.log('%c[gam-debug-dump]', 'color:#ff9933;font-weight:700', out);
+    // Three-layer clipboard fallback (per CLAUDE.md rule 9 browser-console pattern)
+    let copied = null;
+    try { if (typeof copy === 'function') { copy(json); copied = 'copy()'; } } catch(_){}
+    if (!copied) {
+      try { if (navigator.clipboard && document.hasFocus()) { await navigator.clipboard.writeText(json); copied = 'clipboard API'; } } catch(_){}
+    }
+    if (!copied) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = json;
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (ok) copied = 'execCommand fallback';
+      } catch(_){}
+    }
+    console.log(copied
+      ? '%c[gam-debug-dump] copied to clipboard via ' + copied + ' -- paste it back to chat'
+      : '%c[gam-debug-dump] CLIPBOARD COPY FAILED -- select the JSON above manually',
+      'color:' + (copied ? '#3dd68c' : '#f04040') + ';font-weight:700');
+    return out;
+  };
 
   // AF-03 Rule 7: global error handlers for unhandled promise rejections and errors.
   // Writes to chrome.storage.local gam_diag_log (same shape as _diagLog).
@@ -21965,15 +22053,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // fixed-position banner with the failure reason + a "Force re-hydrate"
   // button that triggers the same SW-vault resync the popup uses. No
   // dependency on the rest of init having run -- pure DOM, no helpers.
-  // AF-40 (Rule 119): FEATURE_FLAGS const -- compile-time feature removability gates.
-  // Each flag guards only the entry-point wire-up, not internal call sites.
-  // Disable a feature by setting its flag to false and redeploying.
-  const FEATURE_FLAGS = Object.freeze({
-    HOT_NOW_PANEL:   true,
-    MODMAIL_3COL:    true,
-    AI_HOLD_QUEUE:   true,
-    UNIVERSAL_UNDO:  true
-  });
+  // AF-40 (Rule 119): FEATURE_FLAGS hoisted to top of IIFE (see v10.6.1 HOTFIX
+  // comment at the file head). Original location replaced with this no-op
+  // marker to preserve audit trail.
 
   // AF-30 (Rule 90): LOW_RESOURCE_MODE -- detected at init time via battery/memory signals.
   // When true: animations disabled (CSS class), ambient prefetch skipped, auto-analysis skipped.
