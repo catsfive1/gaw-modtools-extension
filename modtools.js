@@ -31,13 +31,93 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v10.5.1';
+  const VERSION = 'v10.6.0';
+
+  // AF-03 Rule 7: global error handlers for unhandled promise rejections and errors.
+  // Writes to chrome.storage.local gam_diag_log (same shape as _diagLog).
+  // Uses window (not self) -- content scripts live in the page's window context.
+  window.addEventListener('unhandledrejection', function(event) {
+    const reason = event.reason;
+    const msg = (reason && reason.message) ? reason.message : String(reason);
+    console.warn('[ModTools] Unhandled rejection:', msg);
+    try {
+      if (chrome && chrome.storage && chrome.storage.local) {
+        const entry = { ts: Date.now(), iso: new Date().toISOString(), cat: 'unhandledrejection', msg, v: VERSION };
+        chrome.storage.local.get('gam_diag_log').then(function(r) {
+          const log = (r.gam_diag_log || []).slice(-499);
+          log.push(entry);
+          chrome.storage.local.set({ gam_diag_log: log }).catch(function() {});
+        }).catch(function() {});
+      }
+    } catch (_) {}
+  });
+
+  window.addEventListener('error', function(event) {
+    const msg = (event.error && event.error.message) ? event.error.message : (event.message || String(event));
+    console.warn('[ModTools] Uncaught error:', msg);
+    try {
+      if (chrome && chrome.storage && chrome.storage.local) {
+        const entry = { ts: Date.now(), iso: new Date().toISOString(), cat: 'uncaught-error', msg, v: VERSION };
+        chrome.storage.local.get('gam_diag_log').then(function(r) {
+          const log = (r.gam_diag_log || []).slice(-499);
+          log.push(entry);
+          chrome.storage.local.set({ gam_diag_log: log }).catch(function() {});
+        }).catch(function() {});
+      }
+    } catch (_) {}
+  });
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
   // defined). The runtime-message handler below uses this; window exposure
   // is a deprecation shim only.
   let _rehydrateImpl = async function(){ return { ok:false, error:'rehydrate not initialized yet' }; };
+
+  // AF-19 (Rule 57): gamInstallType -- lazy-init install type from background via RPC.
+  // Used to gate verbose dev-only console.warns. Cached after first call.
+  let _gamInstallType = null;
+  async function _getInstallType() {
+    if (_gamInstallType !== null) return _gamInstallType;
+    try {
+      const r = await rpcCall('gamInstallType', {});
+      _gamInstallType = (r && r.ok && r.data && r.data.installType) || 'unknown';
+    } catch(_) { _gamInstallType = 'unknown'; }
+    return _gamInstallType;
+  }
+
+  // AF-26 (Rule 77): scheduleIdle -- use requestIdleCallback when available;
+  // fall back to setTimeout for environments that don't support it.
+  // Used for 8 non-critical boot tasks that can defer to browser idle time.
+  function scheduleIdle(fn, timeoutMs) {
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(fn, { timeout: timeoutMs });
+    } else {
+      setTimeout(fn, timeoutMs);
+    }
+  }
+
+  // AF-26 (Rule 78): module-scoped debounce + throttle helpers.
+  // debounce: collapses rapid calls into one fire after `ms` ms of silence.
+  // throttle: allows at most one call per `ms` ms.
+  // The scoped debounce inside SharedMod (formerly ~L21971) references this
+  // one and its local copy is removed to avoid duplication.
+  function debounce(fn, ms) {
+    var t;
+    return function() {
+      var a = arguments;
+      clearTimeout(t);
+      t = setTimeout(function() { fn.apply(null, a); }, ms);
+    };
+  }
+  function throttle(fn, ms) {
+    var last = 0;
+    return function() {
+      var now = Date.now();
+      if (now - last < ms) return;
+      last = now;
+      fn.apply(null, arguments);
+    };
+  }
 
   // ============================================================================
   // v8.6.5: diagnostic ring buffer for hard-to-reproduce bugs
@@ -50,23 +130,35 @@
   const _DIAG_KEY = 'gam_diag_log';
   const _DIAG_MAX = 500;
 
-  function _diagLog(category, message, extra) {
+  // AF-17 (Rule 49): _diagLog now accepts optional `level` param ('info'|'warn'|'error').
+  // Schema: { ts, iso, level, source (renamed from cat), msg, ctx (renamed from extra), stack, v }.
+  // Backward-compat: old callers that pass 3 positional args still work -- level defaults to 'info'.
+  // warn/error entries are relayed to background via sendMessage for cross-process diag.
+  function _diagLog(category, message, extra, level) {
+    var diagLevel = (level === 'warn' || level === 'error') ? level : 'info';
     let stack = null;
-    if (category === 'sticky' || category === 'auth-modal' || category === 'modPost') {
+    if (diagLevel === 'error' || category === 'sticky' || category === 'auth-modal' || category === 'modPost') {
       try { stack = (new Error()).stack; } catch (_){}
     }
     const entry = {
       ts: Date.now(),
       iso: new Date().toISOString(),
+      level: diagLevel,
+      source: category,   // Rule 49: renamed cat -> source; cat kept as alias for compat
       cat: category,
       msg: String(message || ''),
+      ctx: extra || null, // Rule 49: renamed extra -> ctx; extra kept as alias for compat
       extra: extra || null,
       stack: stack ? stack.split('\n').slice(2, 8).join('\n').replace(/https?:\/\/[^/]+/g, '') : null,
       v: typeof VERSION !== 'undefined' ? VERSION : '?'
     };
     _diagBuffer.push(entry);
     if (_diagBuffer.length > _DIAG_MAX) _diagBuffer.shift();
-    try { console.log('[gam-diag][' + category + ']', message, extra || ''); } catch (_){}
+    try { console.log('[gam-diag][' + diagLevel + '][' + category + ']', message, extra || ''); } catch (_){}
+    // Relay warn/error to background for cross-process diag (Rule 49)
+    if ((diagLevel === 'warn' || diagLevel === 'error') && typeof chrome !== 'undefined' && chrome && chrome.runtime && chrome.runtime.sendMessage) {
+      try { chrome.runtime.sendMessage({ type: 'gam_diag', entry: entry }).catch(function(){}); } catch(_){}
+    }
     // Fire-and-forget persist
     try {
       if (chrome && chrome.storage && chrome.storage.local) {
@@ -361,7 +453,8 @@
       }
 
       // Re-inject badges and action strips on any page
-      setTimeout(()=>{
+      // AF-26 (Rule 77): scheduleIdle -- badge injection is cosmetic, can defer to idle
+      scheduleIdle(function(){
         try{ injectBadges(); injectAllStrips(); }catch(e){}
       }, 900);
 
@@ -376,9 +469,18 @@
     // Hook History API
     const _origPush=history.pushState.bind(history);
     const _origReplace=history.replaceState.bind(history);
-    history.pushState=function(...a){ _origPush(...a); setTimeout(_handleNav,150); };
-    history.replaceState=function(...a){ _origReplace(...a); setTimeout(_handleNav,150); };
-    window.addEventListener('popstate',()=>setTimeout(_handleNav,150));
+    // AF-33 (Rule 97): wrap _handleNav in safe shim -- on throw, close panels + log;
+    // do NOT reload (Rule 97 prohibits location.reload for recoverable errors).
+    function _safeHandleNav(){
+      try { _handleNav(); }
+      catch(e) {
+        try { _diagLog('spa-nav', '_handleNav threw on nav', { err: String(e && e.message || e) }); } catch(_){}
+        try { closeAllPanels(); } catch(_){}
+      }
+    }
+    history.pushState=function(...a){ _origPush(...a); setTimeout(_safeHandleNav,150); };
+    history.replaceState=function(...a){ _origReplace(...a); setTimeout(_safeHandleNav,150); };
+    window.addEventListener('popstate',()=>setTimeout(_safeHandleNav,150));
     console.log('[ModTools] \u{1F517} SPA watcher active');
   }
 
@@ -532,7 +634,8 @@
     });
     try {
       if (r && r.ok) {
-        rpcCall('modmailTrackResponse', {
+        // AF-14 (Rule 40): queued:true -- if SW is down, enqueue for replay
+        const _mmTrackArgs = {
           thread_id:     (opts && opts.thread_id) || '',
           sender:        u,
           subject:       subject || '',
@@ -540,7 +643,23 @@
           ai_used:       (opts && opts.ai_used) ? 1 : 0,
           ai_tone:       (opts && opts.ai_tone) || null,
           sent_at:       Date.now()
-        }).catch(() => {});  // fire-and-forget
+        };
+        rpcCall('modmailTrackResponse', _mmTrackArgs).catch(function(e) {
+          // On failure (including SW death), enqueue for later replay
+          try { _enqueueRpc('modmailTrackResponse', _mmTrackArgs); } catch(_){}
+        });
+        // AF-28 (Rule 83): invalidate modmail draft cache on send success.
+        // Stale draft for this thread should not appear next time the popover opens.
+        if (opts && opts.thread_id) {
+          try {
+            const _threadId = opts.thread_id;
+            chrome.storage.session.get('gam_modmail_drafts').then(function(out) {
+              const cache = (out && out.gam_modmail_drafts) || {};
+              delete cache[_threadId];
+              chrome.storage.session.set({ gam_modmail_drafts: cache }).catch(function(){});
+            }).catch(function(){});
+          } catch(_){}
+        }
       }
     } catch (_) { /* never block the caller */ }
     return r;
@@ -1090,10 +1209,11 @@
     const __axCounter = __uxOn() ? { tabindex: '0', role: 'status', 'aria-live': 'polite' } : {};
     const counter = el('div', { cls:'gam-bug-report-counter', id:'gam-bug-counter', ...__axCounter }, '0 / 2000 (min 20)');
     body.appendChild(counter);
-    ta.addEventListener('input', () => {
+    // AF-26 (Rule 78): V3 debounce 50ms -- char counter DOM write on every keystroke
+    ta.addEventListener('input', debounce(function() {
       const n = ta.value.length;
       counter.textContent = `${n} / 2000 (min 20)`;
-    });
+    }, 50));
 
     const snapRow = el('label', { cls:'gam-bug-report-snaprow' });
     const snapCb = el('input', { type:'checkbox', id:'gam-bug-snap', checked:'checked' });
@@ -1134,6 +1254,14 @@
         return clean;
       });
 
+      // E.2.7: enrich with diag log, install type, ext id (only when snapshot consent given)
+      let _bugDiagLog = [];
+      let _bugInstallType = _gamInstallType || 'unknown';
+      if (snapCb.checked) {
+        try { _bugDiagLog = _diagBuffer.slice(-100); } catch(_) {}
+        if (!_gamInstallType) { try { await _getInstallType(); _bugInstallType = _gamInstallType || 'unknown'; } catch(_) {} }
+      }
+
       const payload = {
         description: desc,
         include_snapshot: snapCb.checked,
@@ -1145,6 +1273,10 @@
         browser: navigator.userAgent,
         recent_actions: snapCb.checked ? recentActions : [],
         settings_redacted: snapCb.checked ? _scrubSecrets(_allSettings()) : {},
+        // E.2.7: diag enrichment fields
+        gam_diag_log: snapCb.checked ? _bugDiagLog : [],
+        install_type: _bugInstallType,
+        ext_id: (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id) || 'unknown',
         timestamp_ms: Date.now()
       };
 
@@ -1256,7 +1388,7 @@
     mailHoverHighlight: false,           // E2: off by default
     autoRefreshEnabled: true,            // E4: on by default
     autoRefreshIntervalMin: 60,          // refresh unfocused/idle pages every N min
-    autoUnstickyEnabled: false,          // v5.1.4: ON by default. v8.6.3: feature disabled because /sticky is a toggle endpoint that fires the wrong way against stale DOM. v8.6.4: default flipped to false so the dead toggle doesn't show as "active" in settings.
+    autoUnstickyEnabled: true,           // ASK-048: re-enabled. v8.6.3 regression fixed: DOM class removed after toggle so stale .stickied nodes don't cause double-fire on next tick.
     autoUnstickyMaxHours: 12,
     autoUnstickyUpvoteThreshold: 100,
     autoUnstickyUpvoteHours: 8,
@@ -1613,7 +1745,8 @@
               // Only NOW promote to RAM cache (write-then-promote ordering)
               _secretsCache[key] = value;
               // IDB backup (fire-and-forget; no longer the source of truth)
-              try { _authBackupPut(key, value).catch(()=>{}); } catch(_){}
+              // AF-19 (Rule 56): log IDB backup failure -- bare catch replaced
+              try { _authBackupPut(key, value).catch(function(e){ try { _diagLog('auth-backup', 'IDB backup write failed', { key: key, err: String(e) }); } catch(_){} }); } catch(_){}
             })
             .catch((e) => {
               console.error('[modtools v9.23.0] secret save FAILED for', key, e);
@@ -1633,7 +1766,8 @@
             const merged = { ...(res[K_SETTINGS] || {}), [key]: value };
             return chrome.storage.local.set({ [K_SETTINGS]: merged });
           })
-          .catch(() => {});
+          // AF-10 (Rule 30): log storage failure -- silent swallow removed
+          .catch(e => console.warn('[gam] setSetting failed', key, e));
       }
       return Promise.resolve();
     }
@@ -1693,7 +1827,8 @@
     } catch (e) { /* swallow -- retry next tick */ }
   }
   // Kick once after boot, then every 5 minutes. Always-on (cheap).
-  setTimeout(() => { pollTeamFeatures(); }, 6000);
+  // AF-26 (Rule 77): scheduleIdle for non-critical boot task
+  scheduleIdle(function() { pollTeamFeatures(); }, 6000);
   setInterval(() => { pollTeamFeatures(); }, 5 * 60 * 1000);
 
   // ╔══════════════════════════════════════════════════════════════════╗
@@ -1726,15 +1861,20 @@
   // When true, we DO NOT intercept native mod-action clicks. Mods can use
   // GAW's native UI as a recovery path if our UI ever breaks.
   let FallbackMode = false;
-  (function loadFallback(){
+  // AF-06 (Rule 16): gam_fallback_mode migrated from localStorage to safeGet/safeSet
+  // (chrome.storage.local). loadFallback is now async; FallbackMode defaults false
+  // until the async read resolves. This does not affect boot -- init() is also async.
+  (async function loadFallback(){
     try {
-      const v = localStorage.getItem('gam_fallback_mode');
-      FallbackMode = v === '1';
+      const v = await safeGet('gam_fallback_mode', '0');
+      FallbackMode = (v === '1' || v === true || v === 1);
+      // Also clear any legacy localStorage copy if present
+      try { if (localStorage.getItem('gam_fallback_mode') !== null) localStorage.removeItem('gam_fallback_mode'); } catch(_){}
     } catch(e){}
   })();
   function setFallbackMode(on){
     FallbackMode = !!on;
-    try { localStorage.setItem('gam_fallback_mode', FallbackMode ? '1' : '0'); } catch(e){}
+    try { safeSet('gam_fallback_mode', FallbackMode ? '1' : '0'); } catch(e){}
     // Hide/show our strips accordingly
     document.querySelectorAll('.gam-strip').forEach(s=>{
       s.style.display = FallbackMode ? 'none' : '';
@@ -1896,7 +2036,8 @@
       try { localStorage.setItem(this.ns, JSON.stringify(snap)); } catch(e){} // ALLOW_LOCALSTORAGE_REVIEW: CachedStore backing store
       try {
         if (typeof chrome !== 'undefined' && chrome && chrome.storage && chrome.storage.local){
-          chrome.storage.local.set({ [this.ns]: snap }).catch(function(){});
+          // AF-10 (Rule 30): log flush failure -- bare catch removed
+          chrome.storage.local.set({ [this.ns]: snap }).catch(function(e){ console.warn('[gam] CachedStore flush failed', this && this.ns, e); }.bind(this));
         }
       } catch(e){}
     }
@@ -2229,7 +2370,8 @@
     try {
       if (typeof chrome !== 'undefined' && chrome && chrome.storage && chrome.storage.local){
         // Fire-and-forget durable write.
-        chrome.storage.local.set({ [key]: value }).catch(function(){});
+        // AF-10 (Rule 30): log failure -- bare catch removed
+        chrome.storage.local.set({ [key]: value }).catch(function(e){ console.warn('[gam] syncMemSet failed', key, e); });
       }
     } catch(e){}
     if (PAGE_SAFE_KEYS.has(key)){
@@ -3122,7 +3264,8 @@
     try {
       function boot(){
         if (!__teamBoostOn() || !__hardeningOn()) return;
-        if (!getSetting('features.shadowQueue', false)) return;
+        // AF-10 (Rule 29): route through getFeatureEffective to respect team overrides
+        if (!getFeatureEffective('features.shadowQueue', false)) return;
         // Route gate: Shadow Queue only boots on Triage Console or /queue.
         const pg = __v80Page();
         if (!pg.queue && !pg.triage) return;
@@ -3253,9 +3396,12 @@
   // the single document-level click delegate, renders the modal, mounts
   // the senior status-bar chip, and runs the MH.every(30, ...) refresh.
   (function __v80ParkUI(){
+    // AF-40 (Rule 119): FEATURE_FLAGS gate at entry point for AI Hold Queue
+    if (!FEATURE_FLAGS.AI_HOLD_QUEUE) return;
     try {
       function isParkOn(){
-        return __teamBoostOn() && __hardeningOn() && getSetting('features.park', false);
+        // AF-10 (Rule 29): route through getFeatureEffective to respect team overrides
+        return __teamBoostOn() && __hardeningOn() && getFeatureEffective('features.park', false);
       }
 
       // ---- Modal --------------------------------------------------
@@ -4153,6 +4299,39 @@
     }, duration);
     return t;
   }
+  // AF-16 (Rule 48): snackWithActions -- extends showToast() to support
+  // action buttons (Retry, Ignore, etc.) inside the toast. Falls back to
+  // plain snack() when actions is empty/absent. snack() with no actions
+  // remains unchanged and always works.
+  function snackWithActions(msg, severity, actions, duration) {
+    if (!actions || !actions.length) {
+      try { snack(msg, severity || 'info'); } catch(_) {}
+      return;
+    }
+    var dur = (typeof duration === 'number' && duration > 0) ? duration : 8000;
+    if (!__uxOn()) {
+      // UX flag off: plain snack, actions are dropped
+      try { snack(msg, severity || 'info'); } catch(_) {}
+      return;
+    }
+    var t = showToast(msg, { kind: severity || 'info', duration: dur });
+    if (!t) return;
+    // Append action buttons inside the toast element
+    var btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:6px;margin-top:6px;justify-content:flex-end';
+    (actions || []).forEach(function(action) {
+      var btn = document.createElement('button');
+      btn.textContent = action.label || 'Action';
+      btn.style.cssText = 'padding:2px 8px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.15);color:inherit;border-radius:3px;cursor:pointer;font:inherit;font-size:10px';
+      btn.addEventListener('click', function() {
+        try { t.remove(); } catch(_) {}
+        try { if (typeof action.fn === 'function') action.fn(); } catch(e) {}
+      });
+      btnRow.appendChild(btn);
+    });
+    t.appendChild(btnRow);
+  }
+
   // --- end v8.1 ux ---
 
   // ===== END v8.1 =====
@@ -4274,6 +4453,47 @@
   // ── T11: Schema version + migration registry ─────────────────────
   const SCHEMA_VERSION = 2;
   const K_SCHEMA = 'gam_schema_version';
+
+  // v10.5.1 AF-07 Rule 19: required keys + their expected types for gam_settings
+  // shape validation. Only top-level scalar gates are checked; nested objects
+  // (autoDeathRowRules etc.) are arrays -- presence + Array.isArray is sufficient.
+  const SETTINGS_REQUIRED_SHAPE = {
+    autoRefreshEnabled:  'boolean',
+    workerModToken:      'string',
+    leadModToken:        'string',
+    isLeadMod:           'boolean',
+    hideSidebar:         'boolean',
+    tardsThreshold:      'number',
+    autoDeathRowRules:   'array',
+    autoTardRules:       'array',
+    'features.platformHardening': 'boolean',
+    'features.teamBoost':         'boolean'
+  };
+
+  // validateSettingsShape(obj) -- returns { ok:bool, missing:[], mistyped:[] }
+  // Called from runMigrations and exposed on window.__GAM_validateSettingsShape
+  // for the popup's "Repair settings" button via a chrome.runtime message.
+  function validateSettingsShape(obj) {
+    var missing = [];
+    var mistyped = [];
+    if (!obj || typeof obj !== 'object') {
+      return { ok: false, missing: Object.keys(SETTINGS_REQUIRED_SHAPE), mistyped: [] };
+    }
+    Object.keys(SETTINGS_REQUIRED_SHAPE).forEach(function(k) {
+      if (!(k in obj)) { missing.push(k); return; }
+      var expected = SETTINGS_REQUIRED_SHAPE[k];
+      if (expected === 'array') {
+        if (!Array.isArray(obj[k])) mistyped.push(k);
+      } else {
+        if (typeof obj[k] !== expected) mistyped.push(k);
+      }
+    });
+    return { ok: missing.length === 0 && mistyped.length === 0, missing: missing, mistyped: mistyped };
+  }
+
+  // Expose for popup relay (chrome.runtime.sendMessage 'repairSettings')
+  try { window.__GAM_validateSettingsShape = validateSettingsShape; } catch(_){}
+
   function runMigrations(){
     let current = 0;
     try { current = parseInt(localStorage.getItem(K_SCHEMA) || '0'); } catch(e){}
@@ -4308,6 +4528,40 @@
     // Future migrations go here (increment SCHEMA_VERSION + add block)
 
     try { localStorage.setItem(K_SCHEMA, String(SCHEMA_VERSION)); } catch(e){}
+
+    // v10.5.1 AF-07 Rule 19: corruption check on gam_settings AFTER migrations run.
+    // Reads from chrome.storage.local (the authoritative store for settings).
+    // On corruption: writes safe defaults for the bad keys and surfaces a snack.
+    try {
+      if (chrome && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(K_SETTINGS, function(res) {
+          try {
+            var stored = (res && res[K_SETTINGS]) || null;
+            var report = validateSettingsShape(stored);
+            if (report.ok) return;
+            console.warn('[ModTools AF-07] gam_settings corruption detected', report);
+            try { _diagLog('af07-repair', 'corruption detected', report); } catch(_){}
+
+            // Build a repair patch: fill missing/mistyped keys with DEFAULT_SETTINGS values.
+            var patch = Object.assign({}, stored || {});
+            var repaired = report.missing.concat(report.mistyped);
+            repaired.forEach(function(k) {
+              if (k in DEFAULT_SETTINGS) patch[k] = DEFAULT_SETTINGS[k];
+            });
+            chrome.storage.local.set({ [K_SETTINGS]: patch }, function() {
+              try { _diagLog('af07-repair', 'repair written', { keys: repaired }); } catch(_){}
+              console.log('[ModTools AF-07] settings repaired, affected keys:', repaired);
+              // Surface snack on the page so the mod sees it.
+              try {
+                snack('\u{1F527} Settings repaired (' + repaired.length + ' key(s) restored to defaults)', 'warn');
+              } catch(_){}
+            });
+          } catch(innerErr) {
+            console.warn('[ModTools AF-07] repair inner error', innerErr);
+          }
+        });
+      }
+    } catch(e){ console.warn('[ModTools AF-07] corruption check failed', e); }
   }
 
   try {
@@ -4379,7 +4633,8 @@
             delay: entry.delay, pattern: entry.pattern, evidenceKey: entry.evidenceKey
           },
           pageUrl: entry.url
-        }).catch(()=>{});
+        // AF-19 (Rule 56): log audit flush failure -- bare catch replaced
+        }).catch(function(e){ try { _diagLog('audit-flush', 'modAuditLog flush FAILED', { err: String(e) }); snack('Audit log flush failed', 'warn'); } catch(_){} });
       }
     } catch(e){}
   }
@@ -4502,6 +4757,19 @@
       try { snack('↩ Restored ' + last.target + ' from Death Row', 'success'); } catch(_){}
       try { logAction({ type: 'undo-dr-add', user: last.target, source: 'undo' }); } catch(_){}
       try { if (typeof refreshTriageConsole === 'function') refreshTriageConsole(); } catch(_){}
+    } else if (last.type === 'dr-remove') {
+      // AF-34 (Rule 101): undo DR remove -- re-add the user to Death Row
+      // CRITICAL FIX: addToDeathRow signature is (username, delayMs, reason, opts).
+      // Previous code passed last.reason as delayMs (NaN delay) and last.executeAt as reason.
+      // Now use stored delayMs; clamp to 72h minimum so expired entries still get re-queued.
+      try {
+        const _undoDelayMs = Math.max(last.delayMs || 0, 72 * 60 * 60 * 1000);
+        addToDeathRow(last.target, _undoDelayMs, last.reason || '');
+        try { rosterSetStatus(last.target, 'deathrow'); } catch(_){}
+        try { snack('↩ Re-queued ' + last.target + ' on Death Row', 'success'); } catch(_){}
+        try { logAction({ type: 'undo-dr-remove', user: last.target, source: 'undo' }); } catch(_){}
+        try { if (typeof refreshTriageConsole === 'function') refreshTriageConsole(); } catch(_){}
+      } catch(e) { try { snack('Undo DR-remove failed: ' + (e && e.message || e), 'error'); } catch(_){} }
     } else {
       try { snack('Cannot undo action type: ' + last.type, 'warn'); } catch(_){}
     }
@@ -4574,8 +4842,9 @@
         : '';
       row.innerHTML = '<div class="gam-sr-meta">'
         + '<span class="gam-sr-kind ' + kindCls + '">' + kindLabel + '</span>'
-        + '<span class="gam-sr-author">u/' + (item.author || '') + '</span>'
-        + '<span>' + (item.community || '') + '</span>'
+        // AF-22 (Rule 65): escapeHtml applied to API-derived author/community fields
+        + '<span class="gam-sr-author">u/' + escapeHtml(item.author || '') + '</span>'
+        + '<span>' + escapeHtml(item.community || '') + '</span>'
         + '<span>' + _spRelAge(item.created_at) + '</span>'
         + '</div>'
         + titleHtml
@@ -4606,7 +4875,8 @@
         const resp = await fetch(url.toString(), { headers: { 'X-Mod-Token': tok } });
         const data = await resp.json();
         if (!data.ok) {
-          listEl.innerHTML = '<div style="padding:10px;color:#f04040;font:11px monospace">Error: ' + (data.error || resp.status) + '</div>';
+          // AF-22 (Rule 65): escapeHtml on API error string
+          listEl.innerHTML = '<div style="padding:10px;color:#f04040;font:11px monospace">Error: ' + escapeHtml(String(data.error || resp.status)) + '</div>';
           return;
         }
         listEl.innerHTML = '';
@@ -4626,7 +4896,8 @@
         });
         if (metaEl) metaEl.textContent = total + ' result' + (total !== 1 ? 's' : '') + ' -- click or Enter to open';
       } catch (err) {
-        listEl.innerHTML = '<div style="padding:10px;color:#f04040;font:11px monospace">Search failed: ' + (err && err.message || err) + '</div>';
+        // AF-22 (Rule 65): escapeHtml on JS Error message (may contain attacker-influenced data)
+        listEl.innerHTML = '<div style="padding:10px;color:#f04040;font:11px monospace">Search failed: ' + escapeHtml(String(err && err.message || err)) + '</div>';
       }
     }
 
@@ -4958,15 +5229,25 @@
     // L1 Map cache — Decision #2: LRU capped at 500.
     const L1_MAX = 500;
     const l1Store = new Map();
+    // AF-28 (Rule 83): HOVER_CACHE_MS is the TTL for L1 entries.
+    // l1Get returns null for entries older than HOVER_CACHE_MS (30 min).
+    const HOVER_CACHE_MS = 30 * 60 * 1000;
     function l1Get(k) {
       if (!l1Store.has(k)) return null;
       const v = l1Store.get(k);
+      // AF-28 (Rule 83): time-based eviction -- stale entries return null
+      if (v && v.fetchedAt && (Date.now() - v.fetchedAt) > HOVER_CACHE_MS) {
+        l1Store.delete(k);
+        return null;
+      }
       l1Store.delete(k); l1Store.set(k, v);   // LRU touch
       return v;
     }
     function l1Set(k, v) {
+      // AF-28 (Rule 83): stamp fetchedAt when storing so TTL check works
+      const entry = (v && typeof v === 'object') ? Object.assign({}, v, { fetchedAt: v.fetchedAt || Date.now() }) : v;
       if (l1Store.has(k)) l1Store.delete(k);
-      l1Store.set(k, v);
+      l1Store.set(k, entry);
       while (l1Store.size > L1_MAX) {
         const first = l1Store.keys().next().value;
         l1Store.delete(first);
@@ -5016,7 +5297,9 @@
       document.body.appendChild(state.rootEl);
 
       if (!state._escBound) {
-        document.addEventListener('keydown', function(e) {
+        // AF-27 (Rule 80): store handler ref so closeAllPanels can remove it,
+        // preventing listener accumulation on SPA navigations that re-call _mount().
+        state._escHandler = function(e) {
           if (!state.open) return;
           if (e.key === 'Escape') {
             e.stopPropagation();
@@ -5032,7 +5315,8 @@
               _popStack();
             }
           }
-        }, true);   // capture phase
+        };
+        document.addEventListener('keydown', state._escHandler, true);   // capture phase
         state._escBound = true;
       }
 
@@ -5407,7 +5691,9 @@
       _lastViewed, _setLastViewed,
       l1Get, l1Set,
       get _currentAbort() { return state._currentAbort; },
-      get _stack() { return state._stack; }
+      get _stack() { return state._stack; },
+      // AF-27 (Rule 80): expose _state for closeAllPanels ESC handler cleanup
+      get _state() { return state; }
     };
   })();
   try { window.IntelDrawer = IntelDrawer; } catch(e) {}
@@ -5486,10 +5772,12 @@
       const thingType = opts && opts.seedData && opts.seedData.thingType ? opts.seedData.thingType : 'post';
       return {
         APPROVE:    async () => { try { await apiApprove(thingId, thingType); snack('Approved', 'success'); logAction({type:'approve', id:thingId, source:'v7-nba'}); } catch(e){} close(); },
-        REMOVE:     async () => { try { await apiRemove(thingId, thingType); snack('Removed', 'success'); logAction({type:'remove', id:thingId, source:'v7-nba'}); } catch(e){} close(); },
-        SPAM:       async () => { try { await apiRemove(thingId, thingType); snack('Removed (spam)', 'success'); logAction({type:'remove-spam', id:thingId, source:'v7-nba'}); } catch(e){} close(); },
+        // AF-34 (Rule 101): withUndo wraps apiRemove -- inverse is apiApprove (Tier B, 5s window)
+        REMOVE:     async () => { try { await withUndo(() => apiRemove(thingId, thingType), { tier: 'B', label: 'Removed ' + thingType, inverse: () => apiApprove(thingId, thingType) }); logAction({type:'remove', id:thingId, source:'v7-nba'}); } catch(e){ snack('Remove failed', 'error'); } close(); },
+        SPAM:       async () => { try { await withUndo(() => apiRemove(thingId, thingType), { tier: 'B', label: 'Removed (spam)', inverse: () => apiApprove(thingId, thingType) }); logAction({type:'remove-spam', id:thingId, source:'v7-nba'}); } catch(e){ snack('Remove failed', 'error'); } close(); },
         LOCK:       () => { close(); },
-        STICKY:     async () => { try { if (typeof apiSticky === 'function') await apiSticky(thingId); snack('Sticky toggled', 'success'); } catch(e){} close(); },
+        // AF-34 (Rule 101): withUndo wraps apiSticky -- inverse is identical call (toggle endpoint)
+        STICKY:     async () => { try { await withUndo(() => apiSticky(thingId), { tier: 'B', label: 'Sticky toggled', inverse: () => apiSticky(thingId) }); } catch(e){ snack('Sticky failed', 'error'); } close(); },
         ESCALATE:   () => { close(); },
         DO_NOTHING: () => { close(); }
       };
@@ -6176,7 +6464,8 @@
         IntelDrawer.open({
           kind: 'User', id: u,
           seedData: { username: u },
-          fallback: () => { location.href = href; }
+          // AF-22 (Rule 64): gate href through allowlistedUrl before navigation
+          fallback: () => { const _safeHref = allowlistedUrl(href); if (_safeHref) { location.href = _safeHref; } else { console.warn('[modtools] fallback href rejected by allowlist:', href); } }
         });
       }, true);
     }
@@ -6442,7 +6731,13 @@
     _executeUndo(slot.clientOpId, slot.inverse, slot.label);
   }, { capture: true });
 
+  // AF-40 (Rule 119): FEATURE_FLAGS.UNIVERSAL_UNDO gates the undo infrastructure.
+  // withUndo is the entry point -- if flag is off, it behaves as a pass-through.
   async function withUndo(actionFn, opts) {
+    if (!FEATURE_FLAGS.UNIVERSAL_UNDO) {
+      // Flag off: execute action directly, no undo
+      return actionFn();
+    }
     const tier = opts.tier || 'A';
     const label = opts.label || 'Action';
     const undoLabel = opts.undoLabel || 'Undo';
@@ -6507,6 +6802,20 @@
     document.querySelectorAll(SEL).forEach(e => {
       try { if (e._gamFocusCleanup) { e._gamFocusCleanup(); e._gamFocusCleanup = null; } } catch(err){}
       try { if (e._gamEscHandler) { document.removeEventListener('keydown', e._gamEscHandler, true); e._gamEscHandler = null; } } catch(err){}
+      // AF-27 (Rule 80): when sweeping #gam-intel-backdrop, also remove the
+      // IntelDrawer ESC handler stored on the module-scoped `state` object.
+      if (e.id === 'gam-intel-backdrop') {
+        try {
+          if (typeof IntelDrawer !== 'undefined' && IntelDrawer._state) {
+            const _ids = IntelDrawer._state;
+            if (_ids._escHandler) {
+              document.removeEventListener('keydown', _ids._escHandler, true);
+              _ids._escHandler = null;
+              _ids._escBound = false;
+            }
+          }
+        } catch(_){}
+      }
       e.remove();
     });
     panelOpen=null;
@@ -6556,7 +6865,8 @@
     } catch(_){}
   }
   // Kick the sweep on init + every 30s (visibility-gated).
-  setTimeout(_gamOrphanBackdropSweep, 1500);
+  // AF-26 (Rule 77): scheduleIdle for non-critical boot task
+  scheduleIdle(_gamOrphanBackdropSweep, 1500);
   setInterval(()=>{ if (document.visibilityState === 'visible') _gamOrphanBackdropSweep(); }, 30_000);
   // v9.24.0 (Commander 2026-05-08): one-shot extension-orphan handler.
   // After the extension is reloaded, every in-flight ModChat / RPC call in
@@ -6566,6 +6876,33 @@
   // of-page banner with a [Reload page] button, and silently swallow every
   // subsequent matching error snack from any caller.
   let _gamExtOrphaned = false;
+  // AF-15 (Rule 45): SW-restart snack with Retry + Dismiss. Fires when rpcCall
+  // returns no response after the 1.5s auto-retry. Fixed-bottom, deduped by ID.
+  function _gamShowSwRestartSnack(rpcName) {
+    if (document.getElementById('gam-sw-restart-snack')) return;
+    const snackEl = document.createElement('div');
+    snackEl.id = 'gam-sw-restart-snack';
+    snackEl.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483640;background:#1a1c20;color:#eee;border:1px solid #444;border-radius:6px;padding:10px 14px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.5);display:flex;align-items:center;gap:10px;max-width:360px';
+    const msgEl = document.createElement('span');
+    msgEl.textContent = 'ModTools background restarted -- click Retry to resume.';
+    const retryBtn = document.createElement('button');
+    retryBtn.textContent = 'Retry';
+    retryBtn.style.cssText = 'background:#4A9EFF;color:#fff;border:none;border-radius:3px;padding:4px 10px;cursor:pointer;font-weight:600;white-space:nowrap';
+    retryBtn.addEventListener('click', function() {
+      try { snackEl.remove(); } catch(_){}
+      try { rpcCall(rpcName, {}); } catch(_){}
+    });
+    const dismissBtn = document.createElement('button');
+    dismissBtn.textContent = 'Dismiss';
+    dismissBtn.style.cssText = 'background:transparent;color:#9b9892;border:1px solid #5a5752;border-radius:3px;padding:4px 8px;cursor:pointer;white-space:nowrap';
+    dismissBtn.addEventListener('click', function() { try { snackEl.remove(); } catch(_){} });
+    snackEl.appendChild(msgEl);
+    snackEl.appendChild(retryBtn);
+    snackEl.appendChild(dismissBtn);
+    try { document.body.appendChild(snackEl); } catch(_){}
+    setTimeout(function() { try { snackEl.remove(); } catch(_){} }, 12000);
+  }
+
   function _gamShowExtOrphanedBanner(){
     if (_gamExtOrphaned) return;
     _gamExtOrphaned = true;
@@ -6889,7 +7226,8 @@
   }
 
   // Kick off initial pull + periodic refresh.  Fire-and-forget; no UI gating.
-  setTimeout(()=>{ pullPatternsFromCloud().then(changed => {
+  // AF-26 (Rule 77): scheduleIdle for non-critical boot task
+  scheduleIdle(function(){ pullPatternsFromCloud().then(function(changed) {
     if (changed && IS_USERS_PAGE && typeof refreshTriageConsole === 'function') refreshTriageConsole();
   }); }, 3000);
   setInterval(()=>{ pullPatternsFromCloud().then(changed => {
@@ -7957,7 +8295,8 @@ Analyze this comment against the community rules. Then write a brief, profession
           pv = document.createElement('div');
           pv.id = 'mc-ai-preview';
           pv.style.cssText = 'margin-top:8px;display:flex;flex-direction:column;gap:6px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px';
-          pv.innerHTML = '<div style="color:#ff9933;letter-spacing:.08em;text-transform:uppercase;font-size:10px">AI drafting 2 replies for u/' + targetUser.replace(/[<>"]/g,'') + '...</div>';
+          // AF-22 (Rule 65): escapeHtml replaces incomplete replace() strip
+          pv.innerHTML = '<div style="color:#ff9933;letter-spacing:.08em;text-transform:uppercase;font-size:10px">AI drafting 2 replies for u/' + escapeHtml(targetUser) + '...</div>';
           if (msgIn && msgIn.parentNode) msgIn.parentNode.insertBefore(pv, msgIn.nextSibling);
           // v9.23.0 - UAT-2 P1 fix: pass actual evidence + ban-history as
           // last_messages so the AI has real per-thread context, not just
@@ -7989,7 +8328,8 @@ Analyze this comment against the community rules. Then write a brief, profession
           });
           if (!ar || !ar.ok || !ar.data || !ar.data.ok || !Array.isArray(ar.data.replies) || ar.data.replies.length === 0){
             const reason = (ar && ar.data && ar.data.error) || (ar && ar.error) || 'unknown';
-            pv.innerHTML = '<div style="color:#ff3b3b">AI suggest failed: ' + String(reason).replace(/[<>"]/g,'') + '</div>';
+            // AF-22 (Rule 65): escapeHtml on API reason string
+            pv.innerHTML = '<div style="color:#ff3b3b">AI suggest failed: ' + escapeHtml(String(reason)) + '</div>';
             return;
           }
           const replies = ar.data.replies;
@@ -8055,13 +8395,22 @@ Analyze this comment against the community rules. Then write a brief, profession
             const stored = (out && out.gam_macro_drafts) || {};
             stored[_mdKind + ':' + _mdUser] = {
               body: _mdVal, base_macro_id: _mdId, base_body: _mdVal,
-              modified_at: Date.now(), promote_count: (stored[_mdKind + ':' + _mdUser] || {}).promote_count || 0
+              // AF-28 (Rule 83): savedAt for TTL -- purge entries older than 24h on read
+              modified_at: Date.now(), savedAt: Date.now(),
+              promote_count: (stored[_mdKind + ':' + _mdUser] || {}).promote_count || 0
             };
+            // Purge stale entries (>24h) before saving
+            var _DRAFT_TTL = 24 * 60 * 60 * 1000;
+            var _now = Date.now();
+            Object.keys(stored).forEach(function(k) { if (stored[k] && stored[k].savedAt && (_now - stored[k].savedAt) > _DRAFT_TTL) delete stored[k]; });
             chrome.storage.session.set({ gam_macro_drafts: stored }).catch(function() {});
+            _mirrorDraftToLocal('gam_macro_drafts', stored); // E.3.4: mirror to local
           }).catch(function() {});
           if (!msgIn.dataset.gamMacroDraftAttached) {
             msgIn.dataset.gamMacroDraftAttached = '1';
-            msgIn.addEventListener('input', function() {
+            // AF-26 (Rule 78): V5 debounce 350ms -- macro draft save was
+            // firing a chrome.storage.session.get+set on every keystroke.
+            msgIn.addEventListener('input', debounce(function() {
               const _u2 = (username || '').toLowerCase();
               if (!_u2) return;
               chrome.storage.session.get('gam_macro_drafts').then(function(out2) {
@@ -8071,8 +8420,9 @@ Analyze this comment against the community rules. Then write a brief, profession
                 stored2[key2].body = msgIn.value;
                 stored2[key2].modified_at = Date.now();
                 chrome.storage.session.set({ gam_macro_drafts: stored2 }).catch(function() {});
+                _mirrorDraftToLocal('gam_macro_drafts', stored2); // E.3.4: mirror to local
               }).catch(function() {});
-            });
+            }, 350));
           }
         })();
       });
@@ -8085,6 +8435,51 @@ Analyze this comment against the community rules. Then write a brief, profession
     const aiErr = root.querySelector('#mc-ban-ai-err');
     const aiUseBtn = root.querySelector('#mc-ban-ai-use');
     let selectedDuration = 1;
+
+    // ASK-034: AI ban-summary preview before firing
+    const _banSummaryWrap = root.querySelector('#mc-ban-summary-wrap');
+    const _banSummaryPreview = root.querySelector('#mc-ban-summary-preview');
+    let _banSummaryTextarea = null;
+    let _banPreviewDebounce = null;
+    if (_banSummaryWrap && _banSummaryPreview) {
+      // Unhide the wrap and replace the static preview div with an editable textarea
+      _banSummaryWrap.style.display = '';
+      _banSummaryTextarea = document.createElement('textarea');
+      _banSummaryTextarea.id = 'mc-ban-summary-edit';
+      _banSummaryTextarea.rows = 3;
+      _banSummaryTextarea.style.cssText = 'width:100%;box-sizing:border-box;background:#0a0a0b;border:1px solid #2a2825;padding:6px 8px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px;color:#e8e6e1;line-height:1.4;resize:vertical;';
+      _banSummaryTextarea.placeholder = '(preview loads after you write a reason...)';
+      _banSummaryPreview.replaceWith(_banSummaryTextarea);
+      // Debounced preview: fires 1.2s after last keystroke in reason field
+      function _triggerBanPreview() {
+        clearTimeout(_banPreviewDebounce);
+        _banPreviewDebounce = setTimeout(async function() {
+          if (!msgIn) return;
+          const previewReason = (msgIn.value || '').trim();
+          if (previewReason.length < 10) return;
+          const previewViol = vSel ? vSel.value : 'other';
+          const previewDurLabel = selectedDuration === -1 ? 'PERMA' : (selectedDuration + 'h');
+          try {
+            const ar = await rpcCall('aiSummarizeBan', {
+              username, violation: previewViol, duration_label: previewDurLabel,
+              reason: previewReason.slice(0, 800), evidence_url: evidenceLink || '',
+              preview_only: true
+            });
+            if (ar && ar.ok && ar.data && typeof ar.data.summary === 'string') {
+              if (_banSummaryTextarea && !_banSummaryTextarea.dataset.userEdited) {
+                _banSummaryTextarea.value = ar.data.summary.slice(0, 200);
+              }
+            }
+          } catch(_) { /* preview is best-effort, never block */ }
+        }, 1200);
+      }
+      if (msgIn) msgIn.addEventListener('input', _triggerBanPreview);
+      if (_banSummaryTextarea) {
+        _banSummaryTextarea.addEventListener('input', function() {
+          _banSummaryTextarea.dataset.userEdited = '1';
+        });
+      }
+    }
 
     // Render custom history list
     function renderCustomHist(){
@@ -8146,6 +8541,19 @@ Analyze this comment against the community rules. Then write a brief, profession
         b.classList.toggle('gam-mc-dur-active', parseInt(b.dataset.v)===v);
       });
       updateGoLabel();
+      // ASK-039: hide modmail checkbox on warning-path ban (duration===0)
+      if (modmailCb) {
+        if (v === 0) {
+          modmailCb.disabled = true;
+          modmailCb.checked = false;
+          const lbl = modmailCb.closest('label');
+          if (lbl) lbl.style.opacity = '0.4';
+        } else {
+          modmailCb.disabled = false;
+          const lbl = modmailCb.closest('label');
+          if (lbl) lbl.style.opacity = '';
+        }
+      }
     }
     durRow.addEventListener('click', e=>{
       const b = e.target.closest('.gam-mc-dur');
@@ -8206,7 +8614,8 @@ Analyze this comment against the community rules. Then write a brief, profession
 
         async function prefetchAndCite(){
           if (!__teamBoostOn() || !__hardeningOn()) return;
-          if (!getSetting('features.precedentCiting', false)) return;
+          // AF-10 (Rule 29): route through getFeatureEffective to respect team overrides
+          if (!getFeatureEffective('features.precedentCiting', false)) return;
           const ruleRef = getCurrentBanRuleRef();
           if (!ruleRef) return;
           // Don't clobber user edits: the textarea must still match the
@@ -8445,6 +8854,37 @@ Analyze this comment against the community rules. Then write a brief, profession
       // duration === -1 (perma) \u2192 days=0 per GAW contract
       // duration > 0 \u2192 days=duration
       const daysForApi = duration === -1 ? 0 : duration;
+
+      // ASK-031/032: ban-preflight + audit chain + perma-ban duration
+      // Compute duration_hours for the worker: perma uses 5*365*24=43800 + permanent:true
+      // so ban-preflight never rejects duration_hours<=0 on the perma path.
+      const _isPerma = duration === -1;
+      const _hoursForApi = _isPerma ? 43800 : (daysForApi * 24);
+      let _banAuditId = null;
+      try {
+        statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Preflight check...</div>`;
+        const pf = await rpcCall('modBanPreflight', {
+          target: username,
+          duration_hours: _hoursForApi,
+          permanent: _isPerma,
+          reason: fullReason.slice(0, 800)
+        });
+        if (!pf || !pf.ok) {
+          const retryMsg = (pf && pf.retry_after_seconds)
+            ? ' \u2014 rate limited, retry in ' + pf.retry_after_seconds + 's'
+            : (pf && pf.error ? ' \u2014 ' + pf.error : '');
+          statusEl.innerHTML = '<div class="gam-mc-banner gam-mc-banner-red">\u26a0 Ban blocked by preflight' + retryMsg + '</div>';
+          goBtn.disabled = false;
+          snack('Ban blocked by preflight' + retryMsg, 'error');
+          return;
+        }
+        _banAuditId = (pf && pf.audit_id) || null;
+      } catch(pfErr) {
+        // Preflight failure is non-fatal \u2014 log and proceed so a worker outage
+        // doesn't block the mod from banning. The audit chain will have a gap.
+        try { console.warn('[modtools] ban-preflight failed (non-fatal):', pfErr && pfErr.message || pfErr); } catch(_){}
+      }
+
       // V11 #5: wrap apiBan with undo middleware (Tier A, 20s window)
       const _banTarget = username;
       const _banDays = daysForApi;
@@ -8462,6 +8902,15 @@ Analyze this comment against the community rules. Then write a brief, profession
           }
         }
       );
+
+      // ASK-031: fire-and-forget ban-confirm to close the audit chain
+      if (_banAuditId) {
+        rpcCall('modBanConfirm', {
+          audit_id: _banAuditId,
+          gaw_response_status: (r && r.status) || 0,
+          gaw_response_ok: !!(r && r.ok)
+        }).catch(function() {});
+      }
 
       if (!r || !r.ok){
         const hint = (r && r.loginRedirect) ? ' \u2014 SESSION EXPIRED, please re-login' : '';
@@ -8484,18 +8933,24 @@ Analyze this comment against the community rules. Then write a brief, profession
         const dateTag = new Date().toISOString().slice(0,10);
         const violLabel = (VIOLATIONS.find(v => v.id === violation) || {}).label || violation || 'rule violation';
         const durLabel = duration === -1 ? 'PERMA' : (duration + 'h');
-        // Try AI summary; fall back to first 14 words of fullReason.
+        // ASK-034: prefer mod-edited preview summary; fall back to fresh AI call; then word truncation.
         let summary14 = '';
-        try {
-          const ar = await rpcCall('aiSummarizeBan', {
-            username, violation, duration_label: durLabel,
-            reason: fullReason.slice(0, 800),
-            evidence_url: evidenceLink || ''
-          });
-          if (ar && ar.ok && ar.data && typeof ar.data.summary === 'string') {
-            summary14 = String(ar.data.summary).slice(0, 200);
-          }
-        } catch(_aiErr) { /* best-effort */ }
+        // If mod edited the preview textarea, use that text directly (no second AI call).
+        if (_banSummaryTextarea && (_banSummaryTextarea.value || '').trim()) {
+          summary14 = _banSummaryTextarea.value.trim().slice(0, 200);
+        }
+        if (!summary14) {
+          try {
+            const ar = await rpcCall('aiSummarizeBan', {
+              username, violation, duration_label: durLabel,
+              reason: fullReason.slice(0, 800),
+              evidence_url: evidenceLink || ''
+            });
+            if (ar && ar.ok && ar.data && typeof ar.data.summary === 'string') {
+              summary14 = String(ar.data.summary).slice(0, 200);
+            }
+          } catch(_aiErr) { /* best-effort */ }
+        }
         if (!summary14) {
           // Local fallback: take first ~14 words of the message
           summary14 = String(fullReason).replace(/\s+/g, ' ').trim().split(/\s+/).slice(0, 14).join(' ');
@@ -8686,6 +9141,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       renderHistory(info);
       // Invalidate intel cache so the next hover reflects the new note
       IntelCache.delete(username.toLowerCase());
+      // AF-28 (Rule 83): also flush IntelDrawer L1 entry for this user
+      try { if (IntelDrawer && typeof IntelDrawer.l1Get === 'function') { IntelDrawer.l1Set(username.toLowerCase(), null); } } catch(_){}
       statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-green">\u2713 Note appended (history now ${info.entries.length} entr${info.entries.length===1?'y':'ies'})</div>`;
       snack(`Note saved for ${username}`, 'success');
       // v7.1: clear persisted draft (local + cloud) on successful send.
@@ -8733,6 +9190,9 @@ Analyze this comment against the community rules. Then write a brief, profession
     const tpl = root.querySelector('#mc-msg-tpl');
     const subj = root.querySelector('#mc-msg-subj');
     const body = root.querySelector('#mc-msg-body');
+    // ASK-038: track which AI draft tone was last selected so modmailTrackResponse
+    // receives ai_used=1 + ai_tone when a mod sends an AI-drafted reply.
+    let _lastSelectedAiTone = null;
     // V10_BUGS/02: restore macro draft (mm_reply) if mod had edited a macro for this user
     (function() {
       const _mmrKind = 'mm_reply';
@@ -8810,7 +9270,8 @@ Analyze this comment against the community rules. Then write a brief, profession
           pv = document.createElement('div');
           pv.id = 'mc-msg-ai-preview';
           pv.style.cssText = 'margin-top:8px;display:flex;flex-direction:column;gap:6px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px';
-          pv.innerHTML = '<div style="color:#ff9933;letter-spacing:.08em;text-transform:uppercase;font-size:10px">AI drafting 2 replies for u/' + username.replace(/[<>"]/g,'') + '...</div>';
+          // AF-22 (Rule 65): escapeHtml replaces incomplete replace() strip
+          pv.innerHTML = '<div style="color:#ff9933;letter-spacing:.08em;text-transform:uppercase;font-size:10px">AI drafting 2 replies for u/' + escapeHtml(username) + '...</div>';
           root.querySelector('#mc-msg-status').appendChild(pv);
           const ar = await rpcCall('modmailAiReplyForThread', {
             sender: username,
@@ -8819,7 +9280,8 @@ Analyze this comment against the community rules. Then write a brief, profession
           });
           if (!ar || !ar.ok || !ar.data || !ar.data.ok || !Array.isArray(ar.data.replies)){
             const reason = (ar && ar.data && ar.data.error) || 'unknown';
-            pv.innerHTML = '<div style="color:#ff3b3b">AI suggest failed: ' + String(reason).replace(/[<>"]/g,'') + '</div>';
+            // AF-22 (Rule 65): escapeHtml on API reason string
+            pv.innerHTML = '<div style="color:#ff3b3b">AI suggest failed: ' + escapeHtml(String(reason)) + '</div>';
             return;
           }
           pv.innerHTML = '';
@@ -8843,6 +9305,8 @@ Analyze this comment against the community rules. Then write a brief, profession
             useBtn.style.cssText = 'margin-top:4px;background:transparent;border:1px solid #ff9933;color:#ff9933;padding:3px 8px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase';
             useBtn.addEventListener('click', () => {
               if (body) body.value = rp.body;
+              // ASK-038: stash tone so modmailTrackResponse gets ai_used+ai_tone on send
+              _lastSelectedAiTone = rp.tone || null;
               try { snack('✓ Reply loaded', 'success'); } catch(_){}
               pv.remove();
             });
@@ -8866,13 +9330,20 @@ Analyze this comment against the community rules. Then write a brief, profession
             const stored = (out && out.gam_macro_drafts) || {};
             stored[_mmKind + ':' + _mmUser] = {
               body: _mmVal, base_macro_id: _mmId, base_body: _mmVal,
-              modified_at: Date.now(), promote_count: (stored[_mmKind + ':' + _mmUser] || {}).promote_count || 0
+              // AF-28 (Rule 83): savedAt for TTL
+              modified_at: Date.now(), savedAt: Date.now(),
+              promote_count: (stored[_mmKind + ':' + _mmUser] || {}).promote_count || 0
             };
+            var _DRAFT_TTL2 = 24 * 60 * 60 * 1000;
+            var _now2 = Date.now();
+            Object.keys(stored).forEach(function(k) { if (stored[k] && stored[k].savedAt && (_now2 - stored[k].savedAt) > _DRAFT_TTL2) delete stored[k]; });
             chrome.storage.session.set({ gam_macro_drafts: stored }).catch(function() {});
+            _mirrorDraftToLocal('gam_macro_drafts', stored); // E.3.4: mirror to local
           }).catch(function() {});
           if (!body.dataset.gamMacroDraftAttached) {
             body.dataset.gamMacroDraftAttached = '1';
-            body.addEventListener('input', function() {
+            // AF-26 (Rule 78): V5 debounce 350ms -- mm_reply macro draft save
+            body.addEventListener('input', debounce(function() {
               const _u3 = (username || '').toLowerCase();
               if (!_u3) return;
               chrome.storage.session.get('gam_macro_drafts').then(function(out3) {
@@ -8882,8 +9353,9 @@ Analyze this comment against the community rules. Then write a brief, profession
                 stored3[key3].body = body.value;
                 stored3[key3].modified_at = Date.now();
                 chrome.storage.session.set({ gam_macro_drafts: stored3 }).catch(function() {});
+                _mirrorDraftToLocal('gam_macro_drafts', stored3); // E.3.4: mirror to local
               }).catch(function() {});
-            });
+            }, 350));
           }
         })();
       });
@@ -8905,7 +9377,12 @@ Analyze this comment against the community rules. Then write a brief, profession
       const statusEl = root.querySelector('#mc-msg-status');
       btn.disabled = true;
       statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Sending...</div>`;
-      const r = await apiSendModMessage(username, subject, message);
+      // ASK-038: pass ai_used/ai_tone so modmailTrackResponse closes the AI learning loop
+      const _mmSendOpts = _lastSelectedAiTone
+        ? { ai_used: 1, ai_tone: _lastSelectedAiTone }
+        : { ai_used: 0, ai_tone: null };
+      const r = await apiSendModMessage(username, subject, message, _mmSendOpts);
+      _lastSelectedAiTone = null; // reset after send
       if (!r.ok){
         statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-red">\u{26A0} Send failed (status ${r.status}).</div>`;
         btn.disabled = false;
@@ -9006,8 +9483,9 @@ Analyze this comment against the community rules. Then write a brief, profession
         const q = btn.dataset.q;
         const statusEl = root.querySelector('#mc-quick-status');
         if (q==='watch'){
+          // AF-34 (Rule 101): withUndo on toggleWatch -- inverse is another toggleWatch call
           const nw = toggleWatch(username);
-          snack(nw ? `${username} watched` : `${username} unwatched`, nw?'warn':'success');
+          withUndo(() => Promise.resolve(nw), { tier: 'B', label: nw ? (username + ' watched') : (username + ' unwatched'), inverse: () => { toggleWatch(username); } });
           closeAllPanels();
           return;
         }
@@ -9534,6 +10012,9 @@ Analyze this comment against the community rules. Then write a brief, profession
             el('span',{cls:'gam-log-user'}, d.username),
             el('span',{cls:'gam-log-violation'}, 'Executes in '+timeUntil(d.executeAt)),
             el('button',{cls:'gam-btn gam-btn-small gam-btn-cancel', style:{marginLeft:'auto', padding:'2px 8px'}, onclick:()=>{
+              // AF-34 (Rule 101): record dr-remove for System A undo
+              // CRITICAL FIX: store delayMs so undo can call addToDeathRow(username, delayMs, reason) correctly
+              try { _recordUndoAction({ type: 'dr-remove', target: d.username, reason: d.reason, delayMs: (d.executeAt - (d.queuedAt || Date.now())), executeAt: d.executeAt }); } catch(_){}
               removeFromDeathRow(d.username);
               rosterSetStatus(d.username,'new');
               snack(d.username+' removed from death row','info');
@@ -9576,7 +10057,8 @@ Analyze this comment against the community rules. Then write a brief, profession
         }},'\u{1F4CB} Copy'),
         el('button',{cls:'gam-btn gam-btn-small gam-btn-danger', onclick:()=>{
           if(confirm('Clear all?')){
-            localStorage.removeItem(K.LOG);
+            // AF-06 (Rule 16): safeRemove replaces raw localStorage.removeItem for K.LOG
+            try { safeRemove(K.LOG); } catch(e){}
             try { chrome?.storage?.local?.remove(K.LOG); } catch(e){}
             snack('Cleared','success'); closeAllPanels();
           }
@@ -9594,7 +10076,8 @@ Analyze this comment against the community rules. Then write a brief, profession
           el('span',{cls:'gam-log-user'}, u),
           el('span',{cls:'gam-log-time'}, 'since '+timeAgo(wl[u].added)),
           el('button',{cls:'gam-btn gam-btn-small gam-btn-cancel', style:{marginLeft:'auto', padding:'2px 8px'}, onclick:()=>{
-            toggleWatch(u); snack(u+' unwatched','success'); closeAllPanels(); openModLog();
+            // AF-34 (Rule 101): withUndo on toggleWatch
+          toggleWatch(u); withUndo(() => Promise.resolve(), { tier: 'B', label: u + ' unwatched', inverse: () => { toggleWatch(u); } }); closeAllPanels(); openModLog();
           }},'\u{2716}')
         ));
       });
@@ -9686,6 +10169,9 @@ Analyze this comment against the community rules. Then write a brief, profession
         });
         const hnCancelBtn = el('button', { cls: 'gam-hn-act' }, '\xD7');
         hnCancelBtn.addEventListener('click', function() {
+          // AF-34 (Rule 101): record dr-remove for System A undo
+          // CRITICAL FIX: store delayMs so undo can call addToDeathRow(username, delayMs, reason) correctly
+          try { _recordUndoAction({ type: 'dr-remove', target: drow.username, reason: drow.reason, delayMs: (drow.executeAt - (drow.queuedAt || Date.now())), executeAt: drow.executeAt }); } catch(_){}
           removeFromDeathRow(drow.username);
           rosterSetStatus(drow.username, 'new');
           snack(drow.username + ' removed from DR', 'info');
@@ -9786,7 +10272,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       else if (act === 'ban')     openModConsole(ctxU, null, 'ban');
       else if (act === 'watch') {
         const nw = toggleWatch(ctxU);
-        snack(nw ? ctxU + ' watched' : ctxU + ' unwatched', nw ? 'warn' : 'success');
+        // AF-34 (Rule 101): withUndo on toggleWatch (context menu site)
+        withUndo(() => Promise.resolve(nw), { tier: 'B', label: nw ? (ctxU + ' watched') : (ctxU + ' unwatched'), inverse: () => { toggleWatch(ctxU); } });
       }
       else if (act === 'copy')    copyAndNotify(ctxU, 'Username copied');
       else if (act === 'profile') window.open('/u/' + encodeURIComponent(ctxU) + '/', '_blank');
@@ -10545,7 +11032,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     });
   }
   // Initial fetch + 60s poll (visibility-gated) + visibilitychange refresh.
-  setTimeout(_susRefresh, 1500);
+  // AF-26 (Rule 77): scheduleIdle for non-critical boot task
+  scheduleIdle(_susRefresh, 1500);
   setInterval(()=>{ if (document.visibilityState === 'visible') _susRefresh(); }, 60_000);
   document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState === 'visible') _susRefresh(); });
   // Decorate newly-rendered author links as the page mutates.
@@ -11655,7 +12143,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       _sharedDrState.lastFetchedAt = Date.now();
     } catch(_){}
   }
-  setTimeout(_sharedDrRefresh, 2000);
+  // AF-26 (Rule 77): scheduleIdle for non-critical boot task
+  scheduleIdle(_sharedDrRefresh, 2000);
   setInterval(()=>{ if (document.visibilityState === 'visible') _sharedDrRefresh(); }, 60_000);
   document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState === 'visible') _sharedDrRefresh(); });
   // Effective rule list = local + shared. De-dupes by pattern (local wins).
@@ -14524,7 +15013,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     async function pollUnreadOnce(){
       if (!isEnabled()) return;
       if (document.visibilityState === 'hidden') return;
-      const r = await rpcCall('modMessageUnreadCount', {});
+      // AF-12 (Rule 35): circuit breaker for polling paths
+      const r = await rpcCallBreaker('modMessageUnreadCount', {});
       if (r && r.ok && r.data && typeof r.data.unread === 'number'){
         STATE.unread = r.data.unread;
         updateBadge();
@@ -14538,7 +15028,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       const since = STATE.lastCreatedAt || 0;
       // v9.2.2: H3 RPC migration regression -- agent removed call() trampoline
       // but missed this site. Inline rpcCall replacement.
-      const r = await rpcCall('modMessageInbox', since ? { since: since } : {});
+      // AF-12 (Rule 35): circuit breaker for polling paths
+      const r = await rpcCallBreaker('modMessageInbox', since ? { since: since } : {});
       if (r && r.ok && r.data && Array.isArray(r.data.data)){
         const added = ingestMessages(r.data.data);
         if (added > 0){
@@ -14994,7 +15485,8 @@ Analyze this comment against the community rules. Then write a brief, profession
         rows:'2'
       });
       STATE.textarea = ta;
-      ta.addEventListener('input', updateCharCount);
+      // AF-26 (Rule 78): V4 debounce 50ms -- char-count DOM write on every keystroke
+      ta.addEventListener('input', debounce(updateCharCount, 50));
       // v9.3.9 (P1-9): @autocomplete + DM shortcut.
       // Detects `@partial` immediately before cursor, shows a popup with
       // matching mods. ↑/↓ navigate, Tab/Enter select, Esc close.
@@ -15042,18 +15534,24 @@ Analyze this comment against the community rules. Then write a brief, profession
         try { ta.focus(); } catch(_){}
         try { updateCharCount(); } catch(_){}
       }
-      ta.addEventListener('input', ()=>{
-        const v = ta.value;
-        const cur = ta.selectionStart || v.length;
-        const before = v.slice(0, cur);
-        const m = before.match(/@([A-Za-z0-9_-]*)$/);
-        if (!m){ _closeAtPopup(); return; }
-        const q = (m[1] || '').toLowerCase();
-        const mods = (STATE.modsList || []).filter(x => {
-          const u = (x.mod_username || '').toLowerCase();
-          return q === '' ? true : u.startsWith(q);
-        }).slice(0, 8);
-        _renderAtPopup(mods);
+      // AF-26 (Rule 78): V2 debounce 120ms -- @autocomplete ran O(n) filter
+      // on every keystroke with no throttling.
+      var _atTimer = null;
+      ta.addEventListener('input', function(){
+        clearTimeout(_atTimer);
+        _atTimer = setTimeout(function(){
+          const v = ta.value;
+          const cur = ta.selectionStart || v.length;
+          const before = v.slice(0, cur);
+          const m = before.match(/@([A-Za-z0-9_-]*)$/);
+          if (!m){ _closeAtPopup(); return; }
+          const q = (m[1] || '').toLowerCase();
+          const mods = (STATE.modsList || []).filter(function(x) {
+            const u = (x.mod_username || '').toLowerCase();
+            return q === '' ? true : u.startsWith(q);
+          }).slice(0, 8);
+          _renderAtPopup(mods);
+        }, 120);
       });
       ta.addEventListener('keydown', (e)=>{
         // @autocomplete navigation
@@ -15286,12 +15784,15 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       try {
         await chrome.storage.session.set({ gam_modmail_drafts: cache });
+        _mirrorDraftToLocal('gam_modmail_drafts', cache); // E.3.4: mirror to local
       } catch (_) {}
     } catch (_e) { /* never throw from ambient task */ }
   }
-  // Run once on page load (after a short settle), then every 10 min.
-  setTimeout(() => { try { _ambientModmailPrefetch(); } catch(_){} }, 15000);
-  setInterval(() => { try { _ambientModmailPrefetch(); } catch(_){} }, 10 * 60 * 1000);
+  // AF-28 (Rule 82): ambient prefetch is now LAZY -- started only on first
+  // click of the modmail envelope button (in buildStatusBar). The unconditional
+  // boot-time setTimeout+setInterval here are REMOVED. See buildStatusBar()
+  // for the gated _ambientPrefetchStarted pattern.
+  // (formerly: setTimeout + setInterval boot calls removed here)
 
   // v9.17.0 - full-screen MODMAIL panel (Commander #44-deep). Promoted from
   // the popover via [↗ EXPAND] button. Right-docked, mirrors the ModChat
@@ -15947,6 +16448,11 @@ Analyze this comment against the community rules. Then write a brief, profession
       row('AI scan today', aiFresh, aiFresh === 'yes' ? C.GREEN : aiOn ? C.WARN : C.TEXT3) +
       row('AI feature', aiOn ? 'enabled' : 'disabled (Settings)', aiOn ? C.GREEN : C.WARN) +
       `<div id="gam-sh-worker-line" class="gam-sh-row"><span class="gam-sh-key">Worker</span><span class="gam-sh-val">probing...</span></div>` +
+      // ASK-003: worker stats section (populated async below)
+      `<div id="gam-sh-worker-stats" style="display:none">` +
+        `<div class="gam-sh-row" style="margin-top:6px;padding-top:6px;border-top:1px solid #2a2825"><span class="gam-sh-key" style="font-weight:600">Worker stats</span></div>` +
+        `<div id="gam-sh-worker-stats-rows"></div>` +
+      `</div>` +
       `<div class="gam-sh-foot"><span>Click anywhere to dismiss</span><span>${new Date().toLocaleTimeString()}</span></div>`;
     // Position above the anchor (bar is at bottom of viewport, popover floats above).
     const r = anchor.getBoundingClientRect();
@@ -15969,6 +16475,31 @@ Analyze this comment against the community rules. Then write a brief, profession
       const line = pop.querySelector('#gam-sh-worker-line .gam-sh-val');
       if (line){ line.textContent = '✗ ' + (e && e.message || e); line.style.color = C.RED; }
     });
+    // ASK-003: fetch worker modStats for queue depth, last verify, last 5 actions
+    rpcCall('modStats', {}).then(function(sr) {
+      if (!sr || !sr.ok || !sr.data) return;
+      const d = sr.data;
+      const statsWrap = pop.querySelector('#gam-sh-worker-stats');
+      const statsRows = pop.querySelector('#gam-sh-worker-stats-rows');
+      if (!statsWrap || !statsRows) return;
+      let html = '';
+      if (d.actions_24h != null) html += row('Actions 24h (D1)', d.actions_24h, d.actions_24h > 50 ? C.WARN : C.TEXT);
+      if (d.queue_depth != null) html += row('Queue depth', d.queue_depth, d.queue_depth > 20 ? C.WARN : C.GREEN);
+      if (d.firehose_active != null) html += row('FH (worker)', d.firehose_active ? 'ON' : 'OFF', d.firehose_active ? C.GREEN : C.TEXT3);
+      if (d.last_verify_ts) {
+        const lvAgo = Math.round((Date.now() - d.last_verify_ts) / 60000);
+        html += row('Last verify', lvAgo + 'm ago', lvAgo > 30 ? C.WARN : C.GREEN);
+      }
+      if (Array.isArray(d.recent_actions) && d.recent_actions.length) {
+        html += `<div class="gam-sh-row" style="margin-top:4px"><span class="gam-sh-key" style="color:${C.TEXT3}">Recent actions</span></div>`;
+        d.recent_actions.slice(0, 5).forEach(function(a) {
+          const ts = a.ts ? new Date(a.ts).toLocaleTimeString() : '';
+          html += `<div class="gam-sh-row" style="font-size:10px"><span class="gam-sh-key" style="color:${C.TEXT3}">${escapeHtml(ts)}</span><span class="gam-sh-val">${escapeHtml((a.type||'?') + (a.user ? ' → ' + a.user : ''))}</span></div>`;
+        });
+      }
+      statsRows.innerHTML = html;
+      statsWrap.style.display = '';
+    }).catch(function() { /* modStats is best-effort */ });
     // Click-outside dismiss.
     const dismiss = (e)=>{
       if (pop.contains(e.target) || anchor.contains(e.target)) return;
@@ -16099,7 +16630,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     //      Persisted via getSetting('siren.dismissedAtTotal') so a
     //      reload doesn't un-dismiss.
     const sirenBtn = el('button', { id:'gam-siren-count', cls:'gam-bar-icon', style:{display:'none'}, title:'Live status — click for Hot Now triage' });
-    sirenBtn.addEventListener('click', _showHotNowPanel);
+    // AF-40 (Rule 119): FEATURE_FLAGS gate at entry point
+    if (FEATURE_FLAGS.HOT_NOW_PANEL) sirenBtn.addEventListener('click', _showHotNowPanel);
     const sirenClearBtn = el('button', { id:'gam-siren-clear', cls:'gam-bar-icon', style:{display:'none', fontSize:'11px', color:C.TEXT3, padding:'0 4px'}, title:'Dismiss alert (re-shows on new activity)' }, '✕');
     sirenClearBtn.addEventListener('click', (e)=>{
       e.stopPropagation();
@@ -16177,9 +16709,12 @@ Analyze this comment against the community rules. Then write a brief, profession
     // v9.6.0: SHIELD brand is now a clickable button -> site-health snapshot
     // popover. Pre-fix it was a passive <span> with only an easter-egg
     // 7-click handler. Click now opens a useful site-health summary.
+    // ASK-004: amber/orange color is Bloomberg Terminal theme (--bb-amber in GAM_CSS
+    // iter 5). It is NOT a warning state -- the shield is always this color in BB mode.
+    // Title updated to explain so Commander stops flagging it as undiagnosed.
     const brandBtn = el('button', {
       cls:'gam-bar-brand gam-bar-icon-brand',
-      title:`GAW ModTools ${VERSION} \u2014 click for site health`
+      title:`GAW ModTools ${VERSION} \u2014 click for site health \u2014 amber color = Bloomberg Terminal theme (not a warning)`
     }, '\u{1F6E1}');
     brandBtn.addEventListener('click', ()=>{
       try { _showSiteHealthPopover(brandBtn); } catch(err){
@@ -16244,7 +16779,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     });
     setInterval(__updateTicker, 30_000);
     setInterval(()=>{ __tickerIdx = (__tickerIdx + 1) % Math.max(1, __tickerStates.length); __updateTicker(); }, 4000);
-    setTimeout(__updateTicker, 800);
+    // AF-26 (Rule 77): scheduleIdle for non-critical boot task
+    scheduleIdle(__updateTicker, 800);
 
     // v9.8.0 \u2014 dedicated MODMAIL INBOX icon. Distinct from the modmail-page
     // mmBtn (which only renders on /modmail/thread/<id>). This one is always
@@ -16260,8 +16796,17 @@ Analyze this comment against the community rules. Then write a brief, profession
     // #44 UI separation). Pre-fix it opened the team chat panel which is a
     // different surface (mod-to-mod chat vs user-to-mod modmail). The chat
     // panel still opens via the 💬 chat icon.
+    // AF-28 (Rule 82): lazy ambient prefetch -- starts ONLY on first inbox click.
+    // Avoids burning AI quota on pages where modmail is never opened.
+    var _ambientPrefetchStarted = false;
     inboxBtn.addEventListener('click', (e)=>{
       e.stopPropagation();
+      // AF-30 (Rule 90): skip ambient prefetch in low-resource mode
+      if (!_ambientPrefetchStarted && !_LOW_RESOURCE_MODE) {
+        _ambientPrefetchStarted = true;
+        setTimeout(function() { try { _ambientModmailPrefetch(); } catch(_){} }, 500);
+        setInterval(function() { try { _ambientModmailPrefetch(); } catch(_){} }, 10 * 60 * 1000);
+      }
       try { _showModmailPopover(inboxBtn); } catch(err) {
         try { snack('Modmail popover failed: ' + (err && err.message || err), 'error'); } catch(_){}
       }
@@ -16656,13 +17201,16 @@ Analyze this comment against the community rules. Then write a brief, profession
             rpcCall('aiTardsSuggest', {}).then(function(r) {
               if (r && r.ok && r.data && r.data.suggestions) {
                 const toCache = { suggestions: r.data.suggestions, scanned: r.data.scanned || 0, fetchedAt: Date.now() };
-                chrome.storage.session.set({ [NOTE_KEY]: toCache }, function() {});
+                // AF-10 (Rule 30): check lastError in callback instead of bare no-op
+              chrome.storage.session.set({ [NOTE_KEY]: toCache }, function() { if (chrome.runtime.lastError) { console.warn('[gam] tard-note cache write failed', chrome.runtime.lastError); } });
                 _renderTards(r.data.suggestions, r.data.scanned, null);
               } else {
-                bodyEl.innerHTML = '<div style="color:#f04040;padding:8px;font-size:10px;">Failed: ' + ((r && r.error) || 'unknown') + '</div>';
+                // AF-22 (Rule 65): escapeHtml on API error string
+                bodyEl.innerHTML = '<div style="color:#f04040;padding:8px;font-size:10px;">Failed: ' + escapeHtml(String((r && r.error) || 'unknown')) + '</div>';
               }
             }).catch(function(err) {
-              bodyEl.innerHTML = '<div style="color:#f04040;padding:8px;font-size:10px;">Error: ' + (err && err.message || err) + '</div>';
+              // AF-22 (Rule 65): escapeHtml on JS Error message
+              bodyEl.innerHTML = '<div style="color:#f04040;padding:8px;font-size:10px;">Error: ' + escapeHtml(String(err && err.message || err)) + '</div>';
             });
           });
         } else {
@@ -16670,13 +17218,16 @@ Analyze this comment against the community rules. Then write a brief, profession
           rpcCall('aiTardsSuggest', {}).then(function(r) {
             if (r && r.ok && r.data && r.data.suggestions) {
               const toCache = { suggestions: r.data.suggestions, scanned: r.data.scanned || 0, fetchedAt: Date.now() };
-              chrome.storage.session.set({ [NOTE_KEY]: toCache }, function() {});
+              // AF-10 (Rule 30): check lastError in callback instead of bare no-op
+              chrome.storage.session.set({ [NOTE_KEY]: toCache }, function() { if (chrome.runtime.lastError) { console.warn('[gam] tard-note cache write failed', chrome.runtime.lastError); } });
               _renderTards(r.data.suggestions, r.data.scanned, null);
             } else {
-              bodyEl.innerHTML = '<div style="color:#f04040;padding:8px;font-size:10px;">Failed: ' + ((r && r.error) || 'unknown') + '</div>';
+              // AF-22 (Rule 65): escapeHtml on API error string
+              bodyEl.innerHTML = '<div style="color:#f04040;padding:8px;font-size:10px;">Failed: ' + escapeHtml(String((r && r.error) || 'unknown')) + '</div>';
             }
           }).catch(function(err) {
-            bodyEl.innerHTML = '<div style="color:#f04040;padding:8px;font-size:10px;">Error: ' + (err && err.message || err) + '</div>';
+            // AF-22 (Rule 65): escapeHtml on JS Error message
+            bodyEl.innerHTML = '<div style="color:#f04040;padding:8px;font-size:10px;">Error: ' + escapeHtml(String(err && err.message || err)) + '</div>';
           });
         }
       }
@@ -19619,6 +20170,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
             }
           } catch(e){}
           try { await syncSecretsToBackgroundVault(); } catch(e){}
+          // ASK-029: firehose always-on — clear user_stopped on auth success so
+          // the boot auto-start fires unconditionally on the next page load.
+          try { await setSetting('firehose.active', true); } catch(e){}
+          try { await setSetting('firehose.user_stopped', false); } catch(e){}
           close();
           try { snack(`Welcome, ${data.username}`, 'success'); } catch(e){}
           // Re-run init so token-gated features (presence, crawler, titles) wire up.
@@ -19649,6 +20204,65 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // background.js's RPC_HANDLERS map -- the content script cannot supply
   // a path. Returns the same { ok, status, data, text, error } shape as
   // workerCall so call sites can swap with minimal churn.
+  // AF-11 (Rule 31): unique request ID for every outbound RPC message.
+  function __makeReqId() {
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  }
+
+  // AF-11 (Rule 31): per-message timeout via Promise.race -- wraps the Chrome
+  // messaging layer (not the inner fetch). 25s gives the background's 20s fetch
+  // timeout 5s of headroom before the content script gives up.
+  function __sendWithTimeout(msg, timeoutMs) {
+    return Promise.race([
+      chrome.runtime.sendMessage(msg),
+      new Promise(function(_, rej) {
+        setTimeout(function() {
+          rej(new Error('MSG_TIMEOUT_' + (msg.type || 'rpc') + '_' + timeoutMs + 'ms'));
+        }, timeoutMs);
+      })
+    ]);
+  }
+
+  // AF-14 (Rule 40): gam_msg_queue -- SW-downtime outbox for fire-and-forget RPCs.
+  // Callers pass { queued: true } to enqueue on EXT_CONTEXT_INVALIDATED instead of drop.
+  // Replay fires at top of each successful rpcCall to drain the outbox.
+  const MSG_QUEUE_KEY = 'gam_msg_queue';
+  const MSG_QUEUE_MAX = 20;
+
+  async function _enqueueRpc(name, args) {
+    try {
+      const r = await chrome.storage.local.get(MSG_QUEUE_KEY);
+      const q = (r[MSG_QUEUE_KEY] || []).slice(-(MSG_QUEUE_MAX - 1));
+      q.push({ id: Date.now() + '-' + Math.random().toString(36).slice(2), ts: Date.now(), type: 'rpc', name: name, args: args || {} });
+      await chrome.storage.local.set({ [MSG_QUEUE_KEY]: q });
+    } catch(_){}
+  }
+
+  async function _replayMsgQueue() {
+    try {
+      const r = await chrome.storage.local.get(MSG_QUEUE_KEY);
+      const q = r[MSG_QUEUE_KEY];
+      if (!q || !q.length) return;
+      await chrome.storage.local.remove(MSG_QUEUE_KEY); // optimistic clear
+      for (const item of q) {
+        try { await rpcCall(item.name, item.args); } catch(_){}
+      }
+    } catch(_){}
+  }
+
+  // AF-14 (Rule 41): RPC call-level debug logging, toggleable via msg_log_enabled setting.
+  // Logs name, ok, status, latency_ms, error -- NEVER token values or response bodies.
+  const _RPC_LOG_KEY = 'gam_rpc_log';
+  const _RPC_LOG_MAX = 200;
+  async function _appendRpcLog(entry) {
+    try {
+      const r = await chrome.storage.local.get(_RPC_LOG_KEY);
+      const log = (r[_RPC_LOG_KEY] || []).slice(-(_RPC_LOG_MAX - 1));
+      log.push(entry);
+      await chrome.storage.local.set({ [_RPC_LOG_KEY]: log });
+    } catch(_){}
+  }
+
   async function rpcCall(name, args){
     // v9.5.2: detect Extension Context Invalidated state up front. After a
     // build/install reload, content scripts in already-open tabs are orphaned
@@ -19678,13 +20292,39 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         error: 'Extension was reloaded -- please refresh this page (Ctrl+R) and try again.'
       };
     }
+    // AF-14 (Rule 41): rpcCall timing for debug log (only when msg_log_enabled=true)
+    const _rpcT0 = Date.now();
+    const _rpcLogEnabled = getSetting('msg_log_enabled', false);
     try {
-      const resp = await chrome.runtime.sendMessage({ type: 'rpc', name: name, args: args || {} });
-      if (!resp) return { ok: false, status: 0, error: 'no response from background' };
+      // AF-11 (Rule 31): attach unique requestId + msgV for correlation; use
+      // __sendWithTimeout so a hung SW doesn't block the caller indefinitely.
+      const requestId = __makeReqId();
+      const resp = await __sendWithTimeout({ type: 'rpc', name: name, args: args || {}, requestId: requestId, msgV: 1 }, 25000);
+      if (!resp) {
+        // AF-15 (Rule 45): SW may have restarted cold (5-min idle eviction).
+        // Auto-retry once after 1.5s warm-up before escalating to UI.
+        try {
+          await new Promise(function(r) { setTimeout(r, 1500); });
+          const retry = await chrome.runtime.sendMessage({ type: 'rpc', name: name, args: args || {} });
+          if (retry) return retry;
+        } catch(_){}
+        try { _gamShowSwRestartSnack(name); } catch(_){}
+        return { ok: false, status: 0, code: 'SW_NO_RESPONSE', error: 'ModTools background restarted. Retrying...' };
+      }
+      // AF-14 (Rule 41): log RPC call result when msg_log_enabled is true
+      if (_rpcLogEnabled) {
+        _appendRpcLog({ ts: _rpcT0, name: name, ok: !!(resp && resp.ok), status: resp && resp.status, latency_ms: Date.now() - _rpcT0, error: (resp && resp.error) || null });
+      }
+      // AF-14 (Rule 40): on successful SW response, drain outbox
+      if (resp && resp.ok) { try { _replayMsgQueue(); } catch(_){} }
       // Background returns { ok, status, data, text, error, timeout } already.
       return resp;
     } catch (e) {
       const msg = String(e && e.message || e);
+      // AF-14 (Rule 41): log failure when msg_log_enabled
+      if (_rpcLogEnabled) {
+        _appendRpcLog({ ts: _rpcT0, name: name, ok: false, status: 0, latency_ms: Date.now() - _rpcT0, error: msg });
+      }
       // Chrome variants of "extension context invalidated":
       //   "Extension context invalidated."
       //   "Could not establish connection. Receiving end does not exist."
@@ -19701,6 +20341,47 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       }
       return { ok: false, status: 0, error: msg };
     }
+  }
+
+  // AF-12 (Rule 35): thin circuit breaker for chrome.runtime.sendMessage.
+  // Wraps rpcCall for the three polling paths. OPEN state fires the orphan banner.
+  // Threshold: 4 consecutive transient failures -> OPEN; 15s reset window.
+  const _CB = {
+    state: 'CLOSED',  // 'CLOSED' | 'OPEN' | 'HALF_OPEN'
+    failures: 0,
+    threshold: 4,
+    resetAfterMs: 15000,
+    openedAt: 0
+  };
+
+  async function rpcCallBreaker(name, args) {
+    if (_CB.state === 'OPEN') {
+      const now = Date.now();
+      if (now - _CB.openedAt < _CB.resetAfterMs) {
+        return { ok: false, status: 0, code: 'CB_OPEN',
+                 error: 'Extension messaging circuit open -- retrying shortly.' };
+      }
+      _CB.state = 'HALF_OPEN';
+    }
+    const r = await rpcCall(name, args);
+    const isTransient = !r || r.code === 'EXT_CONTEXT_INVALIDATED'
+      || r.error === 'no response from background'
+      || (r.code && r.code.indexOf('MSG_TIMEOUT') === 0);
+    if (!r || !r.ok) {
+      if (isTransient) {
+        _CB.failures++;
+        if (_CB.failures >= _CB.threshold || _CB.state === 'HALF_OPEN') {
+          _CB.state = 'OPEN';
+          _CB.openedAt = Date.now();
+          _CB.failures = 0;
+          try { _gamShowExtOrphanedBanner(); } catch(_) {}
+        }
+      }
+    } else {
+      _CB.state = 'CLOSED';
+      _CB.failures = 0;
+    }
+    return r;
   }
 
   // v7.2: dispatching workerCall. Flag OFF -> delegates to __legacyWorkerCall
@@ -19924,17 +20605,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           ? (_meLink.textContent.trim() || (_meLink.getAttribute('href')||'').match(/\/u\/([^\/]+)/)?.[1] || null)
           : null;
         if (!_me){
-          // v9.6.3: visible alert() because snack may not be visible yet
-          // on first page load before init() builds the bar.
-          try { snack('\u{1F6AB} Invite ignored \u2014 log in to GAW first (header user link not found).', 'warn'); } catch(_){}
-          try {
-            alert('GAW ModTools detected an invite code in this URL but ' +
-              'could not find your GAW header user link. Make sure you are ' +
-              'logged in to greatawakening.win, then click the invite link ' +
-              'again.\n\nAlternatively, open the GAW ModTools popup and ' +
-              'paste the invite code manually using the rotation invite ' +
-              'entry field.');
-          } catch(_){}
+          // AF-16 (Rule 47): replace alert() with deferred snack (800ms allows
+          // init() to build the status bar before the snack renders).
+          setTimeout(function() {
+            try { snack('GAW ModTools detected an invite code -- log in to GAW first, then click the link again. Or open the popup and paste the invite code manually.', 'warn'); } catch(_){}
+          }, 800);
           return;
         }
         const _confirmed = window.confirm(
@@ -19977,7 +20652,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
               }
             });
           }
-        } catch(e){ console.warn('[modtools] backup-stage invite failed', e); }
+        // AF-19 (Rule 56): add _diagLog for invite backup failures
+        } catch(e){ console.warn('[modtools] backup-stage invite failed', e); try { _diagLog('invite-backup', 'backup write failed', { err: String(e) }); } catch(_){} }
         try { snack('\u{1F4E8} Invite STAGED \u2014 open the ModTools popup to claim.', 'warn'); } catch(e){}
         return;
       }
@@ -20075,7 +20751,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim();
     if (!me) return;
     const ping = ()=>{
-      rpcCall('modPresencePing', { mod: me, pagePath: _coarsePresencePath(location.pathname), lastActivity: new Date(lastActivity).toISOString() })
+      // AF-12 (Rule 35): circuit breaker for polling paths
+      rpcCallBreaker('modPresencePing', { mod: me, pagePath: _coarsePresencePath(location.pathname), lastActivity: new Date(lastActivity).toISOString() })
         .catch(()=>{});
     };
     ping();
@@ -20551,7 +21228,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // quick form, submits to Worker which opens a GitHub issue.
   async function reportBug(){
     if (!consentEnabled('features.bugReport')){
-      alert('Bug reporting is disabled. Enable "Bug reports" in the first-run consent modal (clear extension data to see it again) or in settings.');
+      // AF-16 (Rule 47): replace alert() with non-blocking snack
+      try { snack('Bug reporting is disabled. Enable "Bug reports" in settings or the consent modal.', 'warn', 6000); } catch(_){}
       return;
     }
     // v7.2 CHUNK 13: askTextModal replaces prompt() under flag-on.
@@ -20612,18 +21290,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     if (r.ok && r.data && r.data.url){
       snack(`\u2713 Bug filed: #${r.data.number}`, 'success');
       console.log('[modtools] bug filed:', r.data.url);
-      // v7.2 CHUNK 17: gate worker-returned URL through allowlistedUrl on
-      // flag-on. If rejected, surface the URL as plain text (console only).
-      if (__hardeningOn()){
-        const safe = allowlistedUrl(r.data.url);
-        if (safe){
-          window.open(safe, '_blank');
-        } else {
-          console.warn('[modtools] bug URL rejected by allowlist:', r.data.url);
-          snack('\u26A0 Bug filed but URL not opened (blocked)', 'warn');
-        }
+      // AF-22 (Rule 64): allowlistedUrl check is unconditional -- the else branch
+      // that bypassed the check when hardening was off is removed entirely.
+      // Security checks must not be flag-gated.
+      const safe = allowlistedUrl(r.data.url);
+      if (safe){
+        window.open(safe, '_blank');
       } else {
-        window.open(r.data.url, '_blank');
+        console.warn('[modtools] bug URL rejected by allowlist:', r.data.url);
+        snack('\u26A0 Bug filed but URL not opened (blocked)', 'warn');
       }
     } else {
       // v7.2 CHUNK 15: normalizeWorkerError under flag-on.
@@ -20869,10 +21544,19 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       const countEl = p.querySelector('.vote .count');
       const upvotes = countEl ? parseInt(countEl.textContent.trim(), 10) || 0 : 0;
       if (ageH < maxHours && upvotes < upvoteThreshold) continue;
+      // ASK-048: verify post is actually sticky in DOM before toggling.
+      // The v8.6.3 regression was caused by stale DOM: .stickied class remained
+      // after a previous toggle, causing the next tick to toggle it BACK to sticky.
+      // Fix: only proceed if DOM shows .stickied, then strip the class immediately
+      // after a successful toggle so the node won't re-match on the next tick.
+      const isActuallySticky = p.classList.contains('stickied') || p.classList.contains('sticky');
+      if (!isActuallySticky) continue;
       // Candidate -- toggle and record
       try {
         const r = await apiSticky(id);
         if (r && r.ok) {
+          // Strip stickied class so DOM is not stale on next tick
+          p.classList.remove('stickied', 'sticky');
           cooldowns[id] = now;
           lsSet(K.STICKY_COOLDOWNS || 'gam_sticky_cooldowns', cooldowns);
           logAction({
@@ -21176,15 +21860,18 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     })();
 
     // ── EE7: Total ban log hits a century → Centennial badge ─────────
-    (function checkCentennial(){
+    // AF-06 (Rule 16): safeGet/safeSet replace raw localStorage for EE state
+    (async function checkCentennial(){
       try {
-        const log = JSON.parse(localStorage.getItem('gam_mod_log') || '[]');
-        const bans = log.filter(e=>e&&e.type==='ban').length;
+        const rawLog = await safeGet(K.LOG, null);
+        const log = Array.isArray(rawLog) ? rawLog : [];
+        const bans = log.filter(function(e){return e&&e.type==='ban';}).length;
         const centuries = Math.floor(bans / 100);
-        const marked = parseInt(localStorage.getItem('gam_ee_cent')||'0');
+        const markedRaw = await safeGet('gam_ee_cent', '0');
+        const marked = parseInt(markedRaw || '0');
         if (centuries > marked){
-          localStorage.setItem('gam_ee_cent', String(centuries));
-          setTimeout(()=>snack(`\u{1F1FA}\u{1F1F8} ${bans} bans! Centennial Patriot \u2014 the community thanks you.`, 'success'), 2000);
+          await safeSet('gam_ee_cent', String(centuries));
+          setTimeout(function(){ try { snack(centuries * 100 + ' bans! Centennial Patriot — the community thanks you.', 'success'); } catch(_){} }, 2000);
         }
       } catch(e){}
     })();
@@ -21220,17 +21907,23 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     });
 
     // ── EE10: "DECLAS" as ban reason → ominous extra confirm line ────
-    document.addEventListener('input', e=>{
-      if (!getSetting('easterEggsEnabled',true)) return;
-      const t = e.target;
+    // AF-26 (Rule 78): V1 debounce 200ms -- global input listener was firing
+    // a regex match on every keystroke site-wide with no guard.
+    var _declasTimer = null;
+    document.addEventListener('input', function(e){
+      var t = e.target;
       if (!t || t.tagName !== 'TEXTAREA') return;
-      if (/declas/i.test(t.value||'')){
-        t.style.borderColor = 'gold';
-        t.title = '\u{1F4C2} DECLAS-level action. The world is watching.';
-      } else {
-        t.style.borderColor = '';
-        t.title = '';
-      }
+      clearTimeout(_declasTimer);
+      _declasTimer = setTimeout(function(){
+        if (!getSetting('easterEggsEnabled',true)) return;
+        if (/declas/i.test(t.value||'')){
+          t.style.borderColor = 'gold';
+          t.title = '\u{1F4C2} DECLAS-level action. The world is watching.';
+        } else {
+          t.style.borderColor = '';
+          t.title = '';
+        }
+      }, 200);
     });
   }
 
@@ -21272,21 +21965,209 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // fixed-position banner with the failure reason + a "Force re-hydrate"
   // button that triggers the same SW-vault resync the popup uses. No
   // dependency on the rest of init having run -- pure DOM, no helpers.
+  // AF-40 (Rule 119): FEATURE_FLAGS const -- compile-time feature removability gates.
+  // Each flag guards only the entry-point wire-up, not internal call sites.
+  // Disable a feature by setting its flag to false and redeploying.
+  const FEATURE_FLAGS = Object.freeze({
+    HOT_NOW_PANEL:   true,
+    MODMAIL_3COL:    true,
+    AI_HOLD_QUEUE:   true,
+    UNIVERSAL_UNDO:  true
+  });
+
+  // AF-30 (Rule 90): LOW_RESOURCE_MODE -- detected at init time via battery/memory signals.
+  // When true: animations disabled (CSS class), ambient prefetch skipped, auto-analysis skipped.
+  let _LOW_RESOURCE_MODE = false;
+
+  async function detectLowResource() {
+    try {
+      if (typeof navigator.getBattery === 'function') {
+        const batt = await navigator.getBattery();
+        if (batt.level < 0.20 && !batt.charging) { _LOW_RESOURCE_MODE = true; }
+      }
+    } catch(_){}
+    try {
+      if (!_LOW_RESOURCE_MODE && navigator.deviceMemory && navigator.deviceMemory <= 1) {
+        _LOW_RESOURCE_MODE = true;
+      }
+    } catch(_){}
+    if (_LOW_RESOURCE_MODE) {
+      try { document.body.classList.add('gam-low-resource'); } catch(_){}
+      // Inject CSS to disable animations/transitions in low-resource mode
+      try {
+        if (!document.getElementById('gam-low-resource-css')) {
+          var s = document.createElement('style');
+          s.id = 'gam-low-resource-css';
+          s.textContent = '.gam-low-resource * { animation: none !important; transition: none !important; }';
+          document.head.appendChild(s);
+        }
+      } catch(_){}
+    }
+  }
+
+  // E.2.4: Feature error-counter + auto-disable system.
+  // _incrementErrorCounter: tracks errors per feature in chrome.storage.local
+  //   with a 5-min sliding window. >= 3 errors -> auto-disables the feature.
+  // _isFeatureDisabled: boot-time check before mounting each feature.
+  // _clearErrorCounter: called from popup Re-enable button via RPC.
+  // _renderDisabledChip: renders a visible chip in the status bar.
+  // _onFeatureAutoDisabled: called when threshold crossed; logs + chips + dispatches event.
+  const _ERR_COUNTER_KEY = 'gam_error_counters';
+  const _ERR_WINDOW_MS = 5 * 60 * 1000;
+  const _ERR_THRESHOLD = 3;
+
+  function _isFeatureDisabled(featureName) {
+    try {
+      const raw = lsGet(_ERR_COUNTER_KEY, {});
+      const entry = raw && raw[featureName];
+      return !!(entry && entry.disabled_at);
+    } catch(_) { return false; }
+  }
+
+  async function _incrementErrorCounter(featureName) {
+    try {
+      if (!chrome || !chrome.storage || !chrome.storage.local) return;
+      const r = await chrome.storage.local.get(_ERR_COUNTER_KEY);
+      const counters = (r && r[_ERR_COUNTER_KEY]) || {};
+      const now = Date.now();
+      const entry = counters[featureName] || { errors: [], disabled_at: null };
+      if (entry.disabled_at) return; // already disabled, no-op
+      // Slide window: keep only errors within the last 5 min
+      entry.errors = (entry.errors || []).filter(function(ts) { return now - ts < _ERR_WINDOW_MS; });
+      entry.errors.push(now);
+      if (entry.errors.length >= _ERR_THRESHOLD) {
+        entry.disabled_at = now;
+        counters[featureName] = entry;
+        await chrome.storage.local.set({ [_ERR_COUNTER_KEY]: counters });
+        _onFeatureAutoDisabled(featureName, entry.errors.length);
+      } else {
+        counters[featureName] = entry;
+        await chrome.storage.local.set({ [_ERR_COUNTER_KEY]: counters });
+      }
+    } catch(_) {}
+  }
+
+  function _onFeatureAutoDisabled(featureName, count) {
+    try { _diagLog('auto_disable', 'Feature auto-disabled: ' + featureName, { count: count, ts: Date.now() }); } catch(_) {}
+    _renderDisabledChip(featureName);
+    // Dispatch event so popup can refresh its feature list
+    try {
+      document.dispatchEvent(new CustomEvent('gam-feature-auto-disabled', { detail: { feature: featureName } }));
+    } catch(_) {}
+    try { snack('⚠ Feature "' + featureName + '" auto-disabled (3 errors in 5 min) -- re-enable from popup', 'error'); } catch(_) {}
+  }
+
+  function _renderDisabledChip(featureName) {
+    try {
+      const bar = document.getElementById('gam-status-bar');
+      if (!bar) return;
+      const chipId = 'gam-disabled-chip-' + featureName.replace(/\W/g, '_');
+      if (document.getElementById(chipId)) return; // already rendered
+      const chip = document.createElement('div');
+      chip.id = chipId;
+      chip.style.cssText = 'background:#7f1d1d;color:#fca5a5;border:1px solid #991b1b;border-radius:4px;padding:1px 6px;font-size:10px;cursor:default;';
+      chip.title = 'Feature "' + featureName + '" auto-disabled due to repeated errors. Re-enable from popup Tools tab.';
+      chip.textContent = '⚠ ' + featureName + ' disabled';
+      bar.appendChild(chip);
+    } catch(_) {}
+  }
+
+  async function _clearErrorCounter(featureName) {
+    try {
+      if (!chrome || !chrome.storage || !chrome.storage.local) return;
+      const r = await chrome.storage.local.get(_ERR_COUNTER_KEY);
+      const counters = (r && r[_ERR_COUNTER_KEY]) || {};
+      delete counters[featureName];
+      await chrome.storage.local.set({ [_ERR_COUNTER_KEY]: counters });
+      // Remove the chip if present
+      const chipId = 'gam-disabled-chip-' + featureName.replace(/\W/g, '_');
+      try { const el = document.getElementById(chipId); if (el) el.remove(); } catch(_) {}
+    } catch(_) {}
+  }
+
+  // E.3.4: Draft session→local mirror write helper.
+  // Called after every chrome.storage.session.set for gam_modmail_drafts or
+  // gam_macro_drafts so popup can read a TTL-stamped fallback from local storage.
+  // Popup is responsible for purging stale entries (savedAt > 24h).
+  function _mirrorDraftToLocal(sessionKey, drafts) {
+    try {
+      if (!chrome || !chrome.storage || !chrome.storage.local) return;
+      const localKey = sessionKey + '_local';
+      chrome.storage.local.set({ [localKey]: { drafts: drafts, savedAt: Date.now() } }).catch(function() {});
+    } catch(_) {}
+  }
+
+  // AF-17 (Rule 50): safeFeature -- error-boundary wrapper for init() feature calls.
+  // Defined before init() so all call sites can reference it.
+  // Handles both sync throws and async rejections; shows a snack on failure
+  // so the mod knows which subsystem errored without crashing the page.
+  // E.2.4: boot-time gate checks auto-disable state; wired to _incrementErrorCounter on every catch.
+  function safeFeature(name, fn) {
+    // E.2.4: skip mounting if feature was auto-disabled due to repeated errors
+    if (_isFeatureDisabled(name)) {
+      try { _renderDisabledChip(name); } catch(_) {}
+      return null;
+    }
+    try {
+      const result = fn();
+      if (result && typeof result.catch === 'function') {
+        result.catch(function(e) {
+          _diagLog('safe-feature', '[' + name + '] async threw', { msg: e && e.message || String(e) });
+          console.error('[ModTools] feature "' + name + '" async failed', e);
+          try { _incrementErrorCounter(name); } catch(_) {}
+          try { snack(name + ' failed -- check console', 'error'); } catch(_) {}
+        });
+      }
+      return result;
+    } catch(e) {
+      _diagLog('safe-feature', '[' + name + '] threw', { msg: e && e.message || String(e) });
+      console.error('[ModTools] feature "' + name + '" threw', e);
+      try { _incrementErrorCounter(name); } catch(_) {}
+      try { snack(name + ' failed -- check console', 'error'); } catch(_) {}
+      return null;
+    }
+  }
+
   function __showAuthFailBanner(authResult) {
     try {
       // Don't double-render if already shown.
       if (document.getElementById('gam-auth-fail-banner')) return;
-      const reasonText = (function(){
-        switch(authResult && authResult.reason) {
-          case 'no_token':       return 'No token stored. Open the GAW ModTools popup and claim a rotation invite.';
-          case 'short_token':    return 'Stored token is malformed (length ' + (authResult.tokenLen || 0) + '). Re-claim via the popup.';
-          case 'fetch_failed':   return 'Worker unreachable: ' + (authResult.error || 'network error') + '. Check connectivity, try Force re-hydrate.';
-          case 'no_response':    return 'No response from worker /mod/whoami. Try Force re-hydrate.';
-          case 'whoami_status':  return 'Worker rejected token (HTTP ' + (authResult.status || '?') + '). Token may be expired or rotated -- claim a fresh invite.';
-          case 'whoami_empty':   return 'Worker accepted token but returned no username. Try Force re-hydrate.';
-          case 'exception':      return 'Auth check threw: ' + (authResult.error || 'unknown') + '. Open DevTools console for stack.';
-          default:               return 'Auth check failed (unknown reason). Open DevTools console.';
+      // AF-33 (Rule 99): 3-step recovery wizard copy for each failure mode.
+      // Steps are programmatically built as <li> nodes -- no innerHTML with
+      // user-derived content (reason codes are all hardcoded strings here).
+      const reasonSteps = (function(){
+        const reason = authResult && authResult.reason;
+        if (reason === 'no_token' || reason === 'short_token') {
+          return [
+            'Step 1 of 3: Click "Open ModTools popup" (button below). The popup opens.',
+            'Step 2 of 3: In the popup, select "I have an invite LINK" OR "I have a token". Paste what your lead sent you.',
+            'Step 3 of 3: Click Save. If the popup says "Welcome, [username]", you\'re done -- this banner will close.',
+            'Still stuck? Your invite link may be expired. Ask your lead for a fresh one.'
+          ];
         }
+        if (reason === 'fetch_failed' || reason === 'no_response') {
+          return [
+            'Step 1 of 3: Click "Force re-hydrate" (button below). Wait 5 seconds.',
+            'Step 2 of 3: If the banner still shows, check https://greatawakening.win in a new tab. If the site itself is down, the worker is also down -- wait and try again later.',
+            'Step 3 of 3: If the site loads but the banner persists, open DevTools (F12) > Console and paste the red error to your lead. This is a worker outage, not an extension problem.',
+            'Still stuck? The worker may be rate-limiting you. Wait 2 minutes and reload.'
+          ];
+        }
+        if (reason === 'whoami_status') {
+          return [
+            'Step 1 of 3: Your token was rotated. Click "Open ModTools popup" (button below).',
+            'Step 2 of 3: In the popup, go to Settings > Token and delete the current token.',
+            'Step 3 of 3: Ask your lead for your current rotation token or a fresh invite link. Paste it in the popup. Click Save.',
+            'Still stuck? You may be using a lead token in the mod slot (or vice versa). Ask your lead which token type you need.'
+          ];
+        }
+        // Generic fallback
+        return [
+          'Auth check failed: ' + (reason || 'unknown') + '.',
+          'Try clicking "Force re-hydrate" below.',
+          (authResult && authResult.error) ? ('Error detail: ' + authResult.error) : 'Open DevTools console for more details.',
+          'Still stuck? Ask your lead or open a bug report via the popup.'
+        ];
       })();
       const b = document.createElement('div');
       b.id = 'gam-auth-fail-banner';
@@ -21300,9 +22181,19 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       const title = document.createElement('div');
       title.style.cssText = 'font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:6px';
       title.textContent = '\u{1F512} GAW ModTools: auth failed';
+      // AF-33 (Rule 99): render steps as <ol><li> for clear numbered recovery path.
+      // textContent only -- no innerHTML with user-derived content.
       const msg = document.createElement('div');
       msg.style.cssText = 'margin-bottom:8px;opacity:.95';
-      msg.textContent = reasonText;
+      const ol = document.createElement('ol');
+      ol.style.cssText = 'margin:0;padding-left:18px;';
+      reasonSteps.forEach(function(step) {
+        const li = document.createElement('li');
+        li.style.cssText = 'margin-bottom:3px;';
+        li.textContent = step;
+        ol.appendChild(li);
+      });
+      msg.appendChild(ol);
       const row = document.createElement('div');
       row.style.cssText = 'display:flex;gap:6px;justify-content:flex-end';
       const btnRetry = document.createElement('button');
@@ -21319,8 +22210,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           // Re-validate.
           const re = await __validateModAuth();
           if (re && re.ok) {
-            btnRetry.textContent = 'Success -- reloading';
-            setTimeout(() => location.reload(), 400);
+            // AF-33 (Rule 97): in-place re-init instead of full page reload.
+            // Auth state is already hydrated in _secretsCache + SW vault at this point.
+            btnRetry.textContent = 'Auth restored -- reloading UI...';
+            try { b.remove(); } catch(_){}
+            try { await init(); } catch(e){
+              try { snack('Partial re-init: ' + (e.message || e), 'warn'); } catch(_){}
+            }
           } else {
             btnRetry.textContent = 'Still failed (' + (re && re.reason || '?') + ')';
             btnRetry.disabled = false;
@@ -21400,8 +22296,20 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     // Commander a visible banner explaining WHY UI is suppressed instead of
     // a silent console.log. Pre-fix: bar disappeared, only signal was a
     // muted devtools line; took two debug-snapshot round-trips to diagnose.
+    // AF-30 (Rule 90): detect low-resource mode early; gates ambient prefetch
+    try { await detectLowResource(); } catch(_){}
+
     const __authResult = await __validateModAuth();
-    try { window.__GAM_AUTH_RESULT = __authResult; } catch(_){}
+    // AF-25 (Rule 73): strip tokenLen from window-exposed auth result shape.
+    // tokenLen leaks token byte-length to page-world JS. keep only ok/reason/status.
+    try {
+      window.__GAM_AUTH_RESULT = {
+        ok: __authResult && __authResult.ok,
+        reason: __authResult && __authResult.reason,
+        status: __authResult && __authResult.status
+        // tokenLen intentionally omitted from window exposure
+      };
+    } catch(_){}
     if (!(__authResult && __authResult.ok)) {
       try {
         console.log('%c[modtools v9.5.3] auth gate failed -- UI suppressed.', 'color:#f04040;font-weight:700', __authResult);
@@ -21424,14 +22332,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     installSpaWatcher();                  // re-init on pushState/popstate navigation
 
     if (IS_USERS_PAGE){
-      buildTriageConsole();
+      // AF-17 (Rule 50): safeFeature wraps bare call to isolate DOM errors
+      safeFeature('buildTriageConsole', () => buildTriageConsole());
       snack(`\u{1F6E1} Triage Console loaded \u2014 ${rosterCount().total} users tracked`,'info');
     }
     if (IS_BAN_PAGE){
-      enhanceBanPage();
+      safeFeature('enhanceBanPage', () => enhanceBanPage());
     }
     if (IS_QUEUE_PAGE){
-      enhanceQueuePage();
+      safeFeature('enhanceQueuePage', () => enhanceQueuePage());
     }
 
     // v7.0: wire Intel Drawer retrofit entry points. Each is flag-gated inside
@@ -21446,7 +22355,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       setTimeout(injectHomeStrip, 500);
     }
     // v5.1.3: enhance modmail read page with sender-action toolbar
-    enhanceModmailRead();
+    // AF-17 (Rule 50): safeFeature wrapper
+    safeFeature('enhanceModmailRead', () => enhanceModmailRead());
 
     // v5.3.3: modmail list — inject 🔓 unban + 🔨 ban buttons next to each sender username
     if (IS_MODMAIL_LIST){
@@ -21470,7 +22380,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       try { installModmailHintsPanel(); } catch(e){ console.warn('[modtools] modmail hints panel skip', e); }
     }
 
-    buildStatusBar();
+    // AF-17 (Rule 50): safeFeature wrapper
+    safeFeature('buildStatusBar', () => buildStatusBar());
     // v8.2: Mod Chat -- start unread-count poller + wire visibility hook.
     // No-op if features.modChat=false or the mod has no token.
     try { ModChat.init(); } catch(e){ console.error('[modchat] init', e); }
@@ -21482,12 +22393,14 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     if (!isMod && getSetting('autoDetectHideUi', false)){
       console.log('[modtools] non-mod browser detected; destructive UI suppressed (opt-in)');
       FallbackMode = true;
-      try { localStorage.setItem('gam_fallback_mode', '1'); } catch(e){}
+      // AF-06 (Rule 16): safeSet replaces raw localStorage
+      try { safeSet('gam_fallback_mode', '1'); } catch(e){}
     }
 
     // v5.1.8: start presence pings if mod + token set
+    // AF-17 (Rule 50): safeFeature wrapper
     if (isMod && getModToken()) {
-      setTimeout(startPresencePings, 3000);
+      setTimeout(() => safeFeature('startPresencePings', () => startPresencePings()), 3000);
     }
 
     // Restore first-boot/missing-token recovery: if there is still no token
@@ -21522,7 +22435,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 
     // v5.1.11 Crew: crawler + titles overlay + sniper pickup
     if (isMod && getModToken()){
-      setTimeout(startCrawler, 6000);
+      // AF-17 (Rule 50): safeFeature wrappers for async boot tasks
+      setTimeout(() => safeFeature('startCrawler', () => startCrawler()), 6000);
       setTimeout(startTitlesOverlay, 2500);
       setTimeout(sniperPickupTick, 8000);
       setInterval(sniperPickupTick, 5 * 60 * 1000);
@@ -21859,7 +22773,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       return '';
     }
 
-    function debounce(fn, ms) { let t; return function(){ const a = arguments; clearTimeout(t); t = setTimeout(function(){ fn.apply(null, a); }, ms); }; }
+    // AF-26 (Rule 78): debounce helper extracted to module scope (see top of IIFE).
+    // Scoped copy removed to avoid duplication; module-scoped debounce is accessible here.
 
     // v5.0-Phase-1: smCall trampoline replaced by named RPCs at each call site below.
     // mod username is injected by the background handler via secretCache, not needed client-side.
@@ -23038,8 +23953,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       if (spacer) bar.insertBefore(chip, spacer);
       else bar.appendChild(chip);
 
-      // Feature flag: BRIGADE_HARD_ALERTS_ON - off by default during soak period
-      const HARD_ALERTS_ON = false;
+      // AF-20 (Rule 58): HARD_ALERTS_ON converted from hard-coded constant to team flag.
+      // Lead can promote features.brigadeHardAlerts remotely; no code push required.
+      const HARD_ALERTS_ON = getFeatureEffective('features.brigadeHardAlerts', false);
 
       async function _pollBrigadeAlerts() {
         const tok = getModToken();

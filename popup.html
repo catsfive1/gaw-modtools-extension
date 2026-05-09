@@ -21,7 +21,7 @@
 <body>
   <div class="pop-header">
     <span class="pop-brand">&#x1F6E1; ModTools</span>
-    <span class="pop-ver" id="ver">v5.2.8</span>
+    <span class="pop-ver" id="ver">v10.6.0</span>
     <!-- v10.x: tier badge (purple LEAD / cyan SR-LEAD / hidden for mod) -->
     <span id="tierBadge" class="pop-tier-badge" style="display:none"></span>
     <!-- v9.5.0: maintenance warning chip. Set by the alarms in background.js
@@ -38,6 +38,8 @@
     <button class="pop-tab" data-tab="tokens" role="tab" aria-selected="false">Tokens</button>
     <button class="pop-tab" data-tab="tools" role="tab" aria-selected="false">Tools</button>
     <button class="pop-tab" data-tab="lead" role="tab" aria-selected="false">Lead</button>
+    <!-- E.3.1 (Rule 94): Diagnostics tab — 5th nav tab -->
+    <button class="pop-tab" data-tab="diag" role="tab" aria-selected="false">Diag</button>
   </nav>
 
   <!-- v9.4.5: stat cards are clickable. data-drill key routes to renderDrillDown(key)
@@ -66,6 +68,11 @@
     <div class="pop-stat" data-drill="notes24" title="Mod notes written in the last 24h. Click for detail.">
       <div class="pop-stat-val" id="s-notes" style="color:#f0a040">&mdash;</div>
       <div class="pop-stat-label">Notes / 24h</div>
+    </div>
+    <!-- ASK-086 / WAVE-B-AUX A.3: AI budget visibility. Value populated by loadStats() via /mod/stats. -->
+    <div class="pop-stat" title="AI calls used today vs your daily cap (e.g. 47/500). Populated from worker /mod/stats.">
+      <div class="pop-stat-val" id="s-ai-today" style="color:#c084fc">&mdash;</div>
+      <div class="pop-stat-label">AI today</div>
     </div>
   </div>
 
@@ -172,6 +179,22 @@
        routines folded into a <details> accordion. Same handlers, same IDs;
        structure is purely visual reorganization. -->
   <div class="pop-maint">
+    <!-- E.2.3 (Rule 52): Safe Mode toggle row — amber when active. Top of Maintenance. -->
+    <div class="pop-maint-row pop-maint-row-safemode" id="safeModeRow" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #2a2f38;margin-bottom:4px">
+      <span style="flex:1;font-size:11px;color:#aaa" title="Disables firehose, AI, animations, presence ping, auto-DR. Keeps: token entry, ban hammer, modmail send, mod log, settings.">&#x26A0; Safe Mode</span>
+      <label class="gam-toggle" id="safeModeToggleLabel" style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px">
+        <input type="checkbox" id="safeModeToggle" style="display:none">
+        <span id="safeModeToggleTrack" class="gam-toggle-track" style="display:inline-block;width:32px;height:16px;border-radius:8px;background:#2a2f38;position:relative;transition:background .2s">
+          <span id="safeModeToggleThumb" style="position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#5c6370;transition:left .2s,background .2s"></span>
+        </span>
+        <span id="safeModeToggleLabel2" style="color:#5c6370">OFF</span>
+      </label>
+    </div>
+    <!-- E.2.4 (Rule 54): Feature Health row — lists auto-disabled features with Re-enable buttons -->
+    <div class="pop-maint-row" id="featureHealthRow" style="display:none;flex-direction:column;padding:6px 0;border-bottom:1px solid #2a2f38;margin-bottom:4px">
+      <div style="font-size:10px;color:#aaa;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.06em">&#x2764; Feature Health</div>
+      <div id="featureHealthList" style="font-size:11px;color:#5c6370">All features healthy</div>
+    </div>
     <div class="pop-maint-row">
       <button id="maintCookies" class="pop-btn pop-btn-ghost"
               title="Clears stuck XSRF/session/cf_* cookies on greatawakening.win plus per-tab localStorage. Use when GAW gives 403/CSRF errors.">
@@ -249,6 +272,15 @@
           &#x1F5C2; Backfill modmail history
         </button>
         <div id="maintModmailBackfillStatus" class="pop-token-status pop-maint-status"></div>
+      </div>
+      <!-- v10.5.1 AF-07 Rule 21: non-destructive shape repair. Fills missing/mistyped
+           keys with safe defaults; never wipes tokens or UX preferences. -->
+      <div class="pop-maint-row">
+        <button id="maintRepair" class="pop-btn pop-btn-ghost"
+                title="Non-destructive. Checks gam_settings for missing or wrong-type keys and fills them with safe defaults. Tokens + UX prefs are never touched.">
+          &#x1F527; Repair settings
+        </button>
+        <div id="maintRepairStatus" class="pop-token-status pop-maint-status"></div>
       </div>
       <div class="pop-maint-row">
         <button id="maintReset" class="pop-btn pop-btn-ghost"
@@ -603,10 +635,45 @@
     </div><!-- /.gam-card-body tokens -->
   </details><!-- /#card-tokens -->
 
+  <!-- E.3.1 (Rule 94): Diagnostics tab section — data-tab="diag", hidden by default via wireTabNav -->
+  <div data-tab="diag" class="pop-tab-hidden" id="diagTabSection">
+    <details class="gam-card" id="card-diag" open>
+      <summary class="gam-card-head">
+        <span class="gam-card-chevron" aria-hidden="true"></span>
+        <span class="gam-card-title">&#x1F4BB; Diagnostics</span>
+      </summary>
+      <div class="gam-card-body" id="diagCardBody">
+        <!-- Section 1: System identity -->
+        <div class="pop-section-label">System identity</div>
+        <div id="diagSysIdentity" class="pop-token-status" style="padding:4px 12px;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:10px;line-height:1.6">Loading...</div>
+        <!-- Section 2: Service Worker health -->
+        <div class="pop-section-label" style="margin-top:8px">Service Worker health</div>
+        <div id="diagSwHealth" class="pop-token-status" style="padding:4px 12px;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:10px;line-height:1.6">Loading...</div>
+        <!-- Section 3: RPC error log -->
+        <div class="pop-section-label" style="margin-top:8px">RPC error log (last 50)</div>
+        <div id="diagRpcLog" style="padding:4px 12px;max-height:180px;overflow:auto;font-family:ui-monospace,monospace;font-size:10px;line-height:1.5">Loading...</div>
+        <div style="padding:4px 12px">
+          <button id="diagExportErrors" class="pop-btn pop-btn-ghost" style="font-size:10px;padding:2px 8px">Copy errors to clipboard</button>
+        </div>
+        <!-- Section 4: Storage + audit -->
+        <div class="pop-section-label" style="margin-top:8px">Storage + audit</div>
+        <div id="diagStorage" class="pop-token-status" style="padding:4px 12px;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:10px;line-height:1.6">Loading...</div>
+        <!-- Debug snapshot button lives here -->
+        <div class="pop-tools" style="padding:4px 12px 8px">
+          <button id="diagSnapshotBtn" class="pop-btn pop-btn-ghost" style="font-size:11px">&#x1F9EA; Copy full snapshot to clipboard</button>
+        </div>
+      </div>
+    </details>
+  </div>
+
   <div class="pop-footer">
     <button id="exportBtn" class="pop-link">Export log</button>
     <span class="pop-sep">&middot;</span>
-    <button id="clearBtn" class="pop-link pop-link-danger">Clear all</button>
+    <!-- E.2.2 (Rule 100): importBtn — between exportBtn and clearBtn per SHIPMASTER Section J -->
+    <button id="importBtn" class="pop-link">Import</button>
+    <span class="pop-sep">&middot;</span>
+    <!-- E.1.1 (Rule 60): renamed "Clear all" -> "Factory reset" -->
+    <button id="clearBtn" class="pop-link pop-link-danger">Factory reset</button>
   </div>
 
   <script src="popup.js"></script>

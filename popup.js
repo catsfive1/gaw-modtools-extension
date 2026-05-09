@@ -17,6 +17,78 @@ const K = {
 // v5.1.1: ModTools-only keys we're allowed to clear/export.
 // Never blindly clear(): could wipe unrelated settings landing in local storage.
 const OWNED_KEYS = Object.values(K);
+
+// =============================================================================
+// E.2.1 (AF-12 Rule 36): popupRpc wrapper + __showPopupRestartNotice
+// Replaces all direct chrome.runtime.sendMessage({type:'rpc',...}) calls.
+// Non-rpc sends (setTokens, clearTokens, tokensStatus, openPopup) NOT wrapped.
+// =============================================================================
+async function popupRpc(name, args) {
+  try {
+    var r = await chrome.runtime.sendMessage({ type: 'rpc', name: name, args: args || {} });
+    if (!r) return { ok: false, code: 'NO_RESPONSE', error: 'No response from extension background.' };
+    return r;
+  } catch (e) {
+    var msg = String(e && e.message || e);
+    if (/context invalidated|receiving end does not exist|message port closed/i.test(msg)) {
+      __showPopupRestartNotice();
+      return { ok: false, code: 'EXT_CONTEXT_INVALIDATED', error: 'Extension is restarting — close and reopen this popup.' };
+    }
+    return { ok: false, error: msg };
+  }
+}
+function __showPopupRestartNotice() {
+  if (document.getElementById('gam-popup-restart-notice')) return;
+  var d = document.createElement('div');
+  d.id = 'gam-popup-restart-notice';
+  d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#2a1d10;border-bottom:1px solid #ff9933;color:#ffd84d;font:600 11px ui-monospace,monospace;padding:6px 12px;text-align:center;';
+  d.textContent = 'Extension is restarting — close and reopen this popup.';
+  document.body.prepend(d);
+}
+// =============================================================================
+// END E.2.1
+// =============================================================================
+
+// =============================================================================
+// E.3.3 (AF-16 Rule 47): showPopupBanner — non-blocking, auto-dismisses 5s
+// Replaces all alert() calls in popup.js (6 sites).
+// =============================================================================
+function showPopupBanner(msg, severity) {
+  var existing = document.getElementById('gam-popup-banner');
+  if (existing) { try { existing.remove(); } catch (_) {} }
+  var colors = { error: { bg: '#2a1010', border: '#f04040', text: '#f87171' },
+                 warn:  { bg: '#2a1d10', border: '#ff9933', text: '#ffd84d' },
+                 success: { bg: '#0f2a1a', border: '#3dd68c', text: '#6ee7b7' },
+                 info:  { bg: '#0f1a2a', border: '#4A9EFF', text: '#93c5fd' } };
+  var c = colors[severity] || colors.info;
+  var b = document.createElement('div');
+  b.id = 'gam-popup-banner';
+  b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9998;background:' + c.bg + ';border-bottom:1px solid ' + c.border + ';color:' + c.text + ';font:600 11px ui-monospace,monospace;padding:6px 12px;text-align:center;cursor:pointer;';
+  b.textContent = msg;
+  b.addEventListener('click', function() { try { b.remove(); } catch (_) {} });
+  document.body.prepend(b);
+  setTimeout(function() { try { if (b.parentNode) b.remove(); } catch (_) {} }, 5000);
+}
+// =============================================================================
+// END E.3.3
+// =============================================================================
+
+// =============================================================================
+// E.2.6 (AF-06 Rule 18): _purgeOldestDiagLog50Pct — shared helper for quota purge
+// =============================================================================
+async function _purgeOldestDiagLog50Pct() {
+  try {
+    var r = await chrome.storage.local.get('gam_diag_log');
+    var entries = (r && r.gam_diag_log) || [];
+    if (entries.length > 0) {
+      var kept = entries.slice(Math.floor(entries.length / 2));
+      await chrome.storage.local.set({ gam_diag_log: kept });
+    }
+  } catch (_) {}
+}
+// =============================================================================
+// END E.2.6 helper
+// =============================================================================
 const GAW_TAB_PATTERNS = ['*://greatawakening.win/*', '*://*.greatawakening.win/*'];
 
 function $(id) { return document.getElementById(id); }
@@ -54,7 +126,8 @@ function _cardWireToggle(id) {
     _cardWriteTimers[id] = setTimeout(function() {
       // v10.5.1 INVARIANT: always write boolean (el.open is already bool, but guard explicitly)
       const openBool = el.open === true;
-      chrome.storage.local.set({ ['gam_card_open_' + id]: openBool }).catch(function() {});
+      // E.2.6 (AF-06 Rule 18): add console.warn to silent catch
+      chrome.storage.local.set({ ['gam_card_open_' + id]: openBool }).catch(function(e) { console.warn('[Popup] storage.set card state failed:', e); });
     }, 400);
   });
 }
@@ -70,7 +143,8 @@ async function _cardAutoCollapseTokens(whoamiOk) {
   if (!card) return;
   if (whoamiOk) {
     card.removeAttribute('open');
-    chrome.storage.local.set({ gam_card_open_tokens: false }).catch(function() {});
+    // E.2.6 (AF-06 Rule 18): add console.warn to silent catch
+    chrome.storage.local.set({ gam_card_open_tokens: false }).catch(function(e) { console.warn('[Popup] storage.set card-tokens state failed:', e); });
     card.classList.add('gam-card-order-last');
     card.classList.remove('gam-card-urgent');
   }
@@ -403,6 +477,25 @@ async function loadStats() {
     $('s-msgs').textContent = todayMsgs;
     $('s-notes').textContent = todayNotes;
 
+    // ASK-086 / WAVE-B-AUX A.3: fetch AI budget from worker /mod/stats.
+    // Fire-and-forget — never blocks the local stat render above.
+    // Shows "--" if worker is unreachable or fields not yet present (WAVE-C stats D1).
+    (async function() {
+      try {
+        var aiEl = document.getElementById('s-ai-today');
+        if (!aiEl) return;
+        var r = await popupRpc('modStats', {});
+        if (r && r.ok && r.data) {
+          var calls = r.data.ai_calls_today;
+          var cap   = r.data.ai_calls_cap;
+          if (typeof calls === 'number' && typeof cap === 'number') {
+            aiEl.textContent = calls + '/' + cap;
+          }
+          // If fields missing, leave '--' placeholder (E.2.5 pattern).
+        }
+      } catch (_) { /* non-fatal — AI budget is informational only */ }
+    })();
+
     if (drReady > 0) {
       const alert = $('dr-alert');
       alert.style.display = 'block';
@@ -450,22 +543,107 @@ $('exportBtn').addEventListener('click', async () => {
     a.click();
     URL.revokeObjectURL(url);
   } catch (err) {
-    alert('Export failed: ' + err.message);
+    // E.3.3 (AF-16 Rule 47): replace alert() with showPopupBanner
+    showPopupBanner('Export failed: ' + err.message, 'error');
   }
 });
 
+// =============================================================================
+// E.2.2 (AF-34 Rule 100): importBtn — data import, counterpart to exportBtn
+// Placement: footer, between exportBtn and clearBtn (per SHIPMASTER Section J).
+// Never overwrites workerModToken / leadModToken from import.
+// =============================================================================
+(function wireImportBtn() {
+  var btn = $('importBtn');
+  if (!btn) return;
+  btn.addEventListener('click', function() {
+    var inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = '.json';
+    inp.style.display = 'none';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', async function() {
+      var file = inp.files && inp.files[0];
+      document.body.removeChild(inp);
+      if (!file) return;
+      try {
+        var text = await file.text();
+        var payload = JSON.parse(text);
+        if (!payload || payload.scope !== 'owned-keys') {
+          showPopupBanner('Import failed: file scope must be "owned-keys"', 'error');
+          return;
+        }
+        var importedVersion = (payload.data && payload.data.gam_settings &&
+          payload.data.gam_settings[MAINT_SCHEMA_KEY]) || 0;
+        if (importedVersion > MAINT_SCHEMA_CURRENT) {
+          showPopupBanner('Import aborted: exported schema version (' + importedVersion + ') is newer than current code (' + MAINT_SCHEMA_CURRENT + '). Downgrade risk.', 'warn');
+          return;
+        }
+        // Strip tokens, sniff_log, fallback_mode from import (device-bound)
+        var skipKeys = ['workerModToken', 'leadModToken', 'gam_sniff_log', 'gam_fallback_mode'];
+        var toWrite = {};
+        var keysRestored = [];
+        var keysSkipped = [];
+        var importData = payload.data || {};
+        Object.keys(importData).forEach(function(k) {
+          if (skipKeys.includes(k)) { keysSkipped.push(k); return; }
+          if (k === 'gam_settings') {
+            // Strip token fields from nested settings object too
+            var s = Object.assign({}, importData[k] || {});
+            delete s.workerModToken;
+            delete s.leadModToken;
+            toWrite[k] = s;
+          } else {
+            toWrite[k] = importData[k];
+          }
+          keysRestored.push(k);
+        });
+        await chrome.storage.local.set(toWrite);
+        showPopupBanner('Import OK: ' + keysRestored.length + ' key(s) restored. Tokens not overwritten. Reload GAW tabs.', 'success');
+        setTimeout(function() { try { loadStats(); } catch(_){} }, 500);
+      } catch (err) {
+        showPopupBanner('Import failed: ' + (err && err.message || err), 'error');
+      }
+    });
+    inp.click();
+  });
+})();
+// =============================================================================
+// END E.2.2
+// =============================================================================
+
 $('clearBtn').addEventListener('click', async () => {
-  // v9.3.6 (noob-rollout audit fix): the confirm message previously omitted
-  // the most consequential data wiped here — your mod token. Without it, a
-  // mod has to ask their lead for a fresh rotation invite to recover.
-  if (!confirm(
-    'Clear ALL ModTools data?\n\n' +
-    'This wipes:\n' +
-    '  • Your mod token (you\'ll need a fresh rotation invite from your lead to recover)\n' +
-    '  • Lead token (if set)\n' +
-    '  • Mod log, roster, death row, watchlist, verification, notes, intel cache\n\n' +
-    'This cannot be undone. Continue?'
-  )) return;
+  // E.1.1 (AF-20 Rule 60): escalate to TRIPLE-CONFIRM. Renamed "Clear all" -> "Factory reset".
+  // Dialog #1: overview of what gets wiped.
+  const ok1 = await __popupConfirm({
+    title: 'Factory reset — are you sure?',
+    body: 'This wipes:\n' +
+          '  • Your mod token (you\'ll need a fresh rotation invite from your lead to recover)\n' +
+          '  • Lead token (if set)\n' +
+          '  • Mod log, roster, death row, watchlist, verification, notes, intel cache\n\n' +
+          'Your audit log (gam_diag_log) is preserved. The setup wizard will re-appear to guide re-authentication.\n\n' +
+          'This cannot be undone. Proceed to confirmation #2?',
+    okLabel: 'Continue',
+    cancelLabel: 'Cancel'
+  });
+  if (!ok1) return;
+  // Dialog #2: token-loss warning.
+  const ok2 = await __popupConfirm({
+    title: 'CONFIRM #2 of 3',
+    body: 'This includes your mod token. You cannot recover it yourself — only your Lead can issue a new rotation invite. Are you sure?',
+    okLabel: 'Yes, continue',
+    cancelLabel: 'No, abort'
+  });
+  if (!ok2) return;
+  // Dialog #3: __popupAskText WIPE confirmation (mirrors maintResetDefaults pattern).
+  const wipeText = await __popupAskText({
+    title: 'CONFIRM #3 of 3 — Factory reset',
+    label: 'Type WIPE to confirm',
+    placeholder: 'WIPE',
+    max: 8,
+    validate: function(v) { return v === 'WIPE' ? '' : 'Type WIPE (uppercase) exactly.'; }
+  });
+  if (wipeText !== 'WIPE') return;
   try {
     // v9.3.13 (Vanguard M-1): explicitly clear the SW vault BEFORE wiping
     // chrome.storage.local. Pre-fix, the storage wipe alone left the SW
@@ -487,10 +665,12 @@ $('clearBtn').addEventListener('click', async () => {
         } catch (e) { /* tab may not have content script loaded, ignore */ }
       }
     } catch (e) { /* tabs permission may be missing - still OK */ }
-    alert('ModTools data cleared. Reload any GAW tabs to see changes.');
+    // E.3.3 (AF-16 Rule 47): replace alert() with showPopupBanner
+    showPopupBanner('Data cleared — reload any GAW tabs', 'success');
     loadStats();
   } catch (err) {
-    alert('Clear failed: ' + err.message);
+    // E.3.3 (AF-16 Rule 47): replace alert() with showPopupBanner
+    showPopupBanner('Clear failed: ' + err.message, 'error');
   }
 });
 
@@ -540,7 +720,8 @@ $('debugBtn').addEventListener('click', async () => {
     a.click();
     URL.revokeObjectURL(url);
   } catch (err) {
-    alert('Debug snapshot failed: ' + err.message);
+    // E.3.3 (AF-16 Rule 47): replace alert() with showPopupBanner
+    showPopupBanner('Debug snapshot failed: ' + err.message, 'error');
   }
 });
 
@@ -905,7 +1086,7 @@ async function saveToken() {
       // returns 401, the value the user pasted was an INVITE CODE, not a
       // minted token. Roll back the save, stage as invite, route to Claim.
       try {
-        const probe = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
+        const probe = await popupRpc('modWhoami');
         if (probe && probe.status === 401) {
           // Roll back: clear the bad token from storage
           try { await saveTokensSecurely({ workerModToken: '' }); } catch(_){}
@@ -933,14 +1114,20 @@ async function saveToken() {
       try { $('tokenInput').value = ''; } catch (e) {}
     } else {
       statusEl.className = 'pop-token-status err';
-      statusEl.textContent = 'save failed: ' + (r && r.error || 'unknown');
+      // E.3.2 (AF-32 Rule 95): distinguish SW cold-start from worker rejection
+      var saveErrMsg = r && r.error || 'unknown';
+      if (/Could not establish connection|receiving end does not exist|message port closed/i.test(saveErrMsg)) {
+        statusEl.textContent = 'Service worker is starting — wait 3s and try again. If this persists, reload the extension.';
+      } else {
+        statusEl.textContent = 'save failed: ' + saveErrMsg;
+      }
     }
     return;
   }
   try {
     // v5.0-Phase-1: route through background RPC vault. authValidateToken
     // tests the candidate against /version server-side and stores it on success.
-    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'authValidateToken', args: { token: token } });
+    const r = await popupRpc('authValidateToken', { token: token });
     if (!r || !r.ok) {
       statusEl.className = 'pop-token-status err';
       statusEl.textContent = r && r.status ? 'rejected (HTTP ' + r.status + ') \u2014 check token matches what the lead gave you' : (r && r.error || 'network error');
@@ -1019,7 +1206,7 @@ async function __applyTierGate() {
   if (!tools) return;
   tools.style.display = 'none';
   try {
-    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
+    const r = await popupRpc('modWhoami');
     if (!r || !r.ok || !r.data) {
       _cardAuthFailed();
       return;
@@ -1196,10 +1383,8 @@ async function __confirmTierChange(username, selectEl) {
   if (!confirmed) return;
 
   try {
-    const r = await chrome.runtime.sendMessage({
-      type: 'rpc', name: 'adminModPromote',
-      payload: { mod_username: username, tier: newTier }
-    });
+    // E.2.1 (AF-12 Rule 36): converted to popupRpc
+    const r = await popupRpc('adminModPromote', { mod_username: username, tier: newTier });
     if (r && r.ok) {
       selectEl.value = newTier;
       selectEl.dataset.curtier = newTier;
@@ -1269,7 +1454,7 @@ async function saveLead() {
     }
     // v5.0-Phase-1: route through background RPC vault. authValidateLeadToken
     // tests + stores the lead token without exposing it on the popup side.
-    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'authValidateLeadToken', args: { token: token } });
+    const r = await popupRpc('authValidateLeadToken', { token: token });
     if (!r || !r.ok) {
       statusEl.className = 'pop-token-status err';
       if (r && r.status === 403) {
@@ -1319,7 +1504,7 @@ async function generateInvite() {
       who = prompt('GAW username this invite is for (optional, for audit):', '') || '';
     }
     // v5.0-Phase-1: route through RPC vault; background attaches tokens.
-    const rInv = await chrome.runtime.sendMessage({ type: 'rpc', name: 'adminInviteCreate', args: { mod: who } });
+    const rInv = await popupRpc('adminInviteCreate', { mod: who });
     if (!rInv || !rInv.ok){
       resultEl.className = 'pop-token-status err';
       resultEl.textContent = 'rejected (HTTP ' + (rInv && rInv.status || '?') + ')';
@@ -1446,7 +1631,7 @@ function __renderInviteResult(container, invite, ttlHours) {
 
 async function __issueSingleFromRoster(username, rowEl, tokens) {
   // v5.0-Phase-1: route through RPC vault; background attaches tokens.
-  const rsi = await chrome.runtime.sendMessage({ type: 'rpc', name: 'adminIssueInvite', args: { username: username } });
+  const rsi = await popupRpc('adminIssueInvite', { username: username });
   if (!rsi || !rsi.ok) {
     const err = document.createElement('div');
     err.style.cssText = 'color:#ff7a7a;font-size:10px;margin-top:2px';
@@ -1557,7 +1742,7 @@ async function __issueBulkFromRoster(panel, tokens) {
   panel.appendChild(status);
 
   // v5.0-Phase-1: route through RPC vault; background attaches tokens.
-  const rBulk = await chrome.runtime.sendMessage({ type: 'rpc', name: 'adminBulkInvite', args: {} });
+  const rBulk = await popupRpc('adminBulkInvite', {});
   status.remove();
 
   if (!rBulk || !rBulk.ok) {
@@ -1722,7 +1907,7 @@ async function openRotationRoster() {
     const tokens = { team: team, lead: lead };
 
     // v5.0-Phase-1: route through RPC vault; background attaches tokens.
-    const rList = await chrome.runtime.sendMessage({ type: 'rpc', name: 'adminListMods', args: {} });
+    const rList = await popupRpc('adminListMods', {});
     if (!rList || !rList.ok) {
       if (result) {
         result.className = 'pop-token-status err';
@@ -1847,7 +2032,7 @@ async function rotateToken() {
       return;
     }
     // v5.0-Phase-1: authRotateSelf validates, rotates, and stores the new token in the vault.
-    const rRot = await chrome.runtime.sendMessage({ type: 'rpc', name: 'authRotateSelf', args: {} });
+    const rRot = await popupRpc('authRotateSelf', {});
     if (!rRot || !rRot.ok) {
       // v9.2.1: rotation_save_failed = worker rotated but storage write failed.
       // Surface CRITICAL banner so the mod knows they need lead recovery.
@@ -1902,7 +2087,7 @@ async function claimRotationInvite() {
 
     status.textContent = 'claiming...';
     // v5.0-Phase-1: authClaimInvite validates the code, stores the new token in the vault.
-    const rClaim = await chrome.runtime.sendMessage({ type: 'rpc', name: 'authClaimInvite', args: { code: code, username: username } });
+    const rClaim = await popupRpc('authClaimInvite', { code: code, username: username });
     if (!rClaim || !rClaim.ok) {
       // v9.2.1: rotation_save_failed = worker accepted claim but storage write failed.
       if (rClaim && rClaim.error === 'rotation_save_failed') {
@@ -1936,7 +2121,7 @@ async function verifyTokenRoundTrip() {
   if (!status) return;
   status.textContent = 'verifying...';
   try {
-    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
+    const r = await popupRpc('modWhoami');
     if (r && r.ok && r.data && r.data.username) {
       status.className = 'pop-token-status ok';
       status.textContent = '✓ verified -- token works as ' + r.data.username;
@@ -2037,7 +2222,8 @@ function _showVerifyTokenBtn() {
       const s = (out && out.gam_settings) || {};
       const has = !!(s.workerModToken && String(s.workerModToken).length >= 32);
       r.style.display = has ? '' : 'none';
-    }).catch(function(){});
+    // E.2.6 (AF-06 Rule 18): add console.warn to silent catch
+    }).catch(function(e){ console.warn('[Popup] storage.get settings failed:', e); });
   }
   update();
   try {
@@ -2073,7 +2259,8 @@ document.querySelectorAll('.crawl-btn').forEach(btn => {
         });
         if (r && r.ok){
           statusEl.className = 'pop-token-status ok';
-          statusEl.textContent = '\u2713 ' + r.result.pages + ' pages, ' + r.result.users + ' users harvested';
+          // E.3.2 (AF-32 Rule 95): crawl success \u2014 append discoverability hint
+          statusEl.textContent = '\u2713 ' + r.result.pages + ' pages, ' + r.result.users + ' users harvested \u2014 users now visible in Stats > Pending and searchable in Mod Console (Ctrl+Shift+M)';
         } else {
           statusEl.className = 'pop-token-status err';
           statusEl.textContent = 'crawl failed: ' + (r && r.error || 'unknown');
@@ -2089,13 +2276,14 @@ document.querySelectorAll('.crawl-btn').forEach(btn => {
 $('dashBtn').addEventListener('click', async () => {
   try {
     const r = await sendToActiveGawTab({ type: 'fetchReport' });
-    if (!r || !r.ok) { alert('Dashboard load failed. Need open GAW tab + mod token.'); return; }
+    if (!r || !r.ok) { showPopupBanner('Dashboard load failed. Need open GAW tab + mod token.', 'error'); return; }
     const html = buildDashboardHtml(r.data && r.data.report || {});
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     chrome.tabs.create({ url });
   } catch (e) {
-    alert('Dashboard failed: ' + e.message);
+    // E.3.3 (AF-16 Rule 47): replace alert() with showPopupBanner
+    showPopupBanner('Dashboard failed: ' + e.message, 'error');
   }
 });
 
@@ -2340,11 +2528,7 @@ async function __claimInviteClick() {
     // /mod/token/claim-rotation (correct endpoint for per-mod rotation
     // invites). The RPC also stores the resulting token in the SW vault
     // automatically, so we don't need a separate saveTokensSecurely step.
-    const rClaim = await chrome.runtime.sendMessage({
-      type: 'rpc',
-      name: 'authClaimInvite',
-      args: { code: code, username: username }
-    });
+    const rClaim = await popupRpc('authClaimInvite', { code: code, username: username });
     if (!rClaim || !rClaim.ok) {
       statusEl.className = 'pop-token-status err';
       let msg = 'claim rejected';
@@ -2362,6 +2546,20 @@ async function __claimInviteClick() {
     statusEl.textContent = '\u2713 claimed \u2014 you are now ' + (claimData.mod_username || username);
     try { await loadToken(); } catch (e) {}
     try { await loadLead(); } catch (e) {}
+
+    // ASK-069 / WAVE-B-AUX A.2: welcome celebration toast \u2014 first-time claim only.
+    // gam_welcomed flag persists in local storage; skip banner on subsequent claims.
+    try {
+      const welStore = await chrome.storage.local.get('gam_welcomed');
+      if (!welStore || !welStore.gam_welcomed) {
+        const welcomeUser = (claimData.mod_username || username) || 'Mod';
+        showPopupBanner(
+          'Welcome, ' + welcomeUser + '! Your token is stored and ModChat is live. You\'re ready to moderate.',
+          'success'
+        );
+        await chrome.storage.local.set({ gam_welcomed: true });
+      }
+    } catch (_) { /* non-fatal: welcome toast is pure UX polish */ }
   } catch (e) {
     statusEl.className = 'pop-token-status err';
     statusEl.textContent = 'check failed: ' + (e && e.message || e);
@@ -2385,6 +2583,22 @@ async function __claimInviteClick() {
   } catch (e) {}
 })();
 // --- v7.2 Platform Hardening END ---
+
+// AF-39 (Rule 116 / C.2.9): dynamic version — replaces stale hardcoded v5.2.8 in popup.html L24
+(function() {
+  try {
+    var verEl = document.getElementById('ver');
+    if (verEl) verEl.textContent = 'v' + chrome.runtime.getManifest().version;
+  } catch (_) {}
+})();
+
+// E.2.5 (AF-09 Rule 26): set '--' placeholder in stat cells before loadStats() runs
+// Prevents blank-to-zero flash on cold start or after storage clear.
+// ASK-086 / WAVE-B-AUX A.3: s-ai-today added to placeholder list.
+['s-pending','s-dr','s-banned','s-today','s-msgs','s-notes','s-ai-today'].forEach(function(id) {
+  var el = document.getElementById(id);
+  if (el && !el.textContent.trim()) el.textContent = '--';
+});
 
 loadStats();
 refreshSniffLabel();
@@ -2506,17 +2720,14 @@ loadLead();
       status.textContent = '⌛ minting your team token via /mod/token/claim-rotation...';
       status.style.color = '#ff9933';
       try {
-        const r = await chrome.runtime.sendMessage({
-          type: 'rpc', name: 'authClaimInvite',
-          args: { code, username }
-        });
+        const r = await popupRpc('authClaimInvite', { code, username });
         if (!r || !r.ok) {
           status.textContent = 'claim failed: ' + ((r && r.data && r.data.error) || (r && r.error) || 'unknown');
           status.style.color = '#ff3b3b';
           return;
         }
         // Verify
-        const who = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
+        const who = await popupRpc('modWhoami');
         if (who && who.ok && who.data && who.data.username) {
           try { await __noteWhoami(who.data.username); } catch(_){}
           $('firstRunSuccessName').textContent = 'Welcome, u/' + who.data.username + (who.data.is_lead ? ' (lead)' : '');
@@ -2546,10 +2757,7 @@ loadLead();
       status.textContent = '⌛ saving + verifying via /mod/whoami...';
       status.style.color = '#ff9933';
       try {
-        const sr = await chrome.runtime.sendMessage({
-          type: 'rpc', name: 'setTokens',
-          args: { workerModToken: input }
-        });
+        const sr = await popupRpc('setTokens', { workerModToken: input });
         // Note: setTokens RPC may not exist; fall back to saveTokensSecurely
         if (!sr || !sr.ok) {
           // Fallback: write directly to chrome.storage.local
@@ -2557,7 +2765,7 @@ loadLead();
           const merged = { ...(cur.gam_settings || {}), workerModToken: input };
           await chrome.storage.local.set({ gam_settings: merged });
         }
-        const who = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
+        const who = await popupRpc('modWhoami');
         if (who && who.ok && who.data && who.data.username) {
           try { await __noteWhoami(who.data.username); } catch(_){}
           $('firstRunSuccessName').textContent = 'Welcome, u/' + who.data.username + (who.data.is_lead ? ' (lead)' : '');
@@ -2701,7 +2909,7 @@ async function loadTeamSettings(){
   const statusEl = $('flagTtlStatus');
   if (!inputEl || !statusEl) return;
   try {
-    const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modSettingsRead' });
+    const r = await popupRpc('modSettingsRead');
     if (!r || !r.ok) { statusEl.textContent = '(could not read team settings)'; return; }
     const ttl = parseInt((r.data && r.data.settings && r.data.settings.username_flag_ttl_days), 10);
     if (Number.isFinite(ttl) && ttl > 0) {
@@ -2729,11 +2937,7 @@ async function saveFlagTtl(){
   statusEl.className = 'pop-token-status';
   statusEl.textContent = 'saving...';
   try {
-    const r = await chrome.runtime.sendMessage({
-      type:'rpc',
-      name:'adminSettingsWrite',
-      args:{ key:'username_flag_ttl_days', value:String(v) }
-    });
+    const r = await popupRpc('adminSettingsWrite', { key:'username_flag_ttl_days', value:String(v) });
     if (r && r.ok){
       statusEl.className = 'pop-token-status ok';
       statusEl.textContent = '✓ flag TTL = ' + v + 'd (live to all mods on next /flags/read)';
@@ -2940,7 +3144,8 @@ function __renderBugRow(panel, row, refresh) {
           args.triage_note = noteInp.value;
         }
       }
-      const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'bugReportUpdate', args });
+      // E.2.1 (AF-12 Rule 36): converted to popupRpc
+      const r = await popupRpc('bugReportUpdate', args);
       if (r && r.ok) {
         saveBtn.textContent = 'saved';
         setTimeout(refresh, 400);
@@ -2986,9 +3191,7 @@ async function loadBugReports() {
   status.textContent = 'loading...';
   while (panel.firstChild) panel.removeChild(panel.firstChild);
   try {
-    const r = await chrome.runtime.sendMessage({
-      type: 'rpc', name: 'bugReportList', args: { status: 'open', limit: 100 }
-    });
+    const r = await popupRpc('bugReportList', { status: 'open', limit: 100 });
     if (!r || !r.ok || !r.data) {
       status.className = 'pop-token-status err';
       status.textContent = 'failed (HTTP ' + (r && r.status || '?') + ')'
@@ -3035,9 +3238,7 @@ async function saveBugVisibility() {
   status.className = 'pop-token-status';
   status.textContent = 'saving...';
   try {
-    const r = await chrome.runtime.sendMessage({
-      type: 'rpc', name: 'bugReportVisibilityWrite', args: { visible_to: v }
-    });
+    const r = await popupRpc('bugReportVisibilityWrite', { visible_to: v });
     if (r && r.ok) {
       status.className = 'pop-token-status ok';
       status.textContent = '✓ saved: ' + (r.data && r.data.visible_to);
@@ -3056,9 +3257,7 @@ async function loadBugVisibility() {
   const inp = $('bugVisInput');
   if (!inp) return;
   try {
-    const r = await chrome.runtime.sendMessage({
-      type: 'rpc', name: 'bugReportVisibilityRead'
-    });
+    const r = await popupRpc('bugReportVisibilityRead');
     if (r && r.ok && r.data && r.data.visible_to) {
       inp.value = r.data.visible_to;
     }
@@ -3095,9 +3294,7 @@ async function loadMacros(){
   if (!list) return;
   list.innerHTML = '<div style="padding:10px;color:#888;font-size:11px;text-align:center">Loading...</div>';
   try {
-    const r = await chrome.runtime.sendMessage({
-      type: 'rpc', name: 'macrosList', args: { kind: __macroKind }
-    });
+    const r = await popupRpc('macrosList', { kind: __macroKind });
     if (!r || !r.ok || !r.data || !Array.isArray(r.data.macros)){
       list.innerHTML = '<div style="padding:10px;color:#f04040;font-size:11px;text-align:center">Failed to load: ' + ((r && r.error) || 'no response') + '</div>';
       return;
@@ -3173,9 +3370,7 @@ async function __macroSave(){
   if (body.length > 4000){ __macroSetStatus('body too long (max 4000)', 'err'); return; }
   __macroSetStatus('saving...');
   try {
-    const r = await chrome.runtime.sendMessage({
-      type: 'rpc', name: 'macroUpsert', args: { id: id, kind: __macroKind, label: label, body: body }
-    });
+    const r = await popupRpc('macroUpsert', { id: id, kind: __macroKind, label: label, body: body });
     if (r && r.ok && r.data && r.data.ok){
       __macroSetStatus('✓ ' + (r.data.action || 'saved'), 'ok');
       __macroCancelEdit();
@@ -3193,9 +3388,7 @@ async function __macroDelete(m){
   if (!window.confirm('Delete macro "' + m.label + '"? This is sync\'d across the team.')) return;
   __macroSetStatus('deleting...');
   try {
-    const r = await chrome.runtime.sendMessage({
-      type: 'rpc', name: 'macroDelete', args: { id: m.id }
-    });
+    const r = await popupRpc('macroDelete', { id: m.id });
     if (r && r.ok && r.data && r.data.ok){
       __macroSetStatus('✓ deleted', 'ok');
       loadMacros();
@@ -3220,14 +3413,12 @@ async function __macroAiSeed(){
     // v9.8.0: pass existing labels as anti-list to prevent repetition
     let existing_labels = [];
     try {
-      const lr = await chrome.runtime.sendMessage({ type:'rpc', name:'macrosList', args:{ kind: __macroKind } });
+      const lr = await popupRpc('macrosList', { kind: __macroKind });
       if (lr && lr.ok && lr.data && Array.isArray(lr.data.macros)) {
         existing_labels = lr.data.macros.map(m => String(m.label || '')).filter(Boolean);
       }
     } catch(_){}
-    const r = await chrome.runtime.sendMessage({
-      type:'rpc', name:'macroAiSuggest', args:{ kind: __macroKind, count: 5, existing_labels }
-    });
+    const r = await popupRpc('macroAiSuggest', { kind: __macroKind, count: 5, existing_labels });
     if (!r || !r.ok || !r.data || !r.data.ok || !Array.isArray(r.data.suggestions)){
       const errReason = (r && r.data && r.data.error) || (r && r.error) || 'unknown';
       __macroSetStatus('AI suggestion failed: ' + errReason, 'err');
@@ -3244,10 +3435,7 @@ async function __macroAiSeed(){
     let saved = 0, failed = 0;
     for (const s of sugg) {
       try {
-        const upsert = await chrome.runtime.sendMessage({
-          type:'rpc', name:'macroUpsert',
-          args:{ kind: __macroKind, label: s.label, body: s.body }
-        });
+        const upsert = await popupRpc('macroUpsert', { kind: __macroKind, label: s.label, body: s.body });
         if (upsert && upsert.ok && upsert.data && upsert.data.ok) saved++;
         else failed++;
       } catch(_){ failed++; }
@@ -3789,12 +3977,19 @@ async function maintStorageProbe() {
     const summary = __fmtBytes(total) + ' (' + pct.toFixed(1) + '% of 5MB) -- top: '
       + top5.map(([k, s]) => k + ' ' + __fmtBytes(s)).join(', ');
     __maintLog('storageProbe', 'ok', { total, pct, top5 });
+    // E.2.6 (AF-06 Rule 18): auto-purge diag log when pct > 90%
+    if (pct > 90) {
+      console.warn('[Popup AF-06] Storage > 90% — auto-purging diag log oldest 50%');
+      await _purgeOldestDiagLog50Pct();
+    }
     const trim = document.createElement('button');
     trim.className = 'pop-btn pop-btn-ghost';
     trim.textContent = 'Trim now';
     trim.style.cssText = 'font-size:10px;padding:2px 8px;margin-left:6px';
     trim.addEventListener('click', () => withLoading(trim, 'trimming...', maintStorageTrim));
-    __maintSetStatus('maintStorageStatus', summary, pct > 80 ? 'warn' : 'ok');
+    // E.2.6 (AF-06 Rule 18): green < 60%, amber 60-80%, red > 80%
+    var storageSev = pct > 80 ? 'warn' : pct > 60 ? 'info' : 'ok';
+    __maintSetStatus('maintStorageStatus', summary, storageSev);
     const el = $('maintStorageStatus');
     if (el) el.appendChild(trim);
   } catch (e) {
@@ -3843,7 +4038,7 @@ async function maintTokenProbe() {
   __maintSetStatus('maintTokenStatus', 'probing...');
   try {
     const t0 = Date.now();
-    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
+    const r = await popupRpc('modWhoami');
     const latency = Date.now() - t0;
     if (!r || !r.ok || !r.data) {
       __maintLog('tokenProbe', 'err', { status: r && r.status, error: r && r.error });
@@ -3869,6 +4064,22 @@ async function maintTokenProbe() {
       + ' -- ' + latency + 'ms, ' + ageStr;
     __maintLog('tokenProbe', 'ok', { username, isLead, latency, ageStr });
     __maintSetStatus('maintTokenStatus', summary, kind);
+    // E.3.2 (AF-32 Rule 95): token expired — inject action link to rotate
+    if (kind === 'err') {
+      const statusEl = $('maintTokenStatus');
+      if (statusEl) {
+        const link = document.createElement('button');
+        link.className = 'pop-link';
+        link.style.cssText = 'margin-left:6px;font-size:10px';
+        link.textContent = 'Token expired — click here to rotate';
+        link.addEventListener('click', function() {
+          _cardAuthFailed();
+          const rotateBtn = $('rotateBtn');
+          if (rotateBtn) rotateBtn.scrollIntoView({ behavior: 'smooth' });
+        });
+        statusEl.appendChild(link);
+      }
+    }
   } catch (e) {
     __maintLog('tokenProbe', 'err', { error: String(e && e.message || e) });
     __maintSetStatus('maintTokenStatus', 'failed: ' + (e && e.message || e), 'err');
@@ -4044,6 +4255,79 @@ async function maintSchemaCheck() {
 }
 
 // =========================================================================
+// Routine #8a (AF-07 Rule 19+21): Repair settings -- non-destructive shape fix
+// Reads gam_settings from chrome.storage.local, validates required key presence
+// + types against SETTINGS_REQUIRED_SHAPE, patches only the broken keys with
+// DEFAULT_SETTINGS values. Tokens and UX prefs are never touched.
+// =========================================================================
+const REPAIR_REQUIRED_SHAPE = {
+  autoRefreshEnabled:           'boolean',
+  workerModToken:               'string',
+  leadModToken:                 'string',
+  isLeadMod:                    'boolean',
+  hideSidebar:                  'boolean',
+  tardsThreshold:               'number',
+  autoDeathRowRules:            'array',
+  autoTardRules:                'array',
+  'features.platformHardening': 'boolean',
+  'features.teamBoost':         'boolean'
+};
+const REPAIR_DEFAULT_VALUES = {
+  autoRefreshEnabled:           true,
+  workerModToken:               '',
+  leadModToken:                 '',
+  isLeadMod:                    false,
+  hideSidebar:                  true,
+  tardsThreshold:               2,
+  autoDeathRowRules:            [],
+  autoTardRules:                [],
+  'features.platformHardening': true,
+  'features.teamBoost':         false
+};
+function __validateSettingsShape(obj) {
+  var missing = [];
+  var mistyped = [];
+  if (!obj || typeof obj !== 'object') {
+    return { ok: false, missing: Object.keys(REPAIR_REQUIRED_SHAPE), mistyped: [] };
+  }
+  Object.keys(REPAIR_REQUIRED_SHAPE).forEach(function(k) {
+    if (!(k in obj)) { missing.push(k); return; }
+    var expected = REPAIR_REQUIRED_SHAPE[k];
+    if (expected === 'array') {
+      if (!Array.isArray(obj[k])) mistyped.push(k);
+    } else {
+      if (typeof obj[k] !== expected) mistyped.push(k);
+    }
+  });
+  return { ok: missing.length === 0 && mistyped.length === 0, missing: missing, mistyped: mistyped };
+}
+async function maintRepairSettings() {
+  __maintSetStatus('maintRepairStatus', 'checking...');
+  try {
+    const r = await chrome.storage.local.get('gam_settings');
+    const s = (r && r.gam_settings) || null;
+    const report = __validateSettingsShape(s);
+    if (report.ok) {
+      __maintLog('repairSettings', 'clean', {});
+      __maintSetStatus('maintRepairStatus', '✓ No corruption found. All required keys present + typed.', 'ok');
+      return;
+    }
+    const broken = report.missing.concat(report.mistyped);
+    const patch = Object.assign({}, s || {});
+    broken.forEach(function(k) {
+      if (k in REPAIR_DEFAULT_VALUES) patch[k] = REPAIR_DEFAULT_VALUES[k];
+    });
+    await chrome.storage.local.set({ gam_settings: patch });
+    __maintLog('repairSettings', 'repaired', { missing: report.missing, mistyped: report.mistyped, keys: broken });
+    __maintSetStatus('maintRepairStatus',
+      '✓ Repaired ' + broken.length + ' key(s): ' + broken.join(', ') + '. Reload GAW tabs.', 'ok');
+  } catch (e) {
+    __maintLog('repairSettings', 'err', { error: String(e && e.message || e) });
+    __maintSetStatus('maintRepairStatus', 'failed: ' + (e && e.message || e), 'err');
+  }
+}
+
+// =========================================================================
 // Routine #8: Reset to defaults (DESTRUCTIVE — triple confirm)
 // =========================================================================
 async function maintResetDefaults() {
@@ -4124,10 +4408,7 @@ async function maintResetDefaults() {
 async function maintAuditVerify() {
   __maintSetStatus('maintAuditVerifyStatus', 'verifying...');
   try {
-    const r = await chrome.runtime.sendMessage({
-      type: 'rpc', name: 'adminAuditVerify',
-      args: { limit: 5000, from: 0 }
-    });
+    const r = await popupRpc('adminAuditVerify', { limit: 5000, from: 0 });
     if (!r || !r.ok || !r.data) {
       __maintLog('auditVerify', 'err', { status: r && r.status, error: r && r.error });
       __maintSetStatus('maintAuditVerifyStatus',
@@ -4210,9 +4491,7 @@ async function maintFullReport() {
   // issues. Result appears in the HTML report's "Top issues" panel via
   // postMessage to the rendered window.
   try {
-    const ar = await chrome.runtime.sendMessage({
-      type: 'rpc', name: 'aiHealthSummarize', args: { report_json: json.slice(0, 16000) }
-    });
+    const ar = await popupRpc('aiHealthSummarize', { report_json: json.slice(0, 16000) });
     if (ar && ar.ok && ar.data && ar.data.ok && Array.isArray(ar.data.top_issues)) {
       // Surface as a snack so user knows AI summary is ready
       const status = $('maintFullReportStatus');
@@ -4324,7 +4603,7 @@ async function maintRosterStaleness() {
   const panel = $('maintRosterStalenessPanel');
   if (panel) { panel.style.display = 'none'; panel.replaceChildren(); }
   try {
-    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'adminListMods' });
+    const r = await popupRpc('adminListMods');
     if (!r || !r.ok || !r.data) {
       __maintLog('rosterStaleness', 'err', { status: r && r.status, error: r && r.error });
       __maintSetStatus('maintRosterStalenessStatus',
@@ -4373,10 +4652,7 @@ async function maintRosterStaleness() {
             btn.disabled = true;
             btn.textContent = '...';
             try {
-              const ri = await chrome.runtime.sendMessage({
-                type: 'rpc', name: 'adminIssueInvite',
-                args: { username: m.mod_username }
-              });
+              const ri = await popupRpc('adminIssueInvite', { username: m.mod_username });
               if (ri && ri.ok && ri.data && ri.data.code) {
                 const url = 'https://greatawakening.win/?mt_invite=' + encodeURIComponent(ri.data.code);
                 try { await navigator.clipboard.writeText(url); } catch (_) {}
@@ -4429,7 +4705,7 @@ async function maintMigrationDebt() {
     // 3) Stale rotation timestamps in roster (ask worker)
     let staleRoster = 0;
     try {
-      const rr = await chrome.runtime.sendMessage({ type: 'rpc', name: 'adminListMods' });
+      const rr = await popupRpc('adminListMods');
       if (rr && rr.ok && rr.data && Array.isArray(rr.data.mods)) {
         const cutoff = Date.now() - 90 * 86400000;
         staleRoster = rr.data.mods.filter(m => !m.is_lead
@@ -4456,9 +4732,7 @@ async function maintMigrationDebt() {
     }
     // 5) Audit-chain NULL hmac flag (check via verify)
     try {
-      const av = await chrome.runtime.sendMessage({
-        type: 'rpc', name: 'adminAuditVerify', args: { limit: 1, from: 0 }
-      });
+      const av = await popupRpc('adminAuditVerify', { limit: 1, from: 0 });
       if (av && av.ok && av.data && av.data.entry_hmac_null_post_boundary) {
         findings.push({
           kind: 'audit_null_hmac',
@@ -4498,15 +4772,139 @@ __maintWire('maintSelectorDrift', maintSelectorDriftReport, 'reading...');
 __maintWire('maintRehydrateAlias', maintForceRehydrate, 'rehydrating...');
 __maintWire('maintDiag', maintDiagStatus, 'reading...');
 __maintWire('maintSchema', maintSchemaCheck, 'checking...');
+__maintWire('maintRepair', maintRepairSettings, 'repairing...');  // v10.5.1 AF-07 Rule 21
 __maintWire('maintReset', maintResetDefaults, 'resetting...');
+
+// =============================================================================
+// E.2.3 (AF-18 Rule 52): Safe Mode toggle wiring
+// Writes gam_settings.safe_mode; shows "reload GAW tab to apply" snack.
+// Wired via __maintWire convention (reads the checkbox state, not a button click).
+// =============================================================================
+(function wireSafeModeToggle() {
+  var toggle = $('safeModeToggle');
+  var track  = $('safeModeToggleTrack');
+  var thumb  = $('safeModeToggleThumb');
+  var label  = $('safeModeToggleLabel2');
+  if (!toggle || !track) return;
+
+  function applySafeModeVisual(on) {
+    if (on) {
+      track.style.background = '#f0a040';
+      thumb.style.left = '18px';
+      thumb.style.background = '#fff';
+      label.style.color = '#f0a040';
+      label.textContent = 'ON';
+    } else {
+      track.style.background = '#2a2f38';
+      thumb.style.left = '2px';
+      thumb.style.background = '#5c6370';
+      label.style.color = '#5c6370';
+      label.textContent = 'OFF';
+    }
+  }
+
+  // Load current safe_mode state on popup open
+  (async function() {
+    try {
+      var r = await chrome.storage.local.get('gam_settings');
+      var safeMode = !!(r && r.gam_settings && r.gam_settings.safe_mode);
+      toggle.checked = safeMode;
+      applySafeModeVisual(safeMode);
+    } catch(_) {}
+  })();
+
+  toggle.addEventListener('change', async function() {
+    var on = toggle.checked;
+    applySafeModeVisual(on);
+    try {
+      var r = await chrome.storage.local.get('gam_settings');
+      var s = Object.assign({}, (r && r.gam_settings) || {});
+      s.safe_mode = on;
+      await chrome.storage.local.set({ gam_settings: s });
+      __showToast('Safe mode ' + (on ? 'enabled' : 'disabled') + ' — reload the GAW tab to apply.', on ? 'warn' : 'ok');
+    } catch(e) {
+      __showToast('Safe mode save failed: ' + (e && e.message || e), 'error');
+    }
+  });
+
+  // Make the whole row clickable (not just the toggle)
+  var row = $('safeModeRow');
+  if (row) {
+    row.addEventListener('click', function(e) {
+      if (e.target !== toggle) { toggle.checked = !toggle.checked; toggle.dispatchEvent(new Event('change')); }
+    });
+  }
+  var safeModeRowEl = $('safeModeRow');
+  if (safeModeRowEl) safeModeRowEl.style.display = 'flex';
+})();
+// =============================================================================
+// END E.2.3
+// =============================================================================
+
+// =============================================================================
+// E.2.4 (AF-18 Rule 54): Feature Health row — reads gam_error_counters on popup
+// open and renders auto-disabled features with Re-enable buttons.
+// =============================================================================
+(async function renderFeatureHealthRow() {
+  var row = $('featureHealthRow');
+  var list = $('featureHealthList');
+  if (!row || !list) return;
+  try {
+    var r = await chrome.storage.local.get('gam_error_counters');
+    var counters = (r && r.gam_error_counters) || {};
+    var disabled = Object.entries(counters).filter(function(kv) { return kv[1] && kv[1].disabled_at; });
+    if (disabled.length === 0) {
+      list.textContent = 'All features healthy';
+      row.style.display = 'flex';
+      return;
+    }
+    list.innerHTML = '';
+    row.style.display = 'flex';
+    disabled.forEach(function(kv) {
+      var feature = kv[0];
+      var rec = kv[1];
+      var time = rec.disabled_at ? new Date(rec.disabled_at).toLocaleTimeString() : '?';
+      var item = document.createElement('div');
+      item.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:3px';
+      var chip = document.createElement('span');
+      chip.style.cssText = 'color:#f04040;font-size:10px;flex:1';
+      chip.textContent = '✗ ' + feature + ' (disabled ' + time + ')';
+      var reEnableBtn = document.createElement('button');
+      reEnableBtn.className = 'pop-btn pop-btn-ghost';
+      reEnableBtn.style.cssText = 'font-size:9px;padding:1px 5px';
+      reEnableBtn.textContent = 'Re-enable';
+      reEnableBtn.addEventListener('click', async function() {
+        try {
+          var cr = await chrome.storage.local.get('gam_error_counters');
+          var cs = Object.assign({}, (cr && cr.gam_error_counters) || {});
+          if (cs[feature]) { cs[feature] = { count: 0, window_start: 0, disabled_at: 0 }; }
+          await chrome.storage.local.set({ gam_error_counters: cs });
+          reEnableBtn.textContent = 're-enabled';
+          reEnableBtn.disabled = true;
+          chip.style.color = '#3dd68c';
+          chip.textContent = '✓ ' + feature + ' re-enabled — reload GAW tab';
+        } catch(e) {
+          reEnableBtn.textContent = 'failed';
+        }
+      });
+      item.appendChild(chip);
+      item.appendChild(reEnableBtn);
+      list.appendChild(item);
+    });
+  } catch(_) { row.style.display = 'none'; }
+})();
+// =============================================================================
+// END E.2.4
+// =============================================================================
 
 // v9.11.0 - AI tard / sus-pattern suggester wire-up (Commander #23/#24).
 async function maintTardSuggest() {
   __maintSetStatus('maintTardSuggestStatus', 'AI scanning recent usernames...');
-  const r = await chrome.runtime.sendMessage({ type:'rpc', name:'aiTardsSuggest' });
+  const r = await popupRpc('aiTardsSuggest');
   if (!r || !r.ok || !r.data || !r.data.ok) {
     const reason = (r && r.data && r.data.error) || (r && r.error) || 'unknown';
-    __maintSetStatus('maintTardSuggestStatus', 'AI failed: ' + reason, 'err');
+    // E.3.2 (AF-32 Rule 95): AI error — append manual fallback hint
+    __maintSetStatus('maintTardSuggestStatus', 'AI failed: ' + reason + ' — AI unavailable, use Ban Manager to ban manually or review /users directly.', 'err');
     return;
   }
   const suggestions = Array.isArray(r.data.suggestions) ? r.data.suggestions : [];
@@ -4596,7 +4994,7 @@ __maintWire('maintTardSuggest', maintTardSuggest, 'scanning...');
 // v9.12.0 - AI sticky-request detector wire-up (Commander #17).
 async function maintStickyScan() {
   __maintSetStatus('maintStickyScanStatus', 'AI scanning recent modmails for sticky requests...');
-  const r = await chrome.runtime.sendMessage({ type:'rpc', name:'aiStickyDetect' });
+  const r = await popupRpc('aiStickyDetect');
   if (!r || !r.ok || !r.data || !r.data.ok) {
     const reason = (r && r.data && r.data.error) || (r && r.error) || 'unknown';
     __maintSetStatus('maintStickyScanStatus', 'AI failed: ' + reason, 'err');
@@ -4717,6 +5115,19 @@ async function __maintLoadWarning() {
 }
 __maintLoadWarning();
 
+// E.3.2 (AF-32 Rule 95): FallbackMode ON — show "NATIVE MODE" label in chip
+(async function __maintCheckFallbackMode() {
+  try {
+    var r = await chrome.storage.local.get('gam_fallback_mode');
+    if (!r || !r.gam_fallback_mode) return;
+    var chip = $('maintWarningChip');
+    if (!chip) return;
+    chip.style.display = '';
+    chip.textContent = '⚠ NATIVE MODE';
+    chip.title = 'ModTools interception is OFF — actions taken in native GAW UI will not sync to shared roster. Open popup to re-enable.';
+  } catch(_) {}
+})();
+
 // =========================================================================
 // v9.5.0: Autonomous maintenance reports — lead-only surface
 // =========================================================================
@@ -4731,7 +5142,7 @@ async function __maintLoadAutoToggle() {
   const status = $('maintAutoStatus');
   if (!sel) return;
   try {
-    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modSettingsRead' });
+    const r = await popupRpc('modSettingsRead');
     if (!r || !r.ok || !r.data) {
       if (status) { status.textContent = '(could not read team settings)'; }
       return;
@@ -4756,11 +5167,7 @@ async function __maintSaveAutoToggle() {
   status.classList.remove('err');
   try {
     const value = sel.value === '0' ? '0' : '1';
-    const r = await chrome.runtime.sendMessage({
-      type: 'rpc',
-      name: 'adminSettingsWrite',
-      args: { key: 'maintenance_autonomous_enabled', value }
-    });
+    const r = await popupRpc('adminSettingsWrite', { key: 'maintenance_autonomous_enabled', value });
     if (!r || !r.ok) {
       status.textContent = 'save failed: ' + (r && r.error || 'unknown');
       status.classList.add('err');
@@ -4831,11 +5238,7 @@ async function __maintLoadReports() {
   status.classList.remove('err');
   try {
     const sev = sevSel ? sevSel.value : '';
-    const r = await chrome.runtime.sendMessage({
-      type: 'rpc',
-      name: 'adminMaintenanceReportsList',
-      args: { days: 14, limit: 100, severity: sev }
-    });
+    const r = await popupRpc('adminMaintenanceReportsList', { days: 14, limit: 100, severity: sev });
     if (!r || !r.ok) {
       status.textContent = 'load failed: ' + (r && r.error || 'HTTP ' + (r && r.status));
       status.classList.add('err');
@@ -4856,7 +5259,7 @@ async function __maintRunNow() {
   status.textContent = 'running weekly probe + LLM analysis...';
   status.classList.remove('err');
   try {
-    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'maintenanceRunNow' });
+    const r = await popupRpc('maintenanceRunNow');
     if (!r || !r.ok) {
       status.textContent = 'run failed: ' + (r && r.error || 'unknown');
       status.classList.add('err');
@@ -4901,7 +5304,7 @@ async function __maintRunNow() {
 async function __loadLeadKpi() {
   // Tile 1: Active Now from /presence/online
   try {
-    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modPresencePing', args: {} });
+    const r = await popupRpc('modPresencePing', {});
     if (r && r.ok && r.data) {
       const count = Array.isArray(r.data.mods) ? r.data.mods.length : (r.data.active_count || 0);
       const el = $('kpi-active-val');
@@ -4923,9 +5326,7 @@ async function __loadLeadKpi() {
     const qaInvite = $('qaInviteBtn');
     if (qaInvite) qaInvite.addEventListener('click', async function() {
       withLoading(qaInvite, 'generating...', async function() {
-        const r = await chrome.runtime.sendMessage({
-          type: 'rpc', name: 'adminInviteCreate', args: { username: _gamWhoamiUsername || 'lead' }
-        });
+        const r = await popupRpc('adminInviteCreate', { username: _gamWhoamiUsername || 'lead' });
         if (r && r.ok && r.data && r.data.invite_url) {
           try { await navigator.clipboard.writeText(r.data.invite_url); } catch (_) {}
           __showToast('Invite link copied to clipboard', 'ok');
@@ -4972,9 +5373,7 @@ async function __loadLapsedMods() {
 
   if (status) { status.className = 'pop-token-status'; status.textContent = 'loading...'; }
   try {
-    const r = await chrome.runtime.sendMessage({
-      type: 'rpc', name: 'adminModLapsed', args: { days: days }
-    });
+    const r = await popupRpc('adminModLapsed', { days: days });
     if (!r || !r.ok || !Array.isArray(r.data)) {
       if (status) { status.className = 'pop-token-status'; status.textContent = 'lapsed data unavailable (worker endpoint pending)'; }
       return;
@@ -5040,4 +5439,207 @@ async function __loadLapsedMods() {
 // [Hooked into wizard success block further up in file — see setTimeout patches]
 // =============================================================================
 // END PATCH 2
+// =============================================================================
+
+// =============================================================================
+// E.3.1 (AF-32 Rule 94): Diagnostics tab — renderDiagTab()
+// Auto-runs on tab show. Reads gam_sw_boots, gam_diag_log, gam_settings,
+// chrome.alarms.getAll() in parallel. Auto-refreshes on storage.onChanged.
+// =============================================================================
+var _diagTabRendered = false;
+async function renderDiagTab() {
+  _diagTabRendered = true;
+  var sysEl = $('diagSysIdentity');
+  var swEl  = $('diagSwHealth');
+  var rpcEl = $('diagRpcLog');
+  var stoEl = $('diagStorage');
+  if (!sysEl || !swEl || !rpcEl || !stoEl) return;
+
+  // --- Section 1: System identity ---
+  try {
+    var mf = chrome.runtime.getManifest();
+    var perms = await new Promise(function(res) {
+      try { chrome.permissions.getAll(function(p) { res(p); }); } catch(_) { res({}); }
+    });
+    var ua = navigator.userAgent;
+    var chromeMatch = ua.match(/Chrome\/([\d.]+)/);
+    var chromeVer = chromeMatch ? chromeMatch[1] : 'unknown';
+    var permList = (perms.permissions || []).concat(perms.origins || []).join(', ');
+    sysEl.textContent = [
+      'Extension: v' + mf.version + ' (' + chrome.runtime.id + ')',
+      'Browser: Chrome ' + chromeVer,
+      'Permissions: ' + permList
+    ].join('\n');
+    sysEl.className = 'pop-token-status ok';
+  } catch(e) {
+    sysEl.textContent = 'identity read failed: ' + (e && e.message || e);
+    sysEl.className = 'pop-token-status err';
+  }
+
+  // --- Section 2: SW health + alarms ---
+  try {
+    var data = await chrome.storage.local.get(['gam_sw_boots', 'gam_settings']);
+    var boots = (data.gam_sw_boots) || [];
+    var last = boots.length > 0 ? boots[boots.length - 1] : null;
+    var lastAgo = last ? Math.round((Date.now() - new Date(last.ts).getTime()) / 1000) + 's ago' : 'no boot recorded';
+    var alarms = await new Promise(function(res) {
+      try { chrome.alarms.getAll(function(a) { res(a || []); }); } catch(_) { res([]); }
+    });
+    var alarmLines = alarms.map(function(a) {
+      return '  ' + a.name + ' — next: ' + new Date(a.scheduledTime).toLocaleTimeString();
+    });
+    var bootLines = boots.slice(-5).reverse().map(function(b) {
+      return '  ' + (b.ts ? new Date(b.ts).toLocaleTimeString() : '?') + ' — ' + (b.reason || '?');
+    });
+    swEl.textContent = [
+      'Boot count: ' + boots.length + ' (max 50 ring buffer)',
+      'Last boot: ' + (last ? last.ts : 'none') + ' (' + lastAgo + ')',
+      'Last boot reason: ' + (last ? last.reason || '?' : '—'),
+      '',
+      'Recent boots:',
+      bootLines.join('\n') || '  (none)',
+      '',
+      'Active alarms:',
+      alarmLines.join('\n') || '  (none)'
+    ].join('\n');
+    swEl.className = 'pop-token-status ok';
+  } catch(e) {
+    swEl.textContent = 'SW health read failed: ' + (e && e.message || e);
+    swEl.className = 'pop-token-status err';
+  }
+
+  // --- Section 3: RPC error log ---
+  var diagRpcEntries = [];
+  try {
+    var diagData = await chrome.storage.local.get('gam_diag_log');
+    var diagLog = (diagData.gam_diag_log) || [];
+    var errorCats = ['unhandledrejection', 'uncaught-error', 'rpc-error', 'net-error'];
+    diagRpcEntries = diagLog.filter(function(e) {
+      return errorCats.some(function(c) { return e && e.cat && e.cat.indexOf(c) !== -1; });
+    }).slice(-50).reverse();
+    if (diagRpcEntries.length === 0) {
+      rpcEl.textContent = '';
+      var chip = document.createElement('div');
+      chip.style.cssText = 'color:#3dd68c;font-size:10px;padding:4px';
+      chip.textContent = 'No RPC errors in log';
+      rpcEl.appendChild(chip);
+    } else {
+      rpcEl.textContent = '';
+      diagRpcEntries.forEach(function(entry) {
+        var row = document.createElement('div');
+        row.style.cssText = 'border-bottom:1px solid #1e2128;padding:2px 0;display:flex;gap:4px;align-items:baseline';
+        var ts = document.createElement('span');
+        ts.style.cssText = 'color:#5c6370;flex:0 0 60px;font-size:9px';
+        ts.textContent = entry.ts ? new Date(entry.ts).toLocaleTimeString() : '?';
+        var cat = document.createElement('span');
+        cat.style.cssText = 'color:#f0a040;flex:0 0 80px;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        cat.textContent = entry.cat || '';
+        var msg = document.createElement('span');
+        msg.style.cssText = 'color:#e8eaed;flex:1;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        msg.textContent = (entry.msg || '').slice(0, 120);
+        row.appendChild(ts); row.appendChild(cat); row.appendChild(msg);
+        rpcEl.appendChild(row);
+      });
+    }
+  } catch(e) {
+    rpcEl.textContent = 'diag log read failed: ' + (e && e.message || e);
+  }
+
+  // Wire "Copy errors" button
+  var diagExportBtn = $('diagExportErrors');
+  if (diagExportBtn) {
+    diagExportBtn.onclick = function() {
+      try {
+        var out = JSON.stringify(diagRpcEntries, null, 2);
+        // E.3.1 diag export — copy to clipboard using three-layer fallback
+        (function __diagCopy(text) {
+          try { if (typeof copy === 'function') { copy(text); } } catch(_) {}
+          try { if (navigator.clipboard) navigator.clipboard.writeText(text).catch(function(){}); } catch(_) {}
+        })(out);
+        diagExportBtn.textContent = 'Copied!';
+        setTimeout(function() { diagExportBtn.textContent = 'Copy errors to clipboard'; }, 2000);
+      } catch(_) {}
+    };
+  }
+
+  // Wire debug snapshot button (moved here from Tools card)
+  var diagSnapBtn = $('diagSnapshotBtn');
+  var toolsDebugBtn = $('debugBtn');
+  if (diagSnapBtn && toolsDebugBtn) {
+    diagSnapBtn.addEventListener('click', function() { toolsDebugBtn.click(); });
+  }
+
+  // --- Section 4: Storage + audit ---
+  try {
+    var total = await new Promise(function(resolve, reject) {
+      try { chrome.storage.local.getBytesInUse(null, function(n) { resolve(n); }); }
+      catch(e) { reject(e); }
+    });
+    var pct = total / MAINT_QUOTA_BYTES * 100;
+    var tokenData = await chrome.storage.local.get('gam_settings');
+    var ts2 = tokenData && tokenData.gam_settings && tokenData.gam_settings.tokenIssuedAt;
+    var tokenAge = ts2 ? Math.floor((Date.now() - ts2) / 86400000) + 'd' : 'unknown';
+    stoEl.textContent = [
+      'Storage: ' + __fmtBytes(total) + ' (' + pct.toFixed(1) + '% of 5MB)',
+      'Token age: ' + tokenAge,
+    ].join('\n');
+    stoEl.className = pct > 80 ? 'pop-token-status err' : pct > 60 ? 'pop-token-status warn' : 'pop-token-status ok';
+  } catch(e) {
+    stoEl.textContent = 'storage read failed: ' + (e && e.message || e);
+    stoEl.className = 'pop-token-status err';
+  }
+}
+
+// Wire the Diag tab to render on first show, auto-refresh on storage changes
+(function wireDiagTab() {
+  var diagBtn = document.querySelector('.pop-tab[data-tab="diag"]');
+  if (!diagBtn) return;
+  diagBtn.addEventListener('click', function() {
+    setTimeout(function() { try { renderDiagTab(); } catch(_) {} }, 50);
+  });
+  // Auto-refresh when diag keys change
+  try {
+    chrome.storage.onChanged.addListener(function(changes) {
+      if (!_diagTabRendered) return;
+      var diagSection = $('diagTabSection');
+      if (!diagSection || diagSection.classList.contains('pop-tab-hidden')) return;
+      if (changes.gam_diag_log || changes.gam_sw_boots) {
+        renderDiagTab();
+      }
+    });
+  } catch(_) {}
+})();
+// =============================================================================
+// END E.3.1
+// =============================================================================
+
+// =============================================================================
+// E.3.4 (AF-33 Rule 98): Promote session drafts to local with TTL
+// gam_modmail_drafts: 4h TTL mirror. gam_macro_drafts: 24h TTL mirror.
+// On read: purge stale (savedAt + TTL < now). On write: update local mirror.
+// This is a utility for modtools.js to call via RPC; popup.js handles the
+// local-side cleanup on popup open (prunes stale TTL entries).
+// =============================================================================
+var DRAFT_TTL_MODMAIL_MS = 4  * 60 * 60 * 1000;  // 4 hours
+var DRAFT_TTL_MACRO_MS   = 24 * 60 * 60 * 1000;  // 24 hours
+
+(async function purgeStaleDrafts() {
+  try {
+    var now = Date.now();
+    // Modmail drafts
+    var mmData = await chrome.storage.local.get('gam_modmail_drafts_local');
+    var mmDraft = mmData && mmData.gam_modmail_drafts_local;
+    if (mmDraft && mmDraft.savedAt && (now - mmDraft.savedAt) > DRAFT_TTL_MODMAIL_MS) {
+      await chrome.storage.local.remove('gam_modmail_drafts_local');
+    }
+    // Macro drafts
+    var macData = await chrome.storage.local.get('gam_macro_drafts_local');
+    var macDraft = macData && macData.gam_macro_drafts_local;
+    if (macDraft && macDraft.savedAt && (now - macDraft.savedAt) > DRAFT_TTL_MACRO_MS) {
+      await chrome.storage.local.remove('gam_macro_drafts_local');
+    }
+  } catch(_) {}
+})();
+// =============================================================================
+// END E.3.4
 // =============================================================================

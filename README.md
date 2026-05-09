@@ -58,13 +58,16 @@ Chrome extension + Cloudflare Worker backend providing a unified Mod Console, sh
 
 ---
 
-## Install (development / side-load)
+## Install
 
-1. Clone or download the repo
-2. Chrome/Brave → `chrome://extensions/` → Developer mode ON → Load unpacked
-3. Select the repo root folder (the one with `manifest.json`)
-4. Sign into greatawakening.win
-5. Paste your per-mod token in the onboarding modal (minted by the lead mod via `scripts/provision-mod-token.ps1`)
+See **[docs/INSTALL.md](docs/INSTALL.md)** for the full install guide, including:
+
+- Decision tree: Drive Desktop path vs. manual ZIP path
+- Step-by-step load-unpacked instructions
+- Brave Shields gotcha (invite links)
+- Drive Desktop "Available offline" gotcha
+- Linux notes
+- Verification checklist
 
 ## Install (Chrome Web Store)
 

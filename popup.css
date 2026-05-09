@@ -1386,3 +1386,54 @@ input[type="checkbox"]:checked::after {
 .gam-empty-card.gam-empty-error .gam-empty-cta:hover {
   background: var(--bb-red-bg);
 }
+
+/* ── E.2.3 (AF-18 Rule 52): Safe Mode toggle row ───────────────────────── */
+#safeModeRow {
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background .1s;
+}
+#safeModeRow:hover { background: rgba(240, 160, 64, 0.06); }
+
+/* ── E.3.1 (AF-32 Rule 94): Diagnostics tab section ────────────────────── */
+#diagTabSection .pop-section-label { margin-top: 8px; }
+#diagSysIdentity, #diagSwHealth, #diagStorage {
+  font-family: ui-monospace, 'JetBrains Mono', Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  padding: 4px 12px;
+}
+#diagRpcLog {
+  padding: 4px 12px;
+  max-height: 180px;
+  overflow: auto;
+  font-family: ui-monospace, 'JetBrains Mono', Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+/* ── E.3.3 (AF-16 Rule 47): popup banner (replaces alert()) ────────────── */
+#gam-popup-banner {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 9998;
+  font: 600 11px ui-monospace, monospace;
+  padding: 6px 12px;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* ── E.2.1 (AF-12 Rule 36): extension restart notice bar ───────────────── */
+#gam-popup-restart-notice {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 9999;
+  font: 600 11px ui-monospace, monospace;
+  padding: 6px 12px;
+  text-align: center;
+  background: #2a1d10;
+  border-bottom: 1px solid #ff9933;
+  color: #ffd84d;
+}

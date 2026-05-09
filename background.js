@@ -47,6 +47,9 @@ const MAINT_INTEL_EVICT_PERIOD_MIN = 30;       // every 30 min
 // log purge) are NEVER fired by this handler.
 const MAINT_WEEKLY_ALARM = 'gam_maint_weekly_run';
 const MAINT_WEEKLY_PERIOD_MIN = 60 * 24 * 7;   // every 7 days
+// AF-05 (Rule 14): SW health heartbeat — logs vault status + storage usage every 5 min.
+const HEALTH_ALARM = 'gam_health';
+const HEALTH_PERIOD_MIN = 5;
 // Storage / log shape constants kept in sync with popup.js + modtools.js.
 const MAINT_DIAG_KEY = 'gam_diag_log';
 const MAINT_DIAG_MAX = 500;
@@ -119,8 +122,51 @@ async function loadSecrets() {
       workerModToken: s.workerModToken || '',
       leadModToken: s.leadModToken || ''
     };
+    // AF-01 P1 fix: restore _UPDATE_FLAG_LAST_SET from durable storage so the
+    // update banner survives SW termination. Without this, verifyUpdateFlag
+    // returns ok:false after every SW restart until the next alarm fires (~30m).
+    try {
+      if (chrome.storage && chrome.storage.local) {
+        const flagOut = await chrome.storage.local.get('gam_update_available');
+        if (flagOut && flagOut.gam_update_available && flagOut.gam_update_available.to) {
+          _UPDATE_FLAG_LAST_SET = flagOut.gam_update_available;
+        }
+      }
+    } catch (_) {}
   } catch (e) { /* service-worker may have been evicted; cache stays empty */ }
 }
+
+// AF-03 Rule 7: global error handlers for unhandled promise rejections and errors.
+// Writes to chrome.storage.local gam_diag_log (same shape as _maintAppendDiag)
+// so failures are visible in the debug snapshot across SW evictions.
+self.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason;
+  const msg = (reason && reason.message) ? reason.message : String(reason);
+  const stack = (reason && reason.stack) ? reason.stack : null;
+  console.warn('[ModTools-SW] Unhandled rejection:', msg, stack);
+  try {
+    const entry = { ts: Date.now(), iso: new Date().toISOString(), cat: 'unhandledrejection', msg, stack, v: 'v10.5.1' };
+    chrome.storage.local.get('gam_diag_log').then(function(r) {
+      const log = (r.gam_diag_log || []).slice(-499);
+      log.push(entry);
+      chrome.storage.local.set({ gam_diag_log: log }).catch(function() {});
+    }).catch(function() {});
+  } catch (_) {}
+});
+
+self.addEventListener('error', (event) => {
+  const msg = (event.message) ? event.message : String(event);
+  const stack = (event.error && event.error.stack) ? event.error.stack : null;
+  console.warn('[ModTools-SW] Uncaught error:', msg, stack);
+  try {
+    const entry = { ts: Date.now(), iso: new Date().toISOString(), cat: 'uncaught-error', msg, stack, v: 'v10.5.1' };
+    chrome.storage.local.get('gam_diag_log').then(function(r) {
+      const log = (r.gam_diag_log || []).slice(-499);
+      log.push(entry);
+      chrome.storage.local.set({ gam_diag_log: log }).catch(function() {});
+    }).catch(function() {});
+  } catch (_) {}
+});
 
 function pathAllowed(path) {
   if (!path || typeof path !== 'string') return false;
@@ -134,8 +180,111 @@ function pathAllowed(path) {
 }
 // --- v7.2 Platform Hardening END ---
 
+// AF-04 Rule 11 / AF-38 (Rule 112): SW boot ring buffer. Written on every SW wake
+// (install + startup). Keyed gam_sw_boots, capped at 50 entries.
+// v10.6.0 fields added: ua, tier, bytesInUse, boot_count.
+async function _recordSwBoot(reason) {
+  try {
+    const ver = chrome.runtime.getManifest().version;
+    const ua  = navigator.userAgent;
+    const ts  = new Date().toISOString();
+
+    // Tier probe: check gam_settings for isLeadMod / workerModToken.
+    var tier = 'unknown';
+    try {
+      var tierR = await chrome.storage.local.get('gam_settings');
+      var tierS = (tierR && tierR.gam_settings) || {};
+      if (tierS.isLeadMod)          tier = 'lead';
+      else if (tierS.workerModToken) tier = 'mod';
+      else                           tier = 'anon';
+    } catch (_) {}
+
+    // Storage pressure snapshot.
+    var bytesInUse = -1;
+    try {
+      bytesInUse = await new Promise(function(res, rej) {
+        chrome.storage.local.getBytesInUse(null, function(n) {
+          if (chrome.runtime.lastError) { rej(chrome.runtime.lastError); return; }
+          res(n);
+        });
+      });
+    } catch (_) {}
+
+    // Boot counter (monotonic from ring-buffer length + 1).
+    const raw = await chrome.storage.local.get('gam_sw_boots');
+    const boots = (raw && Array.isArray(raw.gam_sw_boots)) ? raw.gam_sw_boots : [];
+    const bootCount = boots.length + 1;
+
+    const entry = { v: ver, ts, reason: reason || 'unknown', ua, tier, bytesInUse, boot_count: bootCount };
+    boots.push(entry);
+    if (boots.length > 50) boots.splice(0, boots.length - 50);
+    await chrome.storage.local.set({ gam_sw_boots: boots });
+    console.log('[modtools v' + ver + '] SW boot #' + bootCount + ' at ' + ts +
+      ' reason=' + reason + ' tier=' + tier + ' storage=' + bytesInUse + 'B ua=' + ua);
+  } catch (e) { /* non-fatal -- boot log is diagnostic only */ }
+}
+
+// AF-04 Rule 10: generic exponential-backoff helper.
+// opts: { base=100, cap=8000, maxAttempts=3 } (ms)
+async function withBackoff(fn, opts) {
+  const base = (opts && opts.base) || 100;
+  const cap  = (opts && opts.cap)  || 8000;
+  const max  = (opts && opts.maxAttempts) || 3;
+  let lastErr;
+  for (var attempt = 0; attempt < max; attempt++) {
+    try {
+      return await fn(attempt);
+    } catch (e) {
+      lastErr = e;
+      if (attempt < max - 1) {
+        const delay = Math.min(cap, base * Math.pow(2, attempt)) + Math.random() * base;
+        await new Promise(function(res) { setTimeout(res, delay); });
+      }
+    }
+  }
+  throw lastErr;
+}
+
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('[ModTools] Installed:', details.reason);
+  await _recordSwBoot(details.reason || 'install');
+
+  // AF-09 (Rule 27): on version update, invalidate the gam_profile_intel cache.
+  // Session storage (gam_modmail_drafts) is auto-cleared by SW termination on update.
+  // gam_profile_intel persists across updates and must be purged explicitly
+  // so stale AI analysis results don't survive the update boundary.
+  if (details.reason === 'update') {
+    try {
+      await chrome.storage.local.remove(MAINT_INTEL_KEY);
+      console.log('[ModTools AF-09] update: purged gam_profile_intel cache');
+      var purgeEntry = {
+        ts: new Date().toISOString(),
+        cat: 'maint.updatePurge',
+        msg: 'version update: purged gam_profile_intel',
+        extra: { fromVersion: details.previousVersion || 'unknown' }
+      };
+      var purgeR = await chrome.storage.local.get(MAINT_DIAG_KEY);
+      var purgeLog = purgeR[MAINT_DIAG_KEY] || [];
+      purgeLog.push(purgeEntry);
+      if (purgeLog.length > MAINT_DIAG_MAX) purgeLog.splice(0, purgeLog.length - MAINT_DIAG_MAX);
+      await chrome.storage.local.set({ [MAINT_DIAG_KEY]: purgeLog });
+    } catch (e) {
+      console.warn('[ModTools AF-09] update purge failed:', e);
+    }
+    // AF-39 (Rule 116): signal popup to show "What's New" panel on first open after update.
+    try {
+      await chrome.storage.local.set({ gam_show_whats_new: chrome.runtime.getManifest().version });
+    } catch (_) {}
+    // AF-08 (Rule 24): on update, write a fresh checksum (migration may have changed settings).
+    // Verify-on-update would be a false positive; write fresh baseline instead.
+    try { await _maintSettingsChecksumWrite(); } catch (_) {}
+    // AF-40 (Rule 118): self-diagnostics on update.
+    try { await _runUpdateDiagnostics(); } catch (_) {}
+  } else {
+    // On fresh install, just verify (no prior checksum = first-run OK, silent).
+    try { await _maintSettingsChecksumVerify(); } catch (_) {}
+  }
+
   // (Re)create the recurring update-check alarm on install/update
   try {
     chrome.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
@@ -146,6 +295,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     chrome.alarms.create(MAINT_DIAG_ROTATE_ALARM, { periodInMinutes: MAINT_DIAG_ROTATE_PERIOD_MIN });
     chrome.alarms.create(MAINT_INTEL_EVICT_ALARM, { periodInMinutes: MAINT_INTEL_EVICT_PERIOD_MIN });
     chrome.alarms.create(MAINT_WEEKLY_ALARM, { periodInMinutes: MAINT_WEEKLY_PERIOD_MIN });
+    chrome.alarms.create(HEALTH_ALARM, { periodInMinutes: HEALTH_PERIOD_MIN });
   } catch (e) { console.warn('[ModTools] alarm create failed', e); }
   // v8.6.9: AWAIT __ensureSessionAccess so subsequent storage calls don't
   // fire before the session-area access level is set. Pre-fix race: the
@@ -157,34 +307,50 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
 // Also ensure the alarm is alive on service-worker wake-up
 chrome.runtime.onStartup?.addListener(async () => {
+  await _recordSwBoot('startup');
   try {
+    // AF-04 Rule 12: every chrome.alarms.get callback checks lastError before use.
     chrome.alarms.get(ALARM_NAME, (a) => {
+      if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get ALARM_NAME:', chrome.runtime.lastError.message); return; }
       if (!a) chrome.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
     });
     chrome.alarms.get(BUG_POLL_ALARM, (a) => {
+      if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get BUG_POLL_ALARM:', chrome.runtime.lastError.message); return; }
       if (!a) chrome.alarms.create(BUG_POLL_ALARM, { periodInMinutes: BUG_POLL_PERIOD_MIN });
     });
     // v9.5.0 maintenance alarms — ensure alive on SW wake.
     chrome.alarms.get(MAINT_QUOTA_ALARM, (a) => {
+      if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get MAINT_QUOTA_ALARM:', chrome.runtime.lastError.message); return; }
       if (!a) chrome.alarms.create(MAINT_QUOTA_ALARM, { periodInMinutes: MAINT_QUOTA_PERIOD_MIN });
     });
     chrome.alarms.get(MAINT_TOKEN_AGE_ALARM, (a) => {
+      if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get MAINT_TOKEN_AGE_ALARM:', chrome.runtime.lastError.message); return; }
       if (!a) chrome.alarms.create(MAINT_TOKEN_AGE_ALARM, { periodInMinutes: MAINT_TOKEN_AGE_PERIOD_MIN });
     });
     chrome.alarms.get(MAINT_DIAG_ROTATE_ALARM, (a) => {
+      if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get MAINT_DIAG_ROTATE_ALARM:', chrome.runtime.lastError.message); return; }
       if (!a) chrome.alarms.create(MAINT_DIAG_ROTATE_ALARM, { periodInMinutes: MAINT_DIAG_ROTATE_PERIOD_MIN });
     });
     chrome.alarms.get(MAINT_INTEL_EVICT_ALARM, (a) => {
+      if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get MAINT_INTEL_EVICT_ALARM:', chrome.runtime.lastError.message); return; }
       if (!a) chrome.alarms.create(MAINT_INTEL_EVICT_ALARM, { periodInMinutes: MAINT_INTEL_EVICT_PERIOD_MIN });
     });
     chrome.alarms.get(MAINT_WEEKLY_ALARM, (a) => {
+      if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get MAINT_WEEKLY_ALARM:', chrome.runtime.lastError.message); return; }
       if (!a) chrome.alarms.create(MAINT_WEEKLY_ALARM, { periodInMinutes: MAINT_WEEKLY_PERIOD_MIN });
+    });
+    // AF-05 (Rule 14): health heartbeat resurrection on SW wake.
+    chrome.alarms.get(HEALTH_ALARM, (a) => {
+      if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get HEALTH_ALARM:', chrome.runtime.lastError.message); return; }
+      if (!a) chrome.alarms.create(HEALTH_ALARM, { periodInMinutes: HEALTH_PERIOD_MIN });
     });
   } catch (e) {}
   // v8.6.9: AWAIT both bootstrap calls so the SW is fully ready before
   // any incoming RPC handler fires.
   try { await __ensureSessionAccess(); } catch (e) {}
   try { await loadSecrets(); } catch (e) {}
+  // AF-08 (Rule 24): verify settings checksum on startup.
+  try { await _maintSettingsChecksumVerify(); } catch (e) {}
 });
 
 // v7.2 CHUNK 14: also arm on module load so a freshly-reloaded SW never
@@ -365,6 +531,64 @@ async function _maintSetWarning(payload) {
   } catch (e) { /* fire-and-forget */ }
 }
 
+// AF-09 (Rule 25): auto-purge when storage quota > 80%.
+// Drops oldest 50% of gam_diag_log and LRU 50% of gam_profile_intel.
+// Mirrors what maintStorageTrim() does in popup.js but runs autonomously.
+async function _maintQuotaPurge() {
+  var evicted = 0;
+  var log = [];
+
+  // Purge gam_diag_log: drop oldest 50%
+  try {
+    var r1 = await chrome.storage.local.get(MAINT_DIAG_KEY);
+    var entries1 = r1[MAINT_DIAG_KEY] || [];
+    if (entries1.length > 0) {
+      var dropCount1 = Math.floor(entries1.length / 2);
+      var kept1 = entries1.slice(dropCount1);
+      await chrome.storage.local.set({ [MAINT_DIAG_KEY]: kept1 });
+      evicted += dropCount1;
+      log.push('diag_log: dropped ' + dropCount1 + ', kept ' + kept1.length);
+    }
+  } catch (e) {
+    log.push('diag_log purge failed: ' + String(e && e.message || e));
+  }
+
+  // Purge gam_profile_intel: evict LRU 50% (sort by .ts ascending, drop bottom half)
+  try {
+    var r2 = await chrome.storage.local.get(MAINT_INTEL_KEY);
+    var intel = r2[MAINT_INTEL_KEY] || {};
+    var intelEntries = Object.entries(intel);
+    if (intelEntries.length > 0) {
+      intelEntries.sort(function(a, b) { return ((a[1] && a[1].ts) || 0) - ((b[1] && b[1].ts) || 0); });
+      var dropCount2 = Math.floor(intelEntries.length / 2);
+      var kept2 = Object.fromEntries(intelEntries.slice(dropCount2));
+      await chrome.storage.local.set({ [MAINT_INTEL_KEY]: kept2 });
+      evicted += dropCount2;
+      log.push('profile_intel: dropped ' + dropCount2 + ', kept ' + (intelEntries.length - dropCount2));
+    }
+  } catch (e) {
+    log.push('profile_intel purge failed: ' + String(e && e.message || e));
+  }
+
+  // Log the purge event to gam_diag_log
+  try {
+    var purgeEntry = {
+      ts: new Date().toISOString(),
+      cat: 'maint.quotaPurge',
+      msg: 'auto-purge: evicted ' + evicted + ' entries',
+      extra: { evicted: evicted, detail: log }
+    };
+    var r3 = await chrome.storage.local.get(MAINT_DIAG_KEY);
+    var existing = r3[MAINT_DIAG_KEY] || [];
+    existing.push(purgeEntry);
+    if (existing.length > MAINT_DIAG_MAX) existing.splice(0, existing.length - MAINT_DIAG_MAX);
+    await chrome.storage.local.set({ [MAINT_DIAG_KEY]: existing });
+  } catch (_) {}
+
+  console.log('[ModTools AF-09] quota auto-purge complete. Evicted:', evicted, log);
+  return evicted;
+}
+
 async function _maintQuotaCheck() {
   try {
     const total = await new Promise((resolve, reject) => {
@@ -378,6 +602,8 @@ async function _maintQuotaCheck() {
         detail: 'open Maintenance > Storage health probe > Trim now',
         severity: pct >= 95 ? 'danger' : 'warn'
       });
+      // AF-09 (Rule 25): auto-purge when over threshold.
+      try { await _maintQuotaPurge(); } catch (_) {}
     } else {
       // Auto-clear if storage was previously high but is now OK.
       const cur = await chrome.storage.local.get(MAINT_WARNING_KEY);
@@ -416,6 +642,8 @@ async function _maintTokenAgeCheck() {
       }
     }
     await _maintAppendDiag('alarm.tokenAge', 'ok', { ageDays });
+    // AF-08 (Rule 24): write fresh settings checksum daily (piggybacking the 24h alarm).
+    try { await _maintSettingsChecksumWrite(); } catch (_) {}
   } catch (e) {
     await _maintAppendDiag('alarm.tokenAge', 'err', { error: String(e && e.message || e) });
   }
@@ -457,6 +685,204 @@ async function _maintIntelEvict() {
       { evicted, kept: Object.keys(next).length });
   } catch (e) {
     try { console.warn('[maint] intelEvict failed', e); } catch (_) {}
+  }
+}
+
+// AF-40 (Rule 118): self-diagnostics on update. Runs 4 lightweight probes when
+// the extension is updated. Failures surface via the existing gam_maint_warning
+// channel so no new popup UI is needed.
+async function _runUpdateDiagnostics() {
+  var version = chrome.runtime.getManifest().version;
+  var diagKey = 'gam_diag_update_' + version.replace(/\./g, '_');
+  var probes = {};
+
+  // Probe 1: schema integrity — required keys present in gam_settings.
+  try {
+    var p1r = await chrome.storage.local.get('gam_settings');
+    var p1s = (p1r && p1r.gam_settings) || null;
+    probes.schema = { ok: true, keyCount: p1s ? Object.keys(p1s).length : 0, hasSettings: !!p1s };
+  } catch (e) {
+    probes.schema = { ok: false, error: String(e && e.message || e) };
+  }
+
+  // Probe 2: token validity — tokens present and pass shape check if non-empty.
+  try {
+    var hasWorker = !!(secretCache && secretCache.workerModToken);
+    var hasLead   = !!(secretCache && secretCache.leadModToken);
+    var workerOk  = !hasWorker || __isValidTokenOrEmpty(secretCache.workerModToken);
+    var leadOk    = !hasLead   || __isValidTokenOrEmpty(secretCache.leadModToken);
+    probes.tokens = { ok: workerOk && leadOk, hasWorkerToken: hasWorker, hasLeadToken: hasLead, workerOk, leadOk };
+    if (!workerOk || !leadOk) {
+      await _maintSetWarning({
+        code: 'STALE_TOKEN_SHAPE',
+        message: 'Update detected stale token shape -- re-enter your token in the popup.',
+        severity: 'warn',
+        firstSeenAt: Date.now()
+      });
+    }
+  } catch (e) {
+    probes.tokens = { ok: false, error: String(e && e.message || e) };
+  }
+
+  // Probe 3: storage index reads — critical compound keys parseable.
+  try {
+    var p3r = await chrome.storage.local.get(['gam_profile_intel', 'gam_parked_items', 'gam_diag_log']);
+    var intelOk  = !p3r.gam_profile_intel  || typeof p3r.gam_profile_intel === 'object';
+    var parkedOk = !p3r.gam_parked_items   || typeof p3r.gam_parked_items  === 'object';
+    var diagOk   = !p3r.gam_diag_log       || Array.isArray(p3r.gam_diag_log);
+    probes.indexes = { ok: intelOk && parkedOk && diagOk, intelOk, parkedOk, diagOk };
+    if (!intelOk || !parkedOk || !diagOk) {
+      await _maintSetWarning({
+        code: 'STORAGE_INDEX_CORRUPT',
+        message: 'Update detected storage index mismatch. Open Maintenance to repair.',
+        severity: 'warn',
+        firstSeenAt: Date.now()
+      });
+    }
+  } catch (e) {
+    probes.indexes = { ok: false, error: String(e && e.message || e) };
+  }
+
+  // Probe 4: self-ping (fire-and-forget; 5s timeout). Catches broken SW state.
+  try {
+    var selfPingOk = false;
+    await new Promise(function(res) {
+      var tid = setTimeout(res, 5000);
+      chrome.runtime.sendMessage({ type: 'ping' }, function(r) {
+        if (chrome.runtime.lastError) { clearTimeout(tid); res(); return; }
+        selfPingOk = !!(r && r.ok);
+        clearTimeout(tid);
+        res();
+      });
+    });
+    probes.selfPing = { ok: selfPingOk };
+    if (!selfPingOk) {
+      await _maintSetWarning({
+        code: 'SW_SELF_PING_FAILED',
+        message: 'SW self-ping failed post-update. Try reloading the extension.',
+        severity: 'warn',
+        firstSeenAt: Date.now()
+      });
+    }
+  } catch (e) {
+    probes.selfPing = { ok: false, error: String(e && e.message || e) };
+  }
+
+  // Persist results.
+  try {
+    await chrome.storage.local.set({ [diagKey]: { ts: Date.now(), version, probes } });
+    await _maintAppendDiag('update.diagnostics', 'ok', { version, probes });
+  } catch (_) {}
+}
+
+// AF-08 (Rule 24): settings integrity checksum. Computed daily; verified on boot.
+// On mismatch the existing maint-warning chip surfaces to the popup automatically.
+const CHECKSUM_KEY = 'gam_settings_checksum';
+const CHECKSUM_VOLATILE = new Set([
+  'lastTokenPromptAt', 'lastAiScanDate', 'customBanHistory',
+  'sync_last_written_at', 'rotated_at'
+]);
+
+async function _computeSettingsChecksum(settings) {
+  try {
+    var stable = {};
+    for (var _k in (settings || {})) {
+      if (Object.prototype.hasOwnProperty.call(settings, _k) && !CHECKSUM_VOLATILE.has(_k)) {
+        stable[_k] = settings[_k];
+      }
+    }
+    var sorted = Object.fromEntries(
+      Object.entries(stable).sort(function(a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; })
+    );
+    var encoded = new TextEncoder().encode(JSON.stringify(sorted));
+    var hashBuf = await crypto.subtle.digest('SHA-256', encoded);
+    return Array.from(new Uint8Array(hashBuf))
+      .map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+  } catch (e) {
+    return null;
+  }
+}
+
+async function _maintSettingsChecksumWrite() {
+  try {
+    var r = await chrome.storage.local.get('gam_settings');
+    var s = (r && r.gam_settings) || {};
+    var hash = await _computeSettingsChecksum(s);
+    if (!hash) return;
+    var payload = {
+      hash: hash,
+      computedAt: Date.now(),
+      settingsKeyCount: Object.keys(s).length
+    };
+    await chrome.storage.local.set({ [CHECKSUM_KEY]: payload });
+    try { await _maintAppendDiag('checksum.write', 'ok', { hash: hash.slice(0, 16) + '...' }); } catch (_) {}
+  } catch (e) {
+    try { await _maintAppendDiag('checksum.write', 'err', { error: String(e && e.message || e) }); } catch (_) {}
+  }
+}
+
+async function _maintSettingsChecksumVerify() {
+  try {
+    var results = await Promise.all([
+      chrome.storage.local.get(CHECKSUM_KEY),
+      chrome.storage.local.get('gam_settings')
+    ]);
+    var sr = results[0];
+    var cr = results[1];
+    var stored = sr && sr[CHECKSUM_KEY];
+    if (!stored || !stored.hash) return;
+    var current = await _computeSettingsChecksum(cr && cr.gam_settings || {});
+    if (!current) return;
+    if (current === stored.hash) {
+      try { await _maintAppendDiag('checksum.boot', 'ok', { match: true }); } catch (_) {}
+      return;
+    }
+    console.warn('[ModTools AF-08] settings checksum mismatch on boot', {
+      stored: stored.hash.slice(0, 16),
+      current: current.slice(0, 16),
+      storedAt: new Date(stored.computedAt).toISOString()
+    });
+    try {
+      await _maintAppendDiag('checksum.boot', 'warn', {
+        match: false,
+        storedHash: stored.hash.slice(0, 16) + '...',
+        currentHash: current.slice(0, 16) + '...',
+        storedAt: stored.computedAt
+      });
+    } catch (_) {}
+    await _maintSetWarning({
+      code: 'SETTINGS_CHECKSUM_MISMATCH',
+      message: 'Settings integrity check failed on boot. Use Repair to restore defaults for any corrupted fields.',
+      severity: 'warn',
+      firstSeenAt: Date.now()
+    });
+  } catch (e) {
+    try { console.warn('[ModTools AF-08] checksum verify error', e.message); } catch (_) {}
+  }
+}
+
+// AF-05 (Rule 14): SW health heartbeat handler. Fires every 5 minutes.
+// Logs vault status + storage usage to gam_diag_log for forensic analysis.
+async function _healthCheck() {
+  try { await loadSecrets(); } catch (_) {}
+  const vaultOk = !!(secretCache && (secretCache.workerModToken || secretCache.leadModToken));
+  let storageBytes = 0;
+  try {
+    storageBytes = await new Promise(function(res) {
+      chrome.storage.local.getBytesInUse(null, function(b) { res(b || 0); });
+    });
+  } catch (_) {}
+  const entry = {
+    ts: Date.now(),
+    vaultOk: vaultOk,
+    hasWorkerToken: !!(secretCache && secretCache.workerModToken),
+    hasLeadToken: !!(secretCache && secretCache.leadModToken),
+    storageBytesUsed: storageBytes,
+    storageQuotaPct: Math.round((storageBytes / (MAINT_QUOTA_BYTES || 5242880)) * 100)
+  };
+  try { await _maintAppendDiag('health.check', 'ok', entry); } catch (_) {}
+  if (!vaultOk) {
+    console.warn('[ModTools health] vault empty at heartbeat -- SW was evicted and not yet rehydrated');
   }
 }
 
@@ -759,6 +1185,8 @@ async function _maintWeeklyRun() {
 }
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+  // AF-05 (Rule 14): health heartbeat -- check vault + storage every 5 min.
+  if (alarm.name === HEALTH_ALARM) { await _healthCheck(); return; }
   if (alarm.name === BUG_POLL_ALARM) { await _bugPollAndBadge(); return; }
   // v9.5.0 maintenance alarms.
   if (alarm.name === MAINT_QUOTA_ALARM)        { await _maintQuotaCheck();    return; }
@@ -824,6 +1252,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 // 'tokensStatus' share this listener. Origin guard (sender.id ===
 // chrome.runtime.id) remains in place for every handler.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // AF-13 (Rule 38): check lastError first; if set, the caller is gone — bail.
+  if (chrome.runtime.lastError) { return; }
   // v5.8.1 security: same-extension sender guard (HIGH-4)
   if (sender.id !== chrome.runtime.id) return;
 
@@ -838,6 +1268,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // the calling event chain originates from a user gesture in a tab
   // belonging to the extension's host_permissions. Both are true here:
   // the caller is the GAW content script, the user clicked a banner.
+  // AF-39 (Rule 117): minimum_chrome_version is "116" in manifest.json.
+  // Mods on Chrome 116-126 will hit the else branch below (feature-detect
+  // guard fails) and see the fallback snack. Chrome 127+ get auto-open.
   if (msg && msg.type === 'openPopup') {
     (async () => {
       try {
@@ -987,7 +1420,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'rpc') {
     (async () => {
       const out = await _dispatchRpc(msg.name, msg.args, sender);
-      sendResponse(out);
+      // AF-13 (Rule 38): guard lastError before sendResponse — caller may have
+      // navigated or closed while the async dispatch was in flight.
+      if (!chrome.runtime.lastError) sendResponse(out);
     })();
     return true;
   }
@@ -1029,14 +1464,16 @@ function _classifyCaller(sender) {
 // a confirm-read step. Returns { saved: bool, lastError: string|null }.
 // If saved=false, the caller MUST surface a CRITICAL error -- the worker has
 // already flipped to the new hash; the old token is dead.
+// AF-04 Rule 10: retry loop now routed through withBackoff (true exponential
+// backoff with jitter: 100ms base, 800ms cap, 3 attempts).
 async function _persistRotatedToken(newTokenPlaintext) {
   // Update in-memory SW vault immediately so this SW lifecycle still works.
   secretCache.workerModToken = newTokenPlaintext;
 
   var saved = false;
   var lastError = null;
-  for (var attempt = 1; attempt <= 3; attempt++) {
-    try {
+  try {
+    await withBackoff(async function(attempt) {
       var cur = await chrome.storage.local.get('gam_settings');
       var merged = Object.assign({}, (cur && cur.gam_settings) || {}, { workerModToken: newTokenPlaintext });
       await chrome.storage.local.set({ gam_settings: merged });
@@ -1044,16 +1481,13 @@ async function _persistRotatedToken(newTokenPlaintext) {
       // can fail silently under disk quota or extension update races.
       var verify = await chrome.storage.local.get('gam_settings');
       var verifiedToken = verify && verify.gam_settings && verify.gam_settings.workerModToken;
-      if (verifiedToken === newTokenPlaintext) {
-        saved = true;
-        break;
+      if (verifiedToken !== newTokenPlaintext) {
+        throw new Error('verify mismatch on attempt ' + attempt);
       }
-      lastError = 'verify mismatch on attempt ' + attempt;
-    } catch (e) {
-      lastError = String((e && e.message) || e);
-    }
-    // Exponential-ish backoff: 100ms, 200ms before attempt 3
-    await new Promise(function(res) { setTimeout(res, 100 * attempt); });
+    }, { base: 100, cap: 800, maxAttempts: 3 });
+    saved = true;
+  } catch (e) {
+    lastError = String((e && e.message) || e);
   }
   // Best-effort session write (not durable across SW restarts, but covers the
   // gap between rotation and the next chrome.storage.local flush).
@@ -1102,6 +1536,13 @@ const RPC_HANDLERS = {
   // ---- modXxx: callable from content script + popup ---------------------
   modAuditLog: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    // AF-15 (Rule 43): schema for top-frequency handler.
+    schema: {
+      mod:     { type: 'string', required: true, max: 64 },
+      action:  { type: 'string', required: true, max: 64 },
+      user:    { type: 'string', max: 64 },
+      pageUrl: { type: 'string', max: 500 }
+    },
     async handler(args) {
       return await _rpcWorkerCall('POST', '/audit/log', {
         mod: args && args.mod || 'unknown',
@@ -1127,10 +1568,25 @@ const RPC_HANDLERS = {
   },
   modPresencePing: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    // AF-15 (Rule 43): no required fields; passthrough.
+    schema: {},
     async handler(args) { return await _rpcWorkerCall('POST', '/presence/ping', args || {}); }
+  },
+  // ASK-086 / WAVE-B-AUX A.3: fetch /mod/stats from worker for AI budget + aggregate counts.
+  // Returns ai_calls_today, ai_calls_cap when WAVE-C stats D1 ships; safe null fields until then.
+  modStats: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    schema: {},
+    async handler() { return await _rpcWorkerCall('GET', '/mod/stats', undefined); }
   },
   modGawTimeline: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    // AF-15 (Rule 43): schema for modGawTimeline.
+    schema: {
+      username: { type: 'string', required: true, max: 64 },
+      since:    { type: 'number', min: 0 },
+      limit:    { type: 'number', min: 5, max: 50 }
+    },
     async handler(args) {
       const u = encodeURIComponent(String(args && args.username || '').slice(0, 64));
       if (!u) return { ok: false, status: 400, error: 'username required' };
@@ -1259,6 +1715,10 @@ const RPC_HANDLERS = {
   // doesn't apply -- routine mod usage from any popup origin.
   macrosList: {
     allowed_callers: [RPC_CALLER_POPUP, RPC_CALLER_CONTENT],
+    // AF-15 (Rule 43): schema for macrosList.
+    schema: {
+      kind: { type: 'string', required: true, enum: ['ban_msg', 'mm_reply'] }
+    },
     async handler(args) {
       const kind = String(args && args.kind || '');
       if (kind !== 'ban_msg' && kind !== 'mm_reply') return { ok:false, status:0, error:'invalid_kind' };
@@ -1267,6 +1727,12 @@ const RPC_HANDLERS = {
   },
   macroUpsert: {
     allowed_callers: [RPC_CALLER_POPUP, RPC_CALLER_CONTENT],
+    // AF-15 (Rule 43): schema for macroUpsert.
+    schema: {
+      kind:  { type: 'string', required: true, enum: ['ban_msg', 'mm_reply'] },
+      label: { type: 'string', required: true, max: 80 },
+      body:  { type: 'string', required: true, max: 4000 }
+    },
     async handler(args) {
       const kind = String(args && args.kind || '');
       const label = String(args && args.label || '').trim();
@@ -1291,6 +1757,10 @@ const RPC_HANDLERS = {
   },
   macroUse: {
     allowed_callers: [RPC_CALLER_POPUP, RPC_CALLER_CONTENT],
+    // AF-15 (Rule 43): schema for macroUse.
+    schema: {
+      id: { type: 'number', required: true, min: 1 }
+    },
     async handler(args) {
       const id = parseInt(args && args.id, 10);
       if (!Number.isFinite(id) || id <= 0) return { ok:false, status:0, error:'missing_id' };
@@ -1500,6 +1970,11 @@ const RPC_HANDLERS = {
   // Includes comment_count_24h per row for the BOLD-RED velocity override.
   modSusMark: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    // AF-15 (Rule 43): schema for modSusMark.
+    schema: {
+      username: { type: 'string', required: true, max: 64 },
+      reason:   { type: 'string', max: 200 }
+    },
     async handler(args) {
       const username = String(args && args.username || '');
       const reason   = String(args && args.reason || '');
@@ -1555,6 +2030,11 @@ const RPC_HANDLERS = {
   // the canonical token-derived username. Client just calls.
   modMessageEdit: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    // AF-15 (Rule 43): schema for modMessageEdit.
+    schema: {
+      id:      { type: 'number', required: true, min: 1 },
+      content: { type: 'string', required: true, min: 1, max: 10000 }
+    },
     async handler(args) {
       const id = parseInt(args && args.id, 10);
       const content = String(args && args.content || '');
@@ -1565,6 +2045,10 @@ const RPC_HANDLERS = {
   },
   modMessageDelete: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    // AF-15 (Rule 43): schema for modMessageDelete.
+    schema: {
+      id: { type: 'number', required: true, min: 1 }
+    },
     async handler(args) {
       const id = parseInt(args && args.id, 10);
       if (!Number.isFinite(id) || id <= 0) return { ok: false, status: 0, error: 'missing id' };
@@ -1689,6 +2173,12 @@ const RPC_HANDLERS = {
   },
   modFlagsWrite: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    // AF-15 (Rule 43): schema for modFlagsWrite.
+    schema: {
+      username: { type: 'string', required: true, max: 64 },
+      severity: { type: 'string', required: true, enum: ['low', 'medium', 'high', 'critical'] },
+      reason:   { type: 'string', max: 500 }
+    },
     async handler(args) {
       return await _rpcWorkerCall('POST', '/flags/write', {
         username: args && args.username,
@@ -1700,6 +2190,10 @@ const RPC_HANDLERS = {
   },
   modProfilesRead: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    // AF-15 (Rule 43): schema for modProfilesRead.
+    schema: {
+      usernames: { type: 'array', required: true, max: 50 }
+    },
     async handler(args) {
       return await _rpcWorkerCall('POST', '/profiles/read', args || {});
     }
@@ -1778,6 +2272,12 @@ const RPC_HANDLERS = {
   // ---- modXxx: ai/* + ai-suspect (Iter 4) ----------------------------------
   modAiNextBestAction: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    // AF-15 (Rule 43): schema for modAiNextBestAction.
+    schema: {
+      kind:    { type: 'string', required: true },
+      id:      { type: 'string', required: true, max: 128 },
+      context: { type: 'string', max: 1000 }
+    },
     async handler(args) {
       return await _rpcWorkerCall('POST', '/ai/next-best-action', {
         kind: args && args.kind,
@@ -1791,8 +2291,10 @@ const RPC_HANDLERS = {
   modAiGrokChat: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
     async handler(args) {
+      // AF-12 (Rule 34): cap prompt at 8 KB — matches macroAiSuggest context cap discipline.
+      const prompt = String(args && args.prompt || '').slice(0, 8192);
       return await _rpcWorkerCall('POST', '/ai/grok-chat', {
-        prompt: args && args.prompt,
+        prompt: prompt,
         max_tokens: args && args.max_tokens,
         temperature: args && args.temperature,
         model: args && args.model,
@@ -1803,9 +2305,12 @@ const RPC_HANDLERS = {
   modAiBanSuggest: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
     async handler(args) {
+      // AF-12 (Rule 34): cap comment at 1500 for defense-in-depth (call sites already slice
+      // but handler-level cap ensures no path bypasses the limit).
+      const comment = String(args && args.comment || '').slice(0, 1500);
       return await _rpcWorkerCall('POST', '/ai/ban-suggest', {
         username: args && args.username,
-        comment: args && args.comment,
+        comment: comment,
         prompt: args && args.prompt
       });
     }
@@ -1935,6 +2440,10 @@ const RPC_HANDLERS = {
   },
   modBugReport: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    // AF-15 (Rule 43): schema for modBugReport.
+    schema: {
+      desc: { type: 'string', required: true, min: 20, max: 2000 }
+    },
     async handler(args) {
       // v9.3.13 (Vanguard H-3): cap debugSnapshot at 16KB before relay.
       // The RPC arg-bytes ceiling is 256KB which a compromised mod token
@@ -2240,6 +2749,16 @@ const RPC_HANDLERS = {
   adminDiscordDmModSend: {
     allowed_callers: [RPC_CALLER_POPUP],
     async handler(args) {
+      // AF-20 (Rule 58): feature gate — lead must explicitly enable Discord DM send.
+      // discordDmSend is a send-path action with no undo; remote kill-switch is mandatory.
+      try {
+        var fgR = await chrome.storage.local.get('gam_settings');
+        var fgS = (fgR && fgR.gam_settings) || {};
+        var dmEnabled = !!(fgS.features && fgS.features['discordDmSend']);
+        if (!dmEnabled) return { ok: false, error: 'feature disabled (features.discordDmSend)' };
+      } catch (_) {
+        return { ok: false, error: 'feature gate check failed' };
+      }
       const discordId  = String((args && args.discord_id) || '').trim();
       const msgBody    = String((args && args.body) || '').trim();
       const sourceKind = String((args && args.source_kind) || '').trim();
@@ -2268,6 +2787,80 @@ const RPC_HANDLERS = {
       const postId = String((args && args.post_id) || '').slice(0, 64).trim();
       if (!postId) return { ok: false, status: 400, error: 'post_id required' };
       return await _rpcWorkerCall('GET', '/mod/thread/intel?id=' + encodeURIComponent(postId), null);
+    }
+  },
+
+  // ASK-031: ban-preflight RPC — proxies to /mod/ban-preflight on the worker.
+  // Called by modtools.js before apiBan fires. Returns kill-switch + quota check.
+  // Worker may return 429 (with retry_after_seconds) or 503 (kill switch active).
+  modBanPreflight: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    // WAVE-B-AUX A.1: schema mirrors the worker's expected body shape (ASK-032 perma-ban included).
+    schema: {
+      target:         { type: 'string',  required: true,  max: 64  },
+      duration_hours: { type: 'number',  required: true,  min: 0,  max: 43800 },
+      reason:         { type: 'string',  required: true,  max: 512 },
+      permanent:      { type: 'boolean', required: false }
+    },
+    async handler(args) {
+      if (!secretCache.workerModToken && !secretCache.leadModToken) {
+        try { await loadSecrets(); } catch (e) {}
+      }
+      const ctrl = new AbortController();
+      const timer = setTimeout(function() { try { ctrl.abort(); } catch (_) {} }, 15000);
+      try {
+        const headers = new Headers();
+        if (secretCache.workerModToken) headers.set('X-Mod-Token', secretCache.workerModToken);
+        headers.set('X-Extension-Id', chrome.runtime.id);
+        headers.set('Content-Type', 'application/json');
+        const r = await fetch(WORKER_BASE + '/mod/ban-preflight', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(args || {}),
+          signal: ctrl.signal
+        });
+        const text = await r.text();
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch (_) {}
+        // Pass 429 (retry_after_seconds) and 503 (kill switch) through as-is.
+        return { ok: r.ok, status: r.status, data: parsed, text: text };
+      } catch (e) {
+        return { ok: false, status: 0, error: 'network failure', code: 'PREFLIGHT_NETWORK' };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  },
+
+  // ASK-031: ban-confirm RPC — fire-and-forget audit correlation after apiBan returns.
+  // Never blocks the ban flow. Errors are logged and swallowed.
+  modBanConfirm: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    // WAVE-B-AUX A.1: schema for the audit correlation payload.
+    schema: {
+      audit_id:           { type: 'string',  required: true,  max: 128 },
+      gaw_response_status: { type: 'number',  required: true              },
+      gaw_response_ok:    { type: 'boolean', required: true              }
+    },
+    async handler(args) {
+      if (!secretCache.workerModToken && !secretCache.leadModToken) {
+        try { await loadSecrets(); } catch (e) {}
+      }
+      try {
+        const headers = new Headers();
+        if (secretCache.workerModToken) headers.set('X-Mod-Token', secretCache.workerModToken);
+        headers.set('X-Extension-Id', chrome.runtime.id);
+        headers.set('Content-Type', 'application/json');
+        await fetch(WORKER_BASE + '/mod/ban-confirm', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(args || {})
+        });
+      } catch (e) {
+        // Fire-and-forget: log but never surface errors to the caller.
+        console.warn('[ModTools ASK-031] modBanConfirm failed (non-fatal):', e && e.message || e);
+      }
+      return { ok: true };
     }
   }
 };
@@ -2309,7 +2902,73 @@ function _validateRpcSenderOrigin(callerCtx, sender) {
   return false;
 }
 
+// AF-15 (Rule 43): inline schema validator for RPC args. Zero imports, zero deps.
+// schema: { [field]: { type, required?, min?, max?, pattern?, enum? } }
+// Covers 95% case: string/number/array/boolean with length/range/regex constraints.
+function validateRpc(args, schema) {
+  if (!schema) return { ok: true };
+  var a = args || {};
+  for (var field in schema) {
+    if (!Object.prototype.hasOwnProperty.call(schema, field)) continue;
+    var rule = schema[field];
+    var v = a[field];
+    var missing = (v === undefined || v === null || v === '');
+    if (rule.required && missing) return { ok: false, error: 'missing required field: ' + field };
+    if (missing) continue;
+    if (rule.type === 'string') {
+      if (typeof v !== 'string') return { ok: false, error: field + ' must be string' };
+      if (rule.min != null && v.length < rule.min) return { ok: false, error: field + ' too short (min ' + rule.min + ')' };
+      if (rule.max != null && v.length > rule.max) return { ok: false, error: field + ' too long (max ' + rule.max + ')' };
+      if (rule.pattern && !rule.pattern.test(v)) return { ok: false, error: field + ' failed pattern check' };
+      if (rule.enum && !rule.enum.includes(v)) return { ok: false, error: field + ' must be one of: ' + rule.enum.join(', ') };
+    } else if (rule.type === 'number') {
+      var n = typeof v === 'number' ? v : Number(v);
+      if (!Number.isFinite(n)) return { ok: false, error: field + ' must be a finite number' };
+      if (rule.min != null && n < rule.min) return { ok: false, error: field + ' below minimum ' + rule.min };
+      if (rule.max != null && n > rule.max) return { ok: false, error: field + ' above maximum ' + rule.max };
+    } else if (rule.type === 'boolean') {
+      if (typeof v !== 'boolean') return { ok: false, error: field + ' must be boolean' };
+    } else if (rule.type === 'array') {
+      if (!Array.isArray(v)) return { ok: false, error: field + ' must be array' };
+      if (rule.max != null && v.length > rule.max) return { ok: false, error: field + ' array too long (max ' + rule.max + ')' };
+    }
+  }
+  return { ok: true };
+}
+
+// AF-13 (Rule 39): per-RPC-name rate limiter. Enforced SW-side so a compromised
+// content script cannot bypass client-side debounces.
+const _RPC_WINDOWS = new Map();
+const _RPC_LIMITS = {
+  modAuditLog:       { maxPerMin: 60 },
+  modProfilesWrite:  { maxPerMin: 20 },
+  modAiGrokChat:     { maxPerMin: 10 },
+  modPresencePing:   { maxPerMin: 6  },
+  // ASK-031 / WAVE-B-AUX A.1: ban-preflight + ban-confirm rate limits.
+  // 30/min each is generous for actual ban throughput (~1-3/min peak).
+  modBanPreflight:   { maxPerMin: 30 },
+  modBanConfirm:     { maxPerMin: 30 }
+};
+
+function _rpcRateCheck(name) {
+  var limit = _RPC_LIMITS[name];
+  if (!limit) return true;
+  var now = Date.now();
+  var window = (_RPC_WINDOWS.get(name) || []).filter(function(t) { return now - t < 60000; });
+  if (window.length >= limit.maxPerMin) {
+    console.warn('[ModTools AF-13] RPC rate-limited:', name, window.length + '/min');
+    return false;
+  }
+  window.push(now);
+  _RPC_WINDOWS.set(name, window);
+  return true;
+}
+
 async function _dispatchRpc(name, args, sender) {
+  // AF-13 (Rule 39): per-name rate check before any handler runs.
+  if (!_rpcRateCheck(String(name || ''))) {
+    return { ok: false, status: 429, error: 'rate limited (' + String(name) + ')' };
+  }
   const def = RPC_HANDLERS[String(name || '')];
   if (!def) return { ok: false, status: 0, error: 'unknown rpc: ' + String(name) };
   const callerCtx = _classifyCaller(sender);
@@ -2332,9 +2991,69 @@ async function _dispatchRpc(name, args, sender) {
   } catch (sizeErr) {
     return { ok: false, status: 0, error: 'rpc ' + name + ' refused: args not serializable' };
   }
+  // AF-15 (Rule 43): field-level schema validation (if handler declares a schema).
+  if (def.schema) {
+    const sv = validateRpc(args, def.schema);
+    if (!sv.ok) return { ok: false, status: 400, error: 'schema: ' + sv.error };
+  }
   try {
     return await def.handler(args || {}, { caller: callerCtx });
   } catch (e) {
     return { ok: false, status: 0, error: String(e && e.message || e) };
   }
 }
+
+// AF-25 (Rule 75): Handle revoked permissions by disabling affected features cleanly.
+// When the user revokes a host permission via the Chrome address-bar chip or
+// extensions management page, zero secretCache and broadcast to all affected tabs
+// so the content script can tear down UI and show a user-readable banner.
+const _FEATURE_PERMISSION_MAP = {
+  'https://greatawakening.win/*':   ['modtools_ui', 'workerFetch', 'inboxIntel', 'modChat', 'modmailBackfill'],
+  'https://*.greatawakening.win/*': ['modtools_ui', 'workerFetch', 'inboxIntel', 'modChat', 'modmailBackfill'],
+};
+
+if (chrome.permissions && chrome.permissions.onRemoved) {
+  chrome.permissions.onRemoved.addListener(async (permissions) => {
+    const revokedOrigins = (permissions && permissions.origins) || [];
+    if (revokedOrigins.length === 0) return;
+
+    const affectedFeatures = new Set();
+    for (const origin of revokedOrigins) {
+      const features = _FEATURE_PERMISSION_MAP[origin];
+      if (features) features.forEach(function(f) { affectedFeatures.add(f); });
+    }
+    if (affectedFeatures.size === 0) return;
+
+    console.warn('[ModTools AF-25] Host permissions revoked:', revokedOrigins,
+                 '-- disabling:', Array.from(affectedFeatures));
+
+    // Clear in-RAM secret cache so workerFetch stops attempting calls.
+    if (affectedFeatures.has('workerFetch')) {
+      secretCache = { workerModToken: '', leadModToken: '' };
+    }
+
+    // Notify all tabs that match the revoked origins so the content script
+    // can suppress UI and surface a user-readable banner.
+    try {
+      const tabs = await chrome.tabs.query({});
+      for (const tab of tabs) {
+        if (!tab.id || !tab.url) continue;
+        try {
+          const tabOrigin = new URL(tab.url).origin;
+          const isAffected = revokedOrigins.some(function(o) {
+            const base = o.replace(/\/\*$/, '');
+            return tabOrigin === base ||
+                   tabOrigin.endsWith('.' + base.replace(/^https?:\/\/\*\./, ''));
+          });
+          if (!isAffected) continue;
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'permissionsRevoked',
+            origins: revokedOrigins,
+            features: Array.from(affectedFeatures)
+          }).catch(function() { /* tab may not have content script */ });
+        } catch (_) {}
+      }
+    } catch (_) {}
+  });
+}
+// AF-25 (Rule 75) END
