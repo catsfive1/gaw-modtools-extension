@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v10.6.2';
+  const VERSION = 'v10.7.0';
 
   // v10.6.1 HOTFIX: FEATURE_FLAGS must be declared BEFORE any synchronous IIFE
   // that references it. The earliest reference is __v80ParkUI at line ~3398
@@ -9580,8 +9580,9 @@ Analyze this comment against the community rules. Then write a brief, profession
         const statusEl = root.querySelector('#mc-quick-status');
         if (q==='watch'){
           // AF-34 (Rule 101): withUndo on toggleWatch -- inverse is another toggleWatch call
+          // v10.7.0 UIUX-05 A.1: wrap toggleWatch return in {ok:true} so withUndo guard fires
           const nw = toggleWatch(username);
-          withUndo(() => Promise.resolve(nw), { tier: 'B', label: nw ? (username + ' watched') : (username + ' unwatched'), inverse: () => { toggleWatch(username); } });
+          withUndo(() => Promise.resolve({ ok: true, toggled: nw }), { tier: 'B', label: nw ? (username + ' watched') : (username + ' unwatched'), inverse: () => { toggleWatch(username); } });
           closeAllPanels();
           return;
         }
@@ -9599,33 +9600,93 @@ Analyze this comment against the community rules. Then write a brief, profession
           if (!id){ snack('No content id', 'error'); return; }
           btn.disabled = true;
           const evidenceKey = await captureEvidence('remove', username, item);
-          const r = await apiRemove(id, type);
-          if (r.ok){
+          // v10.7.0 UIUX-05 A.2: wrap apiRemove with withUndo (Tier B); inverse is apiApprove
+          try {
+            await withUndo(() => apiRemove(id, type), {
+              tier: 'B',
+              label: 'Removed ' + type,
+              inverse: () => apiApprove(id, type)
+            });
             logAction({ type:'remove', user:username, contentId:id, contentType:type, evidenceKey, source:'mod-console-quick' });
-            snack(`Removed ${type}`, 'success');
             item.style.opacity = '0.4';
             item.style.textDecoration = 'line-through';
-          } else {
-            snack(`Remove failed (${r.status})`, 'error');
+          } catch(e) {
+            snack('Remove failed', 'error');
             btn.disabled = false;
           }
           return;
         }
         if (q==='perma'){
-          if (!confirm(`PERMA-BAN ${username} with no message? This cannot be undone silently.`)) return;
+          // v10.7.0 UIUX-05 A.3: lowest-ceremony permanent ban gets full preflight + audit + undo treatment
+          // Replace native confirm() with the shared preflight() modal (armSeconds:3, danger:true).
+          // Add modBanPreflight RPC + withUndo (Tier A, 20s) + modBanConfirm audit chain.
+          const confirmed = await preflight({
+            title: 'PERMANENT BAN \u2014 Preflight',
+            danger: true,
+            armSeconds: 3,
+            rows: [
+              ['Target', username],
+              ['Action', 'Permanent ban (no message)'],
+              ['Reason', getUsersBanReason() || '(none)'],
+            ]
+          });
+          if (!confirmed) return;
           btn.disabled = true;
-          statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Capturing evidence + banning...</div>`;
+          statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Capturing evidence...</div>`;
           const evidenceKey = await captureEvidence('perma', username, item);
-          const r = await apiBan(username, 0, getUsersBanReason());
-          if (r.ok){
+          statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Preflight check...</div>`;
+          let _quickPermaBanAuditId = null;
+          const _quickPermaBanReason = getUsersBanReason();
+          try {
+            const pf = await rpcCall('modBanPreflight', {
+              target: username,
+              duration_hours: 43800,
+              permanent: true,
+              reason: (_quickPermaBanReason || 'perma-ban via quick tab').slice(0, 800)
+            });
+            if (!pf || !pf.ok) {
+              const retryMsg = (pf && pf.retry_after_seconds)
+                ? ' \u2014 rate limited, retry in ' + pf.retry_after_seconds + 's'
+                : (pf && pf.error ? ' \u2014 ' + pf.error : '');
+              statusEl.innerHTML = '<div class="gam-mc-banner gam-mc-banner-red">\u26a0 Ban blocked by preflight' + retryMsg + '</div>';
+              btn.disabled = false;
+              snack('Ban blocked by preflight' + retryMsg, 'error');
+              return;
+            }
+            _quickPermaBanAuditId = (pf && pf.audit_id) || null;
+          } catch(pfErr) {
+            try { console.warn('[modtools] quick-perma ban-preflight failed (non-fatal):', pfErr && pfErr.message || pfErr); } catch(_){}
+          }
+          statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Sending ban...</div>`;
+          const r = await withUndo(
+            function() { return apiBan(username, 0, _quickPermaBanReason); },
+            {
+              tier: 'A',
+              label: 'Perma-banned ' + username,
+              undoLabel: 'Undo ban',
+              inverse: function() {
+                return rpcCall('modUnban', { username: username }).catch(function() {
+                  return apiUnban(username).catch(function() {});
+                });
+              }
+            }
+          );
+          if (_quickPermaBanAuditId) {
+            rpcCall('modBanConfirm', {
+              audit_id: _quickPermaBanAuditId,
+              gaw_response_status: (r && r.status) || 0,
+              gaw_response_ok: !!(r && r.ok)
+            }).catch(function() {});
+          }
+          if (r && r.ok){
             rosterSetStatus(username, 'banned');
             const v = await verifyBan(username);
             if (v !== null) markVerified(username, v);
-            logAction({ type:'ban', user:username, violation:'username', duration:-1, reason:getUsersBanReason(), evidenceKey, source:'mod-console-quick', verified:v });
+            logAction({ type:'ban', user:username, violation:'username', duration:-1, reason:_quickPermaBanReason, evidenceKey, source:'mod-console-quick', verified:v });
             statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-green">\u2713\u2713 ${username} banned${v===true?' (verified)':''}</div>`;
             snack(`${username} PERMA-BANNED`, 'success');
           } else {
-            statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-red">Failed (${r.status})</div>`;
+            statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-red">Failed (${r ? r.status : '?'})</div>`;
             btn.disabled = false;
           }
           return;
@@ -9878,14 +9939,19 @@ Analyze this comment against the community rules. Then write a brief, profession
         rmMenu.classList.remove('gam-strip-menu-open');
         if (!id){ snack('No content id','error'); return; }
         const evidenceKey = await captureEvidence('remove', author, item);
-        const r = await apiRemove(id, type);
-        if (r.ok){
+        // v10.7.0 UIUX-05 A.4: wrap strip apiRemove with withUndo (Tier B); inverse is apiApprove
+        try {
+          await withUndo(() => apiRemove(id, type), {
+            tier: 'B',
+            label: 'Removed ' + v.label,
+            inverse: () => apiApprove(id, type)
+          });
           logAction({ type:'remove', user:author, violation:v.id, reason:v.label, contentId:id, contentType:type, evidenceKey, source:'strip' });
           snack(`Removed ${type} (${v.label})`, 'success');
           item.style.opacity = '0.4';
           item.style.textDecoration = 'line-through';
-        } else {
-          snack(`Remove failed (${r.status})`, 'error');
+        } catch(e) {
+          snack('Remove failed', 'error');
         }
       });
       rmMenu.appendChild(item2);
@@ -10173,7 +10239,8 @@ Analyze this comment against the community rules. Then write a brief, profession
           el('span',{cls:'gam-log-time'}, 'since '+timeAgo(wl[u].added)),
           el('button',{cls:'gam-btn gam-btn-small gam-btn-cancel', style:{marginLeft:'auto', padding:'2px 8px'}, onclick:()=>{
             // AF-34 (Rule 101): withUndo on toggleWatch
-          toggleWatch(u); withUndo(() => Promise.resolve(), { tier: 'B', label: u + ' unwatched', inverse: () => { toggleWatch(u); } }); closeAllPanels(); openModLog();
+            // v10.7.0 UIUX-05 A.1: wrap toggleWatch return in {ok:true} so withUndo guard fires
+          toggleWatch(u); withUndo(() => Promise.resolve({ ok: true }), { tier: 'B', label: u + ' unwatched', inverse: () => { toggleWatch(u); } }); closeAllPanels(); openModLog();
           }},'\u{2716}')
         ));
       });
@@ -10369,7 +10436,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       else if (act === 'watch') {
         const nw = toggleWatch(ctxU);
         // AF-34 (Rule 101): withUndo on toggleWatch (context menu site)
-        withUndo(() => Promise.resolve(nw), { tier: 'B', label: nw ? (ctxU + ' watched') : (ctxU + ' unwatched'), inverse: () => { toggleWatch(ctxU); } });
+        // v10.7.0 UIUX-05 A.1: wrap toggleWatch return in {ok:true} so withUndo guard fires
+        withUndo(() => Promise.resolve({ ok: true, toggled: nw }), { tier: 'B', label: nw ? (ctxU + ' watched') : (ctxU + ' unwatched'), inverse: () => { toggleWatch(ctxU); } });
       }
       else if (act === 'copy')    copyAndNotify(ctxU, 'Username copied');
       else if (act === 'profile') window.open('/u/' + encodeURIComponent(ctxU) + '/', '_blank');
@@ -13297,6 +13365,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       + (u.status==='banned'?' gam-t-row-banned':'')
       + (u.onCurrentPage ? '' : ' gam-t-row-historical')
       + (opts && opts.tard ? ' gam-t-row-tard' : '');
+    row.setAttribute('tabindex', '0');
     if (u.inCluster) row.setAttribute('data-incluster', '1');
     const isDone=(u.status==='banned');
 
@@ -22265,7 +22334,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         }
         if (reason === 'fetch_failed' || reason === 'no_response') {
           return [
-            'Step 1 of 3: Click "Force re-hydrate" (button below). Wait 5 seconds.',
+            // v10.7.0 UIUX-06 B.2: rephrase "button below" to unambiguous placement reference
+            'Step 1 of 3: Click the Force re-hydrate button immediately below this banner. Wait 5 seconds.',
             'Step 2 of 3: If the banner still shows, check https://greatawakening.win in a new tab. If the site itself is down, the worker is also down -- wait and try again later.',
             'Step 3 of 3: If the site loads but the banner persists, open DevTools (F12) > Console and paste the red error to your lead. This is a worker outage, not an extension problem.',
             'Still stuck? The worker may be rate-limiting you. Wait 2 minutes and reload.'
@@ -22274,7 +22344,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         if (reason === 'whoami_status') {
           return [
             'Step 1 of 3: Your token was rotated. Click "Open ModTools popup" (button below).',
-            'Step 2 of 3: In the popup, go to Settings > Token and delete the current token.',
+            // v10.7.0 UIUX-06 B.2: fix dead "Settings > Token" menu path (it does not exist in the popup)
+            'Step 2 of 3: Open the popup, expand the Tokens card, and click "Re-enter credentials" (bottom of card) or paste the new token directly into the Team Mod Token field.',
             'Step 3 of 3: Ask your lead for your current rotation token or a fresh invite link. Paste it in the popup. Click Save.',
             'Still stuck? You may be using a lead token in the mod slot (or vice versa). Ask your lead which token type you need.'
           ];

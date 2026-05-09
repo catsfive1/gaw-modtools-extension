@@ -653,7 +653,8 @@ $('clearBtn').addEventListener('click', async () => {
     // RPC zeroes the cache atomically.
     try { await chrome.runtime.sendMessage({ type: 'clearTokens' }); } catch (e) {}
     // v5.1.1: scope clear to ModTools-owned keys only (don't nuke unrelated settings)
-    await chrome.storage.local.remove(OWNED_KEYS);
+    // v10.7.0 UIUX-06 B.1: also remove gam_welcomed so welcome toast fires again after factory reset
+    await chrome.storage.local.remove([...OWNED_KEYS, 'gam_welcomed', 'gam_pending_invite_backup']);
     // Also tell every open GAW tab to clear its localStorage - otherwise
     // the content script's hydration will just read data back from localStorage.
     // v5.1.1: query BOTH root and subdomain tab patterns
@@ -802,6 +803,8 @@ function __popupAskText(opts) {
       input.placeholder = String(o.placeholder || '');
       input.maxLength = Number(o.max) || 120;
       input.className = 'gam-pop-modal-input';
+      // v10.7.0 UIUX-06 B.3: support initialValue so callers can pre-fill the field
+      if (o.initialValue) { input.value = String(o.initialValue); }
       const err = document.createElement('div');
       err.className = 'gam-pop-modal-err';
       const btnRow = document.createElement('div');
@@ -2459,8 +2462,10 @@ async function __claimInviteClick() {
       statusEl.textContent = 'session storage unavailable';
       return;
     }
-    const out = await chrome.storage.session.get('gam_pending_invite');
+    // v10.7.0 UIUX-06 B.3: also read gam_pending_invite_for to pre-fill username field
+    const out = await chrome.storage.session.get(['gam_pending_invite', 'gam_pending_invite_for']);
     let code = (out && out.gam_pending_invite) || '';
+    let _stagedUsername = (out && out.gam_pending_invite_for && out.gam_pending_invite_for !== '__paste_into_token_field__') ? out.gam_pending_invite_for : '';
     // v10.0: fall back to chrome.storage.local backup if session was wiped
     // (extension reload during onboarding). 5-min TTL on the backup; expire
     // anything older than that.
@@ -2470,6 +2475,8 @@ async function __claimInviteClick() {
         const bk = lo && lo.gam_pending_invite_backup;
         if (bk && bk.code && bk.staged_at && (Date.now() - bk.staged_at) < (bk.ttl_ms || 300000)) {
           code = bk.code;
+          // v10.7.0 UIUX-06 B.3: capture username from backup so pre-fill works after extension reload
+          if (!_stagedUsername && bk.gaw_username && bk.gaw_username !== '__paste_into_token_field__') { _stagedUsername = bk.gaw_username; }
           // Re-stage in session so subsequent paths see it.
           try { await chrome.storage.session.set({ gam_pending_invite: code, gam_pending_invite_for: bk.gaw_username || '', gam_pending_invite_at: bk.staged_at }); } catch(_){}
           statusEl.textContent = 'recovered staged invite from local backup...';
@@ -2480,7 +2487,8 @@ async function __claimInviteClick() {
       } catch(_){}
     }
     if (!code) {
-      statusEl.textContent = 'no invite staged \u2014 visit an invite link in a GAW tab';
+      // v10.7.0 UIUX-06 B.4: add recovery action to "no invite staged" dead-end
+      statusEl.textContent = 'No invite link detected. Click the invite link your lead sent you in a GAW tab first, then return here and click Claim invite. Or paste your mt_invite_... URL directly into the Team Mod Token field above.';
       return;
     }
     if (!__isTokenShape(code) && !/^[A-Za-z0-9_-]{16,128}$/.test(code)) {
@@ -2497,10 +2505,12 @@ async function __claimInviteClick() {
     // 404 for every per-mod rotation invite -- the entire reason
     // PresidentialSeal kept hitting "404 invalid code" with a perfectly
     // valid rotation invite in token_invites.
+    // v10.7.0 UIUX-06 B.3: pre-fill username from staged gam_pending_invite_for if available
     const username = await __popupAskText({
       title: 'Claim rotation invite',
       label: 'Your GAW username (any spelling \u2014 match is case-insensitive since v9.3.0)',
       placeholder: 'e.g. PresidentialSeal',
+      initialValue: _stagedUsername || '',
       max: 32,
       validate: function (v) {
         if (!v) return 'username required';
@@ -4390,7 +4400,8 @@ async function maintResetDefaults() {
     // Strip undefined keys (chrome.storage rejects them)
     Object.keys(preserved).forEach(k => preserved[k] === undefined && delete preserved[k]);
     // Remove every owned non-token key + learned selectors + intel cache.
-    const keysToRemove = OWNED_KEYS.filter(k => k !== K.SETTINGS).concat(['gam_learned_selectors']);
+    // v10.7.0 UIUX-06 B.1: also remove gam_welcomed so re-onboarding welcome toast fires correctly
+    const keysToRemove = OWNED_KEYS.filter(k => k !== K.SETTINGS).concat(['gam_learned_selectors', 'gam_welcomed']);
     await chrome.storage.local.remove(keysToRemove);
     await chrome.storage.local.set({ gam_settings: { ...preserved, ...MAINT_DEFAULT_SETTINGS } });
     __maintLog('resetDefaults', 'ok', { preserved: Object.keys(preserved) });

@@ -64,7 +64,8 @@ function Log {
 # Default ZIP URL (GitHub Releases latest)
 # Update this constant each release cycle.
 # ---------------------------------------------------------------------------
-$DEFAULT_ZIP_URL = 'https://github.com/YourOrg/gaw-modtools/releases/latest/download/gaw-modtools.zip'
+# v10.7.0 UIUX-06 B.5: replaced YourOrg placeholder with real GitHub org (catsfive1)
+$DEFAULT_ZIP_URL = 'https://github.com/catsfive1/gaw-modtools-extension/releases/latest/download/gaw-modtools.zip'
 
 # ---------------------------------------------------------------------------
 # Helpers
