@@ -832,6 +832,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // v10.2: openPopup handler. Lets content-script surfaces (auth-fail
+  // banner, in-page snacks, etc.) ask Chrome to open the ModTools popup
+  // directly. chrome.action.openPopup() is Chrome 127+ AND requires that
+  // the calling event chain originates from a user gesture in a tab
+  // belonging to the extension's host_permissions. Both are true here:
+  // the caller is the GAW content script, the user clicked a banner.
+  if (msg && msg.type === 'openPopup') {
+    (async () => {
+      try {
+        if (chrome && chrome.action && typeof chrome.action.openPopup === 'function') {
+          await chrome.action.openPopup();
+          sendResponse({ ok: true });
+        } else {
+          sendResponse({ ok: false, error: 'openPopup unavailable (Chrome <127?)' });
+        }
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e && e.message || e) });
+      }
+    })();
+    return true;
+  }
+
   // --- v7.2 Platform Hardening BEGIN ---
   if (msg && msg.type === 'setTokens') {
     // v9.3.13 (Vanguard H-2): validate token shape on inbound setTokens.
@@ -1106,6 +1128,17 @@ const RPC_HANDLERS = {
   modPresencePing: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
     async handler(args) { return await _rpcWorkerCall('POST', '/presence/ping', args || {}); }
+  },
+  modGawTimeline: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const u = encodeURIComponent(String(args && args.username || '').slice(0, 64));
+      if (!u) return { ok: false, status: 400, error: 'username required' };
+      const since = parseInt(args && args.since, 10) || (Math.floor(Date.now() / 1000) - 30 * 86400);
+      const limit = Math.min(50, Math.max(5, parseInt(args && args.limit, 10) || 30));
+      return await _rpcWorkerCall('GET',
+        '/gaw/user/' + u + '/timeline?since=' + since + '&limit=' + limit, undefined);
+    }
   },
 
   // ---- authXxx: validate + store a candidate mod token (popup token-save flow) -
@@ -2142,6 +2175,99 @@ const RPC_HANDLERS = {
       } catch (e) {
         return { ok: false, error: String(e && e.message || e) };
       }
+    }
+  },
+
+  // v10.x Multi-Lead: promote/demote a mod's tier. Lead-only endpoint.
+  // payload: { mod_username: string, tier: 'mod'|'senior_lead'|'lead' }
+  adminModPromote: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const username = String((args && args.mod_username) || (args && args.payload && args.payload.mod_username) || '').trim();
+      const tier     = String((args && args.tier) || (args && args.payload && args.payload.tier) || '').trim();
+      if (!username) return { ok: false, status: 400, error: 'mod_username required' };
+      if (!['mod', 'senior_lead', 'lead'].includes(tier)) {
+        return { ok: false, status: 400, error: 'tier must be mod|senior_lead|lead' };
+      }
+      return await _rpcWorkerCall('POST', '/admin/mod/promote', { mod_username: username, tier }, { asLead: true });
+    }
+  },
+
+  // v10.x Lead KPI: lapsed mods query.
+  // args: { days: number }
+  adminModLapsed: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const days = Math.min(60, Math.max(7, parseInt((args && args.days) || 21, 10)));
+      return await _rpcWorkerCall('GET', '/admin/mod/lapsed?days=' + days, undefined, { asLead: true });
+    }
+  },
+
+  // v10.5.0: Discord DM — rotation invite blast to all unrotated mods.
+  // args: { include_rotated?: bool, include_zip?: bool, dry_run?: bool }
+  adminRotationDmAllUnrotated: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const payload = {
+        include_rotated: !!(args && args.include_rotated),
+        include_zip:     args && args.include_zip != null ? !!args.include_zip : true,
+        dry_run:         !!(args && args.dry_run)
+      };
+      return await _rpcWorkerCall('POST', '/admin/rotation/dm-all-unrotated', payload, { asLead: true });
+    }
+  },
+
+  // v10.5.0: Generate AI-drafted DM bodies for lead review.
+  // args: { discord_id: string, kind: string, context_json?: {} }
+  // Returns { nonce, drafts: [{tone, body}] } — NO send happens here.
+  adminDiscordDmModWithAiDraft: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const discordId   = String((args && args.discord_id) || '').trim();
+      const kind        = String((args && args.kind) || '').trim();
+      const contextJson = (args && args.context_json) || {};
+      if (!discordId) return { ok: false, status: 400, error: 'discord_id required' };
+      if (!kind)      return { ok: false, status: 400, error: 'kind required' };
+      return await _rpcWorkerCall('POST', '/admin/discord/dm-mod-with-ai-draft',
+        { discord_id: discordId, kind, context_json: contextJson },
+        { asLead: true });
+    }
+  },
+
+  // v10.5.0: Send lead-approved DM to a mod via Discord.
+  // If ai_draft_id supplied, body must match one of the 4 AI drafts.
+  // args: { discord_id: string, body: string, source_kind?: string, ai_draft_id?: string }
+  adminDiscordDmModSend: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const discordId  = String((args && args.discord_id) || '').trim();
+      const msgBody    = String((args && args.body) || '').trim();
+      const sourceKind = String((args && args.source_kind) || '').trim();
+      const aiDraftId  = String((args && args.ai_draft_id) || '').trim();
+      if (!discordId) return { ok: false, status: 400, error: 'discord_id required' };
+      if (!msgBody)   return { ok: false, status: 400, error: 'body required' };
+      return await _rpcWorkerCall('POST', '/admin/discord/dm-mod-send',
+        { discord_id: discordId, body: msgBody, source_kind: sourceKind || undefined, ai_draft_id: aiDraftId || undefined },
+        { asLead: true });
+    }
+  },
+  // v10.3 Patch 1: User similarity lookalikes. POSTs to /admin/users/lookalikes.
+  adminUsersLookalikes: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const username = String((args && args.username) || '').slice(0, 64).trim();
+      if (!username) return { ok: false, status: 400, error: 'username required' };
+      const limit = Math.max(1, Math.min(10, parseInt((args && args.limit) || 5, 10)));
+      return await _rpcWorkerCall('POST', '/admin/users/lookalikes', { username, limit });
+    }
+  },
+  // v10.3 Patch 5: Thread commenter intel. GETs /mod/thread/intel?id=<post_id>.
+  adminThreadIntel: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const postId = String((args && args.post_id) || '').slice(0, 64).trim();
+      if (!postId) return { ok: false, status: 400, error: 'post_id required' };
+      return await _rpcWorkerCall('GET', '/mod/thread/intel?id=' + encodeURIComponent(postId), null);
     }
   }
 };

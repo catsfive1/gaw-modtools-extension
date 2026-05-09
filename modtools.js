@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v9.24.0';
+  const VERSION = 'v10.5.1';
 
   // v9.3.14 (Vanguard L-2): closure-scoped emergency-rehydrate implementation.
   // Assigned later (after preloadSecrets / syncSecretsToBackgroundVault are
@@ -1681,9 +1681,14 @@
       const r = await rpcCall('modFeaturesRead', {});
       if (r && r.ok && r.data && r.data.ok && r.data.data && typeof r.data.data === 'object') {
         // Replace in-place so references to _teamFeatures keep working.
+        // v10.5.1 SSOT: _teamFeatures is the single source of truth for feature flags.
+        // All reads go through getTeamFeature(key). Never read r.data.data directly at call sites.
         for (const k of Object.keys(_teamFeatures)) delete _teamFeatures[k];
         Object.assign(_teamFeatures, r.data.data);
         _teamFeaturesLastPoll = Date.now();
+      } else if (r && !r.ok) {
+        // v10.5.1 INVARIANT: warn on explicit failure (network hole or bad token) -- not on swallowed exception
+        try { console.warn('[ModTools v10.5.1] pollTeamFeatures: RPC returned not-ok', r && r.error); } catch(_){}
       }
     } catch (e) { /* swallow -- retry next tick */ }
   }
@@ -4533,6 +4538,217 @@
     e.stopPropagation();
     undoLastModAction();
   }, true);
+
+  // v10.3 Patch 2: Ctrl+K search palette (Section F of 03_SEARCH_SURFACE.md)
+  (function _initSearchPalette() {
+    let _spDebounce = null;
+    let _spIdx = -1;
+    let _spPalette = null;
+
+    function _spRelAge(ts) {
+      const s = Math.floor((Date.now() / 1000) - ts);
+      if (s < 120)   return s + 's ago';
+      if (s < 3600)  return Math.floor(s / 60) + 'm ago';
+      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+      return Math.floor(s / 86400) + 'd ago';
+    }
+
+    function _spBuildRow(item, kind, idx) {
+      const isRemoved = item.is_removed === 1;
+      const href = kind === 'post'
+        ? 'https://greatawakening.win/p/' + item.id + (item.slug ? '/' + item.slug : '')
+        : 'https://greatawakening.win/p/' + item.post_id;
+      const row = document.createElement('a');
+      row.className = 'gam-sr';
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', 'false');
+      row.id = 'gam-sp-row-' + idx;
+      row.href = href;
+      row.target = '_blank';
+      row.rel = 'noopener noreferrer';
+      const kindLabel = isRemoved ? 'REMOVED' : kind.toUpperCase();
+      const kindCls   = isRemoved ? 'gam-sr-kind-removed' : 'gam-sr-kind-' + kind;
+      const snippet   = (item.snippet || '').slice(0, 120).replace(/</g, '&lt;');
+      const titleHtml = (kind === 'post' && item.title)
+        ? '<div class="gam-sr-title">' + item.title.replace(/</g, '&lt;') + '</div>'
+        : '';
+      row.innerHTML = '<div class="gam-sr-meta">'
+        + '<span class="gam-sr-kind ' + kindCls + '">' + kindLabel + '</span>'
+        + '<span class="gam-sr-author">u/' + (item.author || '') + '</span>'
+        + '<span>' + (item.community || '') + '</span>'
+        + '<span>' + _spRelAge(item.created_at) + '</span>'
+        + '</div>'
+        + titleHtml
+        + '<div class="gam-sr-snippet">' + snippet + '</div>';
+      row.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        window.open(href, '_blank');
+        _closePalette();
+      });
+      return row;
+    }
+
+    async function _spRunSearch(q, listEl, metaEl) {
+      listEl.innerHTML = '<div style="padding:10px;color:#5c6370;font:11px monospace">Searching...</div>';
+      if (metaEl) metaEl.textContent = '';
+      _spIdx = -1;
+      try {
+        const tok = getModToken();
+        if (!tok) {
+          listEl.innerHTML = '<div style="padding:10px;color:#f04040;font:11px monospace">No mod token.</div>';
+          return;
+        }
+        const WBASE = 'https://gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev';
+        const url = new URL(WBASE + '/gaw/search');
+        url.searchParams.set('q', q);
+        url.searchParams.set('scope', 'both');
+        url.searchParams.set('limit', '30');
+        const resp = await fetch(url.toString(), { headers: { 'X-Mod-Token': tok } });
+        const data = await resp.json();
+        if (!data.ok) {
+          listEl.innerHTML = '<div style="padding:10px;color:#f04040;font:11px monospace">Error: ' + (data.error || resp.status) + '</div>';
+          return;
+        }
+        listEl.innerHTML = '';
+        const posts    = data.posts    || [];
+        const comments = data.comments || [];
+        const all = [
+          ...posts.map(function(p) { return Object.assign({}, p, { _kind: 'post' }); }),
+          ...comments.map(function(c) { return Object.assign({}, c, { _kind: 'comment' }); })
+        ].sort(function(a, b) { return b.created_at - a.created_at; });
+        const total = all.length;
+        if (total === 0) {
+          if (metaEl) metaEl.textContent = 'No results';
+          return;
+        }
+        all.forEach(function(item, i) {
+          listEl.appendChild(_spBuildRow(item, item._kind, i));
+        });
+        if (metaEl) metaEl.textContent = total + ' result' + (total !== 1 ? 's' : '') + ' -- click or Enter to open';
+      } catch (err) {
+        listEl.innerHTML = '<div style="padding:10px;color:#f04040;font:11px monospace">Search failed: ' + (err && err.message || err) + '</div>';
+      }
+    }
+
+    function _spNavRows(listEl, delta, combo) {
+      const rows = Array.from(listEl.querySelectorAll('[role="option"]'));
+      if (!rows.length) return;
+      _spIdx = (_spIdx + delta + rows.length) % rows.length;
+      rows.forEach(function(r, i) {
+        const sel = i === _spIdx;
+        r.setAttribute('aria-selected', String(sel));
+        if (sel) r.scrollIntoView({ block: 'nearest' });
+      });
+      if (combo) combo.setAttribute('aria-activedescendant', rows[_spIdx] ? rows[_spIdx].id : '');
+    }
+
+    function _closePalette() {
+      if (_spPalette) _spPalette.classList.remove('gam-sp-open');
+    }
+
+    function _openPalette() {
+      if (!_spPalette) {
+        _spPalette = document.createElement('div');
+        _spPalette.id = 'gam-search-palette';
+        // Combobox wrapper
+        const combo = document.createElement('div');
+        combo.setAttribute('role', 'combobox');
+        combo.setAttribute('aria-haspopup', 'listbox');
+        combo.setAttribute('aria-expanded', 'true');
+        combo.setAttribute('aria-controls', 'gam-sp-list');
+        combo.setAttribute('aria-activedescendant', '');
+
+        const inputRow = document.createElement('div');
+        inputRow.className = 'gam-sp-input-row';
+        const inp = document.createElement('input');
+        inp.className = 'gam-sp-input';
+        inp.setAttribute('type', 'search');
+        inp.setAttribute('placeholder', 'Search posts + comments... (Esc to close)');
+        inp.setAttribute('role', 'searchbox');
+        inp.setAttribute('aria-label', 'Search posts and comments');
+        inp.setAttribute('aria-autocomplete', 'list');
+        inp.autocomplete = 'off';
+        inp.spellcheck = false;
+        inputRow.appendChild(inp);
+        combo.appendChild(inputRow);
+        _spPalette.appendChild(combo);
+
+        const list = document.createElement('div');
+        list.id = 'gam-sp-list';
+        list.setAttribute('role', 'listbox');
+        list.setAttribute('aria-label', 'Search results');
+        list.className = 'gam-sp-list';
+        _spPalette.appendChild(list);
+
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'gam-sp-meta';
+        _spPalette.appendChild(metaDiv);
+
+        inp.addEventListener('input', function() {
+          clearTimeout(_spDebounce);
+          const q = inp.value.trim();
+          if (q.length < 2) { list.innerHTML = ''; metaDiv.textContent = ''; _spIdx = -1; return; }
+          _spDebounce = setTimeout(function() { _spRunSearch(q, list, metaDiv); }, 250);
+        });
+
+        inp.addEventListener('keydown', function(ev) {
+          const rows = Array.from(list.querySelectorAll('[role="option"]'));
+          if (ev.key === 'ArrowDown') {
+            ev.preventDefault();
+            _spNavRows(list, 1, combo);
+          } else if (ev.key === 'ArrowUp') {
+            ev.preventDefault();
+            _spNavRows(list, -1, combo);
+          } else if (ev.key === 'Enter' && _spIdx >= 0 && rows[_spIdx]) {
+            ev.preventDefault();
+            window.open(rows[_spIdx].href, '_blank');
+            _closePalette();
+          } else if (ev.key === 'Escape') {
+            _closePalette();
+          } else {
+            _spIdx = -1;
+          }
+        });
+
+        document.body.appendChild(_spPalette);
+      }
+      _spPalette.classList.add('gam-sp-open');
+      // Position just above the status bar
+      const bar = document.getElementById('gam-status-bar');
+      if (bar) {
+        const barH = bar.getBoundingClientRect().height || 28;
+        _spPalette.style.bottom = (barH + 4) + 'px';
+      }
+      const inp = _spPalette.querySelector('.gam-sp-input');
+      if (inp) { inp.value = ''; inp.focus(); }
+      const list = _spPalette.querySelector('#gam-sp-list');
+      if (list) list.innerHTML = '';
+      const meta = _spPalette.querySelector('.gam-sp-meta');
+      if (meta) meta.textContent = '';
+      _spIdx = -1;
+    }
+
+    // Ctrl+K to open palette (Windows audience: ctrlKey only, not metaKey)
+    document.addEventListener('keydown', function(ev) {
+      if (!ev.ctrlKey) return;
+      if (ev.key !== 'k' && ev.key !== 'K') return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+      ev.preventDefault();
+      if (_spPalette && _spPalette.classList.contains('gam-sp-open')) {
+        _closePalette();
+      } else {
+        _openPalette();
+      }
+    });
+
+    // Click outside to close
+    document.addEventListener('click', function(ev) {
+      if (_spPalette && _spPalette.classList.contains('gam-sp-open')) {
+        if (!_spPalette.contains(ev.target)) _closePalette();
+      }
+    }, true);
+  })();
   function getDeathRowPending(){ return getDeathRow().filter(d=>d.status==='waiting'); }
   function getDeathRowReady(){ return getDeathRow().filter(d=>d.status==='waiting' && Date.now()>=d.executeAt); }
   function markDeathRowExecuted(username){
@@ -5422,7 +5638,26 @@
       const body = el('div');
       const profile = (res && res.ok && res.data && res.data.users) ? res.data.users[id.toLowerCase()] : null;
       const primary = _drawerPrimaryFromProfile(profile);
-      body.appendChild(el('p', null, stateChip({kind:'primary', value: primary}), ' ', el('strong', null, String(id))));
+
+      // --- repeat-offender count (zero extra network cost) ---
+      const banCount = (profile && profile.priorBans != null) ? profile.priorBans : 0;
+      const isRepeat = banCount >= 2;
+
+      // Build the username node -- halo-wrapped if repeat offender.
+      let userNode;
+      if (isRepeat) {
+        const badge = el('span', {cls: 'gam-repeat-badge'}, '\xD7' + String(banCount));
+        const haloWrap = el('span', {cls: 'gam-repeat-halo gam-repeat-halo--pulse',
+          role: 'button', tabindex: '0', title: 'Click to expand ban history'});
+        haloWrap.appendChild(el('strong', null, String(id)));
+        haloWrap.appendChild(badge);
+        userNode = haloWrap;
+      } else {
+        userNode = el('strong', null, String(id));
+      }
+
+      body.appendChild(el('p', null, stateChip({kind:'primary', value: primary}), ' ', userNode));
+
       const bits = [];
       if (profile) {
         if (profile.createdAt) bits.push('joined ' + _drawerFmtTs(profile.createdAt));
@@ -5430,6 +5665,48 @@
         if (profile.priorBans) bits.push('prior bans: ' + String(profile.priorBans));
       }
       body.appendChild(el('p', {style: 'color:#a0aec0;font-size:12px;'}, bits.length ? bits.join(' \u00B7 ') : 'No profile metadata.'));
+
+      // --- inline history list (hidden until halo clicked) ---
+      if (isRepeat) {
+        const repeatLabel = el('div', {cls: 'gam-repeat-label'}, 'REPEAT OFFENDER');
+        const histDiv = el('div', {cls: 'gam-repeat-history'});
+        histDiv.setAttribute('hidden', '');
+
+        // Populate from pAudit (already in-flight -- no await cost here).
+        pAudit.then(function(auditRes) {
+          if (!auditRes || !auditRes.ok || !auditRes.data || !Array.isArray(auditRes.data.rows)) return;
+          const bans = auditRes.data.rows
+            .filter(function(r) { return r.target_user === id && /ban/i.test(r.action) && !/unban/i.test(r.action); })
+            .sort(function(a, b) { return b.ts - a.ts; });
+          if (bans.length === 0) {
+            histDiv.appendChild(el('em', {style: 'color:#718096;font-size:11px;'}, 'No ban records in recent audit window.'));
+          } else {
+            for (let bi = 0; bi < Math.min(bans.length, 10); bi++) {
+              const brow = bans[bi];
+              histDiv.appendChild(el('div', {cls: 'gam-drawer-note-row'},
+                el('span', {cls: 'gam-drawer-note-ts'}, _drawerFmtTs(brow.ts)),
+                el('span', null, ' '),
+                stateChip({kind:'primary', value:'BAN'}),
+                el('span', null, ' '),
+                el('span', {cls: 'gam-drawer-note-author'}, String(brow.mod || 'unknown'))));
+            }
+          }
+        }).catch(function() {});
+
+        // Toggle handler.
+        const toggleHist = function() {
+          if (histDiv.hasAttribute('hidden')) { histDiv.removeAttribute('hidden'); } else { histDiv.setAttribute('hidden', ''); }
+        };
+        userNode.addEventListener('click', function(e) { e.stopPropagation(); toggleHist(); });
+        userNode.addEventListener('keydown', function(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleHist(); } });
+
+        body.appendChild(repeatLabel);
+        body.appendChild(histDiv);
+
+        // One-play pulse -- remove class after animation completes.
+        setTimeout(function() { try { userNode.classList.remove('gam-repeat-halo--pulse'); } catch(e2) {} }, 700);
+      }
+
       return { id: 1, body };
     }
     async function sec2() {
@@ -5515,7 +5792,155 @@
       const res = await pPrecedent;
       return { id: 6, body: _drawerRenderPrecedents(res, 'User', id, opts) };
     }
-    return [sec1(), sec2(), sec3(), sec4(), sec5(), sec6()];
+    async function sec7() {
+      const since30 = Math.floor(Date.now() / 1000) - 30 * 86400;
+      const res = await rpcCall('modGawTimeline', { username: id, since: since30, limit: 30 });
+      const wrap = el('div', { cls: 'gam-at-wrap' });
+
+      if (!res || !res.ok || !res.data) {
+        wrap.appendChild(el('div', { cls: 'gam-at-header' }, 'No firehose data for this user.'));
+        return { id: 7, label: 'Activity', body: wrap };
+      }
+
+      const atPosts    = Array.isArray(res.data.posts)    ? res.data.posts    : [];
+      const atComments = Array.isArray(res.data.comments) ? res.data.comments : [];
+
+      // Merge + sort
+      const atItems = [
+        ...atPosts.map(function(p)    { return Object.assign({}, p, { _kind: 'P', _ts: p.created_at }); }),
+        ...atComments.map(function(c) { return Object.assign({}, c, { _kind: 'C', _ts: c.created_at }); }),
+      ].sort(function(a, b) { return b._ts - a._ts; }).slice(0, 50);
+
+      // Sparkline: 24 hourly buckets over last 24h
+      const atNow = Math.floor(Date.now() / 1000);
+      const atBuckets = new Array(24).fill(0);
+      atItems.forEach(function(it) {
+        const hoursAgo = Math.floor((atNow - it._ts) / 3600);
+        if (hoursAgo >= 0 && hoursAgo < 24) atBuckets[23 - hoursAgo]++;
+      });
+      const atMaxB = Math.max(1, Math.max.apply(null, atBuckets));
+      const spark = el('div', { cls: 'gam-at-spark' });
+      atBuckets.forEach(function(v) {
+        const bar = el('div', { cls: 'gam-at-spark-bar' });
+        bar.style.height = Math.max(1, Math.round((v / atMaxB) * 16)) + 'px';
+        spark.appendChild(bar);
+      });
+
+      // v10.5.1 INVARIANT: only show sparkline header when there is data to show.
+      // Previously zero-item users saw "0 items 30d P:0 C:0" AND the empty message below.
+      if (atItems.length > 0) {
+        const hdr = el('div', { cls: 'gam-at-header' });
+        hdr.appendChild(spark);
+        hdr.appendChild(document.createTextNode(
+          ' ' + atItems.length + ' items  30d  P:' + atPosts.length + '  C:' + atComments.length
+        ));
+        wrap.appendChild(hdr);
+      }
+
+      const atFmtTime = function(ts) {
+        const d = new Date(ts * 1000);
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+      };
+      const atFmtScore = function(s) { return s > 0 ? '+' + s : String(s); };
+
+      atItems.forEach(function(it) {
+        const row = el('div', { cls: 'gam-at-row' + (it.is_removed ? ' gam-at-removed-row' : ''), role: 'button', tabindex: '0' });
+        const timeEl = el('span', { cls: 'gam-at-time' }, atFmtTime(it._ts));
+        const kindEl = el('span', { cls: it._kind === 'P' ? 'gam-at-kind-p' : 'gam-at-kind-c' }, '[' + it._kind + ']');
+        const bodyWrap = el('div');
+        const atTitle = it._kind === 'P'
+          ? String(it.title || '').slice(0, 55)
+          : String(it.snippet || '').replace(/\n/g, ' ').slice(0, 55);
+        const scoreCls = it.score > 0 ? 'gam-at-score-pos' : (it.score < 0 ? 'gam-at-score-neg' : '');
+        const titleEl = el('div', { cls: 'gam-at-title' + (it.is_removed ? ' gam-at-removed' : '') }, atTitle);
+        const metaEl = el('div', { cls: 'gam-at-meta' });
+        const metaScore = el('span', scoreCls ? { cls: scoreCls } : null, atFmtScore(it.score || 0));
+        if (it.community) {
+          metaEl.appendChild(document.createTextNode(it.community + ' · '));
+        }
+        metaEl.appendChild(metaScore);
+        if (it._kind === 'P') {
+          metaEl.appendChild(document.createTextNode(' · ' + (it.comment_count || 0) + 'c'));
+        }
+        bodyWrap.appendChild(titleEl);
+        bodyWrap.appendChild(metaEl);
+        row.appendChild(timeEl);
+        row.appendChild(kindEl);
+        row.appendChild(bodyWrap);
+
+        const openItem = function() {
+          if (it._kind === 'P' && it.slug) {
+            window.open('https://greatawakening.win/p/' + it.slug, '_blank');
+          } else if (it._kind === 'C' && it.post_id) {
+            window.open('https://greatawakening.win/p/' + it.post_id, '_blank');
+          }
+        };
+        row.addEventListener('click', openItem);
+        row.addEventListener('keydown', function(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openItem(); } });
+        wrap.appendChild(row);
+      });
+
+      if (atItems.length === 0) {
+        wrap.appendChild(el('div', { cls: 'gam-at-header' }, 'No activity in last 30 days.'));
+      }
+
+      return { id: 7, label: 'Activity', body: wrap };
+    }
+    // v10.3: Section 8 — User Similarity (lookalikes)
+    async function sec8() {
+      const body = el('div', { cls: 'sim-panel' });
+      body.appendChild(el('div', { cls: 'sim-panel-header' }, 'SIMILAR ACCOUNTS'));
+      // Loading skeleton
+      const loadEl = el('div', { style: 'color:#3a5a7a;font-size:10px;padding:4px 0;' }, 'Scanning co-commenter graph...');
+      body.appendChild(loadEl);
+      try {
+        const tok = getModToken();
+        if (!tok) {
+          loadEl.textContent = 'No mod token.';
+          return { id: 8, label: 'Lookalikes', body };
+        }
+        const r = await fetch(WORKER_BASE + '/admin/users/lookalikes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-mod-token': tok },
+          body: JSON.stringify({ username: id, limit: 5 })
+        });
+        const d = await r.json();
+        loadEl.remove();
+        if (!d.ok || !d.candidates || !d.candidates.length) {
+          body.appendChild(el('div', { style: 'color:#3a5a7a;font-size:10px;padding:4px 0;font-style:italic;' },
+            'No lookalikes found -- this user appears unique'));
+          return { id: 8, label: 'Lookalikes', body };
+        }
+        for (const c of d.candidates) {
+          const lastTog = c.last_seen_together ? Math.round((Date.now() - c.last_seen_together) / 86400000) : null;
+          const row = el('div', {
+            cls: 'sim-row',
+            'data-tooltip': (c.thread_overlap || '?') + ' shared threads' + (c.name_distance != null ? ' - name dist: ' + c.name_distance : ''),
+            style: 'position:relative;'
+          });
+          const uChip = el('span', { cls: 'sim-username' }, c.username);
+          const pill  = el('span', { cls: 'sim-pill sim-pill--' + (c.confidence || 'WATCH') }, c.confidence || 'WATCH');
+          const meta  = el('span', { cls: 'sim-meta' },
+            (c.karma != null ? 'karma ' + c.karma : '') + (lastTog != null ? (c.karma != null ? ' - ' : '') + lastTog + 'd ago' : ''));
+          const openBtn = el('button', { cls: 'gam-btn-small', style: 'font-size:9px;padding:1px 5px;' }, 'Open');
+          openBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            IntelDrawer.open({ kind: 'User', id: c.username, seedData: { username: c.username } });
+          });
+          row.append(uChip, pill, meta, openBtn);
+          row.addEventListener('click', () => {
+            IntelDrawer.open({ kind: 'User', id: c.username, seedData: { username: c.username } });
+          });
+          body.appendChild(row);
+        }
+        body.appendChild(el('div', { style: 'color:#3a5a7a;font-size:9px;padding:3px 0 0;' },
+          'Co-commenter graph - ' + (d.min_overlap_used || 2) + ' shared threads min - ' + (d.query_ms || 0) + 'ms'));
+      } catch (err) {
+        loadEl.textContent = 'Lookalikes error: ' + (err && err.message || err);
+      }
+      return { id: 8, label: 'Lookalikes', body };
+    }
+    return [sec1(), sec2(), sec3(), sec4(), sec5(), sec6(), sec7(), sec8()];
   }
 
   // ---- CHUNK 5: Thread-kind adapter (modmail) ----
@@ -5786,6 +6211,8 @@
           });
           bylineHost.appendChild(btn);
         }
+        // v10.3 Patch 5: Thread Watch button injection
+        injectThreadWatchBtn(postId);
       }
     }
 
@@ -5911,6 +6338,141 @@
       .then(()=>snack(ok,'success'))
       .catch(()=>{ snack(fb,'warn'); console.log('[ModTools]',t); });
   }
+
+  // V11 #5: Universal Undo Middleware (client-side pilot -- ban only)
+  let _undoSlot = null;
+  let _undoTimer = null;
+
+  function _setUndoSlot(slot) {
+    if (_undoTimer) clearTimeout(_undoTimer);
+    _undoSlot = slot;
+    _undoTimer = setTimeout(function() {
+      _undoSlot = null;
+      _undoTimer = null;
+      _gamUndoAnnounce('Undo window closed.');
+    }, slot.ttlMs);
+  }
+
+  function _getUndoSlot() { return _undoSlot; }
+
+  function _gamUndoAnnounce(msg) {
+    try {
+      let sr = document.getElementById('gam-sr-live');
+      if (!sr) {
+        sr = document.createElement('div');
+        sr.id = 'gam-sr-live';
+        sr.setAttribute('role', 'alert');
+        sr.setAttribute('aria-live', 'assertive');
+        sr.style.cssText = 'position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;';
+        document.body.appendChild(sr);
+      }
+      sr.textContent = '';
+      setTimeout(function() { sr.textContent = msg; }, 50);
+    } catch(e) {}
+  }
+
+  function _showUndoToast(label, undoLabel, ttlMs, onUndo) {
+    const toastId = 'gam-undo-toast-' + Date.now();
+    const toast = document.createElement('div');
+    toast.id = toastId;
+    toast.setAttribute('role', 'alert');
+    toast.style.cssText =
+      'position:fixed;bottom:56px;right:16px;z-index:9999999;' +
+      'background:#1a1f28;border:1px solid #3a3f48;border-radius:4px;' +
+      'padding:10px 14px;display:flex;align-items:center;gap:10px;' +
+      'font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;' +
+      'color:#e8eaed;box-shadow:0 4px 16px rgba(0,0,0,.6);' +
+      'min-width:260px;max-width:380px;';
+    const lblEl = document.createElement('span');
+    lblEl.style.flex = '1';
+    lblEl.textContent = label;
+    const undoBtn = document.createElement('button');
+    undoBtn.textContent = undoLabel || 'Undo';
+    undoBtn.style.cssText =
+      'background:transparent;border:1px solid #4A9EFF;border-radius:3px;' +
+      'color:#4A9EFF;font:600 11px inherit;padding:3px 10px;cursor:pointer;flex-shrink:0;';
+    const progress = document.createElement('div');
+    progress.style.cssText =
+      'position:absolute;bottom:0;left:0;height:2px;background:#4A9EFF;border-radius:0 0 4px 4px;' +
+      'width:100%;transition:width linear ' + (ttlMs / 1000) + 's;';
+    toast.style.position = 'fixed';
+    toast.appendChild(lblEl);
+    toast.appendChild(undoBtn);
+    toast.appendChild(progress);
+    document.body.appendChild(toast);
+    setTimeout(function() { progress.style.width = '0%'; }, 30);
+    undoBtn.focus();
+
+    let done = false;
+    undoBtn.addEventListener('click', function() {
+      if (done) return;
+      done = true;
+      toast.remove();
+      onUndo();
+    });
+    const expire = setTimeout(function() {
+      if (!done) toast.remove();
+    }, ttlMs + 400);
+    toast._undoExpire = expire;
+  }
+
+  function _executeUndo(clientOpId, inverseFn, label) {
+    if (!_undoSlot || _undoSlot.clientOpId !== clientOpId) return;
+    _undoSlot = null;
+    if (_undoTimer) { clearTimeout(_undoTimer); _undoTimer = null; }
+    Promise.resolve().then(inverseFn).then(function() {
+      _gamUndoAnnounce(label + ' reversed.');
+      snack('Undone: ' + label, 'success');
+    }).catch(function(err) {
+      _gamUndoAnnounce('Undo failed. Check mod log.');
+      snack('Undo failed: ' + (err && err.message || 'error'), 'error');
+    });
+  }
+
+  // Global U-key handler for undo (registered once at init)
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'u' && e.key !== 'U') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (document.activeElement && document.activeElement.isContentEditable) return;
+    const slot = _getUndoSlot();
+    if (!slot) return;
+    e.preventDefault();
+    _executeUndo(slot.clientOpId, slot.inverse, slot.label);
+  }, { capture: true });
+
+  async function withUndo(actionFn, opts) {
+    const tier = opts.tier || 'A';
+    const label = opts.label || 'Action';
+    const undoLabel = opts.undoLabel || 'Undo';
+    const inverseFn = opts.inverse;
+    const ttlMs = tier === 'A' ? 20000 : 5000;
+    const clientOpId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : ('undo-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+
+    let result;
+    try {
+      result = await actionFn({ client_op_id: clientOpId });
+    } catch (err) {
+      snack('Failed: ' + label, 'error');
+      throw err;
+    }
+
+    if (!result || !result.ok) {
+      return result;
+    }
+
+    _setUndoSlot({ clientOpId: clientOpId, inverse: inverseFn, ttlMs: ttlMs, label: label });
+    _showUndoToast(label, undoLabel, ttlMs, function() {
+      _executeUndo(clientOpId, inverseFn, label);
+    });
+    _gamUndoAnnounce(label + '. Press U or activate Undo button within ' + (ttlMs / 1000) + ' seconds to reverse.');
+
+    return result;
+  }
+
   function closeAllPanels(){
     // v8.6.1: removes EVERY .gam-modal plus the backdrop, not just a
     // hard-coded ID list. Pre-fix, settings and bug-report panels were
@@ -7260,6 +7822,22 @@ Analyze this comment against the community rules. Then write a brief, profession
     const vSel = root.querySelector('#mc-ban-viol');
     const subIn = root.querySelector('#mc-ban-subj');
     const msgIn = root.querySelector('#mc-ban-msg');
+    // V10_BUGS/02: restore macro draft if mod had edited a macro for this user
+    (function() {
+      const _rKind = 'ban_msg';
+      const _rUser = (username || '').toLowerCase();
+      if (!_rUser || !msgIn) return;
+      chrome.storage.session.get('gam_macro_drafts').then(function(out) {
+        const stored = (out && out.gam_macro_drafts) || {};
+        const entry = stored[_rKind + ':' + _rUser];
+        if (!entry || !entry.body || entry.body === entry.base_body) return;
+        if ((msgIn.value || '').trim()) return;
+        msgIn.value = entry.body;
+        if (typeof SuperMod !== 'undefined' && SuperMod._showDraftChip) {
+          SuperMod._showDraftChip(msgIn, entry, _rKind, _rUser);
+        }
+      }).catch(function() {});
+    })();
     const durRow = root.querySelector('#mc-ban-durs');
     const modmailCb = root.querySelector('#mc-ban-modmail');
     const goBtn = root.querySelector('#mc-ban-go');
@@ -7337,6 +7915,20 @@ Analyze this comment against the community rules. Then write a brief, profession
             // Reload list
             const r2 = await rpcCall('macrosList', { kind:'ban_msg' });
             __mcMacroRefill((r2 && r2.ok && r2.data && r2.data.macros) || []);
+            // v10.0: auto-select the just-saved macro and populate the textarea.
+            // Previously the save path returned here without writing result.body
+            // to msgIn, so the original violation template stayed in the field.
+            const savedLabel = result.label;
+            const allOpts = Array.from(macroPick.options);
+            const newOpt = allOpts.find(function(o){ return o.value && o.value !== '__add__' && o.value !== '__ai__' && o.textContent.trim().startsWith(savedLabel); });
+            if (newOpt) {
+              macroPick.value = newOpt.value;
+              if (msgIn) msgIn.value = (evidenceLink ? urlPrefix : '') + result.body;
+            } else {
+              // Fallback: body is known directly from result
+              if (msgIn) msgIn.value = (evidenceLink ? urlPrefix : '') + result.body;
+            }
+            try { snack('✓ Macro loaded into draft', 'success'); } catch(_){}
           } else {
             try { snack('Save failed: ' + ((ur && ur.data && ur.data.error) || (ur && ur.error) || 'unknown'), 'error'); } catch(_){}
           }
@@ -7452,6 +8044,37 @@ Analyze this comment against the community rules. Then write a brief, profession
         const body = opt.dataset.body || '';
         if (msgIn) msgIn.value = (evidenceLink ? urlPrefix : '') + body;
         rpcCall('macroUse', { id: parseInt(opt.value, 10) }).catch(function(){});
+        // V10_BUGS/02: record macro draft base snapshot
+        (function() {
+          const _mdKind = 'ban_msg';
+          const _mdUser = (username || '').toLowerCase();
+          if (!_mdUser || !msgIn) return;
+          const _mdId   = parseInt(opt.value, 10);
+          const _mdVal  = msgIn.value;
+          chrome.storage.session.get('gam_macro_drafts').then(function(out) {
+            const stored = (out && out.gam_macro_drafts) || {};
+            stored[_mdKind + ':' + _mdUser] = {
+              body: _mdVal, base_macro_id: _mdId, base_body: _mdVal,
+              modified_at: Date.now(), promote_count: (stored[_mdKind + ':' + _mdUser] || {}).promote_count || 0
+            };
+            chrome.storage.session.set({ gam_macro_drafts: stored }).catch(function() {});
+          }).catch(function() {});
+          if (!msgIn.dataset.gamMacroDraftAttached) {
+            msgIn.dataset.gamMacroDraftAttached = '1';
+            msgIn.addEventListener('input', function() {
+              const _u2 = (username || '').toLowerCase();
+              if (!_u2) return;
+              chrome.storage.session.get('gam_macro_drafts').then(function(out2) {
+                const stored2 = (out2 && out2.gam_macro_drafts) || {};
+                const key2 = 'ban_msg:' + _u2;
+                if (!stored2[key2]) return;
+                stored2[key2].body = msgIn.value;
+                stored2[key2].modified_at = Date.now();
+                chrome.storage.session.set({ gam_macro_drafts: stored2 }).catch(function() {});
+              }).catch(function() {});
+            });
+          }
+        })();
       });
     }
 
@@ -7532,11 +8155,18 @@ Analyze this comment against the community rules. Then write a brief, profession
     selectDuration(1);
 
     // v5.2.9: violation change → auto-populate subject + message WITH url prefix
+    // v10.0: guard against clobbering an active macro selection.
+    // If the user picked a team macro, the macro dropdown holds a non-empty
+    // value. In that case only update subject (violation-driven) and duration;
+    // leave the message body alone so the macro body is preserved.
     vSel.addEventListener('change', ()=>{
       const v = VIOLATIONS.find(x=>x.id===vSel.value);
       if (!v) return;
+      const macroIsActive = macroPick && macroPick.value && macroPick.value !== '' && macroPick.value !== '__add__' && macroPick.value !== '__ai__';
       subIn.value = v.subject;
-      msgIn.value = urlPrefix + v.message;
+      if (!macroIsActive) {
+        msgIn.value = urlPrefix + v.message;
+      }
       let days = v.defaultDays;
       if (isRepeat && days>0 && days<30) days = Math.min(days*3, 90);
       else if (isRepeat && days===0) days = 3;
@@ -7815,13 +8445,29 @@ Analyze this comment against the community rules. Then write a brief, profession
       // duration === -1 (perma) \u2192 days=0 per GAW contract
       // duration > 0 \u2192 days=duration
       const daysForApi = duration === -1 ? 0 : duration;
-      const r = await apiBan(username, daysForApi, fullReason);
+      // V11 #5: wrap apiBan with undo middleware (Tier A, 20s window)
+      const _banTarget = username;
+      const _banDays = daysForApi;
+      const _banReason = fullReason;
+      const r = await withUndo(
+        function(undoArgs) { return apiBan(_banTarget, _banDays, _banReason); },
+        {
+          tier: 'A',
+          label: 'Banned ' + username,
+          undoLabel: 'Undo ban',
+          inverse: function() {
+            return rpcCall('modUnban', { username: _banTarget }).catch(function() {
+              return apiBan(_banTarget, -999, 'UNDO').catch(function() {});
+            });
+          }
+        }
+      );
 
-      if (!r.ok){
-        const hint = r.loginRedirect ? ' \u2014 SESSION EXPIRED, please re-login' : '';
-        statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-red">\u{26A0} Ban POST failed (status ${r.status}${hint}).</div>`;
+      if (!r || !r.ok){
+        const hint = (r && r.loginRedirect) ? ' \u2014 SESSION EXPIRED, please re-login' : '';
+        statusEl.innerHTML = '<div class="gam-mc-banner gam-mc-banner-red">\u26a0 Ban POST failed (status ' + (r ? r.status : '?') + hint + ').</div>';
         goBtn.disabled = false;
-        snack('Ban failed' + (r.loginRedirect ? ' \u2014 session expired' : ''), 'error');
+        snack('Ban failed' + ((r && r.loginRedirect) ? ' \u2014 session expired' : ''), 'error');
         return;
       }
 
@@ -7876,7 +8522,20 @@ Analyze this comment against the community rules. Then write a brief, profession
       });
       // v7.1: clear persisted draft (local + cloud) on successful send.
       try { if (typeof SuperMod !== 'undefined') SuperMod.clearDraft('ban', username); } catch(e) {}
-      showBanUndoToast(username);
+      // V10_BUGS/02: clear macro draft + kick promote-check
+      (function() {
+        const _cUser = (username || '').toLowerCase();
+        const _cBody = msgIn ? msgIn.value : '';
+        chrome.storage.session.get('gam_macro_drafts').then(function(out) {
+          const stored = (out && out.gam_macro_drafts) || {};
+          delete stored['ban_msg:' + _cUser];
+          chrome.storage.session.set({ gam_macro_drafts: stored }).catch(function() {});
+        }).catch(function() {});
+        if (typeof SuperMod !== 'undefined' && SuperMod._maybeSuggestPromote) {
+          SuperMod._maybeSuggestPromote('ban_msg', _cBody).catch(function() {});
+        }
+      })();
+      // showBanUndoToast(username); -- V11 #5: withUndo already shows undo toast above
 
       // Optional: also send a separate modmail
       let modmailSent = false;
@@ -8074,6 +8733,22 @@ Analyze this comment against the community rules. Then write a brief, profession
     const tpl = root.querySelector('#mc-msg-tpl');
     const subj = root.querySelector('#mc-msg-subj');
     const body = root.querySelector('#mc-msg-body');
+    // V10_BUGS/02: restore macro draft (mm_reply) if mod had edited a macro for this user
+    (function() {
+      const _mmrKind = 'mm_reply';
+      const _mmrUser = (username || '').toLowerCase();
+      if (!_mmrUser || !body) return;
+      chrome.storage.session.get('gam_macro_drafts').then(function(out) {
+        const stored = (out && out.gam_macro_drafts) || {};
+        const entry = stored[_mmrKind + ':' + _mmrUser];
+        if (!entry || !entry.body || entry.body === entry.base_body) return;
+        if ((body.value || '').trim()) return;
+        body.value = entry.body;
+        if (typeof SuperMod !== 'undefined' && SuperMod._showDraftChip) {
+          SuperMod._showDraftChip(body, entry, _mmrKind, _mmrUser);
+        }
+      }).catch(function() {});
+    })();
 
     // v9.8.0: smart team-macros dropdown for mm_reply (mirrors ban-tab pattern)
     const msgMacroPick = root.querySelector('#mc-msg-macro-pick');
@@ -8180,6 +8855,37 @@ Analyze this comment against the community rules. Then write a brief, profession
         // Real macro selection: populate body + bump use_count
         if (body) body.value = opt.dataset.body || '';
         rpcCall('macroUse', { id: parseInt(opt.value, 10) }).catch(() => {});
+        // V10_BUGS/02: record macro draft base snapshot (mm_reply)
+        (function() {
+          const _mmKind = 'mm_reply';
+          const _mmUser = (username || '').toLowerCase();
+          if (!_mmUser || !body) return;
+          const _mmId  = parseInt(opt.value, 10);
+          const _mmVal = body.value;
+          chrome.storage.session.get('gam_macro_drafts').then(function(out) {
+            const stored = (out && out.gam_macro_drafts) || {};
+            stored[_mmKind + ':' + _mmUser] = {
+              body: _mmVal, base_macro_id: _mmId, base_body: _mmVal,
+              modified_at: Date.now(), promote_count: (stored[_mmKind + ':' + _mmUser] || {}).promote_count || 0
+            };
+            chrome.storage.session.set({ gam_macro_drafts: stored }).catch(function() {});
+          }).catch(function() {});
+          if (!body.dataset.gamMacroDraftAttached) {
+            body.dataset.gamMacroDraftAttached = '1';
+            body.addEventListener('input', function() {
+              const _u3 = (username || '').toLowerCase();
+              if (!_u3) return;
+              chrome.storage.session.get('gam_macro_drafts').then(function(out3) {
+                const stored3 = (out3 && out3.gam_macro_drafts) || {};
+                const key3 = 'mm_reply:' + _u3;
+                if (!stored3[key3]) return;
+                stored3[key3].body = body.value;
+                stored3[key3].modified_at = Date.now();
+                chrome.storage.session.set({ gam_macro_drafts: stored3 }).catch(function() {});
+              }).catch(function() {});
+            });
+          }
+        })();
       });
     }
 
@@ -8210,6 +8916,19 @@ Analyze this comment against the community rules. Then write a brief, profession
       snack(`Message sent to ${username}`, 'success');
       // v7.1: clear persisted draft (local + cloud) on successful send.
       try { if (typeof SuperMod !== 'undefined') SuperMod.clearDraft('msg', username); } catch(e) {}
+      // V10_BUGS/02: clear macro draft + kick promote-check (mm_reply)
+      (function() {
+        const _cmUser = (username || '').toLowerCase();
+        const _cmBody = body ? body.value : '';
+        chrome.storage.session.get('gam_macro_drafts').then(function(out) {
+          const stored = (out && out.gam_macro_drafts) || {};
+          delete stored['mm_reply:' + _cmUser];
+          chrome.storage.session.set({ gam_macro_drafts: stored }).catch(function() {});
+        }).catch(function() {});
+        if (typeof SuperMod !== 'undefined' && SuperMod._maybeSuggestPromote) {
+          SuperMod._maybeSuggestPromote('mm_reply', _cmBody).catch(function() {});
+        }
+      })();
       btn.textContent = '\u2713 Sent';
     });
   }
@@ -8728,6 +9447,11 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       host.dataset.gamBylineCompact = '1';
     });
+    // v10.3 Patch 5: re-inject Thread Watch btn in case DOM swapped
+    if (IS_POST_PAGE) {
+      const _twPostId = (location.pathname.match(/^\/p\/([^\/]+)/) || [])[1] || '';
+      if (_twPostId) injectThreadWatchBtn(_twPostId);
+    }
   }
   // Inject the CSS that tightens vertical gaps between title / byline / meta
   // on every GAW post-or-comment row. Scoped to .post and .comment so we don't
@@ -8880,65 +9604,192 @@ Analyze this comment against the community rules. Then write a brief, profession
     panelOpen='log';
   }
 
-  // v5.1.9 EXP Loop 3: right-click any /u/<name> link anywhere on GAW to open a
-  // context menu with instant actions. Reduces context switches to zero.
-  let gamContextMenu = null;
-  function closeGamContextMenu(){ if (gamContextMenu){ gamContextMenu.remove(); gamContextMenu = null; } }
-  document.addEventListener('click', closeGamContextMenu, true);
-  document.addEventListener('contextmenu', (e)=>{
+  // V10 FIREHOSE/05: Hot Now Panel -- replaces SIREN click
+  function _showHotNowPanel() {
+    closeAllPanels();
+
+    // build or reuse panel shell
+    let hnPanel = document.getElementById('gam-hot-now-panel');
+    if (!hnPanel) {
+      hnPanel = el('div', { id: 'gam-hot-now-panel' });
+      document.body.appendChild(hnPanel);
+    }
+    hnPanel.innerHTML = '';
+
+    // header
+    const hnCloseBtn = el('button', { cls: 'gam-hn-close', title: 'Close' }, '\xD7');
+    hnCloseBtn.addEventListener('click', _closeHotNowPanel);
+    hnPanel.appendChild(el('div', { cls: 'gam-hn-header' },
+      el('span', { cls: 'gam-hn-title' }, '\u{1F6A8} HOT NOW'),
+      hnCloseBtn
+    ));
+
+    const hnBody = el('div', { cls: 'gam-hn-body' });
+    hnPanel.appendChild(hnBody);
+
+    // Section 1: SUS Users
+    const hnSusRows = [..._susState.rows.values()]
+      .sort(function(a, b) { return (b.comment_count_24h || 0) - (a.comment_count_24h || 0); })
+      .slice(0, 5);
+    const hnSusSection = el('div', { cls: 'gam-hn-section' });
+    hnSusSection.appendChild(el('div', {
+      cls: 'gam-hn-section-hdr',
+      style: 'color:#f04040'
+    }, hnSusRows.length + ' SUS USER' + (hnSusRows.length !== 1 ? 'S' : '')));
+    if (hnSusRows.length === 0) {
+      hnSusSection.appendChild(el('div', { style: 'color:#5c6370;font-size:11px;padding:4px 0' }, 'No active SUS users'));
+    } else {
+      hnSusRows.forEach(function(srow) {
+        const hnCnt = srow.comment_count_24h || 0;
+        const hnGutter = hnCnt > 15 ? '#f04040' : hnCnt > 8 ? '#ff9933' : '#a78bfa';
+        const hnCntColor = hnCnt > 8 ? '#f04040' : '#ff9933';
+        const hnR = el('div', { cls: 'gam-hn-row', style: 'border-left-color:' + hnGutter });
+        const hnOpenBtn = el('button', { cls: 'gam-hn-act' }, 'Open');
+        hnOpenBtn.addEventListener('click', function() {
+          _closeHotNowPanel();
+          openModConsole(srow.username, null, 'intel');
+        });
+        hnR.appendChild(el('span', { cls: 'gam-hn-user' }, srow.username));
+        hnR.appendChild(el('span', { cls: 'gam-hn-reason' }, srow.reason || ''));
+        if (hnCnt > 0) hnR.appendChild(el('span', { cls: 'gam-hn-count', style: 'color:' + hnCntColor }, hnCnt + '/24h'));
+        hnR.appendChild(hnOpenBtn);
+        hnSusSection.appendChild(hnR);
+      });
+    }
+    hnBody.appendChild(hnSusSection);
+    hnBody.appendChild(el('div', { cls: 'gam-hn-sep' }));
+
+    // Section 2: Death Row Ready
+    let hnDrRows = getDeathRowReady().sort(function(a, b) { return a.executeAt - b.executeAt; }).slice(0, 5);
+    const hnDrPending = hnDrRows.length === 0;
+    if (hnDrPending) hnDrRows = getDeathRowPending().sort(function(a, b) { return a.executeAt - b.executeAt; }).slice(0, 5);
+    const hnDrSection = el('div', { cls: 'gam-hn-section' });
+    const hnDrLabel = hnDrPending ? (hnDrRows.length + ' DR PENDING') : (hnDrRows.length + ' DR READY');
+    hnDrSection.appendChild(el('div', {
+      cls: 'gam-hn-section-hdr',
+      style: 'color:#a78bfa'
+    }, hnDrLabel));
+    if (hnDrRows.length === 0) {
+      hnDrSection.appendChild(el('div', { style: 'color:#5c6370;font-size:11px;padding:4px 0' }, 'Queue empty'));
+    } else {
+      hnDrRows.forEach(function(drow) {
+        const hnReady = Date.now() >= drow.executeAt;
+        const hnDrGutter = hnReady ? '#f04040' : '#a78bfa';
+        const hnTimeLabel = hnReady ? 'READY' : 'in ' + timeUntil(drow.executeAt);
+        const hnTimeColor = hnReady ? '#f04040' : '#a78bfa';
+        const hnDrR = el('div', { cls: 'gam-hn-row', style: 'border-left-color:' + hnDrGutter });
+        const hnExecBtn = el('button', { cls: 'gam-hn-act gam-hn-act-danger' }, hnReady ? 'Execute' : 'Queue');
+        if (!hnReady) hnExecBtn.disabled = true;
+        hnExecBtn.addEventListener('click', function() {
+          _closeHotNowPanel();
+          openModConsole(drow.username, null, 'ban');
+        });
+        const hnCancelBtn = el('button', { cls: 'gam-hn-act' }, '\xD7');
+        hnCancelBtn.addEventListener('click', function() {
+          removeFromDeathRow(drow.username);
+          rosterSetStatus(drow.username, 'new');
+          snack(drow.username + ' removed from DR', 'info');
+          _showHotNowPanel();
+        });
+        hnDrR.appendChild(el('span', { cls: 'gam-hn-user' }, drow.username));
+        hnDrR.appendChild(el('span', { cls: 'gam-hn-reason' }, drow.reason || ''));
+        hnDrR.appendChild(el('span', { cls: 'gam-hn-count', style: 'color:' + hnTimeColor }, hnTimeLabel));
+        hnDrR.appendChild(hnExecBtn);
+        hnDrR.appendChild(hnCancelBtn);
+        hnDrSection.appendChild(hnDrR);
+      });
+    }
+    hnBody.appendChild(hnDrSection);
+
+    // footer
+    const hnFooterLink = el('button', { cls: 'gam-hn-footer-link' }, 'View mod log →');
+    hnFooterLink.addEventListener('click', function() { _closeHotNowPanel(); openModLog(); });
+    hnPanel.appendChild(el('div', { cls: 'gam-hn-footer' }, hnFooterLink));
+
+    // open
+    requestAnimationFrame(function() { hnPanel.classList.add('gam-hn-open'); });
+    panelOpen = 'hotnow';
+  }
+
+  function _closeHotNowPanel() {
+    const hnPanel = document.getElementById('gam-hot-now-panel');
+    if (!hnPanel) return;
+    hnPanel.classList.remove('gam-hn-open');
+    setTimeout(function() { if (hnPanel.parentNode) hnPanel.remove(); }, 180);
+    panelOpen = null;
+  }
+
+  // V11 #1 v0: Universal right-click router (ship-tonight: user surface only)
+  // Surfaces: user (/u/ link) -- post/modmail/chat in v10.3
+  let _gamCtxMenu = null;
+  function _gamCloseCtx() { if (_gamCtxMenu) { _gamCtxMenu.remove(); _gamCtxMenu = null; } }
+  document.addEventListener('click', _gamCloseCtx, true);
+  document.addEventListener('keydown', function(ev) { if (ev.key === 'Escape') _gamCloseCtx(); }, true);
+
+  document.addEventListener('contextmenu', function(e) {
     if (FallbackMode) return;
-    const a = e.target.closest('a[href^="/u/"]');
-    if (!a) return;
-    const href = a.getAttribute('href') || '';
-    const m = href.match(/^\/u\/([^\/\?]+)/);
-    if (!m) return;
-    const u = m[1];
-    if (!u || u.toLowerCase().startsWith('c:') || u === 'me') return;
+    const t = e.target;
+    if (t.closest('#gam-status-bar, .gam-modal, .gam-ctx-menu, #gam-intel-drawer')) return;
+
+    // v10.5.1 INVARIANT: surface attribution. Recognised surfaces: user link (now),
+    // post/modmail/chat in v11. Anything that is NOT a known surface returns silently.
+    // This prevents menu on e.g. image right-click inside a GAW card.
+    const ctxA = t.closest('a[href*="/u/"]');
+    if (!ctxA) return; // not a recognised surface -- let browser handle
+    const ctxM = (ctxA.getAttribute('href') || '').match(/\/u\/([^\/\?#]+)/);
+    if (!ctxM) {
+      // Edge: href contains /u/ but doesn't match the user pattern (e.g. /u/community:foo)
+      try { console.warn('[ModTools v10.5.1] ctx-menu: /u/ link with non-user href', ctxA.href); } catch(_){}
+      return;
+    }
+    const ctxU = decodeURIComponent(ctxM[1]);
+    if (!ctxU || ctxU.toLowerCase().startsWith('c:') || ctxU === 'me') return;
 
     e.preventDefault();
-    closeGamContextMenu();
-    const menu = el('div', { cls:'gam-ctx-menu' });
-    menu.innerHTML = `
-      <div class="gam-ctx-head">\u{1F464} ${escapeHtml(u)}</div>
-      <a class="gam-ctx-item" data-act="intel">\u{1F4CA} Mod Console / Intel</a>
-      <a class="gam-ctx-item" data-act="ban">\u{1F528} Ban...</a>
-      <a class="gam-ctx-item" data-act="note">\u{1F4CB} Note...</a>
-      <a class="gam-ctx-item" data-act="message">\u{21A9}\u{FE0F} Message...</a>
-      <a class="gam-ctx-item" data-act="watch">\u{1F440} ${isWatched(u) ? 'Unwatch' : 'Watch'}</a>
-      <a class="gam-ctx-item" data-act="dr72">\u{1F480} Death Row 72h</a>
-      <a class="gam-ctx-item gam-ctx-sep" data-act="copy">\u{1F517} Copy username</a>
-      <a class="gam-ctx-item" data-act="profile">\u{1F310} Open GAW profile</a>
-    `;
+    _gamCloseCtx();
+
+    const ctxWatched = isWatched(ctxU);
+    const menu = el('div', { cls: 'gam-ctx-menu', id: 'gam-ctx-menu', role: 'menu' });
+    menu.innerHTML =
+      '<div class="gam-ctx-head">' + escapeHtml(ctxU) + '</div>' +
+      '<div class="gam-ctx-item" role="menuitem" tabindex="-1" data-act="console">' +
+        '<span class="gam-ctx-label">Open Mod Console</span>' +
+        '<span class="gam-ctx-kbd"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></span>' +
+      '</div>' +
+      '<div class="gam-ctx-item gam-ctx-item--danger" role="menuitem" tabindex="-1" data-act="ban">' +
+        '<span class="gam-ctx-label">Ban...</span>' +
+        '<span class="gam-ctx-kbd"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd></span>' +
+      '</div>' +
+      '<div class="gam-ctx-item" role="menuitem" tabindex="-1" data-act="watch">' +
+        '<span class="gam-ctx-label">' + (ctxWatched ? 'Unwatch' : 'Watch') + '</span>' +
+        '<span class="gam-ctx-kbd"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd></span>' +
+      '</div>' +
+      '<div class="gam-ctx-sep" role="separator"></div>' +
+      '<div class="gam-ctx-item" role="menuitem" tabindex="-1" data-act="copy">' +
+        '<span class="gam-ctx-label">Copy username</span>' +
+      '</div>' +
+      '<div class="gam-ctx-item" role="menuitem" tabindex="-1" data-act="profile">' +
+        '<span class="gam-ctx-label">Open GAW profile</span>' +
+      '</div>';
     document.body.appendChild(menu);
-    menu.style.left = Math.min(e.clientX, window.innerWidth - 240) + 'px';
-    menu.style.top = Math.min(e.clientY, window.innerHeight - 280) + 'px';
-    gamContextMenu = menu;
-    menu.addEventListener('click', async (ev)=>{
-      const item = ev.target.closest('.gam-ctx-item');
-      if (!item) return;
-      const act = item.dataset.act;
-      closeGamContextMenu();
-      if (act === 'intel') openModConsole(u, null, 'intel');
-      else if (act === 'ban') openModConsole(u, null, 'ban');
-      else if (act === 'note') openModConsole(u, null, 'note');
-      else if (act === 'message') openModConsole(u, null, 'message');
-      else if (act === 'watch'){
-        const nw = toggleWatch(u);
-        snack(nw ? `${u} watched` : `${u} unwatched`, nw ? 'warn' : 'success');
+    const vw = window.innerWidth, vh = window.innerHeight;
+    menu.style.left = Math.min(e.clientX + 2, vw - 228) + 'px';
+    menu.style.top  = Math.min(e.clientY + 2, vh - (menu.offsetHeight || 180) - 8) + 'px';
+    _gamCtxMenu = menu;
+
+    menu.addEventListener('click', function(ev) {
+      const ctxItem = ev.target.closest('[data-act]');
+      if (!ctxItem) return;
+      _gamCloseCtx();
+      const act = ctxItem.dataset.act;
+      if (act === 'console') openModConsole(ctxU, null, 'intel');
+      else if (act === 'ban')     openModConsole(ctxU, null, 'ban');
+      else if (act === 'watch') {
+        const nw = toggleWatch(ctxU);
+        snack(nw ? ctxU + ' watched' : ctxU + ' unwatched', nw ? 'warn' : 'success');
       }
-      else if (act === 'dr72'){
-        const hours = getSetting('defaultDeathRowHours', 72);
-        const added = addToDeathRow(u, hours*3600*1000, getUsersBanReason());
-        if (added){
-          rosterSetStatus(u, 'deathrow');
-          logAction({ type:'deathrow', user:u, delay:`${hours} hours`, source:'ctx-menu' });
-          snack(`\u{1F480} ${u} on Death Row (${hours}h)`, 'warn');
-        } else {
-          snack(`${u} already on death row`, 'warn');
-        }
-      }
-      else if (act === 'copy') copyAndNotify(u, 'Username copied');
-      else if (act === 'profile') window.open(`/u/${encodeURIComponent(u)}/`, '_blank');
+      else if (act === 'copy')    copyAndNotify(ctxU, 'Username copied');
+      else if (act === 'profile') window.open('/u/' + encodeURIComponent(ctxU) + '/', '_blank');
     });
   }, true);
 
@@ -9419,9 +10270,18 @@ Analyze this comment against the community rules. Then write a brief, profession
   }
 
   function renderTooltipBasic(username, cachedIntel){ renderTooltip(username, cachedIntel); }
+  // v10.4: track hover anchor so async intel renders re-position the tooltip.
+  // Pre-fix the tooltip was clamped to viewport at first-render with skeleton
+  // content, then renderTooltipIntel rewrote the HTML to a taller card without
+  // re-running positionTooltip — taller card overflowed the bottom edge
+  // (Commander screenshot 2026-05-08).
+  let _gamTipAnchor = null;
+  function setTooltipAnchor(a){ _gamTipAnchor = a || null; }
   function renderTooltipIntel(username, intel){
     if (currentHoverUsername !== username && !tooltipPinned) return;
     renderTooltip(username, intel);
+    // Re-position now that the rendered card has its final height.
+    try { if (_gamTipAnchor) positionTooltip(_gamTipAnchor); } catch(_){}
   }
 
   // T9: pinned state. When pinned, tooltip becomes interactive (gains pointer
@@ -9449,6 +10309,9 @@ Analyze this comment against the community rules. Then write a brief, profession
     const MARGIN = 8;
     const GAP = 6;
     if (!anchor) return;
+    // v10.4: stash anchor for renderTooltipIntel to re-call us after async
+    // intel arrives + the card grows taller. See setTooltipAnchor above.
+    _gamTipAnchor = anchor;
     const a = anchor.getBoundingClientRect();
     // Temporarily show so we can measure; leave transform off to avoid jump
     tooltipEl.style.visibility = 'hidden';
@@ -9484,11 +10347,15 @@ Analyze this comment against the community rules. Then write a brief, profession
     } else {
       // No good fit either side: clamp vertically in viewport, shifted right of anchor if possible
       top = Math.max(MARGIN, Math.min(vh - th - MARGIN, a.bottom + GAP));
-      // If horizontally overlapping anchor, try shifting right of anchor
+      // If horizontally overlapping anchor, try shifting right of anchor.
+      // v10.4: re-clamp left after the shift so the shifted-right path
+      // doesn't skip the original viewport bounds check (Bug A2 per agent
+      // audit).
       if (top + th > a.top && top < a.bottom){
         const shifted = a.right + GAP;
         if (shifted + tw + MARGIN <= vw) left = shifted;
       }
+      left = Math.max(MARGIN, Math.min(left, vw - tw - MARGIN));
     }
     tooltipEl.style.left = left + 'px';
     tooltipEl.style.top = top + 'px';
@@ -9569,11 +10436,22 @@ Analyze this comment against the community rules. Then write a brief, profession
     _hoverDismissTimer = setTimeout(()=>{ _hoverDismissTimer = null; hideTooltip(); }, ms || 200);
   }
   document.addEventListener('mouseover', e=>{
-    if (tooltipPinned) return;
     const al = e.target.closest(SELECTORS.authorLink);
     if (!al) return;
     const u = al.textContent.trim();
     if (!u) return;
+    // v10.5.1 AFFORDANCE: hint that right-click opens mod menu (Cat 3 #13 hover glyph).
+    // Only set once per element to avoid repeated DOM writes.
+    if (!al.dataset.gamCtxHinted) {
+      al.dataset.gamCtxHinted = '1';
+      if (!al.title) al.title = 'Right-click for mod options';
+    }
+    // v10.5.1 STATE: if pinned on a DIFFERENT user, auto-unpin so new hover takes over.
+    // If hovering the SAME pinned user, stay pinned (mod re-hovers while reading the pin).
+    if (tooltipPinned) {
+      if (u === currentHoverUsername) return; // same user -- keep pin
+      unpinTooltip(); // different user -- break pin, fall through to show new user
+    }
     _cancelDismiss(); // re-entering an authorLink cancels any pending dismiss
 
     currentHoverUsername = u;
@@ -9768,6 +10646,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       if(k==='c' && hoveredItem && !IS_USERS_PAGE){ e.preventDefault(); copyAndNotify(getPermalink(hoveredItem), 'Permalink copied'); return; }
       if(k==='l'){ e.preventDefault(); openModLog(); return; }
+      if(k==='t'){ e.preventDefault(); _showHotNowPanel(); return; }
       if(k==='h'){ e.preventDefault(); openHelp(); return; }
       if(k==='s'){ e.preventDefault(); openSettings(); return; }
       // v5.1.2: Ctrl+Shift+A archives the mail currently being read
@@ -13483,7 +14362,12 @@ Analyze this comment against the community rules. Then write a brief, profession
 #gam-mc-panel[data-dock]{position:fixed;top:0;bottom:0;max-width:95vw;background:${C.BG};z-index:9999988;display:flex;flex-direction:column;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};transition:transform .2s ease-out,width .2s ease-out}
 #gam-mc-panel[data-width="sm"]{width:320px}
 #gam-mc-panel[data-width="md"]{width:480px}
-#gam-mc-panel[data-width="lg"]{width:640px}
+/* v10.3: Commander-3rd-time-asked: lg width is 90vw (was 640px). Caps
+   at 1400px so on a 1920px display the panel is ~1400px and not the
+   entire screen. Internal layout stretches to 100% of the container, so
+   the chat-list / thread / composer fully use the increased real estate.
+   Switch via the existing S→M→L cycle button in the chat panel header. */
+#gam-mc-panel[data-width="lg"]{width:90vw;max-width:1400px}
 #gam-mc-panel[data-dock="right"]{right:0;left:auto;border-left:1px solid ${C.BORDER2};box-shadow:-8px 0 30px rgba(0,0,0,.55);transform:translateX(100%)}
 #gam-mc-panel[data-dock="right"].gam-mc-open{transform:translateX(0)}
 #gam-mc-panel[data-dock="left"]{left:0;right:auto;border-right:1px solid ${C.BORDER2};box-shadow:8px 0 30px rgba(0,0,0,.55);transform:translateX(-100%)}
@@ -14041,14 +14925,40 @@ Analyze this comment against the community rules. Then write a brief, profession
         setSetting('chat.width', next);
       });
       head.appendChild(widthBtn);
-      const dockBtn = el('button', { cls:'gam-mc-headctl', title:'Toggle dock side' });
-      dockBtn.textContent = panel.getAttribute('data-dock') === 'left' ? '\u2B05\uFE0F' : '\u27A1\uFE0F';
+      // v10.2: dock toggle replaces emoji arrows with stable text labels and
+      // adds a 4-second undo toast. Closes advocate groan #4 ("\u2B05\uFE0F/\u27A1\uFE0F emoji
+      // dock toggle, no undo, jumps panel"). The label always reads as the
+      // CURRENT side ("DOCK: R") so the mod knows where the panel is, not
+      // where it would go.
+      const dockBtn = el('button', { cls:'gam-mc-headctl', title:'Toggle dock side (click to flip; Undo within 4s)' });
+      const __dockLabel = (side) => 'DOCK: ' + (side === 'left' ? 'L' : 'R');
+      dockBtn.textContent = __dockLabel(panel.getAttribute('data-dock'));
+      let __dockUndoToast = null;
+      let __dockUndoTimer = null;
       dockBtn.addEventListener('click', ()=>{
         const cur = panel.getAttribute('data-dock') === 'left' ? 'left' : 'right';
         const next = cur === 'left' ? 'right' : 'left';
         panel.setAttribute('data-dock', next);
-        dockBtn.textContent = next === 'left' ? '\u2B05\uFE0F' : '\u27A1\uFE0F';
+        dockBtn.textContent = __dockLabel(next);
         setSetting('chat.dock', next);
+        // Mount a small undo toast inside the chat panel head so it's locally
+        // anchored (no fight with the global snack queue).
+        try { if (__dockUndoToast) __dockUndoToast.remove(); clearTimeout(__dockUndoTimer); } catch(_){}
+        __dockUndoToast = document.createElement('div');
+        __dockUndoToast.style.cssText = 'position:absolute;top:4px;right:4px;z-index:5;background:#1a0f00;border:1px solid #ff9933;color:#ff9933;padding:4px 10px;font:600 10px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;display:flex;gap:8px;align-items:center';
+        __dockUndoToast.innerHTML = '<span>Dock &rarr; ' + (next === 'left' ? 'LEFT' : 'RIGHT') + '</span><button type="button" style="background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 6px;font:600 9px ui-monospace,JetBrains Mono,monospace;cursor:pointer;letter-spacing:0.06em">UNDO</button>';
+        const undoBtn = __dockUndoToast.querySelector('button');
+        if (undoBtn) undoBtn.addEventListener('click', () => {
+          panel.setAttribute('data-dock', cur);
+          dockBtn.textContent = __dockLabel(cur);
+          setSetting('chat.dock', cur);
+          try { __dockUndoToast.remove(); } catch(_){}
+          clearTimeout(__dockUndoTimer);
+        });
+        try { panel.appendChild(__dockUndoToast); } catch(_){}
+        __dockUndoTimer = setTimeout(() => {
+          try { if (__dockUndoToast) __dockUndoToast.remove(); } catch(_){}
+        }, 4000);
       });
       head.appendChild(dockBtn);
       const closeBtn = el('button', { cls:'gam-mc-close', title:'Close' });
@@ -14393,21 +15303,47 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (existing) { existing.remove(); return; }
     const panel = document.createElement('div');
     panel.id = 'gam-modmail-panel';
-    panel.style.cssText = 'position:fixed;top:0;right:0;bottom:0;width:680px;max-width:95vw;z-index:9999988;background:#131316;border-left:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;display:flex;flex-direction:column;box-shadow:-8px 0 30px rgba(0,0,0,0.55);transform:translateX(100%);transition:transform 0.2s ease-out';
+    // V11 #3: 3-column modmail panel
+    const mmIs3Col = window.innerWidth >= 1280;
+    panel.style.cssText =
+      'position:fixed;top:0;right:0;bottom:0;' +
+      'width:' + (mmIs3Col ? '920px' : '680px') + ';' +
+      'max-width:95vw;z-index:9999988;' +
+      'background:#131316;border-left:1px solid #2a2f38;' +
+      'color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;' +
+      'display:flex;flex-direction:column;' +
+      'box-shadow:-8px 0 30px rgba(0,0,0,0.55);' +
+      'transform:translateX(100%);transition:transform 0.2s ease-out';
     panel.innerHTML =
+      // HEADER -- unchanged
       '<div style="background:#0a0a0b;border-bottom:1px solid #3d3a35;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0">' +
         '<span style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:12px">\u{1F4E5} Modmail</span>' +
         '<span style="color:#5a5752;font-size:10px">— full panel</span>' +
         '<span style="flex:1"></span>' +
-        '<button data-refresh="1" title="Refresh" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:3px 8px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">⟳ Refresh</button>' +
-        '<button data-close="1" title="Close (ESC)" style="background:transparent;border:none;color:#5a5752;padding:2px 8px;cursor:pointer;font-size:18px;line-height:1">×</button>' +
+        '<button data-refresh="1" title="Refresh" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:3px 8px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Refresh</button>' +
+        '<button data-close="1" title="Close (ESC)" style="background:transparent;border:none;color:#5a5752;padding:2px 8px;cursor:pointer;font-size:18px;line-height:1">x</button>' +
       '</div>' +
+      // BODY -- 3-column flex row
       '<div style="flex:1 1 auto;display:flex;overflow:hidden">' +
-        '<div id="gam-mmp-list" style="width:280px;flex-shrink:0;border-right:1px solid #2a2825;overflow-y:auto">loading...</div>' +
-        '<div id="gam-mmp-detail" style="flex:1;overflow-y:auto;padding:14px;color:#9b9892">' +
-          '<div style="text-align:center;padding:40px 20px">' +
-            '<div style="color:#5a5752;font-size:11px;letter-spacing:0.08em;text-transform:uppercase">Select a thread</div>' +
-            '<div style="color:#5a5752;font-size:10px;margin-top:6px">Pick a thread on the left to see messages + AI reply candidates.</div>' +
+        // COL 1: thread list
+        '<div id="gam-mmp-list" style="width:240px;flex-shrink:0;border-right:1px solid #2a2f38;overflow-y:auto;background:#0f1114">loading...</div>' +
+        // COL 2: intel strip + messages
+        '<div id="gam-mmp-center" style="flex:1;display:flex;flex-direction:column;overflow:hidden;background:#181b20">' +
+          '<div id="gam-mmp-intel" style="height:40px;flex-shrink:0;border-bottom:1px solid #2a2f38;display:flex;align-items:center;gap:8px;padding:0 12px;color:#5a5752;font-size:10px">Select a thread</div>' +
+          '<div id="gam-mmp-detail" style="flex:1;overflow-y:auto;padding:14px;color:#9b9892">' +
+            '<div style="text-align:center;padding:40px 20px">' +
+              '<div style="color:#5a5752;font-size:11px;letter-spacing:0.08em;text-transform:uppercase">Select a thread</div>' +
+              '<div style="color:#5a5752;font-size:10px;margin-top:6px">Pick a thread on the left to see messages + AI reply candidates.</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        // COL 3: AI drafts (hidden at <1280px)
+        '<div id="gam-mmp-ai" style="width:320px;flex-shrink:0;border-left:1px solid #2a2f38;overflow-y:auto;background:#111318;' + (mmIs3Col ? '' : 'display:none;') + '">' +
+          '<div style="padding:10px 12px;border-bottom:1px solid #2a2f38;flex-shrink:0">' +
+            '<span style="color:#7cb8ff;font-size:9px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase">AI Drafts</span>' +
+          '</div>' +
+          '<div id="gam-mmp-ai-host" style="padding:10px">' +
+            '<div style="color:#5a5752;font-size:10px">Select a thread</div>' +
           '</div>' +
         '</div>' +
       '</div>';
@@ -14468,17 +15404,17 @@ Analyze this comment against the community rules. Then write a brief, profession
       list.innerHTML = '';
       currentThreads.forEach(t => {
         const row = document.createElement('div');
-        row.style.cssText = 'border-bottom:1px solid #2a2825;padding:8px 12px;cursor:pointer;transition:background-color 80ms';
+        row.style.cssText = 'min-height:48px;border-bottom:1px solid #2a2825;padding:8px 12px;cursor:pointer;transition:background-color 80ms';
         row.dataset.threadId = t.thread_id;
         row.addEventListener('mouseenter', () => row.style.background = '#1c1c20');
         row.addEventListener('mouseleave', () => { if (row.dataset.selected !== '1') row.style.background = ''; });
         row.addEventListener('click', () => {
           // Mark selected
-          list.querySelectorAll('[data-thread-id]').forEach(r => { r.dataset.selected = ''; r.style.background = ''; });
+          list.querySelectorAll('[data-thread-id]').forEach(r => { r.dataset.selected = ''; r.style.background = ''; r.style.borderLeft = ''; r.style.paddingLeft = ''; });
           row.dataset.selected = '1';
-          row.style.background = 'rgba(255,153,51,0.12)';
-          row.style.borderLeft = '2px solid #ff9933';
-          row.style.paddingLeft = '10px';
+          row.style.background = 'rgba(255,153,51,0.10)';
+          row.style.borderLeft = '3px solid #ff9933';
+          row.style.paddingLeft = '9px';
           renderDetail(t);
         });
         const head = document.createElement('div');
@@ -14513,10 +15449,12 @@ Analyze this comment against the community rules. Then write a brief, profession
           '<div style="color:#ff9933;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px">Most recent message</div>' +
           '<div style="background:#0a0a0b;border:1px solid #2a2825;padding:10px;color:#e8e6e1;font-size:11px;line-height:1.5;white-space:pre-wrap">' + escapeHtml(t.last_body || '(empty)') + '</div>' +
         '</div>' +
-        '<div id="gam-mmp-ai-host"></div>' +
         '<div style="display:flex;gap:8px;margin-top:12px">' +
-          '<button data-open="' + escapeHtml(t.thread_id) + '" style="background:transparent;border:1px solid #ff9933;color:#ff9933;padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Open thread on GAW ↗</button>' +
+          '<button data-open="' + escapeHtml(t.thread_id) + '" style="background:transparent;border:1px solid #ff9933;color:#ff9933;padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Open thread on GAW</button>' +
         '</div>';
+
+      // V11 #3: populate intel strip
+      _renderIntelStrip(t);
 
       // Wire open button
       detail.querySelector('[data-open]').addEventListener('click', e => {
@@ -14526,7 +15464,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       });
 
       // Render AI candidates from cache OR fire fresh
-      const aiHost = detail.querySelector('#gam-mmp-ai-host');
+      const aiHost = panel.querySelector('#gam-mmp-ai-host');
       let cached = null;
       try {
         const out = await chrome.storage.session.get('gam_modmail_drafts');
@@ -14589,6 +15527,48 @@ Analyze this comment against the community rules. Then write a brief, profession
           try { snack('✓ Reply copied + tracked. Paste on the GAW thread.', 'success'); } catch(_){}
         });
       });
+    }
+
+    // V11 #3: Intel strip renderer
+    function _renderIntelStrip(t) {
+      const strip = panel.querySelector('#gam-mmp-intel');
+      if (!strip) return;
+      strip.innerHTML =
+        '<span style="color:#66ccff;font-weight:600;font-size:11px">u/' + escapeHtml(t.first_user || '?') + '</span>' +
+        '<span id="gam-intel-age" style="background:#1e222a;color:#9b9892;font-size:10px;padding:2px 7px;border-radius:10px;font-variant-numeric:tabular-nums">--</span>' +
+        '<span id="gam-intel-ban" style="display:none;background:rgba(240,64,64,0.18);color:#f04040;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600">BAN --</span>' +
+        '<span id="gam-intel-sus" style="display:none;background:rgba(245,166,35,0.18);color:#f5a623;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600">SUS</span>' +
+        '<span id="gam-intel-watch" style="display:none;background:rgba(167,139,250,0.18);color:#a78bfa;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600">WATCH</span>';
+
+      (async function() {
+        let intel = null;
+        try {
+          const key = 'gam_user_intel_' + t.first_user;
+          const out = await chrome.storage.session.get(key);
+          intel = out && out[key];
+        } catch(_){}
+        if (!intel && t.first_user) {
+          try {
+            const r = await rpcCall('getUserSummary', { username: t.first_user });
+            if (r && r.ok && r.data) intel = r.data;
+          } catch(_){}
+        }
+        if (!intel) return;
+        const ageEl   = panel.querySelector('#gam-intel-age');
+        const banEl   = panel.querySelector('#gam-intel-ban');
+        const susEl   = panel.querySelector('#gam-intel-sus');
+        const watchEl = panel.querySelector('#gam-intel-watch');
+        if (ageEl && intel.account_age_days != null) {
+          const d = intel.account_age_days;
+          ageEl.textContent = d < 30 ? d + 'd' : d < 365 ? Math.floor(d / 30) + 'mo' : Math.floor(d / 365) + 'y';
+        }
+        if (banEl && intel.ban_count > 0) {
+          banEl.style.display = '';
+          banEl.textContent = 'BAN ' + intel.ban_count;
+        }
+        if (susEl && intel.sus_flag) { susEl.style.display = ''; }
+        if (watchEl && intel.watching) { watchEl.style.display = ''; }
+      })();
     }
 
     loadList();
@@ -15118,8 +16098,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     //      crosses a higher mark — i.e. a NEW alert event re-shows.
     //      Persisted via getSetting('siren.dismissedAtTotal') so a
     //      reload doesn't un-dismiss.
-    const sirenBtn = el('button', { id:'gam-siren-count', cls:'gam-bar-icon', style:{display:'none'}, title:'Live status — click to open mod log' });
-    sirenBtn.addEventListener('click', openModLog);
+    const sirenBtn = el('button', { id:'gam-siren-count', cls:'gam-bar-icon', style:{display:'none'}, title:'Live status — click for Hot Now triage' });
+    sirenBtn.addEventListener('click', _showHotNowPanel);
     const sirenClearBtn = el('button', { id:'gam-siren-clear', cls:'gam-bar-icon', style:{display:'none', fontSize:'11px', color:C.TEXT3, padding:'0 4px'}, title:'Dismiss alert (re-shows on new activity)' }, '✕');
     sirenClearBtn.addEventListener('click', (e)=>{
       e.stopPropagation();
@@ -15163,7 +16143,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         // Color tier: red if 5+ recent DRs OR any HOT SUS (>8 comments/24h), amber otherwise.
         const isHot = recentDr >= 5 || [..._susState.rows.values()].some(r => (r.comment_count_24h || 0) > 8);
         sirenBtn.style.color = isHot ? C.RED : C.WARN;
-        sirenBtn.title = 'CURRENT STATUS: ' + susCount + ' TARDs (SUS), ' + recentDr + ' DRs added in last 24h — click to open mod log';
+        sirenBtn.title = 'CURRENT STATUS: ' + susCount + ' TARDs (SUS), ' + recentDr + ' DRs added in last 24h — click for Hot Now triage';
       } catch(_){}
     }
     setInterval(_updateSirenChip, 30_000);
@@ -15353,6 +16333,40 @@ Analyze this comment against the community rules. Then write a brief, profession
       drBtn,
       sirenBtn,
       sirenClearBtn,
+      // v10.3 Patch 3: Sticky-queue chip
+      (function() {
+        const stickyChip = el('button', { id:'gam-sticky-chip', cls:'gam-bar-icon', title:'Sticky-pin requests pending -- click to review' }, 'PIN');
+        stickyChip.style.display = 'none';
+        stickyChip.addEventListener('click', function(ev) {
+          ev.stopPropagation();
+          const acc = document.getElementById('gam-sticky-accordion');
+          if (!acc) return;
+          const nowVisible = acc.style.display !== 'none';
+          acc.style.display = nowVisible ? 'none' : 'block';
+          if (!nowVisible) {
+            const r = stickyChip.getBoundingClientRect();
+            acc.style.left = r.left + 'px';
+          }
+        });
+        return stickyChip;
+      })(),
+      // v10.3 Patch 4: Tard-suggester accordion button
+      (function() {
+        const tardBtn = el('button', { id:'gam-tard-suggest-btn', cls:'gam-bar-icon', title:'AI tard patterns -- click to expand (scans last 80 usernames via firehose)' }, '✨');
+        tardBtn.addEventListener('click', function(ev) {
+          ev.stopPropagation();
+          const acc = document.getElementById('gam-tard-accordion');
+          if (!acc) return;
+          const nowVisible = acc.style.display !== 'none';
+          acc.style.display = nowVisible ? 'none' : 'block';
+          if (!nowVisible) {
+            const r = tardBtn.getBoundingClientRect();
+            acc.style.left = r.left + 'px';
+            _openTardAccordion(acc);
+          }
+        });
+        return tardBtn;
+      })(),
       mmBtn,
       c5Btn,
       IS_USERS_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.ACCENT, cursor:'default'}, title:'Triage Console active' }, '\u{1F4CA}') : null,
@@ -15368,6 +16382,305 @@ Analyze this comment against the community rules. Then write a brief, profession
     setInterval(updateDeathRowCounter, 5000);
     pollSessionHealth();
     setInterval(pollSessionHealth, 2 * 60 * 1000);
+
+    // v10.3 Patch 3: Sticky-queue accordion panel (drop-up above bar)
+    (function() {
+      const acc = document.createElement('div');
+      acc.id = 'gam-sticky-accordion';
+      acc.style.cssText = 'display:none;position:fixed;bottom:36px;z-index:9999980;';
+      document.body.appendChild(acc);
+
+      function _renderStickyChip(count, items) {
+        const chip = document.getElementById('gam-sticky-chip');
+        if (!chip) return;
+        if (!count) { chip.style.display = 'none'; acc.style.display = 'none'; return; }
+        chip.style.display = '';
+        chip.textContent = 'PIN ' + count;
+        // Rebuild accordion content
+        acc.innerHTML = '';
+        const hdr = document.createElement('div');
+        hdr.className = 'gam-sacc-header';
+        hdr.innerHTML = 'PIN REQUESTS (' + count + ' pending) <button id="gam-sacc-close" style="background:none;border:none;color:#ff9933;cursor:pointer;font-size:13px;">×</button>';
+        acc.appendChild(hdr);
+        document.getElementById('gam-sacc-close') && document.getElementById('gam-sacc-close').addEventListener('click', function() { acc.style.display = 'none'; });
+
+        (items || []).forEach(function(item) {
+          const confClass = item.confidence === 'high' ? 'gam-sacc-conf-high' : item.confidence === 'med' ? 'gam-sacc-conf-med' : 'gam-sacc-conf-low';
+          const row = document.createElement('div');
+          row.className = 'gam-sacc-row';
+          const confPill = document.createElement('span');
+          confPill.className = 'gam-sacc-conf ' + confClass;
+          confPill.textContent = (item.confidence || 'low').toUpperCase();
+          const sender = document.createElement('span');
+          sender.style.cssText = 'color:#c8d8e8;font-size:10px;flex-shrink:0;';
+          sender.textContent = item.sender || '';
+          const reason = document.createElement('span');
+          reason.className = 'gam-sacc-reason';
+          reason.textContent = item.reason || '';
+          const openBtn = document.createElement('button');
+          openBtn.className = 'gam-btn-small';
+          openBtn.style.cssText = 'font-size:9px;padding:1px 5px;flex-shrink:0;';
+          openBtn.textContent = 'Open';
+          openBtn.addEventListener('click', function() {
+            window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(item.thread_id), '_blank');
+            // PATCH acknowledged via fire-and-forget
+            const tok = getModToken();
+            if (tok) {
+              fetch('https://gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev/admin/queue/sticky/' + encodeURIComponent(item.thread_id), {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'x-mod-token': tok },
+                body: JSON.stringify({ status: 'acknowledged' })
+              }).catch(function() {});
+            }
+          });
+          row.append(confPill, sender, reason, openBtn);
+          acc.appendChild(row);
+        });
+
+        const footer = document.createElement('div');
+        footer.className = 'gam-sacc-footer';
+        const dismissAllBtn = document.createElement('button');
+        dismissAllBtn.className = 'gam-btn-small';
+        dismissAllBtn.textContent = 'Dismiss all';
+        dismissAllBtn.addEventListener('click', function() {
+          const tok = getModToken();
+          (items || []).forEach(function(item) {
+            if (tok) {
+              fetch('https://gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev/admin/queue/sticky/' + encodeURIComponent(item.thread_id), {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'x-mod-token': tok },
+                body: JSON.stringify({ status: 'dismissed' })
+              }).catch(function() {});
+            }
+          });
+          acc.style.display = 'none';
+          const chip2 = document.getElementById('gam-sticky-chip');
+          if (chip2) chip2.style.display = 'none';
+        });
+        footer.appendChild(dismissAllBtn);
+        acc.appendChild(footer);
+      }
+
+      async function _pollStickyQueue() {
+        const tok = getModToken();
+        if (!tok) return;
+        try {
+          const r = await fetch('https://gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev/admin/queue/sticky?status=pending&limit=20', {
+            headers: { 'x-mod-token': tok }
+          });
+          if (!r.ok) return;
+          const data = await r.json();
+          const items = (data && data.items) || [];
+          _renderStickyChip(items.length, items);
+        } catch (_) {}
+      }
+      // Deferred start: 8s after bar mount to avoid cold-start pile-on
+      setTimeout(_pollStickyQueue, 8000);
+      setInterval(_pollStickyQueue, 60 * 1000);
+    })();
+
+    // v10.3 Patch 4: Tard accordion panel
+    (function() {
+      const tardAcc = document.createElement('div');
+      tardAcc.id = 'gam-tard-accordion';
+      tardAcc.style.cssText = 'display:none;position:fixed;bottom:46px;z-index:9999981;min-width:360px;max-width:480px;max-height:320px;overflow-y:auto;background:#0a0a0b;border:1px solid #ff9933;font:11px/1.4 ui-monospace,"JetBrains Mono",monospace;padding:8px;';
+      document.body.appendChild(tardAcc);
+
+      // Escape closes both accordions
+      document.addEventListener('keydown', function(ev) {
+        if (ev.key !== 'Escape') return;
+        const sa = document.getElementById('gam-sticky-accordion');
+        const ta = document.getElementById('gam-tard-accordion');
+        if (sa) sa.style.display = 'none';
+        if (ta) ta.style.display = 'none';
+      });
+
+      window._openTardAccordion = function(accEl) {
+        accEl.innerHTML = '';
+        // Header
+        const hdr = document.createElement('div');
+        hdr.className = 'gam-tard-header';
+        hdr.innerHTML = 'AI TARD PATTERNS <span id="gam-tard-cache-note" style="font-weight:400;font-size:9px;color:#9b9892;"></span>';
+        const refreshBtn = document.createElement('button');
+        refreshBtn.className = 'gam-btn-small';
+        refreshBtn.style.cssText = 'font-size:9px;padding:1px 5px;';
+        refreshBtn.textContent = 'Refresh';
+        refreshBtn.title = 'Fresh fetch (costs AI quota)';
+        refreshBtn.addEventListener('click', function() { _fetchAndRenderTards(accEl, true); });
+        hdr.appendChild(refreshBtn);
+        accEl.appendChild(hdr);
+
+        const bodyEl = document.createElement('div');
+        bodyEl.id = 'gam-tard-body';
+        accEl.appendChild(bodyEl);
+
+        const footer = document.createElement('div');
+        footer.className = 'gam-tard-footer';
+        const addBtn = document.createElement('button');
+        addBtn.className = 'gam-tard-add-btn';
+        addBtn.id = 'gam-tard-add-btn';
+        addBtn.disabled = true;
+        addBtn.textContent = 'Add 0 selected as DR rules';
+        footer.appendChild(addBtn);
+        const selAllBtn = document.createElement('button');
+        selAllBtn.className = 'gam-btn-small';
+        selAllBtn.textContent = 'Select all';
+        selAllBtn.addEventListener('click', function() {
+          accEl.querySelectorAll('.gam-tard-chk:not(:disabled)').forEach(function(cb) { cb.checked = true; });
+          _updateTardAddBtn(accEl);
+        });
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'gam-btn-small';
+        clearBtn.textContent = 'Clear';
+        clearBtn.addEventListener('click', function() {
+          accEl.querySelectorAll('.gam-tard-chk:not(:disabled)').forEach(function(cb) { cb.checked = false; });
+          _updateTardAddBtn(accEl);
+        });
+        footer.appendChild(selAllBtn);
+        footer.appendChild(clearBtn);
+        accEl.appendChild(footer);
+
+        _fetchAndRenderTards(accEl, false);
+      };
+
+      function _updateTardAddBtn(accEl) {
+        const checked = accEl.querySelectorAll('.gam-tard-chk:checked');
+        const btn = document.getElementById('gam-tard-add-btn');
+        if (!btn) return;
+        btn.disabled = checked.length === 0;
+        btn.textContent = 'Add ' + checked.length + ' selected as DR rules';
+      }
+
+      function _fetchAndRenderTards(accEl, forceRefresh) {
+        const bodyEl = accEl.querySelector('#gam-tard-body');
+        if (!bodyEl) return;
+        const NOTE_KEY = 'gam_tard_suggestions';
+        const CACHE_MAX_MS = 20 * 60 * 1000;
+
+        function _renderTards(suggestions, scannedN, cachedMinAgo) {
+          const note = accEl.querySelector('#gam-tard-cache-note');
+          if (note) note.textContent = cachedMinAgo != null ? '(cached ' + cachedMinAgo + 'min ago)' : '';
+          bodyEl.innerHTML = '';
+          if (!suggestions || !suggestions.length) {
+            bodyEl.innerHTML = '<div style="color:#9b9892;padding:8px;font-size:10px;">No patterns found. Try Refresh.</div>';
+            return;
+          }
+          // Check existing DR rules
+          let existingPatterns = [];
+          try {
+            const settings = getSetting('gam_settings', {});
+            const rules = (settings && settings.autoDeathRowRules) ? settings.autoDeathRowRules : (getSetting('autoDeathRowRules', []));
+            existingPatterns = (rules || []).map(function(r) { return r && r.pattern ? r.pattern : ''; });
+          } catch (_) {}
+
+          const sevColors = { high: '#ff3b3b', medium: '#ffd84d', low: '#9b9892' };
+          suggestions.forEach(function(s) {
+            const alreadyExists = existingPatterns.includes(s.pattern);
+            const row = document.createElement('div');
+            row.className = 'gam-tard-row' + (alreadyExists ? ' gam-tard-row--exists' : '');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'gam-tard-chk';
+            cb.disabled = alreadyExists;
+            cb.checked = !alreadyExists && (s.severity === 'high');
+            cb.setAttribute('data-pattern', s.pattern || '');
+            cb.setAttribute('data-label', s.label || '');
+            cb.setAttribute('data-severity', s.severity || 'low');
+            cb.addEventListener('change', function() { _updateTardAddBtn(accEl); });
+            const sevPill = document.createElement('span');
+            sevPill.className = 'gam-tard-sev';
+            sevPill.style.color = sevColors[s.severity] || sevColors.low;
+            sevPill.textContent = (s.severity || 'low').toUpperCase();
+            const detail = document.createElement('div');
+            detail.style.flex = '1';
+            const patEl = document.createElement('span');
+            patEl.className = 'gam-tard-pattern';
+            patEl.textContent = s.pattern || '';
+            const labelEl = document.createElement('span');
+            labelEl.className = 'gam-tard-label';
+            labelEl.textContent = ' ' + (s.label || '') + (s.example ? ' (e.g. ' + s.example + ')' : '');
+            if (alreadyExists) {
+              const existEl = document.createElement('span');
+              existEl.style.cssText = 'color:#3a5a3a;font-size:9px;margin-left:6px;';
+              existEl.textContent = 'already in DR';
+              detail.append(patEl, labelEl, existEl);
+            } else {
+              detail.append(patEl, labelEl);
+            }
+            row.append(cb, sevPill, detail);
+            bodyEl.appendChild(row);
+          });
+          _updateTardAddBtn(accEl);
+
+          // Wire bulk-add button
+          const addBtn = document.getElementById('gam-tard-add-btn');
+          if (addBtn) {
+            addBtn.onclick = function() {
+              const checked = Array.from(accEl.querySelectorAll('.gam-tard-chk:checked'));
+              if (!checked.length) return;
+              chrome.storage.local.get(['gam_settings'], function(res) {
+                const settings = res.gam_settings || {};
+                const rules = Array.isArray(settings.autoDeathRowRules) ? settings.autoDeathRowRules : [];
+                checked.forEach(function(cb2) {
+                  const pat = cb2.getAttribute('data-pattern');
+                  if (pat && !rules.some(function(r) { return r.pattern === pat; })) {
+                    rules.push({ pattern: pat, label: cb2.getAttribute('data-label') || '', severity: cb2.getAttribute('data-severity') || 'low', addedAt: Date.now(), via: 'tard-accordion' });
+                  }
+                });
+                settings.autoDeathRowRules = rules;
+                chrome.storage.local.set({ gam_settings: settings }, function() {
+                  addBtn.textContent = 'Added ' + checked.length + ' rules';
+                  addBtn.disabled = true;
+                  checked.forEach(function(cb2) {
+                    cb2.checked = false;
+                    cb2.disabled = true;
+                    const parentRow = cb2.closest('.gam-tard-row');
+                    if (parentRow) parentRow.classList.add('gam-tard-row--exists');
+                  });
+                });
+              });
+            };
+          }
+        }
+
+        if (!forceRefresh) {
+          chrome.storage.session.get([NOTE_KEY], function(res) {
+            const cached = res && res[NOTE_KEY];
+            if (cached && cached.fetchedAt && (Date.now() - cached.fetchedAt) < CACHE_MAX_MS) {
+              const minAgo = Math.round((Date.now() - cached.fetchedAt) / 60000);
+              _renderTards(cached.suggestions, cached.scanned, minAgo);
+              return;
+            }
+            // Cache miss - fetch fresh
+            bodyEl.innerHTML = '<div style="color:#9b9892;padding:8px;font-size:10px;">Fetching...</div>';
+            rpcCall('aiTardsSuggest', {}).then(function(r) {
+              if (r && r.ok && r.data && r.data.suggestions) {
+                const toCache = { suggestions: r.data.suggestions, scanned: r.data.scanned || 0, fetchedAt: Date.now() };
+                chrome.storage.session.set({ [NOTE_KEY]: toCache }, function() {});
+                _renderTards(r.data.suggestions, r.data.scanned, null);
+              } else {
+                bodyEl.innerHTML = '<div style="color:#f04040;padding:8px;font-size:10px;">Failed: ' + ((r && r.error) || 'unknown') + '</div>';
+              }
+            }).catch(function(err) {
+              bodyEl.innerHTML = '<div style="color:#f04040;padding:8px;font-size:10px;">Error: ' + (err && err.message || err) + '</div>';
+            });
+          });
+        } else {
+          bodyEl.innerHTML = '<div style="color:#9b9892;padding:8px;font-size:10px;">Fetching (fresh)...</div>';
+          rpcCall('aiTardsSuggest', {}).then(function(r) {
+            if (r && r.ok && r.data && r.data.suggestions) {
+              const toCache = { suggestions: r.data.suggestions, scanned: r.data.scanned || 0, fetchedAt: Date.now() };
+              chrome.storage.session.set({ [NOTE_KEY]: toCache }, function() {});
+              _renderTards(r.data.suggestions, r.data.scanned, null);
+            } else {
+              bodyEl.innerHTML = '<div style="color:#f04040;padding:8px;font-size:10px;">Failed: ' + ((r && r.error) || 'unknown') + '</div>';
+            }
+          }).catch(function(err) {
+            bodyEl.innerHTML = '<div style="color:#f04040;padding:8px;font-size:10px;">Error: ' + (err && err.message || err) + '</div>';
+          });
+        }
+      }
+    })();
 
     // v9.8.0 — custom delegated tooltip system. Replaces native browser
     // tooltips on bar icons. Native ones render BELOW the bar by OS default,
@@ -15406,9 +16719,14 @@ Analyze this comment against the community rules. Then write a brief, profession
       tip.textContent = tipText;
       const rect = t.getBoundingClientRect();
       const tipRect = tip.getBoundingClientRect();
-      // Position ABOVE the bar icon with horizontal centering, clamped to viewport
+      // Position ABOVE the bar icon with horizontal centering, clamped to viewport.
+      // v10.1: gap 6 -> 14px. The 6px gap left tooltips kissing the bar
+      // edge — at the JetBrains-Mono baseline they read as overlapping
+      // even though they technically weren't. 14px gives a clean breathing
+      // band that survives browser zoom + matches Linear/Vercel tooltip
+      // spacing.
       let left = rect.left + rect.width / 2 - tipRect.width / 2;
-      const top = rect.top - tipRect.height - 6;
+      const top = rect.top - tipRect.height - 14;
       left = Math.max(4, Math.min(left, window.innerWidth - tipRect.width - 4));
       tip.style.left = left + 'px';
       tip.style.top  = top + 'px';
@@ -15959,6 +17277,49 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-drawer-note-author { color:${C.TEXT2}; font-size:11px; font-weight:600; margin-right:6px; }
 .gam-drawer-note-ts { color:${C.TEXT3}; font-size:10px; }
 .gam-drawer-note-body { color:${C.TEXT}; font-size:12px; white-space:pre-wrap; margin:2px 0 0; line-height:1.45; }
+.gam-repeat-halo{display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 4px;border:2px solid #f5a623;border-radius:4px;box-shadow:0 0 0 3px rgba(245,166,35,.18);cursor:pointer;}
+.gam-repeat-badge{display:inline-block;font-size:9px;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;background:#f04040;color:#fff;}
+.gam-repeat-label{font-size:9px;color:#f5a623;text-transform:uppercase;letter-spacing:1px;border-left:2px solid #f5a623;padding-left:6px;margin:8px 0 4px;}
+.gam-repeat-history{margin-top:2px;}
+@keyframes gam-halo-pulse{0%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}50%{box-shadow:0 0 0 6px rgba(245,166,35,.35)}100%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}}
+.gam-repeat-halo--pulse{animation:gam-halo-pulse 600ms ease-out 1;}
+.gam-at-wrap{padding:8px 14px;font:11px ui-monospace,SFMono-Regular,Consolas,monospace}
+.gam-at-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:${C.TEXT2};font-size:10px;font-variant-numeric:tabular-nums;letter-spacing:.3px}
+.gam-at-spark{display:flex;align-items:flex-end;gap:1px;height:16px}
+.gam-at-spark-bar{width:3px;background:#f5a623;opacity:.7;border-radius:1px 1px 0 0;min-height:1px}
+.gam-at-row{display:grid;grid-template-columns:42px 20px 1fr;gap:0 6px;padding:3px 0;border-top:1px solid ${C.BG3};cursor:pointer;line-height:1.35;transition:background .08s}
+.gam-at-row:hover{background:rgba(255,255,255,.04)}
+.gam-at-time{color:${C.TEXT2};font-variant-numeric:tabular-nums}
+.gam-at-kind-p{color:#f5a623;font-weight:700}
+.gam-at-kind-c{color:#e8c84a}
+.gam-at-title{color:${C.TEXT};overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gam-at-removed{text-decoration:line-through;color:${C.RED};opacity:.7}
+.gam-at-meta{color:${C.TEXT3};font-size:10px;margin-top:1px}
+.gam-at-score-pos{color:${C.GREEN}}
+.gam-at-score-neg{color:${C.RED}}
+.gam-at-more{color:${C.ACCENT};font-size:10px;cursor:pointer;padding:4px 0;text-align:center}
+#gam-hot-now-panel{position:fixed;top:0;bottom:36px;right:0;width:400px;max-width:95vw;background:${C.BG};border-left:1px solid ${C.BORDER2};box-shadow:-8px 0 30px rgba(0,0,0,.6);z-index:9999992;display:flex;flex-direction:column;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};transform:translateX(100%);transition:transform 160ms cubic-bezier(0.0,0.0,0.2,1.0);overflow:hidden}
+#gam-hot-now-panel.gam-hn-open{transform:translateX(0)}
+.gam-hn-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px 8px;border-bottom:1px solid ${C.BORDER};flex-shrink:0}
+.gam-hn-title{font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:${C.RED}}
+.gam-hn-close{background:transparent;border:none;color:${C.TEXT3};cursor:pointer;font-size:16px;padding:0 2px;line-height:1}
+.gam-hn-close:hover{color:${C.TEXT}}
+.gam-hn-body{overflow-y:auto;flex:1;scrollbar-width:thin;scrollbar-color:${C.BORDER2} transparent}
+.gam-hn-section{padding:10px 14px 4px}
+.gam-hn-section-hdr{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px}
+.gam-hn-sep{height:1px;background:${C.BORDER};margin:4px 0}
+.gam-hn-row{display:flex;align-items:center;gap:8px;padding:5px 14px 5px 11px;border-left:3px solid transparent;font-size:12px;line-height:1.3}
+.gam-hn-row:hover{background:rgba(255,255,255,0.03)}
+.gam-hn-user{font-weight:700;flex-shrink:0;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gam-hn-reason{color:${C.TEXT2};font-size:10px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gam-hn-count{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;flex-shrink:0;white-space:nowrap}
+.gam-hn-act{background:transparent;border:1px solid ${C.BORDER2};border-radius:3px;color:${C.TEXT2};font-size:10px;font-weight:600;padding:2px 7px;cursor:pointer;flex-shrink:0;transition:border-color 80ms,color 80ms}
+.gam-hn-act:hover{border-color:${C.ACCENT};color:${C.ACCENT}}
+.gam-hn-act:disabled{opacity:.4;cursor:default}
+.gam-hn-act.gam-hn-act-danger:hover{border-color:${C.RED};color:${C.RED}}
+.gam-hn-footer{border-top:1px solid ${C.BORDER};padding:7px 14px;display:flex;justify-content:flex-end;flex-shrink:0}
+.gam-hn-footer-link{font-size:10px;color:${C.TEXT3};background:transparent;border:none;cursor:pointer;padding:0}
+.gam-hn-footer-link:hover{color:${C.TEXT2}}
 .gam-drawer-note-form { margin-top:8px; display:flex; flex-direction:column; gap:4px; }
 .gam-drawer-note-form textarea { background:${C.BG}; color:${C.TEXT}; border:1px solid ${C.BORDER}; border-radius:4px; padding:6px 8px; font:inherit; font-size:12px; resize:vertical; min-height:48px; outline:none; transition:border-color .15s; }
 .gam-drawer-note-form textarea:focus { border-color:${C.ACCENT}; }
@@ -16391,11 +17752,18 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-home-jump:hover{color:#ffffff!important;text-decoration:underline!important}
 
 /* v5.1.9 EXP Loop 3: right-click context menu on /u/ links */
-.gam-ctx-menu{position:fixed;z-index:10000005;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:6px;padding:4px;min-width:200px;box-shadow:0 12px 32px rgba(0,0,0,.6);font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT}}
-.gam-ctx-head{padding:6px 12px;font-weight:700;color:${C.ACCENT};font-size:12px;border-bottom:1px solid ${C.BORDER};margin-bottom:4px;letter-spacing:.2px}
-.gam-ctx-item{display:block;padding:6px 12px;color:${C.TEXT};text-decoration:none!important;cursor:pointer;border-radius:4px;transition:background .12s}
-.gam-ctx-item:hover{background:${C.BG3};color:${C.TEXT}!important}
-.gam-ctx-sep{border-top:1px solid ${C.BORDER};margin-top:4px;padding-top:8px}
+.gam-ctx-menu{position:fixed;z-index:10000005;width:220px;background:#181b20;border:1px solid #3a3f48;border-radius:4px;padding:4px 0;box-shadow:0 8px 32px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.04);font:11px/1 'JetBrains Mono','SF Mono',Consolas,monospace;color:#e8eaed;user-select:none}
+.gam-ctx-head{padding:6px 12px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5c6370;border-bottom:1px solid #2a2f38;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gam-ctx-sep{height:1px;background:#2a2f38;margin:3px 0}
+.gam-ctx-item{display:flex;align-items:center;height:28px;padding:0 12px;color:#e8eaed;cursor:pointer;transition:background-color 80ms linear}
+.gam-ctx-item:hover{background:rgba(255,255,255,.06)}
+.gam-ctx-item--danger{color:#f04040}
+.gam-ctx-item--danger:hover{background:rgba(240,64,64,.12)}
+.gam-ctx-item--lead{color:#a78bfa}
+.gam-ctx-item--lead::before{content:'◆';font-size:7px;margin-right:5px;opacity:.8}
+.gam-ctx-label{flex:1;font-size:11px}
+.gam-ctx-kbd{display:flex;align-items:center;gap:1px;margin-left:8px;font-size:9px;color:#5c6370}
+.gam-ctx-kbd kbd{display:inline-flex;align-items:center;justify-content:center;height:16px;min-width:16px;padding:0 3px;border:1px solid #3a3f48;border-radius:2px;font:9px/1 inherit;color:#5c6370;background:transparent}
 
 /* v5.1.4 auto-update banner - sticky top, high contrast so mods can't miss it */
 .gam-update-banner{position:fixed;top:0;left:0;right:0;z-index:10000001;display:flex;align-items:center;gap:12px;padding:10px 16px;background:linear-gradient(90deg, ${C.RED} 0%, #c72222 100%);color:#fff;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;box-shadow:0 2px 12px rgba(0,0,0,.45);letter-spacing:.2px}
@@ -16605,6 +17973,30 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 
   /* Tabular numerals + slashed zero for unambiguous data display */
   font-feature-settings: "tnum" 1, "zero" 1, "ss03" 1, "calt" 0;
+  /* v10.5: GAM Motion Grammar -- 5 canonical duration/easing classes */
+  --gam-dur-micro:      80ms;
+  --gam-dur-appear:     160ms;
+  --gam-dur-disappear:  120ms;
+  --gam-dur-decision:   200ms;
+  --gam-ease-decelerate: cubic-bezier(0,0,0.2,1);
+  --gam-ease-accelerate: cubic-bezier(0.4,0,1,1);
+  --gam-ease-spring:     cubic-bezier(0.34,1.56,0.64,1);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --gam-dur-micro:     0ms;
+    --gam-dur-appear:    0ms;
+    --gam-dur-disappear: 0ms;
+    --gam-dur-decision:  0ms;
+  }
+}
+
+/* v10.5: Universal focus ring -- WCAG 2.2 SC 2.4.11 compliant.
+   3px solid amber + 5px rgba glow. Never :focus -- keyboard-only. */
+:focus-visible {
+  outline: 3px solid var(--bb-amber);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px rgba(255, 176, 0, 0.25);
 }
 
 /* ── Iter 2 ── Status bar: square, dense, Bloomberg-positioned */
@@ -16709,7 +18101,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 #gam-status-bar .gam-bar-icon[title]:hover::before {
   content: attr(title);
   position: absolute;
-  bottom: calc(100% + 6px);
+  bottom: calc(100% + 14px);
   left: 50%;
   transform: translateX(-50%);
   background: var(--bb-panel);
@@ -17482,7 +18874,111 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   border-left: 1px solid var(--bb-line) !important;
   border-color: var(--bb-line) !important;
 }
+
+/* v10.5: Empty state shared component -- 4 semantic categories */
+.gam-empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 16px;
+  text-align: center;
+  background: transparent;
+}
+.gam-empty-icon { color: var(--bb-ink-faint); }
+.gam-empty-headline {
+  font: 600 13px/1.3 var(--bb-font);
+  color: var(--bb-ink);
+}
+.gam-empty-desc {
+  font: 400 11px/1.5 var(--bb-font);
+  color: var(--bb-ink-dim);
+  max-width: 280px;
+}
+.gam-empty-cta {
+  margin-top: 2px;
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid var(--bb-amber);
+  color: var(--bb-amber);
+  cursor: pointer;
+  font: 600 11px/1.2 var(--bb-font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.gam-empty-cta:hover { background: var(--bb-amber-bg); }
+.gam-empty-card.gam-empty-calm .gam-empty-icon { color: var(--bb-ink-faint); }
+.gam-empty-card.gam-empty-notice .gam-empty-icon { color: var(--bb-amber); }
+.gam-empty-card.gam-empty-onboarding .gam-empty-icon { color: var(--bb-cyan); }
+.gam-empty-card.gam-empty-error .gam-empty-icon { color: var(--bb-red); }
+.gam-empty-card.gam-empty-error .gam-empty-cta { border-color: var(--bb-red); color: var(--bb-red); }
+.gam-empty-card.gam-empty-error .gam-empty-cta:hover { background: var(--bb-red-bg); }
+/* ---- v10.3: User Similarity (Patch 1) ---- */
+.sim-panel { border-top:1px solid #1e2a3a; padding:8px 12px; font-family:'IBM Plex Mono',monospace; font-size:11px; }
+.sim-panel-header { color:#5b8db8; font-size:10px; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:6px; }
+.sim-row { display:flex; align-items:center; gap:8px; padding:3px 0; border-bottom:1px solid #111c27; cursor:pointer; }
+.sim-row:hover { background:#0d1820; }
+.sim-username { flex:1; color:#c8d8e8; font-weight:500; }
+.sim-pill { font-size:9px; font-weight:700; letter-spacing:0.06em; padding:1px 5px; border-radius:2px; }
+.sim-pill--HIGH { background:#3d1a1a; color:#ff6b6b; border:1px solid #7a2020; }
+.sim-pill--MEDIUM { background:#2a2a12; color:#d4b44a; border:1px solid #5a4a10; }
+.sim-pill--WATCH { background:#162030; color:#5b8db8; border:1px solid #1e3850; }
+.sim-meta { color:#3a5a7a; font-size:10px; }
+/* ---- v10.3: Search Palette (Patch 2) ---- */
+#gam-search-palette { position:fixed; bottom:36px; left:50%; transform:translateX(-50%); width:480px; max-width:95vw; background:#0a0c0f; border:1px solid #4A9EFF; z-index:9999999; box-shadow:0 -4px 24px rgba(0,0,0,0.7); display:none; }
+#gam-search-palette.gam-sp-open { display:block; }
+#gam-search-palette .gam-sp-input-row { display:flex; gap:4px; padding:8px; border-bottom:1px solid #1a1d22; }
+#gam-search-palette .gam-sp-input { flex:1; background:#0e1115; border:1px solid #2a2f38; color:#e8eaed; font:12px ui-monospace,'JetBrains Mono',monospace; padding:5px 8px; outline:none; border-radius:0; }
+#gam-search-palette .gam-sp-input:focus { border-color:#4A9EFF; }
+#gam-search-palette .gam-sp-list { max-height:320px; overflow-y:auto; }
+#gam-search-palette .gam-sp-meta { font:10px ui-monospace,monospace; color:#5c6370; padding:4px 8px; border-top:1px solid #1a1d22; }
+.gam-sr { display:block; padding:6px 8px; border-bottom:1px solid #181b20; cursor:pointer; text-decoration:none; color:inherit; }
+.gam-sr:hover,.gam-sr[aria-selected="true"] { background:#181b20; outline:1px solid #4A9EFF; outline-offset:-1px; }
+.gam-sr-meta { display:flex; gap:6px; align-items:center; margin-bottom:3px; font:10px ui-monospace,monospace; color:#5c6370; }
+.gam-sr-kind { font-weight:700; font-size:9px; letter-spacing:0.08em; padding:1px 4px; border-radius:0; }
+.gam-sr-kind-post { color:#4A9EFF; border:1px solid #4A9EFF; }
+.gam-sr-kind-comment { color:#a78bfa; border:1px solid #a78bfa; }
+.gam-sr-kind-removed { color:#f04040; border:1px solid #f04040; }
+.gam-sr-author { color:#3dd68c; }
+.gam-sr-snippet { font:11px ui-monospace,monospace; color:#8b929e; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.gam-sr-title { font:11px/1.3 ui-monospace,monospace; color:#e8eaed; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* ---- v10.3: Sticky chip (Patch 3) ---- */
+#gam-sticky-chip { font:600 9px ui-monospace,monospace; color:#ff9933; background:#1a1000; border:1px solid #ff9933; padding:1px 5px; cursor:pointer; display:none; }
+#gam-sticky-accordion { position:fixed; bottom:36px; z-index:9999980; min-width:320px; max-width:480px; max-height:300px; overflow-y:auto; background:#0a0c0f; border:1px solid #ff9933; font:11px ui-monospace,monospace; padding:0; display:none; }
+#gam-sticky-accordion .gam-sacc-header { display:flex; justify-content:space-between; align-items:center; padding:5px 8px; border-bottom:1px solid #2a1800; color:#ff9933; font-size:10px; font-weight:700; letter-spacing:0.08em; }
+#gam-sticky-accordion .gam-sacc-row { display:flex; align-items:center; gap:6px; padding:5px 8px; border-bottom:1px solid #111; }
+#gam-sticky-accordion .gam-sacc-conf { font-size:9px; font-weight:700; padding:1px 4px; border-radius:2px; text-transform:uppercase; flex-shrink:0; }
+#gam-sticky-accordion .gam-sacc-conf-high { background:#2a0000; color:#ff6b6b; border:1px solid #7a1010; }
+#gam-sticky-accordion .gam-sacc-conf-med { background:#2a2000; color:#d4b44a; border:1px solid #5a4000; }
+#gam-sticky-accordion .gam-sacc-conf-low { background:#162030; color:#5b8db8; border:1px solid #1e3850; }
+#gam-sticky-accordion .gam-sacc-reason { flex:1; color:#8b929e; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#gam-sticky-accordion .gam-sacc-footer { padding:5px 8px; border-top:1px solid #2a1800; display:flex; gap:6px; }
+/* ---- v10.3: Tard accordion (Patch 4) ---- */
+#gam-tard-accordion { border-radius:0; box-shadow:0 4px 20px rgba(0,0,0,.7); }
+#gam-tard-accordion .gam-tard-header { display:flex; justify-content:space-between; align-items:center; padding:5px 8px; border-bottom:1px solid #2a1800; color:#ff9933; font-size:10px; font-weight:700; letter-spacing:0.06em; }
+#gam-tard-accordion .gam-tard-row { display:flex; align-items:flex-start; gap:6px; padding:5px 8px; border-bottom:1px solid #1a1a1a; }
+#gam-tard-accordion .gam-tard-footer { position:sticky; bottom:0; background:#0a0a0b; border-top:1px solid #2a2825; padding:6px 8px; margin-top:0; display:flex; gap:6px; align-items:center; }
+#gam-tard-accordion .gam-tard-add-btn { flex:1; background:transparent; border:1px solid #2eaa44; color:#44dd66; padding:4px 10px; cursor:pointer; font:600 10px ui-monospace,monospace; letter-spacing:0.04em; text-transform:uppercase; }
+#gam-tard-accordion .gam-tard-add-btn:disabled { opacity:0.4; cursor:default; }
+#gam-tard-accordion .gam-tard-sev { font-weight:700; font-size:9px; letter-spacing:0.04em; text-transform:uppercase; flex-shrink:0; padding:1px 4px; }
+#gam-tard-accordion .gam-tard-pattern { color:#ff9933; font-weight:700; font-size:10px; }
+#gam-tard-accordion .gam-tard-label { color:#9b9892; font-size:10px; }
+#gam-tard-accordion .gam-tard-row--exists { opacity:0.45; }
+/* ---- v10.3: Thread Watch (Patch 5) ---- */
+#gam-thread-watch-btn { margin-left:8px; background:#0e1820; border:1px solid #2a4060; color:#5b8db8; padding:2px 8px; cursor:pointer; font:11px ui-monospace,monospace; }
+#gam-thread-watch-btn.gam-thread-watch-btn--flagged { background:#2a0800; border-color:#ff9933; color:#ff9933; animation:gam-pulse 1.2s infinite; }
+.gam-thread-stats { display:flex; gap:12px; font-size:11px; color:var(--gam-text2,#8b929e); padding:6px 0 10px; flex-wrap:wrap; }
+.gam-thread-intel .gam-badge--warn { background:#c0392b; color:#fff; padding:4px 8px; font-size:11px; font-weight:700; margin-bottom:8px; display:block; }
+.gam-suspect-row { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--gam-border,#1e2a3a); flex-wrap:wrap; }
+.gam-suspect-row--actioned { opacity:0.35; pointer-events:none; }
+.gam-novelty-badge { min-width:32px; text-align:center; font-weight:700; font-size:11px; background:#0d1820; border-radius:2px; padding:2px 4px; color:#e8eaed; flex-shrink:0; }
+.gam-suspect-info { font-size:11px; color:#c8d8e8; flex:1; }
+.gam-suspect-actions { margin-left:auto; display:flex; gap:4px; flex-shrink:0; }
+.gam-thread-bulk { padding:8px 0 0; display:flex; gap:8px; border-top:1px solid var(--gam-border,#1e2a3a); margin-top:4px; }
+/* ---- v10.3: Brigade chip (Patch 6) ---- */
+#gam-brig-chip { font:600 9px ui-monospace,monospace; color:#ffa500; background:#1a0d00; border:1px solid #ffa500; padding:1px 5px; cursor:pointer; display:none; }
 `;
+
 
 
   // ╔══════════════════════════════════════════════════════════════════╗
@@ -18273,6 +19769,61 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     return r;
   }
 
+  // v10.0: Brave-Shields invite rescue. Brave's "Block tracking parameters"
+  // strips ?mt_invite= silently before our IIFE sees it -- onboarding fails
+  // with no error. Fix: if Brave is detected AND no team token is saved,
+  // surface a one-time amber banner pointing the mod at the popup paste path
+  // (which always works). Dismissed flag is persistent so existing mods who
+  // already authed never see it again.
+  (async ()=>{
+    try {
+      if (typeof navigator === 'undefined') return;
+      let isBrave = false;
+      try { isBrave = !!(navigator.brave && typeof navigator.brave.isBrave === 'function' && await navigator.brave.isBrave()); } catch(_){}
+      if (!isBrave) return;
+      // Only nag the unauthed.
+      const st = await new Promise(res => { try { chrome.storage.local.get([K_SETTINGS, 'gam_brave_banner_dismissed'], res); } catch(_) { res({}); } });
+      if (st && st[K_SETTINGS] && st[K_SETTINGS].workerModToken) return;
+      if (st && st.gam_brave_banner_dismissed) return;
+      // Build banner. Self-contained CSS so it survives before init() builds GAM_CSS.
+      const wrap = document.createElement('div');
+      wrap.id = 'gam-brave-banner';
+      wrap.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483645;background:#1a0f00;border-bottom:2px solid #ff9933;color:#ff9933;font:600 12px/1.4 ui-monospace,JetBrains Mono,Consolas,monospace;padding:10px 16px;box-shadow:0 2px 12px rgba(0,0,0,0.6);letter-spacing:0.04em';
+      wrap.innerHTML = '<div style="max-width:920px;margin:0 auto;display:flex;align-items:flex-start;gap:12px"><div style="flex:0 0 auto;font-size:18px;line-height:1">&#x1F981;</div><div style="flex:1 1 auto;color:#ffe0b3;font-weight:400;letter-spacing:0.02em"><strong style="color:#ff9933;font-weight:700">Brave detected.</strong> Brave Shields strip <code style="background:#000;padding:1px 4px;color:#ffd84d">?mt_invite=</code> from URLs silently. If your lead sent you an invite link, the code may already be lost from this URL. <strong style="color:#fff">Open the GAW ModTools extension popup &rarr; pick &ldquo;I have an invite LINK&rdquo; &rarr; paste the FULL URL.</strong> The popup paste path bypasses Shields. <a href="#" id="gam-brave-banner-help" style="color:#66ccff;text-decoration:underline">More info</a></div><button id="gam-brave-banner-dismiss" type="button" style="flex:0 0 auto;background:transparent;border:1px solid #ff9933;color:#ff9933;padding:4px 10px;font:600 11px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;cursor:pointer;text-transform:uppercase">Got it</button></div>';
+      // Push page content down so the banner doesn't overlap GAW's own header.
+      const prevPad = document.body && document.body.style.paddingTop;
+      try { if (document.body) document.body.style.paddingTop = '64px'; } catch(_){}
+      try { document.documentElement.appendChild(wrap); } catch(_) { try { document.body.appendChild(wrap); } catch(_){} }
+      const dismissBtn = document.getElementById('gam-brave-banner-dismiss');
+      const helpLink = document.getElementById('gam-brave-banner-help');
+      const teardown = () => {
+        try { wrap.remove(); } catch(_){}
+        try { if (document.body) document.body.style.paddingTop = prevPad || ''; } catch(_){}
+      };
+      if (dismissBtn) dismissBtn.addEventListener('click', () => {
+        try { chrome.storage.local.set({ gam_brave_banner_dismissed: Date.now() }); } catch(_){}
+        teardown();
+      });
+      if (helpLink) helpLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        try { window.alert('GAW ModTools — Brave Shields rescue\n\nBrave’s built-in "Block tracking parameters" feature (Shields, on by default) silently strips ?mt_invite= from URLs.\n\nWhen your lead sends you an invite link like\n  https://greatawakening.win/?mt_invite=ABC123...\nBrave loads the page WITHOUT that parameter. The extension never sees it.\n\nThe fix is simple:\n  1. Click the GAW ModTools extension icon (top-right of Chrome).\n  2. The first-run wizard will appear.\n  3. Pick "I have an invite LINK" — paste the FULL URL your lead sent you.\n  4. Or pick "I have an invite CODE" and paste just the code portion.\n\nThis path runs entirely inside the extension, where Shields cannot interfere.'); } catch(_){}
+      });
+      // Auto-dismiss + remember if the user later authenticates (token gets saved
+      // by some other flow); listen for the chrome.storage event.
+      try {
+        chrome.storage.onChanged.addListener((ch) => {
+          const s = ch && ch[K_SETTINGS] && ch[K_SETTINGS].newValue;
+          if (s && s.workerModToken) {
+            try { chrome.storage.local.set({ gam_brave_banner_dismissed: Date.now() }); } catch(_){}
+            teardown();
+          }
+        });
+      } catch(_){}
+    } catch(e){
+      console.warn('[modtools] brave detect failed', e);
+    }
+  })();
+
   // v5.1.8: invite-claim on ?mt_invite=CODE.
   // v5.8.1 security fix: was SILENT auto-claim -- this was a critical vector
   // where any phishing link could swap a mod's team token for an
@@ -18410,6 +19961,23 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
             });
           }
         } catch(e){ console.warn('[modtools] stage invite failed', e); }
+        // v10.0: extension-reload survives chrome.storage.session wipe. Mirror
+        // to chrome.storage.local with a 5-min TTL so a reload-mid-claim
+        // (e.g. the mod hits chrome://extensions and reloads the unpacked
+        // extension between the stage and the click-to-claim) doesn't lose
+        // the invite. Popup checks both stores; whichever wins, wins.
+        try {
+          if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local){
+            await chrome.storage.local.set({
+              gam_pending_invite_backup: {
+                code,
+                gaw_username: _me,
+                staged_at: Date.now(),
+                ttl_ms: 5 * 60 * 1000
+              }
+            });
+          }
+        } catch(e){ console.warn('[modtools] backup-stage invite failed', e); }
         try { snack('\u{1F4E8} Invite STAGED \u2014 open the ModTools popup to claim.', 'warn'); } catch(e){}
         return;
       }
@@ -19762,10 +21330,45 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           btnRetry.disabled = false;
         }
       });
+      // v10.2: Open-popup direct cross-talk. For auth states where
+      // re-hydrate cannot help (no_token / short_token / whoami_status),
+      // surface a button that opens the ModTools popup directly. The popup
+      // is where the actual recovery happens — claiming a fresh invite,
+      // pasting a token. Pre-fix the banner only said "Open the GAW
+      // ModTools popup" in copy; mods had to physically click the icon
+      // (or worse, didn't notice the icon at all). chrome.action.openPopup
+      // requires Chrome 127+; gracefully degrades to a snack with manual
+      // instructions if unavailable.
+      const showOpenPopup = ['no_token','short_token','whoami_status','whoami_empty'].includes(authResult && authResult.reason);
+      let btnOpen = null;
+      if (showOpenPopup) {
+        btnOpen = document.createElement('button');
+        btnOpen.textContent = 'Open ModTools popup';
+        btnOpen.style.cssText = 'padding:4px 10px;border:1px solid #fff;background:#fff;color:#a02020;border-radius:4px;cursor:pointer;font:inherit;font-weight:700';
+        btnOpen.addEventListener('click', async () => {
+          btnOpen.disabled = true;
+          btnOpen.textContent = 'Opening...';
+          try {
+            const r = await chrome.runtime.sendMessage({ type: 'openPopup' });
+            if (r && r.ok) {
+              try { b.remove(); } catch(_){}
+            } else {
+              btnOpen.textContent = 'Click extension icon ↑';
+              btnOpen.disabled = false;
+              try { snack('Click the GAW ModTools icon in your Chrome toolbar to open the popup.', 'warn'); } catch(_){}
+            }
+          } catch (e) {
+            btnOpen.textContent = 'Click extension icon ↑';
+            btnOpen.disabled = false;
+            try { snack('Click the GAW ModTools icon in your Chrome toolbar to open the popup.', 'warn'); } catch(_){}
+          }
+        });
+      }
       const btnDismiss = document.createElement('button');
       btnDismiss.textContent = 'Dismiss';
       btnDismiss.style.cssText = 'padding:4px 10px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;border-radius:4px;cursor:pointer;font:inherit;opacity:.85';
       btnDismiss.addEventListener('click', () => { try { b.remove(); } catch(_){} });
+      if (btnOpen) row.appendChild(btnOpen);
       row.appendChild(btnRetry);
       row.appendChild(btnDismiss);
       b.appendChild(title);
@@ -20317,6 +21920,67 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           .then(function() { try { banner.remove(); } catch (e) {} snack('draft taken over', 'success'); });
       });
       try { ta.parentNode.insertBefore(banner, ta); } catch (e) {}
+    }
+
+    // V10_BUGS/02: Macro draft memory helpers
+    function _showDraftChip(ta, entry, kind, user) {
+      const field = ta.closest('.gam-mc-field') || ta.parentNode;
+      if (!field) return;
+      const prevChip = field.querySelector('.gam-macro-draft-chip');
+      if (prevChip) prevChip.remove();
+      const ageMin = Math.max(1, Math.round((Date.now() - (entry.modified_at || Date.now())) / 60000));
+      const chip = document.createElement('div');
+      chip.className = 'gam-macro-draft-chip';
+      chip.style.cssText = 'position:absolute;top:0;right:0;background:#1a1a2e;border:1px solid #ff9933;color:#ff9933;font:600 9px ui-monospace,monospace;letter-spacing:.07em;text-transform:uppercase;padding:2px 7px;display:flex;gap:6px;align-items:center;z-index:10;opacity:1;transition:opacity 0.3s';
+      if (field.style.position !== 'relative' && field.style.position !== 'absolute') field.style.position = 'relative';
+      const chipLabel = document.createElement('span');
+      chipLabel.textContent = 'draft restored ' + ageMin + 'm ago';
+      const chipClear = document.createElement('button');
+      chipClear.textContent = 'clear';
+      chipClear.style.cssText = 'background:none;border:none;color:#9b9892;cursor:pointer;font:600 9px ui-monospace,monospace;padding:0';
+      chipClear.addEventListener('click', function() {
+        chip.remove();
+        ta.value = '';
+        chrome.storage.session.get('gam_macro_drafts').then(function(out) {
+          const stored = (out && out.gam_macro_drafts) || {};
+          delete stored[kind + ':' + user];
+          chrome.storage.session.set({ gam_macro_drafts: stored }).catch(function() {});
+        }).catch(function() {});
+      });
+      chip.appendChild(chipLabel);
+      chip.appendChild(chipClear);
+      field.appendChild(chip);
+      setTimeout(function() { chip.style.opacity = '0.35'; }, 8000);
+    }
+
+    function _maybeSuggestPromote(kind, body) {
+      if (!body || !body.trim()) return Promise.resolve();
+      let h = 5381;
+      for (let ci = 0; ci < body.length && ci < 2000; ci++) h = ((h << 5) + h) ^ body.charCodeAt(ci);
+      const hashKey = 'k' + (h >>> 0).toString(36);
+      return chrome.storage.local.get('gam_macro_promote_counts').then(function(out) {
+        const cnts = (out && out.gam_macro_promote_counts) || {};
+        cnts[hashKey] = (cnts[hashKey] || 0) + 1;
+        return chrome.storage.local.set({ gam_macro_promote_counts: cnts }).then(function() {
+          if (cnts[hashKey] >= 3 && typeof _gamPromptMacro === 'function') {
+            _gamPromptMacro({
+              title: 'Save this as a team macro?',
+              subtitle: "You've sent this same text " + cnts[hashKey] + ' times. Add it to the shared library?',
+              defaultBody: body
+            }).then(function(result) {
+              if (!result) return;
+              rpcCall('macroUpsert', { kind: kind, label: result.label, body: result.body })
+                .then(function(r) {
+                  if (r && r.ok && r.data && r.data.ok) {
+                    snack('Macro saved to team', 'success');
+                    cnts[hashKey] = 0;
+                    chrome.storage.local.set({ gam_macro_promote_counts: cnts }).catch(function() {});
+                  }
+                });
+            }).catch(function() {});
+          }
+        });
+      }).catch(function() {});
     }
 
     function attachDraftPersistence(ta, action, target) {
@@ -21146,6 +22810,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       chime: chime,
       attachDraftPersistence: attachDraftPersistence,
       clearDraft: clearDraft,
+      _showDraftChip: _showDraftChip,
+      _maybeSuggestPromote: _maybeSuggestPromote,
       openProposeModal: openProposeModal,
       handleProposals: handleProposals,
       renderOnlineChip: renderOnlineChip,
@@ -21173,5 +22839,245 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // setInterval(superModPoller 15000 gam-crossmod-banner gam-crossmod-takeover
   // Propose Ban Propose Remove Propose Lock gam-online-chip is reviewing this
   // withCollisionCheck banDraft: clearDraftFor( beforeunload gam_draft_
+
+  // ---- v10.3 Patch 5: Thread Watch -----------------------------------------------
+  function injectThreadWatchBtn(postId) {
+    if (!IS_POST_PAGE || !postId) return;
+    if (document.getElementById('gam-thread-watch-btn')) return; // idempotent
+    const titleEl = document.querySelector('h1.post-title, .post h1, h1[class*="title"], .title-content, h1');
+    if (!titleEl) return;
+    const btn = document.createElement('button');
+    btn.id = 'gam-thread-watch-btn';
+    btn.textContent = 'Thread Watch';
+    btn.title = 'Thread Watch -- brigade analysis';
+    btn.setAttribute('data-post-id', postId);
+    btn.addEventListener('click', function() { openThreadIntelDrawer(postId); });
+    titleEl.after(btn);
+  }
+
+  async function openThreadIntelDrawer(postId) {
+    if (!postId) return;
+    IntelDrawer.open({ kind: 'Post', id: postId, title: 'Thread Watch' });
+    IntelDrawer.setLoading && IntelDrawer.setLoading(true);
+    let data;
+    try {
+      const tok = getModToken();
+      if (!tok) { IntelDrawer.setLoading && IntelDrawer.setLoading(false); return; }
+      const r = await fetch(WORKER_BASE + '/mod/thread/intel?id=' + encodeURIComponent(postId), {
+        headers: { 'x-mod-token': tok }
+      });
+      data = await r.json();
+    } catch (e) {
+      IntelDrawer.setLoading && IntelDrawer.setLoading(false);
+      try { snack('Thread intel failed: ' + (e && e.message || e), 'error'); } catch (_) {}
+      return;
+    }
+    IntelDrawer.setLoading && IntelDrawer.setLoading(false);
+    // Auto-flag: amber button pulse
+    if (data && data.auto_flagged) {
+      const btn2 = document.getElementById('gam-thread-watch-btn');
+      if (btn2) btn2.classList.add('gam-thread-watch-btn--flagged');
+    }
+    if (IntelDrawer.setBody) {
+      IntelDrawer.setBody(_renderThreadIntelPanel(data, postId));
+    }
+  }
+
+  function _renderThreadIntelPanel(data, postId) {
+    const wrap = el('div', { cls: 'gam-thread-intel' });
+    if (!data || !data.total_commenters) {
+      wrap.appendChild(el('div', { style: 'color:#5c6370;font-size:11px;padding:8px 0;' }, 'No commenter data found for this thread.'));
+      return wrap;
+    }
+    if (data.auto_flagged) {
+      wrap.appendChild(el('div', { cls: 'gam-badge--warn' },
+        'AUTO-FLAGGED: ' + Math.round(data.novel_ratio * 100) + '% new accounts'));
+    }
+    const zeroKarmaPct = data.total_commenters > 0
+      ? Math.round((data.zero_karma_count || 0) / data.total_commenters * 100) : 0;
+    wrap.appendChild(el('div', { cls: 'gam-thread-stats' },
+      el('span', {}, data.total_commenters + ' commenters'),
+      el('span', {}, Math.round((data.novel_ratio || 0) * 100) + '% new (<14d)'),
+      el('span', {}, zeroKarmaPct + '% zero-karma')));
+
+    if (data.top_suspects && data.top_suspects.length) {
+      wrap.appendChild(el('div', { style: 'font-size:10px;color:#5b8db8;letter-spacing:0.08em;text-transform:uppercase;padding:4px 0 6px;' }, 'SUSPECT USERS (top 5 by novelty)'));
+      const suspectList = el('div', { cls: 'gam-thread-suspects' });
+      data.top_suspects.forEach(function(s) {
+        suspectList.appendChild(_renderSuspectRow(s, postId));
+      });
+      wrap.appendChild(suspectList);
+
+      if (data.top_suspects.length > 1) {
+        const bulkBar = el('div', { cls: 'gam-thread-bulk' });
+        bulkBar.appendChild(_makeBulkBanBtn(data.top_suspects, postId));
+        bulkBar.appendChild(_makeBulkWatchBtn(data.top_suspects));
+        wrap.appendChild(bulkBar);
+      }
+    } else {
+      wrap.appendChild(el('div', { style: 'color:#5c6370;font-size:11px;padding:4px 0;' }, 'No high-novelty accounts detected.'));
+    }
+    return wrap;
+  }
+
+  function _renderSuspectRow(s, postId) {
+    const row = el('div', { cls: 'gam-suspect-row', 'data-username': s.username, 'data-post-id': postId });
+    const badge = el('span', { cls: 'gam-novelty-badge' }, String(s.novelty_score || 0));
+    const info  = el('span', { cls: 'gam-suspect-info' },
+      '@' + s.username + '  ' + (s.account_age_days || '?') + 'd  ' + (s.karma || 0) + ' karma  ' + (s.comment_count || 0) + ' cmts');
+    const actions = el('div', { cls: 'gam-suspect-actions' });
+
+    const banRemoveBtn = el('button', { cls: 'gam-btn-small gam-btn--red', style: 'color:#ff6b6b;border-color:#7a2020;' }, 'Ban+Remove');
+    banRemoveBtn.addEventListener('click', function() { _onBanAndRemove(s.username, postId); });
+
+    const watchBtn = el('button', { cls: 'gam-btn-small' }, 'Watch');
+    watchBtn.addEventListener('click', function() { _onWatchUser(s.username, 'Thread Watch: ' + postId); });
+
+    const susBtn = el('button', { cls: 'gam-btn-small', style: 'color:#ff9933;border-color:#7a4000;' }, 'SUS');
+    susBtn.addEventListener('click', function() { _onMarkSus(s.username); });
+
+    actions.append(banRemoveBtn, watchBtn, susBtn);
+    row.append(badge, info, actions);
+    return row;
+  }
+
+  async function _onBanAndRemove(username, postId) {
+    try {
+      await Promise.all([
+        rpcCall('modBanUser', { target: username, duration_days: 7, reason: 'Brigade activity', via: 'thread-watch' }),
+        rpcCall('modCommentRemoveBatch', { post_id: postId, author: username, via: 'thread-watch' })
+      ]);
+      try { snack('Banned @' + username + ' + removed comments', 'success'); } catch (_) {}
+      const rowEl = document.querySelector('[data-username="' + username + '"]');
+      if (rowEl) rowEl.classList.add('gam-suspect-row--actioned');
+    } catch (e) {
+      try { snack('Ban+Remove failed: ' + (e && e.message || e), 'error'); } catch (_) {}
+    }
+  }
+
+  async function _onWatchUser(username, reason) {
+    try {
+      await rpcCall('modWatchUser', { username: username, reason: reason, via: 'thread-watch' });
+      try { snack('Watching @' + username, 'success'); } catch (_) {}
+    } catch (e) {
+      try { snack('Watch failed: ' + (e && e.message || e), 'error'); } catch (_) {}
+    }
+  }
+
+  async function _onMarkSus(username) {
+    try {
+      await rpcCall('modMarkSus', { username: username, via: 'thread-watch' });
+      try { snack('Marked @' + username + ' SUS', 'success'); } catch (_) {}
+    } catch (e) {
+      try { snack('SUS failed: ' + (e && e.message || e), 'error'); } catch (_) {}
+    }
+  }
+
+  function _makeBulkBanBtn(suspects, postId) {
+    const btn = el('button', { cls: 'gam-btn-small', style: 'color:#ff6b6b;border-color:#7a2020;' },
+      'Ban All ' + suspects.length);
+    btn.addEventListener('click', async function() {
+      btn.disabled = true;
+      btn.textContent = 'Banning...';
+      try {
+        await Promise.all(suspects.map(function(s) {
+          return Promise.all([
+            rpcCall('modBanUser', { target: s.username, duration_days: 7, reason: 'Brigade activity', via: 'thread-watch' }),
+            rpcCall('modCommentRemoveBatch', { post_id: postId, author: s.username, via: 'thread-watch' })
+          ]);
+        }));
+        try { snack('Banned ' + suspects.length + ' users + removed comments', 'success'); } catch (_) {}
+        btn.textContent = 'Done';
+      } catch (e) {
+        try { snack('Bulk ban failed: ' + (e && e.message || e), 'error'); } catch (_) {}
+        btn.disabled = false;
+        btn.textContent = 'Ban All ' + suspects.length;
+      }
+    });
+    return btn;
+  }
+
+  function _makeBulkWatchBtn(suspects) {
+    const btn = el('button', { cls: 'gam-btn-small' }, 'Watch All ' + suspects.length);
+    btn.addEventListener('click', async function() {
+      btn.disabled = true;
+      try {
+        await Promise.all(suspects.map(function(s) {
+          return rpcCall('modWatchUser', { username: s.username, reason: 'Thread Watch bulk', via: 'thread-watch' });
+        }));
+        try { snack('Watching ' + suspects.length + ' users', 'success'); } catch (_) {}
+        btn.textContent = 'Done';
+      } catch (e) {
+        try { snack('Bulk watch failed: ' + (e && e.message || e), 'error'); } catch (_) {}
+        btn.disabled = false;
+        btn.textContent = 'Watch All ' + suspects.length;
+      }
+    });
+    return btn;
+  }
+
+  // ---- v10.3 Patch 6: Brigade BRIG chip (soak-ready infrastructure) -----------
+  (function _initBrigChip() {
+    // Chip is added to the bar after buildStatusBar() completes.
+    // We defer so the bar DOM exists.
+    setTimeout(function() {
+      const bar = document.getElementById('gam-status-bar');
+      if (!bar) return;
+      const chip = document.createElement('button');
+      chip.id = 'gam-brig-chip';
+      chip.className = 'gam-bar-icon';
+      chip.title = 'Brigade alerts -- click to view in Hot Now';
+      chip.textContent = 'BRIG 0';
+      chip.style.display = 'none'; // hidden until alerts present
+      chip.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        try { _showHotNowPanel && _showHotNowPanel(); } catch (_) {}
+      });
+      // Insert chip before the barSpacer (flex gap area)
+      const spacer = bar.querySelector('.gam-bar-spacer');
+      if (spacer) bar.insertBefore(chip, spacer);
+      else bar.appendChild(chip);
+
+      // Feature flag: BRIGADE_HARD_ALERTS_ON - off by default during soak period
+      const HARD_ALERTS_ON = false;
+
+      async function _pollBrigadeAlerts() {
+        const tok = getModToken();
+        if (!tok) return;
+        try {
+          const r = await fetch(WORKER_BASE + '/admin/queue/brigade?status=watching&status=flagged&limit=10', {
+            headers: { 'x-mod-token': tok }
+          });
+          if (!r.ok) return; // endpoint not live yet - silent
+          const data = await r.json();
+          const count = (data && data.items && data.items.length) || 0;
+          if (count > 0) {
+            // v10.5.1 INVARIANT: chip is the soak-mode UI surface -- always shown when count>0.
+            // HARD_ALERTS_ON=false suppresses only OS-level Notification escalation.
+            // No silent data: mod sees BRIG chip even during soak. Log for devtools trace.
+            try { console.log('[ModTools v10.5.1 BRIG] ' + count + ' brigade row(s) watching/flagged; hard-alerts=' + HARD_ALERTS_ON); } catch(_){}
+            chip.textContent = 'BRIG ' + count;
+            chip.style.display = '';
+            // Browser notification escalation (soak-first: disabled)
+            if (HARD_ALERTS_ON && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+              const latest = data.items[0];
+              new Notification('Brigade Alert', {
+                body: 'Coordinated reply detected on thread ' + (latest && latest.post_id || ''),
+                tag: 'gam-brigade-alert'
+              });
+            }
+          } else {
+            chip.style.display = 'none';
+          }
+        } catch (_) {
+          // Endpoint not live (pre-migration) - stay hidden
+        }
+      }
+
+      // Initial poll: deferred 12s after bar mount
+      setTimeout(_pollBrigadeAlerts, 12000);
+      setInterval(_pollBrigadeAlerts, 60 * 1000);
+    }, 1500);
+  })();
 
 })();

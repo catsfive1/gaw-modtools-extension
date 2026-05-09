@@ -1,5 +1,13 @@
 # HANDOFF — UI/UX, AUTH, USABILITY, FEATURE GAPS
 
+> **WARNING: STALE** — written 2026-05-07 at v9.6.6. Section 4 ask-audit superseded by docs/HARVEST_72H_2026-05-08.md. Kept for historical context.
+> The following section-4 items have since shipped:
+> A2 (modmail macros in Mod Console Message tab) — SHIPPED v9.8.0
+> D1 (tooltip Y-gap) — SHIPPED v10.1
+> B3 (firehose dedupe) — confirmed SHIPPED v9.4.6 (was already done at time of writing)
+> Section 11.1 item 1 (Fix B3) is moot.
+> See AGENT_BRIEF.md and FEATURES_MATRIX_v10.5.md for current state.
+
 **Audience:** the next Opus session.
 **Date written:** 2026-05-07 (revised after Commander demanded a full ask audit).
 **Tone:** brutally honest. No victory lap.
@@ -118,9 +126,7 @@ Past 3 days of asks vs delivered code. Status: ✅ delivered, ⚠ partial, ❌ b
 |---|---|---|---|
 | **B1** | DB has all modmails ever sent, historical backfill | ⚠ | modmail_threads schema with ON CONFLICT dedupe exists; **no proactive historical backfill** — only ingests as mod sees them |
 | **B2** | Firehose ON at all times | ❌ | Opt-in via popup Start button, defaults OFF. setSetting('firehose.active', true) only fires on explicit start |
-| **B3** | Duplicate detection so DB doesn't bloat | ❌ BROKEN | gaw_posts (line 7577) and gaw_comments (line 7656) real-firehose INSERTs **lack ON CONFLICT clause**. Every duplicate primary-key insert throws. **Likely explanation for `firehoseState.errors:8` in Commander's debug snapshot.** Test-seed path (line 8876) DOES have ON CONFLICT — proves the schema supports it |
-
-**Fix path for B3:** add `ON CONFLICT(id) DO UPDATE SET score=excluded.score, comment_count=excluded.comment_count, last_updated=excluded.last_updated, version=version+1` to both INSERTs. Same pattern as the test-seed path.
+| **B3** | Duplicate detection so DB doesn't bloat | ✅ FIXED v9.4.6 (worker, 2026-05-08) | All 4 firehose INSERT paths converted to atomic UPSERT with `ON CONFLICT(id) DO UPDATE SET ... RETURNING version`: `handleGawPostsIngest` (gaw-mod-proxy-v2.js ~8390), `handleGawCommentsIngest` (~8470), `gawUpsertPostRow` (~8809), `gawUpsertCommentRow` (~8870). Eliminates SELECT-then-INSERT TOCTOU race (root cause of `firehoseState.errors`). Smoke-tested live: insert + duplicate insert via /gaw/posts/ingest and /gaw/comments/ingest both returned `ok:true` with `rows_new=1` then `rows_updated=1` — pre-fix the second call returned HTTP 500. Deploy version: `c120afc5-60be-4d9d-be13-0aba67179702` |
 
 ### 4.3 Modmail UX
 

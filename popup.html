@@ -22,6 +22,8 @@
   <div class="pop-header">
     <span class="pop-brand">&#x1F6E1; ModTools</span>
     <span class="pop-ver" id="ver">v5.2.8</span>
+    <!-- v10.x: tier badge (purple LEAD / cyan SR-LEAD / hidden for mod) -->
+    <span id="tierBadge" class="pop-tier-badge" style="display:none"></span>
     <!-- v9.5.0: maintenance warning chip. Set by the alarms in background.js
          when storage quota >80% or token age >60d. Click opens the Maintenance
          section. Hidden by default; shown when gam_maint_warning is present. -->
@@ -81,43 +83,64 @@
     <div class="pop-drill-body" id="pop-drill-body"></div>
     <div class="pop-drill-foot">
       <span class="pop-drill-meta" id="pop-drill-meta"></span>
-      <button class="pop-link" id="pop-drill-csv">Export CSV</button>
+      <button class="pop-link" id="pop-drill-csv" title="Download the rows in this drill panel as a CSV (mod log, roster, death-row, etc.) for spreadsheet analysis.">Export rows</button>
     </div>
   </div>
 
-  <div class="pop-actions">
-    <a href="https://greatawakening.win/users" target="_blank" class="pop-btn pop-btn-primary">
-      &#x1F4CA; Open Triage Console
+  <!-- v10.4: 4-column grid replacing the full-width single-column stack.
+       Closes Commander's "buttons that are mostly negative space" complaint.
+       Each cell is icon-above-uppercase-label (Bloomberg dense), 44×N min-tap
+       target. Native title= shows the rich tooltip; custom anticipating-tooltip
+       JS lands in v10.5 with live count injection. -->
+  <div class="pop-actions" id="pop-actions">
+    <a href="https://greatawakening.win/users" target="_blank"
+       class="pop-btn pop-btn-primary"
+       title="MANAGE /USERS — Triage flagged accounts. Batch-ban, Death Row queue, suspicious filter, cluster alerts. Click any row to drill into Mod Console.">
+      <span class="pop-btn-icon">&#x1F465;</span>
+      <span class="pop-btn-label">Users</span>
     </a>
-    <a href="https://greatawakening.win/queue" target="_blank" class="pop-btn">
-      &#x1F4CB; Open /queue
+    <a href="https://greatawakening.win/queue" target="_blank"
+       class="pop-btn"
+       title="MOD QUEUE — Posts + comments awaiting decision. Death Row count appears in the Stats tab. Act here to prevent items expiring unreviewed.">
+      <span class="pop-btn-icon">&#x1F4CB;</span>
+      <span class="pop-btn-label">Queue</span>
     </a>
-    <a href="https://greatawakening.win/ban" target="_blank" class="pop-btn">
-      &#x1F528; Open /ban
+    <a href="https://greatawakening.win/ban" target="_blank"
+       class="pop-btn"
+       title="BAN MANAGER — Currently banned and 24h ban total visible in Stats tab. Click to unban, extend, or audit ban reasons. Death Row executions land here.">
+      <span class="pop-btn-icon">&#x1F528;</span>
+      <span class="pop-btn-label">Ban</span>
     </a>
-    <a href="https://greatawakening.win" target="_blank" class="pop-btn">
-      &#x1F3E0; Open GAW
+    <a href="https://greatawakening.win" target="_blank"
+       class="pop-btn"
+       title="GREAT AWAKENING — Open the forum home page. New tabs inherit your active session token. If the bottom status bar shows red, the team token needs re-claiming via the wizard.">
+      <span class="pop-btn-icon">&#x1F3E0;</span>
+      <span class="pop-btn-label">GAW</span>
     </a>
   </div>
 
+  <!-- v10.3: Force re-hydrate REMOVED (per Cat-1 audit). The button was a
+       no-op since v9.2.1 because chrome.storage.onChanged listeners in
+       both the content script AND the service worker auto-mirror token
+       writes within milliseconds. The button did a redundant second
+       write of identical values + required an active GAW tab to route.
+       The auth-fail-banner version (modtools.js:19844) is kept — it
+       fires in the right context, re-validates against the worker, and
+       auto-reloads on success. ELIMINATE-THE-MEATBAG: the auto-sync
+       runs automatically; no button needed. -->
+  <!-- v10.x: Collapsible card — Tools (Diagnostics + Data harvest) -->
+  <details class="gam-card" id="card-tools" open>
+    <summary class="gam-card-head">
+      <span class="gam-card-chevron" aria-hidden="true"></span>
+      <span class="gam-card-title">Tools</span>
+      <span class="gam-card-badge" id="card-badge-tools" style="display:none"></span>
+    </summary>
+    <div class="gam-card-body">
   <div class="pop-section-label">Diagnostics</div>
   <div class="pop-tools">
     <button id="debugBtn" class="pop-btn pop-btn-ghost">&#x1F9EA; Debug snapshot</button>
     <button id="dashBtn" class="pop-btn pop-btn-ghost">&#x1F4CA; Dashboard</button>
-    <!-- v9.3.14 (Vanguard L-2) / v9.4.6 (Commander): replaces the legacy
-         window.__GAM_REHYDRATE() page-console call. Asks the active GAW
-         tab to re-read chrome.storage.local into the in-memory cache + SW
-         vault. Use this if you rotated your token via a recovery script or
-         saw an "auth desynced" snack — it forces the SW to re-read storage.
-         Result format "team=yes(48), lead=yes(N)" reports each token's
-         length in chars (32-256 range). Available to ALL mods (per-mod
-         popup; any mod can have a token desync). -->
-    <button id="rehydrateBtn" class="pop-btn pop-btn-ghost"
-            title="Re-load token vault from storage. 'team=yes(48)' means a 48-char team token is now cached in the SW vault. Run if you saw an auth-desynced snack.">
-      &#x21BB; Force re-hydrate
-    </button>
   </div>
-  <div id="rehydrateStatus" class="pop-token-status"></div>
 
   <div class="pop-section-label">Data harvest</div>
   <div class="pop-tools">
@@ -126,14 +149,28 @@
     <button class="pop-btn pop-btn-ghost crawl-btn" data-section="queue" data-pages="5">&#x1F578; Crawl /queue (5)</button>
   </div>
   <div id="crawlStatus" class="pop-token-status" style="padding: 0 12px 4px;"></div>
+    </div><!-- /.gam-card-body tools -->
+  </details><!-- /#card-tools -->
 
+  <!-- v10.x: Collapsible card — Maintenance -->
+  <details class="gam-card" id="card-maint" open>
+    <summary class="gam-card-head">
+      <span class="gam-card-chevron" aria-hidden="true"></span>
+      <span class="gam-card-title">&#x1F527; Maintenance</span>
+      <span class="gam-card-badge" id="card-badge-maint" style="display:none"></span>
+    </summary>
+    <div class="gam-card-body">
   <!-- v9.5.0: Maintenance Mode. One-click self-heal routines for non-tech mods.
        Each row is a separate routine (#1-8 below); each logs to gam_diag_log via
        the modtools.js content-script handler. Lead-tier maintenance rows live
        inside #leadSection (rendered further down) so the existing __applyLeadGate
-       in popup.js handles visibility — no separate gate is added here. -->
-  <div class="pop-section-label">&#x1F527; Maintenance</div>
+       in popup.js handles visibility - no separate gate is added here. -->
   <div id="maintWarningBanner" class="pop-maint-banner" style="display:none"></div>
+  <!-- v10.1: pareto cut (advocate groan #1: "11 stacked Maintenance buttons
+       with developer jargon"). Top 4 are mod-friendly recovery + AI helpers
+       that any mod uses regularly; remaining 6 are advanced/diagnostic
+       routines folded into a <details> accordion. Same handlers, same IDs;
+       structure is purely visual reorganization. -->
   <div class="pop-maint">
     <div class="pop-maint-row">
       <button id="maintCookies" class="pop-btn pop-btn-ghost"
@@ -143,53 +180,11 @@
       <div id="maintCookiesStatus" class="pop-token-status pop-maint-status"></div>
     </div>
     <div class="pop-maint-row">
-      <button id="maintStorage" class="pop-btn pop-btn-ghost"
-              title="Reads chrome.storage.local usage + top-5 largest keys. Trim button evicts oldest 50% of intel cache + caps diag log.">
-        &#x1F4CA; Storage health probe
-      </button>
-      <div id="maintStorageStatus" class="pop-token-status pop-maint-status"></div>
-    </div>
-    <div class="pop-maint-row">
       <button id="maintToken" class="pop-btn pop-btn-ghost"
               title="Pings worker /mod/whoami, reports token age + lead status. Color-coded by age (green &lt;60d / yellow 60-90d / red &gt;90d).">
         &#x1F511; Token health probe
       </button>
       <div id="maintTokenStatus" class="pop-token-status pop-maint-status"></div>
-    </div>
-    <div class="pop-maint-row">
-      <button id="maintSelectorDrift" class="pop-btn pop-btn-ghost"
-              title="Lists learned-selector promotions from gam_learned_selectors so you can see if GAW changed their layout. Surfaced for awareness.">
-        &#x1FA7A; Selector drift report
-      </button>
-      <div id="maintSelectorDriftStatus" class="pop-token-status pop-maint-status"></div>
-    </div>
-    <div class="pop-maint-row">
-      <button id="maintRehydrateAlias" class="pop-btn pop-btn-ghost"
-              title="Forces the SW token vault to re-read chrome.storage.local. Use after a token rotation or auth-desynced snack. Same handler as the original Force re-hydrate up top.">
-        &#x21BB; Force re-hydrate (token vault)
-      </button>
-      <div id="maintRehydrateAliasStatus" class="pop-token-status pop-maint-status"></div>
-    </div>
-    <div class="pop-maint-row">
-      <button id="maintDiag" class="pop-btn pop-btn-ghost"
-              title="Counts diag log entries. Buttons: Export (clipboard, redacted JSON) and Purge oldest 50%.">
-        &#x1F4DC; Diag log status + purge
-      </button>
-      <div id="maintDiagStatus" class="pop-token-status pop-maint-status"></div>
-    </div>
-    <div class="pop-maint-row">
-      <button id="maintSchema" class="pop-btn pop-btn-ghost"
-              title="Compares stored gam_settings.schema_version against the code-side constant. If mismatch, runs additive migration (safe defaults).">
-        &#x2699; Schema migration check
-      </button>
-      <div id="maintSchemaStatus" class="pop-token-status pop-maint-status"></div>
-    </div>
-    <div class="pop-maint-row">
-      <button id="maintReset" class="pop-btn pop-btn-ghost"
-              title="DESTRUCTIVE. Wipes gam_settings feature flags (preserves tokens). Triple-confirms before running. Use only when 'everything seems weird'.">
-        &#x1F198; Reset settings to defaults
-      </button>
-      <div id="maintResetStatus" class="pop-token-status pop-maint-status"></div>
     </div>
     <!-- v9.11.0 - AI tard / sus-pattern suggester (Commander #23/#24).
          Calls /ai/tards/suggest which scans recent gaw_users via firehose
@@ -202,7 +197,6 @@
       <div id="maintTardSuggestStatus" class="pop-token-status pop-maint-status"></div>
     </div>
     <div id="maintTardSuggestPanel" style="display:none"></div>
-
     <!-- v9.12.0 - AI sticky-request detector (Commander #17). Scans recent
          modmail_messages for "sticky pls" / "please sticky" / etc., asks
          Llama to confirm genuine request, returns up to 10 with confidence. -->
@@ -215,18 +209,67 @@
     </div>
     <div id="maintStickyScanPanel" style="display:none"></div>
 
-    <!-- v9.16.0 - manual modmail history backfill (Commander #6). Walks
-         /modmail?page=1..N and ingests historical threads + messages into
-         the inbox-intel pipeline. Throttled at 1.5s/page. Use once to seed
-         historical data, then ambient ingest takes over. -->
-    <div class="pop-maint-row">
-      <button id="maintModmailBackfill" class="pop-btn pop-btn-ghost"
-              title="Walks /modmail page 1..10 in your active GAW tab and ingests historical threads + messages. ~15s for 10 pages. Run once.">
-        &#x1F5C2; Backfill modmail history
-      </button>
-      <div id="maintModmailBackfillStatus" class="pop-token-status pop-maint-status"></div>
-    </div>
+    <details class="pop-maint-advanced">
+      <summary>System diagnostics (advanced)</summary>
+      <div class="pop-maint-row">
+        <button id="maintStorage" class="pop-btn pop-btn-ghost"
+                title="Reads chrome.storage.local usage + top-5 largest keys. Trim button evicts oldest 50% of intel cache + caps diag log.">
+          &#x1F4CA; Storage health probe
+        </button>
+        <div id="maintStorageStatus" class="pop-token-status pop-maint-status"></div>
+      </div>
+      <div class="pop-maint-row">
+        <button id="maintSelectorDrift" class="pop-btn pop-btn-ghost"
+                title="Lists learned-selector promotions from gam_learned_selectors so you can see if GAW changed their layout. Surfaced for awareness.">
+          &#x1FA7A; Selector drift report
+        </button>
+        <div id="maintSelectorDriftStatus" class="pop-token-status pop-maint-status"></div>
+      </div>
+      <div class="pop-maint-row">
+        <button id="maintDiag" class="pop-btn pop-btn-ghost"
+                title="Counts diag log entries. Buttons: Export (clipboard, redacted JSON) and Purge oldest 50%.">
+          &#x1F4DC; Diag log status + purge
+        </button>
+        <div id="maintDiagStatus" class="pop-token-status pop-maint-status"></div>
+      </div>
+      <div class="pop-maint-row">
+        <button id="maintSchema" class="pop-btn pop-btn-ghost"
+                title="Compares stored gam_settings.schema_version against the code-side constant. If mismatch, runs additive migration (safe defaults).">
+          &#x2699; Schema migration check
+        </button>
+        <div id="maintSchemaStatus" class="pop-token-status pop-maint-status"></div>
+      </div>
+      <!-- v9.16.0 - manual modmail history backfill (Commander #6). Walks
+           /modmail?page=1..N and ingests historical threads + messages into
+           the inbox-intel pipeline. Throttled at 1.5s/page. Use once to seed
+           historical data, then ambient ingest takes over. -->
+      <div class="pop-maint-row">
+        <button id="maintModmailBackfill" class="pop-btn pop-btn-ghost"
+                title="Walks /modmail page 1..10 in your active GAW tab and ingests historical threads + messages. ~15s for 10 pages. Run once.">
+          &#x1F5C2; Backfill modmail history
+        </button>
+        <div id="maintModmailBackfillStatus" class="pop-token-status pop-maint-status"></div>
+      </div>
+      <div class="pop-maint-row">
+        <button id="maintReset" class="pop-btn pop-btn-ghost"
+                title="DESTRUCTIVE. Wipes gam_settings feature flags (preserves tokens). Triple-confirms before running. Use only when 'everything seems weird'.">
+          &#x1F198; Reset settings to defaults
+        </button>
+        <div id="maintResetStatus" class="pop-token-status pop-maint-status"></div>
+      </div>
+    </details>
   </div>
+    </div><!-- /.gam-card-body maint -->
+  </details><!-- /#card-maint -->
+
+  <!-- v10.x: Collapsible card — Macros -->
+  <details class="gam-card" id="card-macros" open>
+    <summary class="gam-card-head">
+      <span class="gam-card-chevron" aria-hidden="true"></span>
+      <span class="gam-card-title">&#x1F4DD; Team Macros</span>
+      <span class="gam-card-badge" id="card-badge-macros" style="display:none"></span>
+    </summary>
+    <div class="gam-card-body">
 
   <!-- v9.6.0: Team Macros (shared canned messages) — visible to ALL mods,
        any mod can add/edit/delete; sync'd across team via worker. -->
@@ -255,6 +298,17 @@
     </div>
     <div id="macrosStatus" class="pop-token-status"></div>
   </div>
+    </div><!-- /.gam-card-body macros -->
+  </details><!-- /#card-macros -->
+
+  <!-- v10.x: Collapsible card — Tokens (team token + lead token + wizard + claim invite) -->
+  <details class="gam-card" id="card-tokens" open>
+    <summary class="gam-card-head">
+      <span class="gam-card-chevron" aria-hidden="true"></span>
+      <span class="gam-card-title">&#x1F511; Tokens</span>
+      <span class="gam-card-badge" id="card-badge-tokens" style="display:none"></span>
+    </summary>
+    <div class="gam-card-body">
 
   <div class="pop-token">
     <label for="tokenInput">&#x1F511; Team Mod Token</label>
@@ -301,12 +355,23 @@
       <div id="firstRunStatus" style="margin-top:8px;color:#9b9892;font-size:10px;line-height:1.4"></div>
     </div>
     <div id="firstRunWizardSuccess" style="display:none">
-      <div style="color:#44dd66;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:12px;margin-bottom:8px">✓ Authenticated</div>
+      <div style="color:#44dd66;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:12px;margin-bottom:8px">&#x2713; Authenticated</div>
       <div style="color:#e8e6e1;margin-bottom:12px" id="firstRunSuccessName">Welcome, u/...</div>
-      <div style="color:#9b9892;font-size:10.5px;line-height:1.5">Refresh greatawakening.win to see the status bar at the bottom. Your token is stored in IndexedDB backup so it survives extension reloads.</div>
+      <div style="color:#9b9892;font-size:10.5px;line-height:1.5;margin-bottom:10px">Refresh greatawakening.win to see the status bar at the bottom. Your token is stored in IndexedDB backup so it survives extension reloads.</div>
+      <!-- v10.5.1 AFFORDANCE: explicit Done button gives users clear exit from success state.
+           Pre-fix: wizard stayed open with no close affordance; mods had to click the card header. -->
+      <button id="firstRunDone" class="pop-btn pop-btn-primary" style="width:100%">Done &#x2014; collapse this card</button>
     </div>
   </div>
 
+  <!-- v10.x: Collapsible card — Lead (token + KPI + tools) -->
+  <details class="gam-card" id="card-lead" open>
+    <summary class="gam-card-head">
+      <span class="gam-card-chevron" aria-hidden="true"></span>
+      <span class="gam-card-title">&#x1F451; Lead</span>
+      <span class="gam-card-badge" id="card-badge-lead" style="display:none"></span>
+    </summary>
+    <div class="gam-card-body">
   <!-- v9.6.1: leadSection always visible so user can paste lead token before
        team token is saved. Pre-fix the section was display:none until
        __applyLeadGate confirmed is_lead via /mod/whoami, but whoami needs
@@ -320,6 +385,11 @@
     <div id="leadStatus" class="pop-token-status"></div>
     <!-- v9.6.1: lead-only tools wrapped here. Gated by __applyLeadGate. -->
     <div id="leadOnlyTools" style="display:none">
+    <!-- v10.x: loading shimmy for senior_lead tier while tools initialise -->
+    <div id="srLeadEmptyHint" style="display:none;color:#9b9892;font-size:10.5px;
+         padding:6px 0;border-bottom:1px solid #1e2128;margin-bottom:6px">
+      Loading elevated tools&hellip;
+    </div>
     <!-- v9.4.4: margin-top 8 -> 4 across lead sub-rows. -->
     <div class="pop-tools" style="margin-top:4px">
       <button id="inviteBtn" class="pop-btn pop-btn-ghost">&#x1F4E8; Generate invite link</button>
@@ -335,6 +405,9 @@
     <div id="rotateInviteResult" class="pop-token-status"></div>
     <div id="rotateRosterPanel" style="display:none"></div>
 
+    <!-- v10.x: Settings + Maintenance accordion (infrequent ops, collapsed by default) -->
+    <details class="pop-maint-advanced" id="leadSettingsAccordion">
+      <summary>Settings &amp; Maintenance (advanced)</summary>
     <!-- v9.3.1 (P0-4): team-wide settings. First setting is the username
          flag TTL (default 30d). Lead writes; all mods read on the next
          /flags/read (server enforces filter).
@@ -445,8 +518,69 @@
     </div>
     <div id="maintReportsStatus" class="pop-token-status"></div>
     <div id="maintReportsPanel" style="display:none;max-height:360px;overflow:auto;background:#11131a;border:1px solid #3b414d;border-radius:4px;padding:6px;margin:6px 0;font-size:11px"></div>
+    </details><!-- /#leadSettingsAccordion -->
     </div><!-- /#leadOnlyTools -->
   </div><!-- /#leadSection -->
+
+  <!-- v10.x Patch 3: Lead KPI dashboard (ship-tonight minimal) -->
+  <!-- 4-tile KPI row - Active Now reads /presence/online; tiles 2-4 stub OK -->
+  <div id="leadKpiRow" style="display:none;display:grid;grid-template-columns:repeat(4,1fr);gap:2px;margin:8px 0;border:1px solid #2a2d33">
+    <div class="gam-kpi-tile" id="kpi-active" data-kpi="active"
+         style="background:#11131a;padding:8px 6px;text-align:center;cursor:pointer;border-right:1px solid #2a2d33"
+         title="Active mods now (presence ping in last 5m). Click for list.">
+      <div style="font:600 9px/1.2 ui-monospace,monospace;color:#888;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">ACTIVE NOW</div>
+      <div id="kpi-active-val" style="font:700 22px/1 ui-monospace,monospace;color:#f0a040">&mdash;</div>
+    </div>
+    <div class="gam-kpi-tile" id="kpi-clearrate" data-kpi="clearrate"
+         style="background:#11131a;padding:8px 6px;text-align:center;cursor:pointer;border-right:1px solid #2a2d33"
+         title="Queue clear-rate 24h. Stub until /metrics/queue-pressure endpoint lands.">
+      <div style="font:600 9px/1.2 ui-monospace,monospace;color:#888;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">CLR-RATE</div>
+      <div id="kpi-clearrate-val" style="font:700 22px/1 ui-monospace,monospace;color:#f0a040">&mdash;</div>
+    </div>
+    <div class="gam-kpi-tile" id="kpi-mmp50" data-kpi="mmp50"
+         style="background:#11131a;padding:8px 6px;text-align:center;cursor:pointer;border-right:1px solid #2a2d33"
+         title="Modmail p50 response latency. Stub until /metrics/modmail-sla endpoint lands.">
+      <div style="font:600 9px/1.2 ui-monospace,monospace;color:#888;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">MM p50</div>
+      <div id="kpi-mmp50-val" style="font:700 22px/1 ui-monospace,monospace;color:#f0a040">&mdash;</div>
+    </div>
+    <div class="gam-kpi-tile" id="kpi-incidents" data-kpi="incidents"
+         style="background:#11131a;padding:8px 6px;text-align:center;cursor:pointer"
+         title="Open incidents. Coming v11.3 (mod_incidents table).">
+      <div style="font:600 9px/1.2 ui-monospace,monospace;color:#888;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">INCIDENTS</div>
+      <div id="kpi-incidents-val" style="font:700 22px/1 ui-monospace,monospace;color:#f0a040">0</div>
+    </div>
+  </div>
+
+  <!-- v10.x: Quick-actions row (lead-only, same visibility as leadKpiRow) -->
+  <div id="leadQuickActions" style="display:none;display:flex;gap:4px;margin:0 0 8px">
+    <button id="qaInviteBtn" class="pop-btn pop-btn-ghost" style="flex:1;font-size:11px"
+            title="Generate invite link and copy to clipboard immediately.">+ Invite</button>
+    <button id="qaRotateAllBtn" class="pop-btn pop-btn-ghost" style="flex:1;font-size:11px"
+            title="Issue rotation invites for all mods past their rotation window.">Rotate all</button>
+    <button id="qaBugsBtn" class="pop-btn pop-btn-ghost" style="flex:1;font-size:11px"
+            title="Open bug reports panel.">Bugs <span id="qaBugsBadge" style="display:none;background:#cc3333;color:#fff;padding:1px 5px;border-radius:8px;font-size:10px;margin-left:2px"></span></button>
+    <a id="qaChatBtn" class="pop-btn pop-btn-ghost" style="flex:1;font-size:11px;text-align:center"
+       href="https://greatawakening.win/mod/chat" target="_blank"
+       title="Open ModChat (new tab until embeddable).">Chat</a>
+  </div>
+
+  <!-- v10.x: Lapsed mods card (lead-only) -->
+  <div id="lapsedModsCard" style="display:none;margin:0 0 8px;border:1px solid #2a2d33;background:#11131a">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-bottom:1px solid #2a2d33">
+      <span style="font:600 10px/1 ui-monospace,monospace;color:#f0a040;text-transform:uppercase;letter-spacing:0.1em">LAPSED <span id="lapsedModsCount"></span></span>
+      <button id="lapsedPingAllBtn" class="pop-btn pop-btn-ghost" style="font-size:10px;padding:2px 6px">Ping all</button>
+    </div>
+    <div id="lapsedModsList" style="max-height:180px;overflow:auto"></div>
+    <div style="padding:4px 8px;border-top:1px solid #2a2d33;display:flex;align-items:center;gap:6px">
+      <label style="font-size:10px;color:#888;flex:1">Lapse threshold (days)</label>
+      <input id="lapsedThresholdInput" type="number" min="7" max="60" value="21"
+             style="width:50px;padding:2px 6px;background:#050507;color:#e5e9f0;border:1px solid #3b414d;font:inherit;font-size:10px">
+    </div>
+    <div id="lapsedModsStatus" class="pop-token-status"></div>
+  </div>
+
+    </div><!-- /.gam-card-body lead -->
+  </details><!-- /#card-lead -->
 
   <!-- v7.2 Platform Hardening: Claim invite button. When platformHardening is
        on, URL-detected invite codes are staged into chrome.storage.session by
@@ -460,6 +594,14 @@
     <button id="claimInviteBtn" class="pop-btn pop-btn-ghost">&#x1F4E8; Claim invite</button>
     <div id="claimInviteStatus" class="pop-token-status"></div>
   </div>
+  <!-- v10.x: Restart setup button (non-destructive wizard re-entry) -->
+  <div id="restartSetupWrap" style="display:none;margin:6px 8px 0;text-align:right">
+    <button id="restartSetupBtn" class="pop-link" style="font-size:10.5px;color:#5a5752">
+      Re-enter credentials
+    </button>
+  </div>
+    </div><!-- /.gam-card-body tokens -->
+  </details><!-- /#card-tokens -->
 
   <div class="pop-footer">
     <button id="exportBtn" class="pop-link">Export log</button>

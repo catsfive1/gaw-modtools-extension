@@ -97,11 +97,35 @@ html, body {
 }
 
 /* ── Action buttons ─────────────────────────────────────────────────── */
+/* v10.4: 4-column grid replaces the single-column stack to kill the
+   "mostly negative space" UI Commander flagged. Each cell is icon-above-
+   uppercase-label, min-height 44px tap target, flex-column inside. */
 .pop-actions {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 4px;
   padding: 0 12px 8px;
+}
+.pop-actions .pop-btn {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 2px !important;
+  padding: 6px 4px !important;
+  min-height: 44px !important;
+  text-align: center !important;
+  white-space: normal !important;
+}
+.pop-actions .pop-btn .pop-btn-icon {
+  font-size: 16px !important;
+  line-height: 1 !important;
+}
+.pop-actions .pop-btn .pop-btn-label {
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
 }
 .pop-btn {
   display: block;
@@ -126,7 +150,7 @@ html, body {
   border-color: #4A9EFF;
   color: #fff;
   font-size: 12px;
-  padding: 7px 12px;
+  padding: 8px 12px;
 }
 .pop-btn-primary:hover {
   background: #5aadff;
@@ -181,7 +205,7 @@ html, body {
 }
 .pop-btn-ghost {
   flex: 1;
-  padding: 5px 8px;
+  padding: 4px 8px;
   background: transparent;
   border: 1px solid #2a2f38;
   border-radius: 4px;
@@ -259,7 +283,7 @@ html, body {
   border-radius: 4px;
   color: #e8eaed;
   font: 11px 'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;
-  padding: 5px 8px;
+  padding: 4px 8px;
   outline: none;
   transition: border-color .12s;
   min-width: 0;
@@ -356,7 +380,7 @@ html, body {
   color: #e8eaed;
   border: 0;
   border-radius: 4px;
-  padding: 4px 10px;
+  padding: 4px 8px;
   cursor: pointer;
   font-size: 12px;
 }
@@ -365,7 +389,7 @@ html, body {
   color: #fff;
   border: 0;
   border-radius: 4px;
-  padding: 4px 10px;
+  padding: 4px 8px;
   cursor: pointer;
   font-size: 12px;
 }
@@ -430,8 +454,9 @@ html, body {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  border-bottom: 1px solid #2a2f38;
-  background: linear-gradient(180deg, #1c2028 0%, #181b20 100%);
+  border-bottom: 2px solid var(--bb-amber, #ff9933);
+  /* v10.4: gradient → flat per Bloomberg "no gradients" rule. */
+  background: var(--bb-panel, #181b20);
 }
 .pop-drill-title {
   font-size: 12px;
@@ -529,7 +554,7 @@ html, body {
 .pop-drill-pill.pending { background: rgba(74,158,255,.14); color: #4A9EFF; }
 .pop-drill-pill.dr { background: rgba(167,139,250,.16); color: #a78bfa; }
 .pop-drill-pill.ready { background: rgba(240,64,64,.20); color: #f06060; }
-.pop-drill-pill.note { background: rgba(240,160,64,.14); color: #f0a040; }
+.pop-drill-pill.note { background: rgba(240,160,64,.14); color: var(--bb-warn); }
 .pop-drill-pill.msg { background: rgba(61,214,140,.14); color: #3dd68c; }
 .pop-drill-pill.ban { background: rgba(240,64,64,.16); color: #f06060; }
 
@@ -563,7 +588,7 @@ html, body {
 }
 .pop-maint-row .pop-btn-ghost {
   text-align: left;
-  padding: 5px 10px;
+  padding: 4px 8px;
 }
 .pop-maint-status {
   padding: 0 4px;
@@ -572,7 +597,7 @@ html, body {
   margin-top: 0;
 }
 .pop-maint-status:empty { display: none; }
-.pop-maint-status.warn { color: #f0a040; }
+.pop-maint-status.warn { color: var(--bb-warn); }
 
 /* Header warning chip — fired by the gam_maint_warning storage flag. */
 .pop-maint-chip {
@@ -582,7 +607,7 @@ html, body {
   border-radius: 8px;
   margin-left: 6px;
   background: rgba(240,160,64,.16);
-  color: #f0a040;
+  color: var(--bb-warn);
   border: 1px solid rgba(240,160,64,.4);
   cursor: pointer;
   letter-spacing: 0.2px;
@@ -595,9 +620,9 @@ html, body {
   padding: 4px 8px;
   background: rgba(240,160,64,.10);
   border: 1px solid rgba(240,160,64,.4);
-  border-left: 3px solid #f0a040;
+  border-left: 3px solid var(--bb-warn);
   border-radius: 4px;
-  color: #f0a040;
+  color: var(--bb-warn);
   font-size: 10px;
   font-weight: 600;
   line-height: 1.4;
@@ -630,7 +655,7 @@ html, body {
 .pop-maint-roster-row:last-child { border-bottom: 0; }
 .pop-maint-roster-row .name { color: #e8eaed; font-weight: 600; }
 .pop-maint-roster-row .age.green { color: #3dd68c; }
-.pop-maint-roster-row .age.yellow { color: #f0a040; }
+.pop-maint-roster-row .age.yellow { color: var(--bb-warn); }
 .pop-maint-roster-row .age.red { color: #f04040; font-weight: 700; }
 .pop-maint-roster-row button {
   font-size: 10px;
@@ -666,12 +691,43 @@ html, body {
   --bb-cyan:      #66ccff;
   --bb-cyan-bg:   rgba(102,204,255,0.10);
   --bb-yellow:    #ffd84d;
+  /* v10.4: --bb-warn promoted to a real CSS variable. Pre-fix the warn
+     hue (#f0a040) was hard-coded at 6 sites; this is the canonical
+     token for "near-warning" status (chips, drill pills, etc.). */
+  --bb-warn:      #f0a040;
+  --bb-warn-bg:   rgba(240,160,64,0.10);
+  --bb-purple:    #a78bfa;
+  --bb-purple-bg: rgba(167,139,250,0.10);
   --bb-r: 0;
   --bb-s1: 2px; --bb-s2: 4px; --bb-s3: 6px; --bb-s4: 8px;
   --bb-s5: 12px; --bb-s6: 16px; --bb-s7: 24px;
   --bb-font: ui-monospace, "JetBrains Mono", "IBM Plex Mono", "Cascadia Code", "Consolas", "Menlo", monospace;
   --bb-t-xs: 10px; --bb-t-sm: 11px; --bb-t-base: 12px;
   --bb-t-md: 13px; --bb-t-lg: 15px; --bb-t-xl: 18px; --bb-t-xxl: 22px;
+  /* v10.5: GAM Motion Grammar — 5 canonical duration/easing classes */
+  --gam-dur-micro:      80ms;
+  --gam-dur-appear:     160ms;
+  --gam-dur-disappear:  120ms;
+  --gam-dur-decision:   200ms;
+  --gam-ease-decelerate: cubic-bezier(0,0,0.2,1);
+  --gam-ease-accelerate: cubic-bezier(0.4,0,1,1);
+  --gam-ease-spring:     cubic-bezier(0.34,1.56,0.64,1);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --gam-dur-micro:     0ms;
+    --gam-dur-appear:    0ms;
+    --gam-dur-disappear: 0ms;
+    --gam-dur-decision:  0ms;
+  }
+}
+
+/* v10.5: Universal focus ring -- WCAG 2.2 SC 2.4.11 compliant.
+   3px solid amber + 5px rgba glow. outline-offset:2px prevents clipping. */
+:focus-visible {
+  outline: 3px solid var(--bb-amber);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px rgba(255, 176, 0, 0.25);
 }
 
 /* Iter 1-2: body / global */
@@ -723,16 +779,21 @@ body {
   background: rgba(255,153,51,0.08) !important;
 }
 .pop-tab:focus-visible {
-  outline: 1px solid var(--bb-amber) !important;
-  outline-offset: -1px !important;
+  outline: 3px solid var(--bb-amber);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px rgba(255, 176, 0, 0.25);
 }
 
-/* Iter 3: header / brand */
+/* Iter 3: header / brand
+   v10.4: bottom border becomes 2px amber (was 1px neutral line-hot) so the
+   header has a single clear brand signal — no gradient required. The
+   gradient at popup.css:35 is overridden by the var(--bb-bg) flat fill
+   here; this rule wins via specificity + Bloomberg cascade order. */
 .pop-header,
 .pop-brand,
 header.pop-header {
   background: var(--bb-bg) !important;
-  border-bottom: 1px solid var(--bb-line-hot) !important;
+  border-bottom: 2px solid var(--bb-amber) !important;
   border-radius: 0 !important;
   padding: var(--bb-s4) var(--bb-s5) !important;
   font: 600 var(--bb-t-sm)/1.2 var(--bb-font) !important;
@@ -907,14 +968,11 @@ input:focus, textarea:focus, select:focus {
   padding: var(--bb-s5) !important;
   margin: var(--bb-s4) 0 !important;
 }
-#pop-drill::before, .pop-drill::before {
-  content: "DRILL // ";
-  color: var(--bb-amber);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  font-size: var(--bb-t-xs);
-  text-transform: uppercase;
-}
+/* v10.3: removed the "DRILL // " ::before prefix. The panel already has
+   a JS-driven title (`#pop-drill-title` populated from __DRILL_TITLES)
+   like "Pending users (awaiting triage)" — descriptive on its own.
+   The "DRILL //" prefix was Bloomberg-aesthetic decoration stacked on
+   top of a working title and read as noise (Commander). */
 #pop-drill table, .pop-drill table {
   width: 100%;
   border-collapse: collapse;
@@ -1178,4 +1236,153 @@ input[type="checkbox"]:checked::after {
 /* Iter 22: reduced motion */
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   v10.0 — Token field 3-dimension differentiation
+   Closes advocate groan #2: "🔑 vs 👑 too subtle at 12px." Three distinct
+   visual signals between TEAM (neutral) and LEAD (purple authority):
+     1. icon weight (outline key   vs filled crown — intrinsic in the unicode
+        glyph, but reinforced by color)
+     2. label color (neutral grey  vs purple)
+     3. left accent rail (none     vs 2px solid purple, like Linear's
+        "pro feature" indicator)
+   The lead field also gets a subtle purple background tint and a purple
+   focus ring. Pasting into the wrong slot becomes physically obvious before
+   the keystroke completes.
+   ════════════════════════════════════════════════════════════════════════ */
+#leadSection {
+  position: relative;
+}
+#leadSection::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--bb-amber-dim) !important;
+  pointer-events: none;
+}
+#leadSection > label[for="leadInput"],
+#leadSection .pop-token-hint {
+  color: #a78bfa !important;
+}
+#leadSection > label[for="leadInput"] {
+  font-weight: 700 !important;
+  letter-spacing: 0.12em !important;
+}
+#leadInput {
+  border-color: rgba(167,139,250,0.35) !important;
+  background: rgba(167,139,250,0.04) !important;
+}
+#leadInput:focus {
+  border-color: #a78bfa !important;
+  box-shadow: inset 0 0 0 1px #a78bfa !important;
+}
+
+/* Reinforce TEAM token field as the neutral-default counterpart so the two
+   read distinctly even at a glance without seeing the icons. */
+.pop-token > label[for="tokenInput"] {
+  color: var(--bb-amber) !important;
+}
+#tokenInput {
+  border-color: var(--bb-line-hot) !important;
+}
+
+/* v10.1 — Maintenance pareto: <details> accordion for advanced diagnostics.
+   Closes advocate groan #1 ("11 stacked Maintenance buttons with developer
+   jargon"). Visible level keeps 4 mod-friendly buttons; this hides the
+   6 advanced/diagnostic ones until the mod opts in. */
+.pop-maint-advanced {
+  margin-top: var(--bb-s3) !important;
+  border-top: 1px dashed var(--bb-line-hot) !important;
+  padding-top: var(--bb-s3) !important;
+}
+.pop-maint-advanced > summary {
+  cursor: pointer;
+  list-style: none;
+  font: 600 var(--bb-t-xs)/1.2 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.1em !important;
+  padding: var(--bb-s2) var(--bb-s4) !important;
+  user-select: none;
+  outline: none;
+  transition: color 100ms ease-out, background-color 100ms ease-out;
+}
+.pop-maint-advanced > summary::-webkit-details-marker { display: none; }
+.pop-maint-advanced > summary::before {
+  content: "▸ ";
+  display: inline-block;
+  margin-right: var(--bb-s2);
+  color: var(--bb-amber-dim);
+  transition: transform 120ms ease-out;
+}
+.pop-maint-advanced[open] > summary::before {
+  content: "▾ ";
+  color: var(--bb-amber);
+}
+.pop-maint-advanced > summary:hover {
+  color: var(--bb-amber) !important;
+  background: rgba(255,153,51,0.04) !important;
+}
+.pop-maint-advanced > summary:focus-visible {
+  outline: 1px solid var(--bb-amber) !important;
+  outline-offset: -1px !important;
+}
+.pop-maint-advanced[open] {
+  background: rgba(255,153,51,0.02);
+}
+
+/* v10.5: Empty state shared component (.gam-empty-state / .gam-empty-card)
+   4 semantic categories: calm (A), notice (B), onboarding (C), error (D).
+   Mirrors modtools.js renderEmptyState() visual spec. */
+.gam-empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 16px;
+  text-align: center;
+  background: transparent;
+}
+.gam-empty-icon { color: var(--bb-ink-faint); }
+.gam-empty-headline {
+  font: 600 13px/1.3 var(--bb-font);
+  color: var(--bb-ink);
+}
+.gam-empty-desc {
+  font: 400 11px/1.5 var(--bb-font);
+  color: var(--bb-ink-dim);
+  max-width: 280px;
+}
+.gam-empty-cta {
+  margin-top: 2px;
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid var(--bb-amber);
+  color: var(--bb-amber);
+  cursor: pointer;
+  font: 600 11px/1.2 var(--bb-font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.gam-empty-cta:hover { background: var(--bb-amber-bg); }
+
+/* Category color overrides */
+/* A: calm (normal/all-clear) -- icon gray */
+.gam-empty-card.gam-empty-calm .gam-empty-icon { color: var(--bb-ink-faint); }
+/* B: notice (action needed) -- icon amber */
+.gam-empty-card.gam-empty-notice .gam-empty-icon { color: var(--bb-amber); }
+/* C: onboarding (first run) -- icon cyan */
+.gam-empty-card.gam-empty-onboarding .gam-empty-icon { color: var(--bb-cyan); }
+/* D: error (broken state) -- icon red */
+.gam-empty-card.gam-empty-error .gam-empty-icon { color: var(--bb-red); }
+.gam-empty-card.gam-empty-error .gam-empty-cta {
+  border-color: var(--bb-red);
+  color: var(--bb-red);
+}
+.gam-empty-card.gam-empty-error .gam-empty-cta:hover {
+  background: var(--bb-red-bg);
 }

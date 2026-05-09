@@ -4,9 +4,7 @@ Audience: agents. Priority-ordered. Each item: scope envelope + files + done-cri
 
 ## TIER 1 — IN FLIGHT
 
-| id | item | status |
-|---|---|---|
-| **v9.5.0** | Maintenance Mode (12 routines + 4 alarms + lead health report + backlog doc) | sub-agent `acd46b305abfad88d` building. Done when ZIP appears in `dist/`. Commit + push, update AGENT_BRIEF version state. |
+(No items currently in flight — all previous TIER 1 shipped through v10.4.0)
 
 ## TIER 1 — REQUIRES COMMANDER (legitimate §10 carve-outs)
 
@@ -34,7 +32,6 @@ Audience: agents. Priority-ordered. Each item: scope envelope + files + done-cri
 | **TS-6** | force-NULL plaintext column on the 13 still-legacy unrotated mod_tokens rows | one-shot worker endpoint OR `wrangler d1 execute` | `SELECT COUNT(*) FROM mod_tokens WHERE token IS NOT NULL AND token_hash IS NOT NULL` returns 0 |
 | **TS-7** | remove `MOD_TOKEN` wrangler secret after 1-week soak | `npx wrangler secret delete MOD_TOKEN` | after 2026-05-12; checkModToken already does not read it |
 | **TS-8** | `EXTENSION_ID_ALLOWLIST` populated when extension hits CWS | wrangler.jsonc vars | env-var contains the published CWS extension ID |
-| **TS-9** | manifest `"key"` field for deterministic unpacked-install IDs | manifest.json | RSA pubkey base64 in manifest; install ID stable across mods |
 | **TS-10** | pre-028 mutated `action` rows boundary marker | one-shot D1 update | KV `audit_pre_028_boundary_id` set to `MAX(id) WHERE correlated_action IS NULL AND action LIKE 'ban.confirmed%'` at deploy time |
 
 ## TIER 3 — Architectural / multi-day

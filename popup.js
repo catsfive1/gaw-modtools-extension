@@ -21,6 +21,345 @@ const GAW_TAB_PATTERNS = ['*://greatawakening.win/*', '*://*.greatawakening.win/
 
 function $(id) { return document.getElementById(id); }
 
+// =============================================================================
+// v10.x PATCH 1 — Collapsible Cards System
+// =============================================================================
+// Card IDs: tokens | maint | tools | macros | lead
+// Storage key: gam_card_open_{id} -> boolean
+// 400ms write debounce prevents burst writes on rapid toggle.
+
+const _cardWriteTimers = {};
+
+async function _cardRestoreAll() {
+  const ids = ['tokens', 'maint', 'tools', 'macros', 'lead'];
+  const keys = ids.map(function(id) { return 'gam_card_open_' + id; });
+  try {
+    const data = await chrome.storage.local.get(keys);
+    ids.forEach(function(id) {
+      const el = document.getElementById('card-' + id);
+      if (!el) return;
+      const stored = data['gam_card_open_' + id];
+      // undefined = first visit = use HTML default (open attribute present)
+      if (stored === false) el.removeAttribute('open');
+      else if (stored === true) el.setAttribute('open', '');
+    });
+  } catch (_) {}
+}
+
+function _cardWireToggle(id) {
+  const el = document.getElementById('card-' + id);
+  if (!el) return;
+  el.addEventListener('toggle', function() {
+    clearTimeout(_cardWriteTimers[id]);
+    _cardWriteTimers[id] = setTimeout(function() {
+      // v10.5.1 INVARIANT: always write boolean (el.open is already bool, but guard explicitly)
+      const openBool = el.open === true;
+      chrome.storage.local.set({ ['gam_card_open_' + id]: openBool }).catch(function() {});
+    }, 400);
+  });
+}
+
+(async function initCards() {
+  await _cardRestoreAll();
+  ['tokens', 'maint', 'tools', 'macros', 'lead'].forEach(_cardWireToggle);
+})();
+
+// Auto-collapse tokens card when auth succeeds (whoamiOk=true) or fail (false)
+async function _cardAutoCollapseTokens(whoamiOk) {
+  const card = document.getElementById('card-tokens');
+  if (!card) return;
+  if (whoamiOk) {
+    card.removeAttribute('open');
+    chrome.storage.local.set({ gam_card_open_tokens: false }).catch(function() {});
+    card.classList.add('gam-card-order-last');
+    card.classList.remove('gam-card-urgent');
+  }
+}
+
+function _cardAuthFailed() {
+  const card = document.getElementById('card-tokens');
+  if (!card) return;
+  card.setAttribute('open', '');
+  card.classList.remove('gam-card-order-last');
+  card.classList.add('gam-card-urgent');
+}
+
+function _cardWizardComplete() {
+  const card = document.getElementById('card-tokens');
+  if (!card) return;
+  card.removeAttribute('open');
+  card.classList.add('gam-card-order-last');
+  const badge = document.getElementById('card-badge-tokens');
+  if (badge && !badge.querySelector('.gam-card-rerun')) {
+    const btn = document.createElement('button');
+    btn.className = 'pop-btn pop-btn-ghost gam-card-rerun';
+    btn.style.cssText = 'font-size:9px;padding:1px 6px;min-height:0;height:18px;line-height:1';
+    btn.textContent = 'Re-run setup';
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      const wiz = document.getElementById('firstRunWizard');
+      if (wiz) { wiz.style.display = ''; }
+      ['firstRunWizardStep1','firstRunWizardStep2','firstRunWizardSuccess']
+        .forEach(function(eid, i) {
+          const el2 = document.getElementById(eid);
+          if (el2) el2.style.display = i === 0 ? '' : 'none';
+        });
+      card.setAttribute('open', '');
+    });
+    badge.style.display = '';
+    badge.appendChild(btn);
+  }
+  chrome.storage.local.set({ gam_card_open_tokens: false }).catch(function() {});
+}
+// =============================================================================
+// END PATCH 1
+// =============================================================================
+
+// =============================================================================
+// v10.x PATCH 5 — Shared empty-state renderer (popup context)
+// =============================================================================
+(function __installPopupEmptyState() {
+  if (window.__gamEmptyStateReady) return;
+  window.__gamEmptyStateReady = true;
+  const s = document.createElement('style');
+  s.textContent = [
+    '.gam-empty-card{display:flex;flex-direction:column;align-items:center;gap:10px;',
+    'padding:24px 16px;text-align:center;background:none}',
+    '.gam-empty-icon{color:#5c6370}',
+    '.gam-empty-headline{font-size:13px;font-weight:600;color:#e8eaed}',
+    '.gam-empty-desc{font-size:11px;color:#8b929e;max-width:280px;line-height:1.5}',
+    '.gam-empty-cta{margin-top:2px;padding:6px 14px;background:transparent;',
+    'border:1px solid #ff9933;color:#ff9933;cursor:pointer;font:600 11px ui-monospace,monospace;',
+    'letter-spacing:0.06em;text-transform:uppercase}',
+    '.gam-empty-cta:hover{background:rgba(255,153,51,0.10)}'
+  ].join('');
+  (document.head || document.body).appendChild(s);
+})();
+
+const GAM_EMPTY_SVG = {
+  'modmail-empty':  '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
+  'users-empty':    '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.2"/><path d="M15 20a4 4 0 0 1 6 0"/></svg>',
+  'check-circle':   '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-5"/></svg>',
+  'error-octagon':  '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.6"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+  'rules-empty':    '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>'
+};
+
+function gamEmptyState(opts) {
+  const o = opts || {};
+  const card = document.createElement('div');
+  card.className = 'gam-empty-card';
+  card.setAttribute('role', 'status');
+  if (o.icon && GAM_EMPTY_SVG[o.icon]) {
+    const iw = document.createElement('div');
+    iw.className = 'gam-empty-icon';
+    iw.innerHTML = GAM_EMPTY_SVG[o.icon]; // STATIC constants - XSS-safe
+    card.appendChild(iw);
+  }
+  if (o.headline) {
+    const h = document.createElement('div');
+    h.className = 'gam-empty-headline';
+    h.textContent = String(o.headline);
+    card.appendChild(h);
+  }
+  if (o.desc) {
+    const d = document.createElement('div');
+    d.className = 'gam-empty-desc';
+    d.textContent = String(o.desc);
+    card.appendChild(d);
+  }
+  if (o.ctaLabel && typeof o.ctaFn === 'function') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'gam-empty-cta';
+    btn.textContent = String(o.ctaLabel);
+    btn.addEventListener('click', function(e) { try { o.ctaFn(e); } catch(_) {} });
+    card.appendChild(btn);
+  }
+  return card;
+}
+// =============================================================================
+// END PATCH 5 — gamEmptyState
+// =============================================================================
+
+// =============================================================================
+// v10.x PATCH 6 — Proactive Notice Library
+// =============================================================================
+async function _shouldShowNotice(id) {
+  return new Promise(function(resolve) {
+    try {
+      chrome.storage.local.get(['gam_notice_' + id + '_dismissed'], function(r) {
+        resolve(!r['gam_notice_' + id + '_dismissed']);
+      });
+    } catch (_) { resolve(true); }
+  });
+}
+
+function gamProactiveNotice(opts) {
+  const id            = opts.id;
+  const severity      = opts.severity || 'warn';
+  const headline      = opts.headline || '';
+  const body          = opts.body || '';
+  const actionLabel   = opts.action_label;
+  const actionFn      = opts.action_fn;
+  const persistDismiss  = opts.persist_dismiss !== false;
+  const onePerSession   = !!opts.one_per_session;
+  const autoClearCond   = opts.auto_clear_condition;
+
+  const STORE_KEY   = 'gam_notice_' + id + '_dismissed';
+  const SESSION_KEY = 'gam_notice_shown_' + id;
+
+  if (onePerSession && sessionStorage.getItem(SESSION_KEY)) return { teardown: function() {} };
+  sessionStorage.setItem(SESSION_KEY, '1');
+
+  const PALETTE = {
+    warn:     { bg: '#1a0f00', accent: '#ff9933' },
+    alert:    { bg: '#1a0000', accent: '#ff3333' },
+    incident: { bg: '#1a001a', accent: '#ff33ff' }
+  };
+  const pal = PALETTE[severity] || PALETTE.warn;
+  const bg = pal.bg;
+  const accent = pal.accent;
+
+  const wrap = document.createElement('div');
+  wrap.id = 'gam-notice-' + id;
+  wrap.style.cssText = [
+    'position:fixed;top:0;left:0;right:0;z-index:2147483640',
+    'background:' + bg + ';border-bottom:2px solid ' + accent,
+    'color:' + accent + ';font:600 12px/1.4 ui-monospace,JetBrains Mono,Consolas,monospace',
+    'padding:10px 16px;box-shadow:0 2px 12px rgba(0,0,0,0.6);letter-spacing:0.04em',
+    'display:flex;align-items:center;gap:12px'
+  ].join(';');
+
+  const safeHeadline = String(headline).replace(/[<>&"]/g, function(c) {
+    return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c];
+  });
+  const safeBody = String(body).replace(/[<>&"]/g, function(c) {
+    return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c];
+  });
+
+  const actionHTML = actionLabel
+    ? '<button id="gam-notice-' + id + '-action"' +
+      ' style="background:' + accent + ';color:#000;border:0;padding:3px 10px;' +
+      'font:700 11px ui-monospace,monospace;cursor:pointer;letter-spacing:0.06em"' +
+      '>' + String(actionLabel).replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }) + '</button>'
+    : '';
+
+  wrap.innerHTML = '<span style="flex:1"><strong>' + safeHeadline + '</strong>' +
+    '<span style="font-weight:400;margin-left:8px;opacity:0.85">' + safeBody + '</span></span>' +
+    actionHTML +
+    '<button id="gam-notice-' + id + '-dismiss"' +
+    ' style="background:transparent;color:' + accent + ';border:1px solid ' + accent + ';' +
+    'padding:2px 8px;font:600 11px ui-monospace,monospace;cursor:pointer">X</button>';
+
+  const prevPad = (document.body && document.body.style.paddingTop) || '';
+  try { document.body.style.paddingTop = '52px'; } catch (_) {}
+  try { document.documentElement.appendChild(wrap); } catch (_) {
+    try { document.body.appendChild(wrap); } catch (_) {}
+  }
+
+  const teardown = function() {
+    try { wrap.remove(); } catch (_) {}
+    try { document.body.style.paddingTop = prevPad; } catch (_) {}
+  };
+
+  const dismiss = async function() {
+    if (persistDismiss) {
+      try { await chrome.storage.local.set({ [STORE_KEY]: Date.now() }); } catch (_) {}
+    }
+    teardown();
+  };
+
+  const dismissBtn = document.getElementById('gam-notice-' + id + '-dismiss');
+  if (dismissBtn) dismissBtn.addEventListener('click', dismiss);
+  if (actionLabel) {
+    const actBtn = document.getElementById('gam-notice-' + id + '-action');
+    if (actBtn) actBtn.addEventListener('click', function() { if (actionFn) actionFn(teardown); });
+  }
+
+  if (autoClearCond) {
+    const iv = setInterval(async function() {
+      try { if (await autoClearCond()) { clearInterval(iv); teardown(); } } catch (_) {}
+    }, 15000);
+  }
+
+  return { teardown: teardown };
+}
+
+// N-01: Token age > 75 days
+(async function __noticeTokenAge() {
+  try {
+    if (!await _shouldShowNotice('token_age_75')) return;
+    const out = await chrome.storage.local.get('gam_settings');
+    const settings = (out && out.gam_settings) || {};
+    const issued = settings.tokenIssuedAt;
+    if (!issued) return;
+    const daysOld = (Date.now() - issued) / 86400000;
+    if (daysOld < 75) return;
+    const daysLeft = Math.max(0, 90 - Math.floor(daysOld));
+    gamProactiveNotice({
+      id: 'token_age_75',
+      severity: 'warn',
+      headline: 'TOKEN EXPIRY IN ' + daysLeft + ' DAY' + (daysLeft !== 1 ? 'S' : ''),
+      body: 'Issued ' + new Date(issued).toLocaleDateString() + '. Re-claim before the 90-day hard cutoff.',
+      action_label: 'RE-CLAIM TOKEN',
+      action_fn: function() {
+        chrome.runtime.sendMessage({ type: 'GAM_OPEN_POPUP', view: 'token-claim' });
+      },
+      persist_dismiss: true,
+      auto_clear_condition: async function() {
+        const s2 = await chrome.storage.local.get('gam_settings');
+        return !!(s2 && s2.gam_settings && s2.gam_settings.tokenIssuedAt > issued);
+      }
+    });
+  } catch (_) {}
+})();
+
+// N-02: AI budget >= 80%
+(async function __noticeAiBudget() {
+  try {
+    if (!await _shouldShowNotice('ai_budget_80')) return;
+    const out = await chrome.storage.local.get('gam_settings');
+    const settings = (out && out.gam_settings) || {};
+    const used = settings.aiUsageToday || 0;
+    const limit = settings.aiDailyLimit || 0;
+    if (!limit || (used / limit) < 0.80) return;
+    const pct = Math.round((used / limit) * 100);
+    gamProactiveNotice({
+      id: 'ai_budget_80',
+      severity: 'warn',
+      headline: 'AI BUDGET ' + pct + '% CONSUMED',
+      body: used + ' of ' + limit + ' AI calls used today. Manual summaries required after this point.',
+      action_label: 'VIEW USAGE',
+      action_fn: function(teardown) { teardown(); },
+      persist_dismiss: false,
+      one_per_session: true
+    });
+  } catch (_) {}
+})();
+
+// N-03: Watched user posts - wired into feed via modtools content script events.
+// The notice function is exposed so modtools.js can call it when a watched post arrives.
+window.__gamNoticeWatchedPost = function(post) {
+  try {
+    const noticeId = 'watched_post_' + String(post.id || Date.now());
+    gamProactiveNotice({
+      id: noticeId,
+      severity: 'warn',
+      headline: 'WATCHED USER ACTIVE -- ' + String(post.author || '').toUpperCase(),
+      body: 'Posted in ' + String(post.community || 'the forum') + '. Review before it propagates.',
+      action_label: 'REVIEW POST',
+      action_fn: function(teardown) { teardown(); },
+      persist_dismiss: false
+    });
+    setTimeout(function() {
+      try { document.getElementById('gam-notice-' + noticeId).remove(); } catch (_) {}
+    }, 90000);
+  } catch (_) {}
+};
+// =============================================================================
+// END PATCH 6
+// =============================================================================
+
 // v8.5.3: disable a button for the duration of an async op, restore on finish.
 async function withLoading(btn, label, fn) {
   const orig = btn.textContent;
@@ -465,11 +804,14 @@ async function loadToken() {
       if (status.hasTeamToken) {
         statusEl.className = 'pop-token-status';
         statusEl.textContent = 'stored';
+        // v10.x: tokens card auto-collapse will fire after __applyTierGate whoami
+        // (hasTeamToken alone is insufficient — wait for whoami result)
       } else {
         // v9.2.5: direct new mods (e.g. PresidentialSeal pre-claim) toward
         // the claim flow rather than the dead-end "not configured" message.
         // v9.3.6: clearer first-run guidance per noob-rollout audit.
         statusEl.textContent = '👋 First time? Click 📨 Claim invite below if you have a link, OR 📥 I have a rotation invite to enter the code manually. Both work.';
+        _cardAuthFailed();
       }
       // Show claim-invite wrap when flag on (even before a code is staged --
       // clicking with nothing staged surfaces a clear status message).
@@ -659,49 +1001,220 @@ async function loadLead() {
     await __applyLeadGate();
   } catch (e) {}
 }
-// v9.3.16 (Commander): worker-verified lead gate. Calls modWhoami RPC.
-// Shows #leadSection ONLY if `is_lead === true`. Defaults hidden so a
-// regular mod (PresidentialSeal etc.) NEVER sees the lead surface even
-// if the popup loads before the network call returns.
+// =============================================================================
+// v10.x PATCH 4 \u2014 Multi-Lead tier gate
+// Replaces __applyLeadGate with __applyTierGate.
+// Backward-compat: workers without 'tier' field fall back to is_lead boolean.
+// =============================================================================
+let _gamTier = 'mod'; // fail-closed default
+let _gamWhoamiUsername = '';
+
+// Keep __applyLeadGate as a thin wrapper for any legacy call sites.
 async function __applyLeadGate() {
-  // v9.6.1: gate moved from #leadSection (entire block) to #leadOnlyTools
-  // (sub-block holding rotation roster, invite gen, team settings, lead
-  // maintenance, etc.). The token-input row stays always visible so a fresh
-  // user can paste their lead token without first having to save a team
-  // token (chicken-and-egg fix).
-  // v9.6.2: when the team token already returns is_lead=true (catsfive's
-  // case), surface a hint above the lead-token input that it's now OPTIONAL
-  // -- the worker accepts either x-lead-token OR x-mod-token+is_lead for
-  // every admin endpoint except dual-factor sensitive ops (audit backfill,
-  // health/extended, key rotation). So the lead input is only useful for
-  // those rare dual-factor calls.
+  return await __applyTierGate();
+}
+
+async function __applyTierGate() {
   const tools = $('leadOnlyTools');
   if (!tools) return;
-  // Default hidden until proven lead.
   tools.style.display = 'none';
   try {
-    const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modWhoami' });
-    if (r && r.ok && r.data && r.data.is_lead === true) {
-      tools.style.display = '';
-      // v9.6.2 UX hint: badge the lead-token input as OPTIONAL since the
-      // team token already works for most lead operations.
-      try {
-        const hintHost = $('leadStatus');
-        const lbl = document.querySelector('label[for="leadInput"]');
-        if (lbl && !document.getElementById('lead-optional-hint')){
-          const hint = document.createElement('div');
-          hint.id = 'lead-optional-hint';
-          hint.style.cssText = 'font-size:10.5px;color:#3dd68c;margin:2px 0 4px;';
-          hint.innerHTML = '\u2713 Your team token (' + (r.data.username || 'this account') + ') already authenticates you as lead. ' +
-            'This field is OPTIONAL \u2014 only needed for dual-factor ops (audit backfill, health/extended).';
-          lbl.parentNode.insertBefore(hint, lbl.nextSibling);
-        }
-      } catch(_){}
+    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
+    if (!r || !r.ok || !r.data) {
+      _cardAuthFailed();
+      return;
     }
+    // Backward-compat: tier field or is_lead boolean
+    // v10.5.1 INVARIANT: clamp to known enum; unknown server value fails closed to 'mod'
+    const _rawTier = r.data.tier || (r.data.is_lead ? 'lead' : 'mod');
+    if (!['mod', 'senior_lead', 'lead'].includes(_rawTier)) {
+      console.warn('[ModTools v10.5.1] unexpected tier value from server:', _rawTier, '-- defaulting to mod');
+    }
+    _gamTier = ['mod', 'senior_lead', 'lead'].includes(_rawTier) ? _rawTier : 'mod';
+    _gamWhoamiUsername = r.data.username || '';
+
+    __renderTierBadge(_gamTier);
+    __applyTierVisibility(_gamTier, r);
+    // Auto-collapse tokens card on auth success
+    await _cardAutoCollapseTokens(true);
+    // Show lead KPI row + quick actions for full leads
+    __loadLeadKpi();
   } catch (_) {
-    // Network/auth failure \u2192 stay hidden (fail-closed).
+    // Network/auth failure - stay hidden (fail-closed)
+    _cardAuthFailed();
   }
 }
+
+function __renderTierBadge(tier) {
+  const badge = $('tierBadge');
+  if (!badge) return;
+  if (tier === 'lead') {
+    badge.textContent = 'LEAD';
+    badge.className = 'pop-tier-badge tier-lead';
+    badge.style.display = '';
+  } else if (tier === 'senior_lead') {
+    badge.textContent = 'SR-LEAD';
+    badge.className = 'pop-tier-badge tier-senior-lead';
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function __setSrLeadLoadingHint(visible) {
+  const el = $('srLeadEmptyHint');
+  if (el) el.style.display = visible ? '' : 'none';
+}
+
+function __applyTierVisibility(tier, whoamiData) {
+  const r = whoamiData || {};
+  const data = r.data || r || {};
+
+  // Lead nav tab: only full leads
+  const leadTab = document.querySelector('[data-tab="lead"]');
+  if (leadTab) leadTab.style.display = (tier === 'lead') ? '' : 'none';
+
+  // #leadOnlyTools: visible for senior_lead AND lead
+  const tools = $('leadOnlyTools');
+  if (tools) {
+    tools.style.display = (tier !== 'mod') ? '' : 'none';
+    if (tier === 'senior_lead') __setSrLeadLoadingHint(true);
+  }
+
+  const isFullLead = (tier === 'lead');
+
+  // Lead-exclusive nodes (hidden for senior_lead)
+  const leadExclusive = [
+    'maintAuditVerify', 'maintFullReport',
+    'maintAutoToggle', 'maintAutoSave', 'maintAutoStatus', 'maintRunNow'
+  ];
+  leadExclusive.forEach(function(id) {
+    const el = $(id);
+    if (!el) return;
+    el.style.display = isFullLead ? '' : 'none';
+    const parentRow = el.closest && el.closest('.pop-maint-row');
+    if (parentRow) parentRow.style.display = isFullLead ? '' : 'none';
+  });
+
+  // Bug reports: senior_lead read-only
+  const bugVisSave = $('bugVisSave');
+  const bugVisInput = $('bugVisInput');
+  if (bugVisSave) bugVisSave.style.display = isFullLead ? '' : 'none';
+  if (bugVisInput) bugVisInput.readOnly = !isFullLead;
+
+  // v9.6.2 OPTIONAL hint for lead token input
+  if (tier !== 'mod') {
+    try {
+      const lbl = document.querySelector('label[for="leadInput"]');
+      if (lbl && !document.getElementById('lead-optional-hint')) {
+        const hint = document.createElement('div');
+        hint.id = 'lead-optional-hint';
+        hint.style.cssText = 'font-size:10.5px;color:#3dd68c;margin:2px 0 4px;';
+        hint.innerHTML = '\u2713 Your team token (' + (data.username || 'this account') + ') already authenticates you as lead. ' +
+          'This field is OPTIONAL \u2014 only needed for dual-factor ops (audit backfill, health/extended).';
+        lbl.parentNode.insertBefore(hint, lbl.nextSibling);
+      }
+    } catch (_) {}
+  }
+
+  // Lead KPI row and quick-actions: full lead only
+  const kpiRow = $('leadKpiRow');
+  const qaRow  = $('leadQuickActions');
+  if (kpiRow) kpiRow.style.display = isFullLead ? 'grid' : 'none';
+  if (qaRow)  qaRow.style.display  = isFullLead ? 'flex'  : 'none';
+
+  // Lapsed mods card: full lead only
+  const lapsedCard = $('lapsedModsCard');
+  if (lapsedCard) lapsedCard.style.display = isFullLead ? '' : 'none';
+
+  // Restart setup button: show once visible
+  const rsw = $('restartSetupWrap');
+  if (rsw && tier !== 'mod') rsw.style.display = '';
+
+  if (tier === 'senior_lead') {
+    // Hint auto-hides as soon as content loads
+    setTimeout(function() { __setSrLeadLoadingHint(false); }, 1500);
+  }
+}
+
+// Confirm modal for tier changes (Patch 4)
+function __showConfirmModal(opts) {
+  return new Promise(function(resolve) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText =
+      'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;' +
+      'display:flex;align-items:center;justify-content:center';
+    const safeTitle = String(opts.title || '').replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; });
+    const safeBody2 = String(opts.body  || '').replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; });
+    const safeLbl   = String(opts.confirmLabel || 'Confirm').replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; });
+    const ccls      = String(opts.confirmClass || '');
+    overlay.innerHTML =
+      '<div style="background:#1a1d24;border:1px solid #3b414d;border-radius:6px;' +
+      'padding:16px;max-width:260px;width:90%;font-size:12px;color:#e5e9f0">' +
+      '<div style="font-weight:700;margin-bottom:8px">' + safeTitle + '</div>' +
+      '<div style="color:#9b9892;margin-bottom:14px">' + safeBody2 + '</div>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+      '<button class="pop-btn pop-btn-ghost" id="__cmCancel">Cancel</button>' +
+      '<button class="pop-btn ' + ccls + '" id="__cmConfirm">' + safeLbl + '</button>' +
+      '</div></div>';
+    document.body.appendChild(overlay);
+    overlay.querySelector('#__cmCancel').onclick  = function() { overlay.remove(); resolve(false); };
+    overlay.querySelector('#__cmConfirm').onclick = function() { overlay.remove(); resolve(true);  };
+    overlay.onclick = function(e) { if (e.target === overlay) { overlay.remove(); resolve(false); } };
+  });
+}
+
+function __showToast(msg, type) {
+  // Minimal toast for tier change feedback
+  try {
+    const t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:12px;right:12px;z-index:99999;' +
+      'background:' + (type === 'err' ? '#3a0a0a' : '#0a1f0a') + ';' +
+      'border:1px solid ' + (type === 'err' ? '#ff3333' : '#3dd68c') + ';' +
+      'color:' + (type === 'err' ? '#ff3333' : '#3dd68c') + ';' +
+      'font:600 11px ui-monospace,monospace;padding:6px 12px;border-radius:3px';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(function() { try { t.remove(); } catch (_) {} }, 3000);
+  } catch (_) {}
+}
+
+async function __confirmTierChange(username, selectEl) {
+  const newTier  = selectEl.value;
+  const prevTier = selectEl.dataset.curtier || 'mod';
+  if (newTier === prevTier) return;
+
+  // Revert while modal is open
+  selectEl.value = prevTier;
+
+  const confirmed = await __showConfirmModal({
+    title:        'Change tier for u/' + username,
+    body:         prevTier + ' -> ' + (newTier === 'senior_lead' ? 'sr-lead' : newTier),
+    confirmLabel: 'Confirm',
+    confirmClass: 'pop-btn-danger'
+  });
+  if (!confirmed) return;
+
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: 'rpc', name: 'adminModPromote',
+      payload: { mod_username: username, tier: newTier }
+    });
+    if (r && r.ok) {
+      selectEl.value = newTier;
+      selectEl.dataset.curtier = newTier;
+      selectEl.setAttribute('data-curtier', newTier);
+      __showToast('u/' + username + ' is now ' + newTier, 'ok');
+    } else {
+      __showToast('Promote failed: ' + ((r && r.error) || 'unknown'), 'err');
+    }
+  } catch (e) {
+    __showToast('RPC error: ' + (e && e.message || e), 'err');
+  }
+}
+// =============================================================================
+// END PATCH 4
+// =============================================================================
 
 async function saveLead() {
   const token = $('leadInput').value.trim();
@@ -949,6 +1462,84 @@ async function __issueSingleFromRoster(username, rowEl, tokens) {
   __renderInviteResult(rowEl, { username: data.username, code: data.code }, data.ttl_hours);
 }
 
+// v10.5.0: DM all unrotated mods their rotation invite via Discord.
+// Calls /admin/rotation/dm-all-unrotated and renders per-mod result table inline.
+async function __dmAllUnrotated(panel, tokens) {
+  const unrotated = tokens.filter(m => !m.rotated_at && !m.is_lead);
+  const confirmed = await __popupConfirm({
+    title: 'DM rotation invites to Discord?',
+    body: 'This will DM ' + unrotated.length + ' unrotated mod(s) their rotation invite via Discord. ' +
+          'Mods without a linked Discord account will be listed for manual copy. Proceed?',
+    okLabel: 'Send DMs',
+    cancelLabel: 'Cancel'
+  });
+  if (!confirmed) return;
+
+  const btn = panel.querySelector('[data-dm-all-btn]');
+  if (btn) { btn.textContent = 'Sending...'; btn.disabled = true; }
+
+  let data;
+  try {
+    const resp = await __popupPost('/admin/rotation/dm-all-unrotated', { include_zip: true });
+    data = await resp.json();
+  } catch (e) {
+    if (btn) { btn.textContent = '📨 DM all (error)'; btn.disabled = false; }
+    console.error('[dm-all-unrotated]', e);
+    return;
+  }
+
+  // Replace button with inline result block
+  const container = btn ? btn.parentElement : panel;
+  if (btn) btn.remove();
+
+  const summary = document.createElement('div');
+  summary.style.cssText = 'font-size:11px;color:#888;margin:4px 0 6px';
+  summary.textContent = 'Sent: ' + data.sent + ' | No Discord: ' + data.skipped_no_discord + ' | Errors: ' + data.errors;
+  container.appendChild(summary);
+
+  for (const r of (data.results || [])) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px';
+
+    const name = document.createElement('span');
+    name.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#ccc';
+    name.textContent = r.username;
+    row.appendChild(name);
+
+    const status = document.createElement('span');
+    if (r.ok) {
+      status.style.color = '#4caf50';
+      status.textContent = '✓ DM sent';
+    } else if (r.reason === 'no_discord') {
+      status.style.color = '#ffa726';
+      status.textContent = '(no Discord)';
+      // Fallback: issue a fresh invite and copy link to clipboard
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'pop-btn pop-btn-ghost';
+      copyBtn.style.cssText = 'font-size:10px;padding:2px 6px;margin-left:4px';
+      copyBtn.textContent = 'Copy invite';
+      copyBtn.addEventListener('click', async () => {
+        try {
+          const ir = await __popupPost('/admin/mod/rotation-invite', { mod_username: r.username });
+          const id = await ir.json();
+          if (id.ok && id.code) {
+            await navigator.clipboard.writeText('https://greatawakening.win/?mt_invite=' + id.code);
+            copyBtn.textContent = 'Copied!';
+          } else {
+            copyBtn.textContent = 'Error';
+          }
+        } catch (_) { copyBtn.textContent = 'Error'; }
+      });
+      row.appendChild(copyBtn);
+    } else {
+      status.style.color = '#f44336';
+      status.textContent = '✗ ' + String(r.error || 'failed').slice(0, 50);
+    }
+    row.appendChild(status);
+    container.appendChild(row);
+  }
+}
+
 async function __issueBulkFromRoster(panel, tokens) {
   const ok = await __popupConfirm({
     title: 'Issue invites for ALL unrotated mods?',
@@ -1075,6 +1666,25 @@ function __buildRosterRow(m, tokens) {
     top.appendChild(btn);
   }
 
+  // v10.x Patch 4: tier dropdown (full lead only)
+  if (_gamTier === 'lead') {
+    const tierSel = document.createElement('select');
+    tierSel.className = 'roster-tier-sel';
+    tierSel.dataset.mod = m.mod_username;
+    const curTier = m.tier || (m.is_lead ? 'lead' : 'mod');
+    tierSel.dataset.curtier = curTier;
+    ['mod', 'senior_lead', 'lead'].forEach(function(t) {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t === 'senior_lead' ? 'sr-lead' : t;
+      opt.selected = (curTier === t);
+      tierSel.appendChild(opt);
+    });
+    tierSel.setAttribute('data-curtier', curTier);
+    tierSel.addEventListener('change', function() { __confirmTierChange(m.mod_username, tierSel); });
+    top.appendChild(tierSel);
+  }
+
   row.appendChild(top);
   return row;
 }
@@ -1155,6 +1765,22 @@ async function openRotationRoster() {
       bulkBtn.style.opacity = '0.5';
     }
     header.appendChild(bulkBtn);
+
+    // v10.5.0: DM all unrotated via Discord
+    const dmAllBtn = document.createElement('button');
+    dmAllBtn.id = 'rosterDmAll';
+    dmAllBtn.className = 'pop-btn pop-btn-ghost';
+    dmAllBtn.setAttribute('data-dm-all-btn', '');
+    dmAllBtn.style.cssText = 'font-size:11px;padding:4px 10px;flex-shrink:0;margin-left:4px';
+    if (unrotatedNonLead.length > 0) {
+      dmAllBtn.textContent = '📨 DM all (' + unrotatedNonLead.length + ')';
+      dmAllBtn.addEventListener('click', () => __dmAllUnrotated(panel, tokens));
+    } else {
+      dmAllBtn.textContent = '📨 DM all';
+      dmAllBtn.disabled = true;
+      dmAllBtn.style.opacity = '0.5';
+    }
+    header.appendChild(dmAllBtn);
 
     // v8.5.3: explicit close button — panel can be 380px tall, scrolled away from toggle
     const closeBtn = document.createElement('button');
@@ -1314,6 +1940,7 @@ async function verifyTokenRoundTrip() {
     if (r && r.ok && r.data && r.data.username) {
       status.className = 'pop-token-status ok';
       status.textContent = '✓ verified -- token works as ' + r.data.username;
+      try { await __noteWhoami(r.data.username); } catch(_){}
     } else {
       status.className = 'pop-token-status err';
       status.textContent = '✗ token verification FAILED -- you may be locked out. Use lead-issued rotation invite to recover.';
@@ -1322,6 +1949,58 @@ async function verifyTokenRoundTrip() {
     status.className = 'pop-token-status err';
     status.textContent = 'verify error: ' + (e && e.message || e);
   }
+}
+
+// v10.1: Two-mods-same-machine collision guard. Drive Desktop sync ships
+// a single unpacked/ folder to multiple mod machines. If two mods share
+// a Chrome profile (same gam_settings local store), the second mod's
+// claim-rotation silently overwrites the first's token. Symptom: mod A
+// suddenly authenticates as mod B with no warning. The guard detects when
+// the whoami-resolved username changes and surfaces a non-blocking modal
+// the moment it happens. We don't auto-rollback (the user's intent might
+// be a deliberate switch — e.g. lead testing a non-lead account); we just
+// make the situation impossible to miss.
+async function __noteWhoami(username) {
+  if (!username) return;
+  try {
+    const out = await chrome.storage.local.get('gam_last_whoami_username');
+    const prev = (out && out.gam_last_whoami_username) || '';
+    if (prev && prev !== username) {
+      // Persist the new identity FIRST so dismissing the modal doesn't
+      // re-trigger on the next whoami probe.
+      try { await chrome.storage.local.set({ gam_last_whoami_username: username }); } catch(_){}
+      // Render an in-popup modal (not window.alert — blocking modals are
+      // hostile and skipped by power users).
+      const backdrop = document.createElement('div');
+      backdrop.className = 'gam-pop-modal-backdrop';
+      backdrop.style.zIndex = '2147483647';
+      backdrop.innerHTML =
+        '<div class="gam-pop-modal-panel" style="max-width:420px;border-color:#a78bfa">' +
+          '<div class="gam-pop-modal-title" style="color:#a78bfa">⚠ Identity changed</div>' +
+          '<div class="gam-pop-modal-body">' +
+            'This Chrome profile previously authenticated as <strong style="color:#ffd84d">' + escapeHtml(prev) + '</strong>.\n\n' +
+            'You are now authenticated as <strong style="color:#3dd68c">' + escapeHtml(username) + '</strong>.\n\n' +
+            'If this was intentional (rotation, testing a different account) — fine, dismiss this.\n\n' +
+            'If this was UNEXPECTED (e.g. shared computer, Drive Desktop sync, two mods on the same Chrome profile) — your previous token has been replaced. To prevent silent overwrites, use a separate Chrome profile per mod account.' +
+          '</div>' +
+          '<div class="gam-pop-modal-btnrow">' +
+            '<button class="gam-pop-modal-btn-ok" style="background:#a78bfa">OK, got it</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(backdrop);
+      const dismiss = () => { try { backdrop.remove(); } catch(_){} };
+      const okBtn = backdrop.querySelector('.gam-pop-modal-btn-ok');
+      if (okBtn) okBtn.addEventListener('click', dismiss);
+      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) dismiss(); });
+    } else if (!prev) {
+      // First time we resolve a username — record without warning.
+      try { await chrome.storage.local.set({ gam_last_whoami_username: username }); } catch(_){}
+    }
+  } catch (e) { /* never throw from a guard */ }
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 // Injects the Verify button into rotateStatus parent on first call; subsequent
@@ -1593,7 +2272,25 @@ async function __claimInviteClick() {
       return;
     }
     const out = await chrome.storage.session.get('gam_pending_invite');
-    const code = (out && out.gam_pending_invite) || '';
+    let code = (out && out.gam_pending_invite) || '';
+    // v10.0: fall back to chrome.storage.local backup if session was wiped
+    // (extension reload during onboarding). 5-min TTL on the backup; expire
+    // anything older than that.
+    if (!code) {
+      try {
+        const lo = await chrome.storage.local.get('gam_pending_invite_backup');
+        const bk = lo && lo.gam_pending_invite_backup;
+        if (bk && bk.code && bk.staged_at && (Date.now() - bk.staged_at) < (bk.ttl_ms || 300000)) {
+          code = bk.code;
+          // Re-stage in session so subsequent paths see it.
+          try { await chrome.storage.session.set({ gam_pending_invite: code, gam_pending_invite_for: bk.gaw_username || '', gam_pending_invite_at: bk.staged_at }); } catch(_){}
+          statusEl.textContent = 'recovered staged invite from local backup...';
+        } else if (bk) {
+          // Expired backup -- purge.
+          try { await chrome.storage.local.remove('gam_pending_invite_backup'); } catch(_){}
+        }
+      } catch(_){}
+    }
     if (!code) {
       statusEl.textContent = 'no invite staged \u2014 visit an invite link in a GAW tab';
       return;
@@ -1658,6 +2355,8 @@ async function __claimInviteClick() {
       return;
     }
     try { await chrome.storage.session.remove('gam_pending_invite'); } catch (e) {}
+    // v10.0: also purge the local backup mirror once successfully claimed.
+    try { await chrome.storage.local.remove('gam_pending_invite_backup'); } catch (e) {}
     const claimData = rClaim.data || {};
     statusEl.className = 'pop-token-status ok';
     statusEl.textContent = '\u2713 claimed \u2014 you are now ' + (claimData.mod_username || username);
@@ -1703,13 +2402,28 @@ loadLead();
 (async function initFirstRunWizard() {
   const wiz = $('firstRunWizard');
   if (!wiz) return;
-  // Check if a team token is already saved -- if so, no wizard
+  // v10.3 (Auth Carry-Over RCA primary fix): wizard now reads via the SW
+  // tokensStatus RPC instead of raw chrome.storage.local. Pre-fix the
+  // wizard read local storage directly while loadToken read the SW vault;
+  // after a Drive Desktop sync triggered an extension reload, the SW
+  // session cache was empty while local still held the token — the two
+  // reads disagreed and the wizard popped up for already-authed mods
+  // (catsfive screenshot 2026-05-08). __tokensStatus routes through the
+  // SW which forces loadSecrets() on cold cache, cascading session →
+  // local → IDB; both reads converge. Token found → wizard hides
+  // automatically with zero re-entry required.
   let hasToken = false;
   try {
-    const out = await chrome.storage.local.get('gam_settings');
-    const s = (out && out.gam_settings) || {};
-    hasToken = !!(s.workerModToken && String(s.workerModToken).length >= 32);
-  } catch (_) {}
+    const status = await __tokensStatus();
+    hasToken = !!(status && status.hasTeamToken);
+  } catch (_) {
+    // Fallback to local-storage read so a hard SW failure doesn't strand the wizard
+    try {
+      const out = await chrome.storage.local.get('gam_settings');
+      const s = (out && out.gam_settings) || {};
+      hasToken = !!(s.workerModToken && String(s.workerModToken).length >= 32);
+    } catch (_) {}
+  }
   if (hasToken) {
     wiz.style.display = 'none';
     return;
@@ -1766,6 +2480,14 @@ loadLead();
     $('firstRunStatus').textContent = '';
     showStep(1);
   });
+  // v10.5.1 AFFORDANCE: Done button on success step — collapses the tokens card
+  // so the wizard visually closes. Pre-fix: success screen had no exit affordance.
+  const _firstRunDoneBtn = $('firstRunDone');
+  if (_firstRunDoneBtn) {
+    _firstRunDoneBtn.addEventListener('click', function() {
+      _cardWizardComplete();
+    });
+  }
   $('firstRunGo').addEventListener('click', async () => {
     const input = $('firstRunInput').value.trim();
     const status = $('firstRunStatus');
@@ -1796,13 +2518,14 @@ loadLead();
         // Verify
         const who = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
         if (who && who.ok && who.data && who.data.username) {
+          try { await __noteWhoami(who.data.username); } catch(_){}
           $('firstRunSuccessName').textContent = 'Welcome, u/' + who.data.username + (who.data.is_lead ? ' (lead)' : '');
           showStep(3);
           if (legacyTeamToken) {
             const wrap = legacyTeamToken.closest('.pop-token, .pop-section');
             if (wrap) wrap.style.opacity = '';
           }
-          setTimeout(() => { wiz.style.display = 'none'; try { loadToken(); loadLead(); loadStats(); } catch(_){} }, 5000);
+          setTimeout(() => { _cardWizardComplete(); try { loadToken(); loadLead(); loadStats(); } catch(_){} }, 5000);
         } else {
           status.textContent = 'token minted but whoami probe failed -- try refreshing';
           status.style.color = '#ffd84d';
@@ -1836,13 +2559,14 @@ loadLead();
         }
         const who = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modWhoami' });
         if (who && who.ok && who.data && who.data.username) {
+          try { await __noteWhoami(who.data.username); } catch(_){}
           $('firstRunSuccessName').textContent = 'Welcome, u/' + who.data.username + (who.data.is_lead ? ' (lead)' : '');
           showStep(3);
           if (legacyTeamToken) {
             const wrap = legacyTeamToken.closest('.pop-token, .pop-section');
             if (wrap) wrap.style.opacity = '';
           }
-          setTimeout(() => { wiz.style.display = 'none'; try { loadToken(); loadLead(); loadStats(); } catch(_){} }, 5000);
+          setTimeout(() => { _cardWizardComplete(); try { loadToken(); loadLead(); loadStats(); } catch(_){} }, 5000);
         } else {
           // Likely the user pasted an invite code instead of a token
           status.innerHTML = 'worker rejected as token (HTTP ' + (who && who.status || '?') + '). It looks like you may have pasted an INVITE CODE instead. Click Back and try the "invite CODE" path.';
@@ -2278,11 +3002,21 @@ async function loadBugReports() {
       else { badge.style.display = 'none'; }
     }
     status.className = 'pop-token-status ok';
-    status.textContent = (reports.length === 0
-      ? 'no open reports'
-      : reports.length + ' open · click row to expand')
-      + ' · visibility: ' + (r.data.visible_to || 'leads');
-    reports.forEach(function (row) { __renderBugRow(panel, row, loadBugReports); });
+    if (reports.length === 0) {
+      // v10.x Patch 5 P4: visual empty state for bug reports
+      const emptyCard = (typeof gamEmptyState === 'function')
+        ? gamEmptyState({ icon: 'check-circle', headline: 'No open bug reports', desc: 'Team is clean. Reports appear here as mods submit them.' })
+        : null;
+      if (emptyCard) {
+        panel.appendChild(emptyCard);
+        status.textContent = '0 open · visibility: ' + (r.data.visible_to || 'leads');
+      } else {
+        status.textContent = 'no open reports · visibility: ' + (r.data.visible_to || 'leads');
+      }
+    } else {
+      status.textContent = reports.length + ' open · click row to expand · visibility: ' + (r.data.visible_to || 'leads');
+      reports.forEach(function (row) { __renderBugRow(panel, row, loadBugReports); });
+    }
   } catch (e) {
     status.className = 'pop-token-status err';
     status.textContent = 'network error: ' + (e && e.message || e);
@@ -2647,6 +3381,17 @@ let __lastDrill = { key: null, rows: [], cols: [] };
 function __renderDrillEmpty(key) {
   const body = $('pop-drill-body');
   body.textContent = '';
+  // v10.x Patch 5: visual empty states for high-visibility drill variants
+  const visualSpecs = {
+    dr:      { icon: 'check-circle', headline: 'Death Row clear',     desc: 'No users scheduled for banning.' },
+    pending: { icon: 'users-empty',  headline: 'Triage queue clear',  desc: 'No new users waiting. Run a /users crawl to refresh.' }
+  };
+  const spec = visualSpecs[key];
+  if (spec && typeof gamEmptyState === 'function') {
+    body.appendChild(gamEmptyState(spec));
+    return;
+  }
+  // Fallback: v8.0 text
   const wrap = document.createElement('div');
   wrap.className = 'pop-drill-empty';
   wrap.textContent = 'No data in window.';
@@ -3776,10 +4521,18 @@ async function maintTardSuggest() {
   head.textContent = '✨ AI proposed ' + suggestions.length + ' patterns (scanned ' + scanned + ' usernames)';
   panel.appendChild(head);
   if (suggestions.length === 0) {
-    const empty = document.createElement('div');
-    empty.style.color = '#9b9892';
-    empty.textContent = 'No suspicious patterns detected. (Check firehose is running + gaw_users has data.)';
-    panel.appendChild(empty);
+    // v10.x Patch 5 P5: visual empty state - clean scan is NOT an error
+    const emptyCard = (typeof gamEmptyState === 'function')
+      ? gamEmptyState({ icon: 'users-empty', headline: 'No new patterns detected', desc: '0 suspicious username clusters in current data.' })
+      : null;
+    if (emptyCard) {
+      panel.appendChild(emptyCard);
+    } else {
+      const empty = document.createElement('div');
+      empty.style.color = '#9b9892';
+      empty.textContent = 'No suspicious patterns detected.';
+      panel.appendChild(empty);
+    }
     __maintSetStatus('maintTardSuggestStatus', '✓ scan complete (0 suggestions)', 'ok');
     return;
   }
@@ -4141,3 +4894,150 @@ async function __maintRunNow() {
   // hiding #leadSection on non-leads, so this is a no-op for non-leads).
   __maintLoadAutoToggle();
 })();
+
+// =============================================================================
+// v10.x PATCH 3 — Lead KPI Dashboard + Lapsed Mods + Quick-actions wiring
+// =============================================================================
+async function __loadLeadKpi() {
+  // Tile 1: Active Now from /presence/online
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'modPresencePing', args: {} });
+    if (r && r.ok && r.data) {
+      const count = Array.isArray(r.data.mods) ? r.data.mods.length : (r.data.active_count || 0);
+      const el = $('kpi-active-val');
+      if (el) {
+        el.textContent = String(count);
+        el.style.color = count === 0 ? '#f04040' : count < 2 ? '#f0a040' : '#f0a040';
+      }
+    }
+  } catch (_) {}
+  // Tiles 2-4 stub — show dashes until worker endpoints land
+  // (clearrate, mmp50 already initialized to &mdash; in HTML)
+
+  // Load lapsed mods
+  __loadLapsedMods();
+
+  // Wire quick-actions (once, idempotent check)
+  if (!window.__qaWired) {
+    window.__qaWired = true;
+    const qaInvite = $('qaInviteBtn');
+    if (qaInvite) qaInvite.addEventListener('click', async function() {
+      withLoading(qaInvite, 'generating...', async function() {
+        const r = await chrome.runtime.sendMessage({
+          type: 'rpc', name: 'adminInviteCreate', args: { username: _gamWhoamiUsername || 'lead' }
+        });
+        if (r && r.ok && r.data && r.data.invite_url) {
+          try { await navigator.clipboard.writeText(r.data.invite_url); } catch (_) {}
+          __showToast('Invite link copied to clipboard', 'ok');
+        } else {
+          __showToast('Invite failed: ' + ((r && r.error) || 'unknown'), 'err');
+        }
+      });
+    });
+
+    const qaRotateAll = $('qaRotateAllBtn');
+    if (qaRotateAll) qaRotateAll.addEventListener('click', function() {
+      const rosterBtn = $('rotateRosterBtn');
+      if (rosterBtn) rosterBtn.click();
+    });
+
+    const qaBugs = $('qaBugsBtn');
+    if (qaBugs) qaBugs.addEventListener('click', function() {
+      const bugBtn = $('bugListBtn');
+      if (bugBtn) bugBtn.click();
+    });
+
+    // Sync bugs badge to quick-actions badge
+    const bugBadge = $('bugListBadge');
+    const qaBadge  = $('qaBugsBadge');
+    if (bugBadge && qaBadge) {
+      const obs = new MutationObserver(function() {
+        qaBadge.textContent = bugBadge.textContent;
+        qaBadge.style.display = bugBadge.style.display;
+      });
+      obs.observe(bugBadge, { childList: true, attributes: true, attributeFilter: ['style'] });
+    }
+  }
+}
+
+async function __loadLapsedMods() {
+  const card    = $('lapsedModsCard');
+  const list    = $('lapsedModsList');
+  const countEl = $('lapsedModsCount');
+  const status  = $('lapsedModsStatus');
+  if (!card || !list) return;
+
+  const threshInput = $('lapsedThresholdInput');
+  const days = Math.max(7, Math.min(60, parseInt((threshInput && threshInput.value) || 21, 10)));
+
+  if (status) { status.className = 'pop-token-status'; status.textContent = 'loading...'; }
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: 'rpc', name: 'adminModLapsed', args: { days: days }
+    });
+    if (!r || !r.ok || !Array.isArray(r.data)) {
+      if (status) { status.className = 'pop-token-status'; status.textContent = 'lapsed data unavailable (worker endpoint pending)'; }
+      return;
+    }
+    const mods = r.data;
+    if (countEl) countEl.textContent = mods.length > 0 ? '(' + mods.length + ')' : '';
+    list.replaceChildren();
+    if (mods.length === 0) {
+      if (status) { status.className = 'pop-token-status ok'; status.textContent = 'no lapsed mods'; }
+      return;
+    }
+    mods.forEach(function(m) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e2128;font-size:11px';
+      const nameEl = document.createElement('span');
+      nameEl.style.cssText = 'flex:1;color:#e4e4e4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      nameEl.textContent = m.mod_username || m.username || '?';
+      const daysEl = document.createElement('span');
+      daysEl.style.cssText = 'color:#f0a040;font-variant-numeric:tabular-nums;min-width:28px;text-align:right';
+      daysEl.textContent = String(m.days_since_action || '?') + 'd';
+      const pingBtn = document.createElement('button');
+      pingBtn.textContent = 'Ping';
+      pingBtn.className = 'pop-btn pop-btn-ghost';
+      pingBtn.style.cssText = 'font-size:9px;padding:1px 5px';
+      pingBtn.addEventListener('click', function() {
+        __showToast('Open ModChat to ping u/' + (m.mod_username || '?'), 'ok');
+      });
+      row.appendChild(nameEl); row.appendChild(daysEl); row.appendChild(pingBtn);
+      list.appendChild(row);
+    });
+    if (status) { status.className = 'pop-token-status ok'; status.textContent = mods.length + ' lapsed mod(s) >' + days + 'd'; }
+  } catch (e) {
+    if (status) { status.className = 'pop-token-status'; status.textContent = 'lapsed load failed: ' + (e && e.message || e); }
+  }
+}
+
+// Restart setup button wiring
+(function wireRestartSetup() {
+  const btn = $('restartSetupBtn');
+  if (!btn) return;
+  btn.addEventListener('click', function() {
+    const wiz = $('firstRunWizard');
+    if (wiz) { wiz.style.display = 'block'; }
+    const card = document.getElementById('card-tokens');
+    if (card) card.setAttribute('open', '');
+    const step1 = $('firstRunWizardStep1');
+    const step2 = $('firstRunWizardStep2');
+    const success = $('firstRunWizardSuccess');
+    if (step1) step1.style.display = 'block';
+    if (step2) step2.style.display = 'none';
+    if (success) success.style.display = 'none';
+  });
+})();
+// =============================================================================
+// END PATCH 3
+// =============================================================================
+
+// =============================================================================
+// v10.x PATCH 2 — Token Section: wizard auto-collapse hook + restart button
+// Wizard complete: call _cardWizardComplete() to collapse tokens card.
+// (The wizard setTimeout block at ~L1894 is patched below.)
+// =============================================================================
+// [Hooked into wizard success block further up in file — see setTimeout patches]
+// =============================================================================
+// END PATCH 2
+// =============================================================================
