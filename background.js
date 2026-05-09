@@ -1442,6 +1442,45 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // v10.8.0 A1: content-script-initiated stale-flag purge. Defensive — content
+  // script already has direct chrome.storage.local access, but this gives the
+  // SW a chance to clear its RAM mirror too.
+  if (msg && msg.type === 'clearUpdateFlag') {
+    (async () => {
+      try {
+        await chrome.storage.local.remove('gam_update_available');
+        _UPDATE_FLAG_LAST_SET = null;
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e && e.message || e) });
+      }
+    })();
+    return true;
+  }
+
+  // v10.8.0 A2: popup Re-enable button clears a feature's auto-disable entry
+  // from gam_error_counters. The delete is authoritative in the SW so the
+  // content-script feature guard picks it up on next read.
+  if (msg && msg.type === 'clearErrorCounter') {
+    const feature = String((msg && msg.feature) || '');
+    if (!feature) {
+      sendResponse({ ok: false, error: 'feature required' });
+      return true;
+    }
+    (async () => {
+      try {
+        const r = await chrome.storage.local.get('gam_error_counters');
+        const counters = (r && r.gam_error_counters) || {};
+        delete counters[feature];
+        await chrome.storage.local.set({ gam_error_counters: counters });
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e && e.message || e) });
+      }
+    })();
+    return true;
+  }
+
   if (msg && msg.type === 'tokensStatus') {
     (async () => {
       // Prefer live RAM; fall back to session store if the service worker
@@ -2892,6 +2931,78 @@ const RPC_HANDLERS = {
     }
   },
 
+  // v10.8.0 A3: queue snapshot for M3 ticker popover — POST /mod/queue-snapshot.
+  // Returns current mod action queue state (pending, processing, recent).
+  modGetQueueSnapshot: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    schema: {
+      limit: { type: 'number', required: false, min: 1, max: 50 }
+    },
+    async handler(args) {
+      if (!secretCache.workerModToken && !secretCache.leadModToken) {
+        try { await loadSecrets(); } catch (e) {}
+      }
+      const ctrl = new AbortController();
+      const timer = setTimeout(function() { try { ctrl.abort(); } catch (_) {} }, 15000);
+      try {
+        const headers = new Headers();
+        if (secretCache.workerModToken) headers.set('X-Mod-Token', secretCache.workerModToken);
+        headers.set('X-Extension-Id', chrome.runtime.id);
+        headers.set('Content-Type', 'application/json');
+        const body = { limit: Math.min(50, Math.max(1, parseInt(args && args.limit, 10) || 10)) };
+        const r = await fetch(WORKER_BASE + '/mod/queue-snapshot', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(body),
+          signal: ctrl.signal
+        });
+        const text = await r.text();
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch (_) {}
+        return { ok: r.ok, status: r.status, data: parsed, text: text };
+      } catch (e) {
+        return { ok: false, status: 0, error: 'network failure', code: 'QUEUE_SNAPSHOT_NETWORK' };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  },
+
+  // v10.8.0 A4: user cadence data for TARD-1 chip — GET /mod/user/cadence?username=<u>.
+  modUserCadence: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    schema: {
+      username: { type: 'string', required: true, max: 64 }
+    },
+    async handler(args) {
+      if (!secretCache.workerModToken && !secretCache.leadModToken) {
+        try { await loadSecrets(); } catch (e) {}
+      }
+      const username = String((args && args.username) || '').trim().slice(0, 64);
+      if (!username) return { ok: false, status: 400, error: 'username required' };
+      const ctrl = new AbortController();
+      const timer = setTimeout(function() { try { ctrl.abort(); } catch (_) {} }, 15000);
+      try {
+        const headers = new Headers();
+        if (secretCache.workerModToken) headers.set('X-Mod-Token', secretCache.workerModToken);
+        headers.set('X-Extension-Id', chrome.runtime.id);
+        const r = await fetch(WORKER_BASE + '/mod/user/cadence?username=' + encodeURIComponent(username), {
+          method: 'GET',
+          headers: headers,
+          signal: ctrl.signal
+        });
+        const text = await r.text();
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch (_) {}
+        return { ok: r.ok, status: r.status, data: parsed, text: text };
+      } catch (e) {
+        return { ok: false, status: 0, error: 'network failure', code: 'USER_CADENCE_NETWORK' };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  },
+
   // ASK-031: ban-confirm RPC — fire-and-forget audit correlation after apiBan returns.
   // Never blocks the ban flow. Errors are logged and swallowed.
   modBanConfirm: {
@@ -3007,7 +3118,10 @@ const _RPC_LIMITS = {
   // ASK-031 / WAVE-B-AUX A.1: ban-preflight + ban-confirm rate limits.
   // 30/min each is generous for actual ban throughput (~1-3/min peak).
   modBanPreflight:   { maxPerMin: 30 },
-  modBanConfirm:     { maxPerMin: 30 }
+  modBanConfirm:     { maxPerMin: 30 },
+  // v10.8.0 A3/A4: queue snapshot (ticker popover) + user cadence (TARD-1 chip).
+  modGetQueueSnapshot: { maxPerMin: 30 },
+  modUserCadence:      { maxPerMin: 60 }
 };
 
 function _rpcRateCheck(name) {

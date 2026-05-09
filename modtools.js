@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v10.7.3';
+  const VERSION = 'v10.8.0';
 
   // v10.6.1 HOTFIX: FEATURE_FLAGS must be declared BEFORE any synchronous IIFE
   // that references it. The earliest reference is __v80ParkUI at line ~3398
@@ -44,6 +44,20 @@
     AI_HOLD_QUEUE:   true,
     UNIVERSAL_UNDO:  true
   });
+
+  // v10.8.0 M6 (UIUX-04 B.2): centralized AI tone color palette.
+  // Three render sites (modmail panel, mod-console inline, popover) used to
+  // have inconsistent palettes. Single source of truth here.
+  const GAM_TONE_COLOR = Object.freeze({
+    firm:        '#ff3b3b',
+    empathetic:  '#66ccff',
+    brief:       '#ffd84d',
+    escalate:    '#ff9933',
+    fallback:    '#9b9892'
+  });
+  function tonecolor(tone) {
+    return GAM_TONE_COLOR[String(tone || '').toLowerCase()] || GAM_TONE_COLOR.fallback;
+  }
 
   // v10.6.1 HOTFIX: emergency debug dump callable from DevTools console.
   // Installed at top of IIFE (before any code that might throw) so it's
@@ -6010,6 +6024,7 @@
     const pAudit     = rpcCall('modAuditQuery',    { limit: 20 });
     const pDelta     = rpcCall('modIntelDelta',    { kind: 'User', id, since_ts: lastViewed });
     const pPrecedent = rpcCall('modPrecedentFind', { kind: 'User', signature: String(id).toLowerCase(), limit: 5 });
+    const pCadence   = rpcCall('modUserCadence',   { username: id }); // v10.8.0 M9 (TARD-1): cadence chip
 
     async function sec1() {
       const res = await pProfiles;
@@ -6041,8 +6056,39 @@
         if (profile.createdAt) bits.push('joined ' + _drawerFmtTs(profile.createdAt));
         if (profile.karma != null) bits.push('karma ' + String(profile.karma));
         if (profile.priorBans) bits.push('prior bans: ' + String(profile.priorBans));
+        // v10.8.0 M10 (TARD-2): account age from worker intel
+        if (profile.account_age_days != null) bits.push(profile.account_age_days + 'd account');
+      }
+      // v10.8.0 M10 (TARD-2): NEW account badge in drawer header
+      if (profile && profile.is_new_account) {
+        const newBadge = el('span', {
+          style: 'display:inline-block;background:rgba(167,139,250,0.15);border:1px solid #a78bfa;color:#a78bfa;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;padding:0 5px;text-transform:uppercase;margin-left:6px'
+        }, profile.account_age_days != null ? ('NEW ' + profile.account_age_days + 'd') : 'NEW');
+        const pNode = body.querySelector('p');
+        if (pNode) pNode.appendChild(newBadge);
       }
       body.appendChild(el('p', {style: 'color:#a0aec0;font-size:12px;'}, bits.length ? bits.join(' \u00B7 ') : 'No profile metadata.'));
+
+      // v10.8.0 M9 (TARD-1): cadence chip \u2014 fetch async, render inline
+      const cadenceSlot = el('div', {style: 'margin-top:4px;min-height:18px'});
+      body.appendChild(cadenceSlot);
+      pCadence.then(function(cad) {
+        if (!cad || !cad.ok) return;
+        // v10.8.0 M10 (TARD-2): populate new-account cache for link decoration
+        if (typeof cad.is_new_account !== 'undefined') {
+          try { _newAccountCache.set(String(id).toLowerCase(), { is_new: !!cad.is_new_account, age_days: cad.account_age_days || 0 }); _susApplyDecorations(false); } catch(_) {}
+        }
+        const label = String(cad.cadence_label || '');
+        const color = label === 'BURSTING' ? '#ff3b3b'
+                    : label === 'HEAVY'    ? '#ff9933'
+                    : label === 'NEW'      ? '#a78bfa'
+                    : '#9b9892';
+        const cpd = (typeof cad.comments_per_day_avg === 'number') ? cad.comments_per_day_avg.toFixed(1) : '?';
+        const chip = el('span', {
+          style: 'display:inline-flex;align-items:center;gap:4px;background:rgba(0,0,0,0.3);border:1px solid ' + color + ';color:' + color + ';font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;padding:1px 5px'
+        }, cpd + ' comments/day \u00B7 ' + (label || 'normal'));
+        cadenceSlot.appendChild(chip);
+      }).catch(function() {});
 
       // --- inline history list (hidden until halo clicked) ---
       if (isRepeat) {
@@ -8384,9 +8430,20 @@ Analyze this comment against the community rules. Then write a brief, profession
           if (pv) pv.remove();
           pv = document.createElement('div');
           pv.id = 'mc-ai-preview';
-          pv.style.cssText = 'margin-top:8px;display:flex;flex-direction:column;gap:6px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px';
-          // AF-22 (Rule 65): escapeHtml replaces incomplete replace() strip
-          pv.innerHTML = '<div style="color:#ff9933;letter-spacing:.08em;text-transform:uppercase;font-size:10px">AI drafting 2 replies for u/' + escapeHtml(targetUser) + '...</div>';
+          pv.style.cssText = 'margin-top:8px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px';
+          // v10.8.0 M4 (UIUX-04 B.3): ghost-card shimmer skeleton replaces single loading line
+          (function() {
+            const grid = document.createElement('div');
+            grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px';
+            for (var _gi = 0; _gi < 4; _gi++) {
+              const ghost = document.createElement('div');
+              ghost.className = 'gam-ai-skeleton';
+              ghost.style.cssText = 'background:#1a1a1d;border:1px solid #2a2825;padding:8px;height:80px;border-radius:0;position:relative;overflow:hidden';
+              ghost.innerHTML = '<div style="height:8px;background:#2a2825;width:30%;margin-bottom:6px"></div><div style="height:6px;background:#2a2825;width:90%;margin-bottom:4px"></div><div style="height:6px;background:#2a2825;width:80%;margin-bottom:4px"></div><div style="height:6px;background:#2a2825;width:60%"></div>';
+              grid.appendChild(ghost);
+            }
+            pv.appendChild(grid);
+          })();
           if (msgIn && msgIn.parentNode) msgIn.parentNode.insertBefore(pv, msgIn.nextSibling);
           // v9.23.0 - UAT-2 P1 fix: pass actual evidence + ban-history as
           // last_messages so the AI has real per-thread context, not just
@@ -8434,7 +8491,7 @@ Analyze this comment against the community rules. Then write a brief, profession
             const card = document.createElement('div');
             card.style.cssText = 'background:#0a0a0b;border:1px solid #3d3a35;padding:6px 8px;display:flex;flex-direction:column;gap:4px';
             const tag = document.createElement('div');
-            tag.style.cssText = 'color:' + (rp.tone === 'firm' ? '#ff3b3b' : rp.tone === 'empathetic' ? '#66ccff' : '#ffd84d') + ';font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:10px';
+            tag.style.cssText = 'color:' + tonecolor(rp.tone) + ';font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:10px'; // v10.8.0 M6
             tag.textContent = (rp.tone || 'reply') + ' · ' + (rp.label || ('Option ' + (i+1)));
             const body = document.createElement('div');
             body.style.cssText = 'color:#e8e6e1;line-height:1.4;white-space:pre-wrap';
@@ -9359,9 +9416,20 @@ Analyze this comment against the community rules. Then write a brief, profession
           if (pv) pv.remove();
           pv = document.createElement('div');
           pv.id = 'mc-msg-ai-preview';
-          pv.style.cssText = 'margin-top:8px;display:flex;flex-direction:column;gap:6px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px';
-          // AF-22 (Rule 65): escapeHtml replaces incomplete replace() strip
-          pv.innerHTML = '<div style="color:#ff9933;letter-spacing:.08em;text-transform:uppercase;font-size:10px">AI drafting 2 replies for u/' + escapeHtml(username) + '...</div>';
+          pv.style.cssText = 'margin-top:8px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px';
+          // v10.8.0 M4 (UIUX-04 B.3): ghost-card shimmer skeleton replaces single loading line
+          (function() {
+            const grid = document.createElement('div');
+            grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px';
+            for (var _gi2 = 0; _gi2 < 4; _gi2++) {
+              const ghost = document.createElement('div');
+              ghost.className = 'gam-ai-skeleton';
+              ghost.style.cssText = 'background:#1a1a1d;border:1px solid #2a2825;padding:8px;height:80px;border-radius:0;position:relative;overflow:hidden';
+              ghost.innerHTML = '<div style="height:8px;background:#2a2825;width:30%;margin-bottom:6px"></div><div style="height:6px;background:#2a2825;width:90%;margin-bottom:4px"></div><div style="height:6px;background:#2a2825;width:80%;margin-bottom:4px"></div><div style="height:6px;background:#2a2825;width:60%"></div>';
+              grid.appendChild(ghost);
+            }
+            pv.appendChild(grid);
+          })();
           root.querySelector('#mc-msg-status').appendChild(pv);
           const ar = await rpcCall('modmailAiReplyForThread', {
             sender: username,
@@ -9385,7 +9453,7 @@ Analyze this comment against the community rules. Then write a brief, profession
             const card = document.createElement('div');
             card.style.cssText = 'background:#0a0a0b;border:1px solid #3d3a35;padding:6px 8px;display:flex;flex-direction:column;gap:4px';
             const tag = document.createElement('div');
-            tag.style.cssText = 'color:' + (rp.tone === 'firm' ? '#ff3b3b' : rp.tone === 'empathetic' ? '#66ccff' : '#ffd84d') + ';font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:10px';
+            tag.style.cssText = 'color:' + tonecolor(rp.tone) + ';font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:10px'; // v10.8.0 M6
             tag.textContent = (rp.tone || 'reply') + ' · ' + (rp.label || ('Option ' + (i+1)));
             const bodyEl = document.createElement('div');
             bodyEl.style.cssText = 'color:#e8e6e1;line-height:1.4;white-space:pre-wrap';
@@ -9442,7 +9510,9 @@ Analyze this comment against the community rules. Then write a brief, profession
                 if (!stored3[key3]) return;
                 stored3[key3].body = body.value;
                 stored3[key3].modified_at = Date.now();
-                chrome.storage.session.set({ gam_macro_drafts: stored3 }).catch(function() {});
+                chrome.storage.session.set({ gam_macro_drafts: stored3 }).then(function() {
+                  try { _showDraftSavedChip(body && body.parentNode); } catch(_) {} // v10.8.0 M5 (UIUX-04 B.4)
+                }).catch(function() {});
                 _mirrorDraftToLocal('gam_macro_drafts', stored3); // E.3.4: mirror to local
               }).catch(function() {});
             }, 350));
@@ -11160,13 +11230,15 @@ Analyze this comment against the community rules. Then write a brief, profession
   function _susApplyDecorations(force){
     const sel = force
       ? 'a[href^="/u/"]'
-      : 'a[href^="/u/"]:not([data-gam-sus-decorated])';
+      : 'a[href^="/u/"]:not([data-gam-sus-decorated]):not([data-gam-new-decorated])';
     document.querySelectorAll(sel).forEach(a=>{
       const href = a.getAttribute('href') || '';
       const m = href.match(/^\/u\/([^/?#]+)/);
       if (!m) return;
       const u = decodeURIComponent(m[1] || '').toLowerCase();
       const row = _susState.rows.get(u);
+      const newEntry = _newAccountCache.get(u); // v10.8.0 M10 (TARD-2)
+      const isNew = newEntry && newEntry.is_new;
       // If decorated but no longer SUS (cleared) -> strip decoration
       if (a.hasAttribute('data-gam-sus-decorated') && !row){
         try {
@@ -11174,18 +11246,34 @@ Analyze this comment against the community rules. Then write a brief, profession
           if (orig != null) a.textContent = orig;
           a.removeAttribute('data-gam-sus-decorated');
           a.removeAttribute('data-gam-sus-orig-text');
-          a.style.color = '';
-          a.style.fontWeight = '';
+          a.style.color = isNew ? '#a78bfa' : '';
+          a.style.fontWeight = isNew ? '600' : '';
           a.title = a.getAttribute('data-gam-sus-orig-title') || '';
           a.removeAttribute('data-gam-sus-orig-title');
         } catch(_){}
-        return;
+        if (!isNew) return;
+      }
+      // v10.8.0 M10 (TARD-2): NEW account prefix — amber discrete badge
+      if (isNew && !a.hasAttribute('data-gam-new-decorated')) {
+        a.setAttribute('data-gam-new-decorated', '1');
+        if (!a.hasAttribute('data-gam-sus-orig-text')) {
+          a.setAttribute('data-gam-sus-orig-text', a.textContent || '');
+          a.setAttribute('data-gam-sus-orig-title', a.title || '');
+        }
+        const ageTxt = (newEntry && newEntry.age_days) ? newEntry.age_days + 'd' : '';
+        const newPrefix = 'ⓝ' + (ageTxt ? ageTxt : '') + ' '; // ⓝ
+        const txt2 = a.textContent || '';
+        if (!txt2.startsWith('ⓝ')) a.textContent = newPrefix + txt2;
+        a.style.color = a.style.color || '#a78bfa';
+        a.title = (ageTxt ? 'New account (' + ageTxt + '). ' : 'New account. ') + (a.title || '');
       }
       if (!row) return;
       // Stash original text/title once so we can restore on clear
       if (!a.hasAttribute('data-gam-sus-decorated')){
-        a.setAttribute('data-gam-sus-orig-text', a.textContent || '');
-        a.setAttribute('data-gam-sus-orig-title', a.title || '');
+        if (!a.hasAttribute('data-gam-sus-orig-text')) {
+          a.setAttribute('data-gam-sus-orig-text', a.textContent || '');
+          a.setAttribute('data-gam-sus-orig-title', a.title || '');
+        }
       }
       a.setAttribute('data-gam-sus-decorated', '1');
       const isHot = (row.comment_count_24h || 0) > 8;
@@ -11194,7 +11282,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       const reason = row.reason || '(no reason)';
       const extra = isHot ? ' — ' + row.comment_count_24h + '/24h ⚠️' : '';
       a.title = '\u{1F6A9} SUS by ' + (row.marked_by || '?') + ': ' + reason + extra;
-      // Prefix '🚩 ' once
+      // Prefix '🚩 ' once (may follow ⓝ prefix if both conditions)
       const txt = a.textContent || '';
       if (!/^\u{1F6A9}\s/u.test(txt)) a.textContent = '\u{1F6A9} ' + txt;
     });
@@ -11209,6 +11297,10 @@ Analyze this comment against the community rules. Then write a brief, profession
     const _susObs = new MutationObserver(()=>{ _susApplyDecorations(false); });
     _susObs.observe(document.body, { childList:true, subtree:true });
   } catch(_){}
+
+  // v10.8.0 M10 (TARD-2): cache of new-account flags populated by modUserCadence calls.
+  // Key: lowercase username, value: { is_new: bool, age_days: number }
+  const _newAccountCache = new Map();
 
   // T9: click a username to PIN the tooltip. Click again (or X, or outside)
   // to unpin. Shift-click bypasses pin and lets GAW handle the click (go to
@@ -16179,8 +16271,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       const head = '<div style="color:#ff9933;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:6px">' +
         (fresh ? '✨ Generated' : '✓ Pre-fetched') + ' AI reply candidates</div>';
       const cards = replies.map(rp => {
-        const toneColor = { firm:'#ff3b3b', empathetic:'#66ccff', brief:'#ffd84d', escalate:'#ff9933' };
-        const c = toneColor[rp.tone] || '#9b9892';
+        const c = tonecolor(rp.tone); // v10.8.0 M6: use centralized palette
         return '<div style="background:#0a0a0b;border:1px solid #3d3a35;padding:10px;display:flex;flex-direction:column;gap:6px">' +
           '<div style="color:' + c + ';font-weight:600;letter-spacing:0.06em;text-transform:uppercase;font-size:10px">' + escapeHtml(rp.tone || 'reply') + ' · ' + escapeHtml(rp.label || '') + '</div>' +
           '<div style="color:#e8e6e1;font-size:11px;line-height:1.5;white-space:pre-wrap">' + escapeHtml(rp.body) + '</div>' +
@@ -16432,8 +16523,7 @@ Analyze this comment against the community rules. Then write a brief, profession
             const card = document.createElement('div');
             card.style.cssText = 'background:#0a0a0b;border:1px solid #3d3a35;padding:4px 6px;display:flex;flex-direction:column;gap:3px';
             const tag = document.createElement('div');
-            const toneColor = { firm:'#ff3b3b', empathetic:'#66ccff', brief:'#ffd84d', escalate:'#ff9933' };
-            tag.style.cssText = 'color:' + (toneColor[rp.tone] || '#9b9892') + ';font-weight:600;letter-spacing:0.04em;text-transform:uppercase;font-size:9px';
+            tag.style.cssText = 'color:' + tonecolor(rp.tone) + ';font-weight:600;letter-spacing:0.04em;text-transform:uppercase;font-size:9px'; // v10.8.0 M6
             tag.textContent = rp.tone || 'reply';
             const bodyEl = document.createElement('div');
             bodyEl.style.cssText = 'color:#e8e6e1;font-size:10px;line-height:1.3;white-space:pre-wrap;max-height:80px;overflow-y:auto';
@@ -16484,8 +16574,7 @@ Analyze this comment against the community rules. Then write a brief, profession
             const card = document.createElement('div');
             card.style.cssText = 'background:#0a0a0b;border:1px solid #3d3a35;padding:4px 6px;display:flex;flex-direction:column;gap:3px';
             const tag = document.createElement('div');
-            const toneColor = { firm:'#ff3b3b', empathetic:'#66ccff', brief:'#ffd84d', escalate:'#ff9933' };
-            tag.style.cssText = 'color:' + (toneColor[rp.tone] || '#9b9892') + ';font-weight:600;letter-spacing:0.04em;text-transform:uppercase;font-size:9px';
+            tag.style.cssText = 'color:' + tonecolor(rp.tone) + ';font-weight:600;letter-spacing:0.04em;text-transform:uppercase;font-size:9px'; // v10.8.0 M6
             tag.textContent = rp.tone || 'reply';
             const bodyEl = document.createElement('div');
             bodyEl.style.cssText = 'color:#e8e6e1;font-size:10px;line-height:1.3;white-space:pre-wrap;max-height:80px;overflow-y:auto';
@@ -16797,6 +16886,59 @@ Analyze this comment against the community rules. Then write a brief, profession
     document.addEventListener('keydown', pop._escHandler);
   }
 
+  // v10.8.0 M5 (UIUX-04 B.4): Draft auto-save indicator — tiny "Saved" pill fade-in/out
+  function _showDraftSavedChip(host) {
+    if (!host) return;
+    var chip = host.querySelector('.gam-draft-saved');
+    if (!chip) {
+      chip = document.createElement('span');
+      chip.className = 'gam-draft-saved';
+      chip.style.cssText = 'color:#3dd68c;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;margin-left:8px;opacity:0;transition:opacity 0.2s';
+      chip.textContent = '✓ Saved';
+      host.appendChild(chip);
+    }
+    chip.style.opacity = '1';
+    clearTimeout(chip._fadeTimer);
+    chip._fadeTimer = setTimeout(function() { chip.style.opacity = '0'; }, 1500);
+  }
+
+  // v10.8.0 M2: Fire a DR ban immediately, bypassing the scheduled time.
+  async function _drExecuteNow(username, reason) {
+    const ok = await preflight({
+      title: 'Fire ban now?',
+      danger: true,
+      armSeconds: 2,
+      rows: [
+        ['Target', username],
+        ['Action', 'Execute Death Row ban immediately'],
+        ['Reason', reason || 'Death Row execution']
+      ]
+    });
+    if (!ok) return;
+    try {
+      removeFromDeathRow(username);
+      const pf = await rpcCall('modBanPreflight', {
+        target: username,
+        duration_hours: 43800,
+        reason: reason || 'Death Row execution',
+        permanent: true
+      });
+      if (!pf || !pf.ok) {
+        try { snack('Preflight failed: ' + (pf && pf.error || 'unknown'), 'error'); } catch(_){}
+        return;
+      }
+      const banResult = await apiBan(username, 0, reason || 'Death Row execution');
+      rpcCall('modBanConfirm', {
+        audit_id: pf.audit_id,
+        gaw_response_status: (banResult && banResult.status) || 0,
+        gaw_response_ok: !!(banResult && banResult.ok)
+      }).catch(() => {});
+      try { snack('✓ DR ban fired: ' + username, 'success'); } catch(_){}
+    } catch (e) {
+      try { snack('Fire failed: ' + (e && e.message || e), 'error'); } catch(_){}
+    }
+  }
+
   // v10.7.1 TP.2: Death Row inline popover — snapshot of pending DR entries
   function _showDrPopover(anchor) {
     const POP_ID = 'gam-dr-popover';
@@ -16927,8 +17069,20 @@ Analyze this comment against the community rules. Then write a brief, profession
           }
         });
 
+        // v10.8.0 M2: Fire now button — executes DR ban immediately
+        const fireBtn = mkBtn('Fire now', '#ff3b3b');
+        fireBtn.style.border = '1px solid #ff3b3b';
+        fireBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          _drExecuteNow(username, reason).then(function() {
+            const stillInDom = pop.querySelector('[data-dr-row="' + username + '"]');
+            if (stillInDom) stillInDom.remove();
+            title.textContent = 'DEATH ROW — ' + pop.querySelectorAll('[data-dr-row]').length + ' PENDING';
+          }).catch(function(){});
+        });
         row4.appendChild(profileBtn);
         row4.appendChild(cancelBtn);
+        row4.appendChild(fireBtn);
         wrap.appendChild(row4);
         body.appendChild(wrap);
       });
@@ -16967,7 +17121,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     document.addEventListener('keydown', pop._escHandler);
   }
 
-  // v10.7.1 TP.3: Queue inline popover — snapshot count + escape link (no client-side queue item store)
+  // v10.8.0 M3 (TP.3): Queue inline popover — real data from /mod/queue-snapshot
+  // Depends on SHIP-V10-8-AUX wiring rpcCall('modGetQueueSnapshot') in background.js
   function _showQueuePopover(anchor) {
     const POP_ID = 'gam-queue-popover';
     const existing = document.getElementById(POP_ID);
@@ -16979,9 +17134,9 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     const pop = document.createElement('div');
     pop.id = POP_ID;
-    pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:300px;max-width:380px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
+    pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:340px;max-width:460px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
     const r = anchor.getBoundingClientRect();
-    pop.style.left = Math.max(8, Math.min(window.innerWidth - 380, r.left)) + 'px';
+    pop.style.left = Math.max(8, Math.min(window.innerWidth - 460, r.left)) + 'px';
     pop.style.bottom = (window.innerHeight - r.top + 6) + 'px';
     pop.style.top = '';
 
@@ -16999,29 +17154,107 @@ Analyze this comment against the community rules. Then write a brief, profession
     hdr.appendChild(title); hdr.appendChild(spacer); hdr.appendChild(closeBtn);
     pop.appendChild(hdr);
 
-    // Body
+    // Body — filled async after mount
     const body = document.createElement('div');
-    body.style.cssText = 'padding:12px 10px;color:#9b9892;font-size:10px;text-align:center';
-
-    const msg = document.createElement('div');
-    msg.textContent = queueCount + ' post' + (queueCount === 1 ? '' : 's') + ' awaiting review in the mod queue.';
-    body.appendChild(msg);
-
-    const note = document.createElement('div');
-    note.style.cssText = 'color:#5a5752;margin-top:4px';
-    note.textContent = 'Open the queue page to triage items.';
-    body.appendChild(note);
-
-    const qBtn = document.createElement('a');
-    qBtn.href = '/queue';
-    qBtn.target = '_blank';
-    qBtn.rel = 'noopener';
-    qBtn.style.cssText = 'display:inline-block;margin-top:10px;background:transparent;border:1px solid #66ccff;color:#66ccff;padding:3px 10px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;text-decoration:none';
-    qBtn.textContent = 'Open /queue page →';
-    body.appendChild(qBtn);
-
+    body.id = 'gam-queue-body';
+    body.style.cssText = 'max-height:340px;overflow-y:auto';
+    body.innerHTML = '<div style="padding:12px;color:#9b9892">Loading queue snapshot...</div>';
     pop.appendChild(body);
+
+    // Footer
+    const foot = document.createElement('div');
+    foot.style.cssText = 'border-top:1px solid #2a2825;padding:4px 10px';
+    const footLink = document.createElement('a');
+    footLink.href = '/queue';
+    footLink.target = '_blank';
+    footLink.rel = 'noopener';
+    footLink.style.cssText = 'color:#5a5752;font-size:9px;text-decoration:none';
+    footLink.textContent = 'Open full /queue page';
+    foot.appendChild(footLink);
+    pop.appendChild(foot);
+
     document.body.appendChild(pop);
+
+    // Async fetch snapshot
+    rpcCall('modGetQueueSnapshot', { limit: 10 }).then(function(res) {
+      if (!res || !res.ok) {
+        body.innerHTML = '<div style="padding:12px;color:#ff3b3b">Queue snapshot unavailable' + (res && res.error ? ': ' + escapeHtml(res.error) : '') + '</div>';
+        return;
+      }
+      const items = (res.data && res.data.items) || [];
+      title.textContent = 'QUEUE — ' + ((res.data && res.data.queue_depth) || items.length) + ' ITEMS';
+      if (items.length === 0) {
+        body.innerHTML = '<div style="padding:12px;color:#9b9892;text-align:center">Queue is empty</div>';
+        return;
+      }
+      body.innerHTML = '';
+      items.forEach(function(it) {
+        const row = document.createElement('div');
+        row.style.cssText = 'border-bottom:1px solid #2a2825;padding:6px 10px;display:flex;flex-direction:column;gap:3px';
+
+        // Title / snippet line
+        const titleLine = document.createElement('div');
+        titleLine.style.cssText = 'color:#e8e6e1;font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+        titleLine.textContent = it.title || it.snippet || '(no title)';
+        row.appendChild(titleLine);
+
+        // Snippet (if title exists separately)
+        if (it.snippet && it.title) {
+          const snipLine = document.createElement('div');
+          snipLine.style.cssText = 'color:#9b9892;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+          snipLine.textContent = it.snippet;
+          row.appendChild(snipLine);
+        }
+
+        // Meta row: author + age + reports
+        const metaLine = document.createElement('div');
+        metaLine.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:9px;color:#5a5752';
+        const authorChip = document.createElement('span');
+        authorChip.style.color = '#66ccff';
+        authorChip.textContent = it.author || '?';
+        const ageTxt = it.queued_ts ? timeAgo(new Date(it.queued_ts).toISOString()) : '';
+        const reportTxt = it.report_count ? it.report_count + ' rpt' : '';
+        metaLine.appendChild(authorChip);
+        if (ageTxt) { const s = document.createElement('span'); s.textContent = ageTxt; metaLine.appendChild(s); }
+        if (reportTxt) { const s = document.createElement('span'); s.style.color = '#ff9933'; s.textContent = reportTxt; metaLine.appendChild(s); }
+        row.appendChild(metaLine);
+
+        // Action buttons
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex;gap:5px;margin-top:2px';
+        function mkQBtn(label, col) {
+          const b = document.createElement('button');
+          b.textContent = label;
+          b.style.cssText = 'background:transparent;border:1px solid ' + col + ';color:' + col + ';padding:1px 5px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
+          return b;
+        }
+        const thingId = it.thing_id;
+        const apprBtn = mkQBtn('Approve', '#44dd66');
+        apprBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          withUndo(function() { return apiApprove(thingId); }, { tier:'B', label:'approve ' + thingId, inverse: function() { return apiRemove(thingId); } });
+          row.style.opacity = '0.4';
+        });
+        const remBtn = mkQBtn('Remove', '#ff3b3b');
+        remBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          withUndo(function() { return apiRemove(thingId); }, { tier:'B', label:'remove ' + thingId, inverse: function() { return apiApprove(thingId); } });
+          row.style.opacity = '0.4';
+        });
+        const openBtn = mkQBtn('Open', '#9b9892');
+        openBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          window.open('/post/' + thingId, '_blank');
+        });
+        btnRow.appendChild(apprBtn);
+        btnRow.appendChild(remBtn);
+        btnRow.appendChild(openBtn);
+        row.appendChild(btnRow);
+        body.appendChild(row);
+      });
+    }).catch(function(e) {
+      body.innerHTML = '<div style="padding:12px;color:#ff3b3b">' + escapeHtml(String(e && e.message || e)) + '</div>';
+    });
 
     closeBtn.addEventListener('click', function() { _closePop(); });
 
@@ -17197,7 +17430,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     // handler \u2014 confusing. Now: click runs a one-shot session-health probe
     // (CSRF check + worker /mod/whoami) and snacks the result. This makes
     // the click meaningful without changing the visual.
-    const sessDot = el('button', { id:'gam-sess-pill', cls:'gam-bar-icon', title:'Session health \u2014 click for live check' }, '\u25CF');
+    const sessDot = el('button', { id:'gam-sess-pill', cls:'gam-bar-icon', title:'Session health \u2014 click for live check', 'aria-label':'Session health \u2014 click for live check' }, '\u25CF'); // v10.8.0 M11
     sessDot.style.color = C.TEXT3;
     sessDot.addEventListener('click', async ()=>{
       try {
@@ -17216,7 +17449,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         snack(msg, csrfOk && whoamiOk ? 'success' : 'error');
       } catch(e){ snack('Session check failed: ' + (e.message||e), 'error'); }
     });
-    const fbBtn = el('button', { cls:'gam-bar-icon', id:'gam-fb-toggle' });
+    const fbBtn = el('button', { cls:'gam-bar-icon', id:'gam-fb-toggle', 'aria-label':'Interception mode toggle' }); // v10.8.0 M11
     function renderFallback(){
       fbBtn.textContent = FallbackMode ? '\u{1F513}' : '\u{1F512}';
       fbBtn.title = FallbackMode
@@ -17248,7 +17481,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       snack(`Filter: ${filterSel.value === 'off' ? 'off' : filterSel.value + '+ upvoted hidden'}`, 'info');
     });
 
-    const drBtn = el('button', { id:'gam-dr-count', cls:'gam-bar-icon', style:{display:'none'}, title:'Death Row queue' });
+    const drBtn = el('button', { id:'gam-dr-count', cls:'gam-bar-icon', style:{display:'none'}, title:'Death Row queue', 'aria-label':'Death Row queue' }); // v10.8.0 M11
     drBtn.addEventListener('click', openModLog);
 
     // v9.3.7 (P1-4) / v9.3.16 (Commander): SIREN chip. Live count of
@@ -17259,10 +17492,10 @@ Analyze this comment against the community rules. Then write a brief, profession
     //      crosses a higher mark — i.e. a NEW alert event re-shows.
     //      Persisted via getSetting('siren.dismissedAtTotal') so a
     //      reload doesn't un-dismiss.
-    const sirenBtn = el('button', { id:'gam-siren-count', cls:'gam-bar-icon', style:{display:'none'}, title:'Live status — click for Hot Now triage' });
+    const sirenBtn = el('button', { id:'gam-siren-count', cls:'gam-bar-icon', style:{display:'none'}, title:'Live status — click for Hot Now triage', 'aria-label':'Live status — click for Hot Now triage' }); // v10.8.0 M11
     // AF-40 (Rule 119): FEATURE_FLAGS gate at entry point
     if (FEATURE_FLAGS.HOT_NOW_PANEL) sirenBtn.addEventListener('click', _showHotNowPanel);
-    const sirenClearBtn = el('button', { id:'gam-siren-clear', cls:'gam-bar-icon', style:{display:'none', fontSize:'11px', color:C.TEXT3, padding:'0 4px'}, title:'Dismiss alert (re-shows on new activity)' }, '✕');
+    const sirenClearBtn = el('button', { id:'gam-siren-clear', cls:'gam-bar-icon', style:{display:'none', fontSize:'11px', color:C.TEXT3, padding:'0 4px'}, title:'Dismiss alert (re-shows on new activity)', 'aria-label':'Dismiss siren alert' }, '✕'); // v10.8.0 M11
     sirenClearBtn.addEventListener('click', (e)=>{
       e.stopPropagation();
       const lastTotal = parseInt(sirenBtn.getAttribute('data-current-total') || '0', 10) || 0;
@@ -17314,7 +17547,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     // Modmail popover trigger: only rendered on modmail read pages.
     const IS_MODMAIL_READ = /\/(modmail\/thread|messages?)\/[^/?]+\/?$/.test(location.pathname);
     const mmBtn = IS_MODMAIL_READ
-      ? el('button', { id:'gam-mm-trigger', cls:'gam-bar-icon', title:'Modmail actions (click)' }, '\u2709')
+      ? el('button', { id:'gam-mm-trigger', cls:'gam-bar-icon', title:'Modmail actions (click)', 'aria-label':'Modmail actions' }, '\u2709') // v10.8.0 M11
       : null;
     if (mmBtn){
       mmBtn.addEventListener('click', (e)=>{
@@ -17327,7 +17560,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     // Click opens a popover showing last-hour mod actions + currently online mods.
     // No mouse tracking. Hover shows current page from /presence/online telemetry.
     const c5Btn = ((me() || '').toLowerCase() === 'catsfive' && isLeadMod())
-      ? el('button', { id:'gam-c5-btn', cls:'gam-bar-icon gam-c5-btn', title:'C5 Command Center (lead-only)' }, 'C5')
+      ? el('button', { id:'gam-c5-btn', cls:'gam-bar-icon gam-c5-btn', title:'C5 Command Center (lead-only)', 'aria-label':'C5 Command Center' }, 'C5') // v10.8.0 M11
       : null;
     if (c5Btn){
       c5Btn.addEventListener('click', (e)=>{
@@ -17344,15 +17577,26 @@ Analyze this comment against the community rules. Then write a brief, profession
     // Title updated to explain so Commander stops flagging it as undiagnosed.
     const brandBtn = el('button', {
       cls:'gam-bar-brand gam-bar-icon-brand',
-      title:`GAW ModTools ${VERSION} \u2014 click for site health \u2014 amber color = Bloomberg Terminal theme (not a warning)`
+      title:`GAW ModTools ${VERSION} \u2014 click for site health \u2014 amber color = Bloomberg Terminal theme (not a warning)`,
+      'aria-label':`GAW ModTools ${VERSION} \u2014 site health`, // v10.8.0 M11
+      style: 'position:relative'
     }, '\u{1F6E1}');
+    // v10.8.0 M8 (UIUX-06 P2): tier badge \u2014 'L' for lead, no badge for regular mod
+    if (isLeadMod()) {
+      const tierBadge = document.createElement('span');
+      tierBadge.className = 'gam-bar-tier-badge';
+      tierBadge.style.cssText = 'color:#ff3b3b;background:rgba(255,59,59,0.18);font:700 8px ui-monospace,monospace;line-height:1;border-radius:2px;padding:0 2px;position:absolute;bottom:1px;right:1px;letter-spacing:0;pointer-events:none';
+      tierBadge.textContent = 'L';
+      tierBadge.title = 'Lead mod';
+      brandBtn.appendChild(tierBadge);
+    }
     brandBtn.addEventListener('click', ()=>{
       try { _showSiteHealthPopover(brandBtn); } catch(err){
         try { snack('Site health probe failed: ' + (err && err.message || err), 'error'); } catch(_){}
       }
     });
     // v9.6.0: GEAR moved to far-right of bar per Commander 2026-05-07.
-    const gearBtn = el('button',{ cls:'gam-bar-icon', onclick:openSettings, title:'Settings' }, '\u2699\uFE0F');
+    const gearBtn = el('button',{ cls:'gam-bar-icon', onclick:openSettings, title:'Settings', 'aria-label':'Settings' }, '\u2699\uFE0F'); // v10.8.0 M11
 
     // v9.6.1: GEAR moved from far-right to immediately after SHIELD (left
     // side of the bar) per Commander correction 2026-05-07. Original ask was
@@ -17366,11 +17610,14 @@ Analyze this comment against the community rules. Then write a brief, profession
     const tickerEl = el('button', {
       cls: 'gam-bar-icon gam-bar-ticker',
       id: 'gam-bar-ticker',
-      title: 'Live updates \u2014 click to act'
+      title: 'Live updates \u2014 click to act',
+      'aria-label': 'Live updates \u2014 click to act', // v10.8.0 M11
+      'aria-live': 'polite'
     }, 'site quiet');
     tickerEl.style.cssText = 'min-width:160px;text-align:left;padding-left:8px;font-variant-numeric:tabular-nums;letter-spacing:.04em;text-transform:uppercase;';
     let __tickerStates = [];
     let __tickerIdx = 0;
+    let __tickerPaused = false; // v10.8.0 M1 (UIUX-03 P1): pause rotation on hover
     function __updateTicker(){
       const states = [];
       try {
@@ -17401,6 +17648,9 @@ Analyze this comment against the community rules. Then write a brief, profession
       tickerEl.dataset.target = cur.target || '';
       tickerEl.classList.toggle('gam-ticker-pulse', !!cur.pulse);
     }
+    // v10.8.0 M1 (UIUX-03 P1): pause ticker rotation while hovering
+    tickerEl.addEventListener('mouseenter', () => { __tickerPaused = true; });
+    tickerEl.addEventListener('mouseleave', () => { __tickerPaused = false; });
     // v10.7.1 TP.4: inline popovers replace navigation — mod sees data without leaving page
     tickerEl.addEventListener('click', (e)=>{
       e.stopPropagation();
@@ -17413,7 +17663,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       // quiet / unknown kind — no-op (no nav)
     });
     setInterval(__updateTicker, 30_000);
-    setInterval(()=>{ __tickerIdx = (__tickerIdx + 1) % Math.max(1, __tickerStates.length); __updateTicker(); }, 4000);
+    setInterval(()=>{ if (__tickerPaused) return; __tickerIdx = (__tickerIdx + 1) % Math.max(1, __tickerStates.length); __updateTicker(); }, 4000); // v10.8.0 M1: gated on !__tickerPaused
     // AF-26 (Rule 77): scheduleIdle for non-critical boot task
     scheduleIdle(__updateTicker, 800);
 
@@ -17425,7 +17675,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     const inboxBtn = el('button', {
       cls: 'gam-bar-icon',
       id: 'gam-bar-inbox',
-      title: 'Modmail inbox \u2014 click to open chat panel'
+      title: 'Modmail inbox \u2014 click to open chat panel',
+      'aria-label': 'Modmail inbox \u2014 click to open chat panel' // v10.8.0 M11
     }, '\u{1F4E5}');
     // v9.14.0 - inbox icon now opens DEDICATED MODMAIL POPOVER (Commander
     // #44 UI separation). Pre-fix it opened the team chat panel which is a
@@ -17473,7 +17724,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     const peopleBtn = el('button', {
       cls: 'gam-bar-icon',
       id: 'gam-bar-people',
-      title: 'Active mods on GAW (click for window)'
+      title: 'Active mods on GAW (click for window)',
+      'aria-label': 'Active mods on GAW (click for window)' // v10.8.0 M11
     }, '\u{1F465}');
     peopleBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -17491,20 +17743,20 @@ Analyze this comment against the community rules. Then write a brief, profession
       brandBtn,
       gearBtn,
       el('span', { cls:'gam-bar-sep' }),
-      el('button',{ cls:'gam-bar-icon', onclick:openModLog, title:'Mod log + Death Row queue \u2014 your action history (Ctrl+Shift+L)' }, '\u{1F4CB}'),
+      el('button',{ cls:'gam-bar-icon', onclick:openModLog, title:'Mod log + Death Row queue \u2014 your action history (Ctrl+Shift+L)', 'aria-label':'Mod log + Death Row queue' }, '\u{1F4CB}'), // v10.8.0 M11
       inboxBtn,
       peopleBtn,
       el('span', { cls:'gam-bar-sep' }),
-      el('button',{ cls:'gam-bar-icon', onclick:openHelp, title:'Keybinds + commands cheatsheet (Ctrl+Shift+H)' }, '\u2753'),
-      el('button',{ cls:'gam-bar-icon', onclick:downloadDebugSnapshot, title:'Debug snapshot \u2014 redacted JSON export of local state for support' }, '\u{1F41E}'),
+      el('button',{ cls:'gam-bar-icon', onclick:openHelp, title:'Keybinds + commands cheatsheet (Ctrl+Shift+H)', 'aria-label':'Help \u2014 keybinds and commands' }, '\u2753'), // v10.8.0 M11
+      el('button',{ cls:'gam-bar-icon', onclick:downloadDebugSnapshot, title:'Debug snapshot \u2014 redacted JSON export of local state for support', 'aria-label':'Debug snapshot' }, '\u{1F41E}'), // v10.8.0 M11
       // v7.1.2: team-sharable bug report (distinct from 🐞 local export above).
-      el('button',{ cls:'gam-bar-icon', onclick:openBugReportModal, title:'File a bug report — sends to the team\'s GitHub via worker (auto-strips PII)' }, '\u{1F41B}'),
+      el('button',{ cls:'gam-bar-icon', onclick:openBugReportModal, title:'File a bug report — sends to the team\'s GitHub via worker (auto-strips PII)', 'aria-label':'File a bug report' }, '\u{1F41B}'), // v10.8.0 M11
       // v9.8.0: ModChat launcher moved to FAR RIGHT (just before tickerEl).
       // v5.4.0: Clean UI broom — hides share/hide/block/set context from action rows
-      el('button',{ id:'gam-clean-broom', cls:'gam-bar-icon' + (getSetting('cleanUi', false) ? ' gam-on' : ''), onclick:toggleCleanUi, title:'Clean UI (hide share/hide/block/set context)' }, '\uD83E\uDDF9'),
+      el('button',{ id:'gam-clean-broom', cls:'gam-bar-icon' + (getSetting('cleanUi', false) ? ' gam-on' : ''), onclick:toggleCleanUi, title:'Clean UI (hide share/hide/block/set context)', 'aria-label':'Toggle clean UI mode' }, '\uD83E\uDDF9'), // v10.8.0 M11
       // v5.4.0: Lock button — only on single post pages (/p/<id>). Inline regex so we never
       // rely on a module-scoped const which (if load order changed) could TDZ.
-      (/^\/p\/[^/]+/.test(location.pathname)) ? el('button',{ id:'gam-lock-btn', cls:'gam-bar-icon', onclick:togglePostLock, title:'Lock / unlock this post' }, '\uD83D\uDD12') : null,
+      (/^\/p\/[^/]+/.test(location.pathname)) ? el('button',{ id:'gam-lock-btn', cls:'gam-bar-icon', onclick:togglePostLock, title:'Lock / unlock this post', 'aria-label':'Lock or unlock this post' }, '\uD83D\uDD12') : null, // v10.8.0 M11
       el('span', { cls:'gam-bar-sep' }),
       sessDot,
       fbBtn,
@@ -17515,7 +17767,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       sirenClearBtn,
       // v10.3 Patch 3: Sticky-queue chip
       (function() {
-        const stickyChip = el('button', { id:'gam-sticky-chip', cls:'gam-bar-icon', title:'Sticky-pin requests pending -- click to review' }, 'PIN');
+        const stickyChip = el('button', { id:'gam-sticky-chip', cls:'gam-bar-icon', title:'Sticky-pin requests pending -- click to review', 'aria-label':'Sticky-pin requests pending' }, 'PIN'); // v10.8.0 M11
         stickyChip.style.display = 'none';
         stickyChip.addEventListener('click', function(ev) {
           ev.stopPropagation();
@@ -17532,7 +17784,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       })(),
       // v10.3 Patch 4: Tard-suggester accordion button
       (function() {
-        const tardBtn = el('button', { id:'gam-tard-suggest-btn', cls:'gam-bar-icon', title:'AI tard patterns -- click to expand (scans last 80 usernames via firehose)' }, '✨');
+        const tardBtn = el('button', { id:'gam-tard-suggest-btn', cls:'gam-bar-icon', title:'AI tard patterns -- click to expand (scans last 80 usernames via firehose)', 'aria-label':'AI TARD pattern suggestions' }, '✨'); // v10.8.0 M11
         tardBtn.addEventListener('click', function(ev) {
           ev.stopPropagation();
           const acc = document.getElementById('gam-tard-accordion');
@@ -20165,6 +20417,28 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-thread-bulk { padding:8px 0 0; display:flex; gap:8px; border-top:1px solid var(--gam-border,#1e2a3a); margin-top:4px; }
 /* ---- v10.3: Brigade chip (Patch 6) ---- */
 #gam-brig-chip { font:600 9px ui-monospace,monospace; color:#ffa500; background:#1a0d00; border:1px solid #ffa500; padding:1px 5px; cursor:pointer; display:none; }
+
+/* v10.8.0 M4 (UIUX-04 B.3): AI loading ghost-card shimmer animation */
+.gam-ai-skeleton::after {
+  content:'';
+  position:absolute; inset:0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%);
+  animation: gam-shimmer 1.5s infinite;
+}
+@keyframes gam-shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+/* v10.8.0 M8 (UIUX-06 P2): tier badge on brand button */
+.gam-bar-tier-badge {
+  font:700 8px ui-monospace,monospace;
+  line-height:1;
+  border-radius:2px;
+  padding:0 2px;
+  position:absolute;
+  bottom:1px;
+  right:1px;
+  letter-spacing:0;
+  pointer-events:none;
+}
 `;
 
 
@@ -21099,9 +21373,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       let isBrave = false;
       try { isBrave = !!(navigator.brave && typeof navigator.brave.isBrave === 'function' && await navigator.brave.isBrave()); } catch(_){}
       if (!isBrave) return;
-      // Only nag the unauthed.
-      const st = await new Promise(res => { try { chrome.storage.local.get([K_SETTINGS, 'gam_brave_banner_dismissed'], res); } catch(_) { res({}); } });
-      if (st && st[K_SETTINGS] && st[K_SETTINGS].workerModToken) return;
+      // v10.8.0 M7 (UIUX-06 P1): show banner on ANY Brave install — token check removed.
+      // Pre-fix: gated on !workerModToken so fresh installs without a token never saw the rescue banner.
+      const st = await new Promise(res => { try { chrome.storage.local.get(['gam_brave_banner_dismissed'], res); } catch(_) { res({}); } });
       if (st && st.gam_brave_banner_dismissed) return;
       // Build banner. Self-contained CSS so it survives before init() builds GAM_CSS.
       const wrap = document.createElement('div');
