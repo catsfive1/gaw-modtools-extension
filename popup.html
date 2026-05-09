@@ -136,7 +136,7 @@
        auto-reloads on success. ELIMINATE-THE-MEATBAG: the auto-sync
        runs automatically; no button needed. -->
   <!-- v10.x: Collapsible card — Tools (Diagnostics + Data harvest) -->
-  <details class="gam-card" id="card-tools" open>
+  <details class="gam-card" id="card-tools" data-tab="tools" open>
     <summary class="gam-card-head">
       <span class="gam-card-chevron" aria-hidden="true"></span>
       <span class="gam-card-title">Tools</span>
@@ -160,7 +160,7 @@
   </details><!-- /#card-tools -->
 
   <!-- v10.x: Collapsible card — Maintenance -->
-  <details class="gam-card" id="card-maint" open>
+  <details class="gam-card" id="card-maint" data-tab="tools" open>
     <summary class="gam-card-head">
       <span class="gam-card-chevron" aria-hidden="true"></span>
       <span class="gam-card-title">&#x1F527; Maintenance</span>
@@ -295,7 +295,7 @@
   </details><!-- /#card-maint -->
 
   <!-- v10.x: Collapsible card — Macros -->
-  <details class="gam-card" id="card-macros" open>
+  <details class="gam-card" id="card-macros" data-tab="tools" open>
     <summary class="gam-card-head">
       <span class="gam-card-chevron" aria-hidden="true"></span>
       <span class="gam-card-title">&#x1F4DD; Team Macros</span>
@@ -556,7 +556,7 @@
 
   <!-- v10.x Patch 3: Lead KPI dashboard (ship-tonight minimal) -->
   <!-- 4-tile KPI row - Active Now reads /presence/online; tiles 2-4 stub OK -->
-  <div id="leadKpiRow" style="display:none;display:grid;grid-template-columns:repeat(4,1fr);gap:2px;margin:8px 0;border:1px solid #2a2d33">
+  <div id="leadKpiRow" style="display:none;grid-template-columns:repeat(4,1fr);gap:2px;margin:8px 0;border:1px solid #2a2d33"><!-- v10.6.2 HOTFIX UIUX-01: removed duplicate display:grid that defeated display:none -->
     <div class="gam-kpi-tile" id="kpi-active" data-kpi="active"
          style="background:#11131a;padding:8px 6px;text-align:center;cursor:pointer;border-right:1px solid #2a2d33"
          title="Active mods now (presence ping in last 5m). Click for list.">
@@ -584,7 +584,7 @@
   </div>
 
   <!-- v10.x: Quick-actions row (lead-only, same visibility as leadKpiRow) -->
-  <div id="leadQuickActions" style="display:none;display:flex;gap:4px;margin:0 0 8px">
+  <div id="leadQuickActions" style="display:none;gap:4px;margin:0 0 8px"><!-- v10.6.2 HOTFIX UIUX-01: removed duplicate display:flex that defeated display:none -->
     <button id="qaInviteBtn" class="pop-btn pop-btn-ghost" style="flex:1;font-size:11px"
             title="Generate invite link and copy to clipboard immediately.">+ Invite</button>
     <button id="qaRotateAllBtn" class="pop-btn pop-btn-ghost" style="flex:1;font-size:11px"

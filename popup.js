@@ -2895,7 +2895,7 @@ loadLead();
     catch (_) { return 'stats'; }
   }
   detectInitialTab().then(initial => {
-    setTab(['stats','tokens','tools','lead'].includes(initial) ? initial : 'stats');
+    setTab(['stats','tokens','tools','lead','diag'].includes(initial) ? initial : 'stats'); // v10.6.2 HOTFIX UIUX-01: added 'diag' to whitelist
   }).catch(() => setTab('stats'));
 })();
 

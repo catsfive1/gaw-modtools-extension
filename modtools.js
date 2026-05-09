@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v10.6.1';
+  const VERSION = 'v10.6.2';
 
   // v10.6.1 HOTFIX: FEATURE_FLAGS must be declared BEFORE any synchronous IIFE
   // that references it. The earliest reference is __v80ParkUI at line ~3398
@@ -5435,6 +5435,8 @@
       }
 
       _mount();
+      // v10.6.2 HOTFIX UIUX-02 P0-A: clear any pinned tooltip so it can't chase cursor through backdrop
+      try { if (typeof unpinTooltip === 'function') unpinTooltip(); if (typeof hideTooltip === 'function') hideTooltip(); } catch(_) {}
 
       // Abort any prior in-flight adapter calls for the previous subject.
       if (state._currentAbort) {
@@ -6926,7 +6928,7 @@
         '#gam-backdrop, .gam-modal-backdrop, #gam-intel-backdrop, .gam-preflight-wrap'
       );
       if (!backdrops.length) return;
-      const liveModal = document.querySelector('.gam-modal, #gam-mc-panel.gam-modal-open, #gam-intel-drawer.gam-intel-open');
+      const liveModal = document.querySelector('.gam-modal, #gam-mc-panel.gam-modal-open, #gam-intel-drawer.gam-intel-drawer--open'); // v10.6.2 HOTFIX UIUX-02 P0-B: was gam-intel-open (wrong), actual class is gam-intel-drawer--open — mismatch caused sweep to nuke backdrop+ESC every 30s
       const liveOnboardInput = document.querySelector('#gam-tob-input:focus, #gam-token-onboard-backdrop input:focus');
       // Preflight wraps are LIVE if they were mounted in the last 30s; we use
       // the wrap-level dataset stamp set on creation as the cheap freshness
@@ -9495,6 +9497,12 @@ Analyze this comment against the community rules. Then write a brief, profession
         }
       })();
       btn.textContent = '\u2713 Sent';
+      // v10.6.2 HOTFIX UIUX-04 A.1 P0: re-enable button after 1.5s so mod can send follow-up
+      setTimeout(function() {
+        btn.disabled = false;
+        btn.textContent = 'Send message';
+        body.value = '';
+      }, 1500);
     });
   }
 
@@ -11011,6 +11019,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     _hoverDismissTimer = setTimeout(()=>{ _hoverDismissTimer = null; hideTooltip(); }, ms || 200);
   }
   document.addEventListener('mouseover', e=>{
+    // v10.6.2 HOTFIX UIUX-02 P0-A: suppress tooltip chase while Intel Drawer is open
+    if (typeof IntelDrawer !== 'undefined' && typeof IntelDrawer.isOpen === 'function' && IntelDrawer.isOpen()) return;
     const al = e.target.closest(SELECTORS.authorLink);
     if (!al) return;
     const u = al.textContent.trim();
@@ -11047,6 +11057,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     }, HOVER_DWELL_MS);
   });
   document.addEventListener('mouseout', e=>{
+    // v10.6.2 HOTFIX UIUX-02 P0-A: suppress tooltip dismiss-schedule while Intel Drawer is open
+    if (typeof IntelDrawer !== 'undefined' && typeof IntelDrawer.isOpen === 'function' && IntelDrawer.isOpen()) return;
     if (tooltipPinned) return;
     if (!e.target.closest(SELECTORS.authorLink)) return;
     // v9.3.3 (P1-2): don't hide immediately. Schedule 200ms grace; mouse
@@ -11341,7 +11353,7 @@ Analyze this comment against the community rules. Then write a brief, profession
   function enhanceModmailRead(){
     // v5.2.1: the floating action bar is now a popover on the status bar (envelope icon).
     // This keeps the page UI clean; hover/click the ✉ icon on the bottom bar for actions.
-    if (getSetting('statusBarCompact', true)) return;
+    if (getSetting('statusBarCompact', false)) return; // v10.6.2 HOTFIX UIUX-04 A.3: default was true, action bar never showed; flip to false so bar appears by default
     // v5.1.4: match /modmail/thread/<id> (the real GAW URL) and legacy /messages/<id>
     if (!/\/(modmail\/thread|messages?)\/[^/?]+\/?$/.test(location.pathname)) return;
     if (document.getElementById('gam-mm-bar')) return;
@@ -15893,7 +15905,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     const panel = document.createElement('div');
     panel.id = 'gam-modmail-panel';
     // V11 #3: 3-column modmail panel
-    const mmIs3Col = window.innerWidth >= 1280;
+    const mmIs3Col = window.innerWidth >= 1400; // v10.6.2 HOTFIX UIUX-04 B.6: raised from 1280 to 1400 — 1366px laptops now get 2-col (680px) instead of 3-col (920px) which curtained the feed
     panel.style.cssText =
       'position:fixed;top:0;right:0;bottom:0;' +
       'width:' + (mmIs3Col ? '920px' : '680px') + ';' +
@@ -16059,6 +16071,17 @@ Analyze this comment against the community rules. Then write a brief, profession
         const out = await chrome.storage.session.get('gam_modmail_drafts');
         const cache = (out && out.gam_modmail_drafts) || {};
         cached = cache[t.thread_id];
+        // v10.6.2 HOTFIX UIUX-04 A.2 P0: fall back to local mirror on cold session cache
+        if (!cached) {
+          try {
+            const lo = await chrome.storage.local.get('gam_modmail_drafts_local');
+            const localStore = lo && lo.gam_modmail_drafts_local;
+            if (localStore && localStore.drafts && localStore.drafts[t.thread_id]
+                && (Date.now() - (localStore.savedAt || 0)) < 4 * 60 * 60 * 1000) {
+              cached = localStore.drafts[t.thread_id];
+            }
+          } catch (_) {}
+        }
       } catch (_) {}
       if (cached && Array.isArray(cached.replies) && cached.replies.length > 0) {
         renderAICards(aiHost, cached.replies, t, false);
@@ -16226,6 +16249,16 @@ Analyze this comment against the community rules. Then write a brief, profession
     try {
       chrome.storage.session.get('gam_modmail_drafts').then(out => {
         __draftCache = (out && out.gam_modmail_drafts) || {};
+        // v10.6.2 HOTFIX UIUX-04 A.2 P0: fall back to local mirror on cold session cache
+        if (!Object.keys(__draftCache).length) {
+          chrome.storage.local.get('gam_modmail_drafts_local').then(lo => {
+            const localStore = lo && lo.gam_modmail_drafts_local;
+            if (localStore && localStore.drafts
+                && (Date.now() - (localStore.savedAt || 0)) < 4 * 60 * 60 * 1000) {
+              __draftCache = localStore.drafts;
+            }
+          }).catch(() => {});
+        }
       }).catch(() => {});
     } catch (_) {}
 
@@ -16432,7 +16465,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:280px;max-width:360px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
     const r = anchor.getBoundingClientRect();
     pop.style.left = Math.max(8, Math.min(window.innerWidth - 360, r.left)) + 'px';
-    pop.style.top  = (r.bottom + 6) + 'px';
+    pop.style.bottom = (window.innerHeight - r.top + 6) + 'px'; // v10.6.2 HOTFIX UIUX-03 P0.1: anchor above bar (was top:r.bottom+6 which placed it off-screen below)
+    pop.style.top = '';
     pop.innerHTML =
       '<div style="background:#0a0a0b;border-bottom:1px solid #2a2825;padding:6px 10px;display:flex;align-items:center;gap:8px">' +
         '<span style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:10px">Active mods</span>' +
@@ -17011,6 +17045,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       tickerEl
     );
     document.body.appendChild(bar);
+    // v10.6.2 HOTFIX UIUX-03 P1: prevent bar from occluding feed content
+    try { document.body.style.paddingBottom = '56px'; } catch(_) {}
     updateDeathRowCounter();
     setInterval(updateDeathRowCounter, 5000);
     pollSessionHealth();
@@ -18031,7 +18067,7 @@ Analyze this comment against the community rules. Then write a brief, profession
    so keyboard users see exactly which icon they're on. */
 .gam-bar-icon:focus-visible,
 .gam-bar-icon-brand:focus-visible{outline:2px solid ${C.ACCENT};outline-offset:2px}
-select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text-align:center;font-size:12px}
+select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text-align:center;font-size:12px;min-height:32px!important;min-width:32px!important} /* v10.6.2 HOTFIX UIUX-03 P0.2: select can't use ::after hit-extension, enforce 32px min tap target */
 #gam-sess-pill{font-size:11px}
 #gam-dr-count{width:auto;padding:0 6px;font-size:11px;font-weight:600}
 /* v5.2.1 / v9.3.10: modmail actions popover anchored above status bar.
