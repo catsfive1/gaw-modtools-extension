@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v10.7.0';
+  const VERSION = 'v10.7.1';
 
   // v10.6.1 HOTFIX: FEATURE_FLAGS must be declared BEFORE any synchronous IIFE
   // that references it. The earliest reference is __v80ParkUI at line ~3398
@@ -16602,6 +16602,445 @@ Analyze this comment against the community rules. Then write a brief, profession
     loadWindow(initial);
   }
 
+  // v10.7.1 TP.1: SUS users inline popover — no navigation, data snapshot above bar
+  function _showSusPopover(anchor) {
+    const POP_ID = 'gam-sus-popover';
+    const existing = document.getElementById(POP_ID);
+    if (existing) { existing.remove(); return; }
+
+    const rows = (typeof _susState === 'object' && _susState && _susState.rows instanceof Map)
+      ? _susState.rows
+      : new Map();
+    const count = rows.size;
+
+    const pop = document.createElement('div');
+    pop.id = POP_ID;
+    pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:340px;max-width:420px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
+    const r = anchor.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(window.innerWidth - 420, r.left)) + 'px';
+    pop.style.bottom = (window.innerHeight - r.top + 6) + 'px';
+    pop.style.top = '';
+
+    // Header
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'background:#0a0a0b;border-bottom:1px solid #2a2825;padding:6px 10px;display:flex;align-items:center;gap:8px';
+    const title = document.createElement('span');
+    title.style.cssText = 'color:#ff3b3b;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:10px';
+    title.textContent = 'SUS — ' + count + ' FLAGGED';
+    const spacer = document.createElement('span');
+    spacer.style.flex = '1';
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = 'background:transparent;border:none;color:#5a5752;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1';
+    hdr.appendChild(title); hdr.appendChild(spacer); hdr.appendChild(closeBtn);
+    pop.appendChild(hdr);
+
+    // Body
+    const body = document.createElement('div');
+    body.style.cssText = 'padding:6px 10px;max-height:320px;overflow-y:auto';
+
+    if (count === 0) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'color:#5a5752;text-align:center;padding:16px 0;font-size:10px';
+      empty.textContent = 'No sus users currently flagged';
+      body.appendChild(empty);
+    } else {
+      rows.forEach(function(rowData) {
+        const username = rowData.username || '';
+        const reason = rowData.reason || '';
+        const markedBy = rowData.marked_by || '';
+        const markedAt = rowData.marked_at || rowData.created_at || 0;
+        const cc24 = typeof rowData.comment_count_24h === 'number' ? rowData.comment_count_24h : null;
+        const truncReason = reason.length > 80 ? reason.slice(0, 80) + '…' : reason;
+
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'padding:6px 0;border-bottom:1px solid #1e1c1a;display:flex;flex-direction:column;gap:3px';
+
+        // Row 1: flag + username link + comment count
+        const row1 = document.createElement('div');
+        row1.style.cssText = 'display:flex;align-items:center;gap:6px';
+
+        const flag = document.createElement('span');
+        flag.textContent = '🚩';
+
+        const uLink = document.createElement('a');
+        uLink.href = '/u/' + encodeURIComponent(username);
+        uLink.target = '_blank';
+        uLink.rel = 'noopener';
+        uLink.style.cssText = 'color:#66ccff;font-weight:600;text-decoration:none';
+        uLink.textContent = username;
+
+        row1.appendChild(flag);
+        row1.appendChild(uLink);
+
+        if (cc24 !== null) {
+          const ccEl = document.createElement('span');
+          ccEl.style.cssText = 'font-weight:700;font-size:10px;' + (cc24 > 8 ? 'color:#ff3b3b' : 'color:#9b9892');
+          ccEl.textContent = cc24 + ' cmts/24h';
+          row1.appendChild(ccEl);
+        }
+        wrap.appendChild(row1);
+
+        // Row 2: reason
+        if (truncReason) {
+          const reasonEl = document.createElement('div');
+          reasonEl.style.cssText = 'color:#c8c5c0;font-size:10px;padding-left:16px';
+          reasonEl.textContent = truncReason;
+          wrap.appendChild(reasonEl);
+        }
+
+        // Row 3: meta + actions
+        const row3 = document.createElement('div');
+        row3.style.cssText = 'display:flex;align-items:center;gap:6px;padding-left:16px';
+
+        const meta = document.createElement('span');
+        meta.style.cssText = 'color:#5a5752;font-size:10px;flex:1';
+        const agoText = markedAt ? timeAgo(new Date(markedAt).toISOString()) : '';
+        meta.textContent = 'marked by ' + (markedBy || '?') + (agoText ? ' · ' + agoText : '');
+        row3.appendChild(meta);
+
+        // Action buttons
+        function mkBtn(label, color) {
+          const b = document.createElement('button');
+          b.textContent = label;
+          b.style.cssText = 'background:transparent;border:1px solid ' + color + ';color:' + color + ';padding:1px 5px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
+          return b;
+        }
+
+        const profileBtn = mkBtn('Profile', '#66ccff');
+        profileBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          window.open('/u/' + encodeURIComponent(username), '_blank');
+        });
+
+        const banBtn = mkBtn('Ban', '#ff3b3b');
+        banBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          window.open('/ban?username=' + encodeURIComponent(username), '_blank');
+        });
+
+        const unmarkBtn = mkBtn('Unmark', '#ff9933');
+        unmarkBtn.addEventListener('click', async function(e) {
+          e.stopPropagation();
+          unmarkBtn.disabled = true;
+          unmarkBtn.textContent = '...';
+          try {
+            await rpcCall('modSusClear', { username });
+            if (typeof _susState === 'object' && _susState && _susState.rows) {
+              _susState.rows.delete(String(username).toLowerCase());
+            }
+            try { _susApplyDecorations(true); } catch(_){}
+            wrap.remove();
+            // Update header count
+            const remaining = pop.querySelectorAll('[data-sus-row]').length;
+            title.textContent = 'SUS — ' + remaining + ' FLAGGED';
+            try { snack('✓ ' + username + ' unmarked SUS', 'success'); } catch(_){}
+          } catch(err) {
+            try { snack('Unmark failed: ' + (err && err.message || err), 'error'); } catch(_){}
+            unmarkBtn.disabled = false;
+            unmarkBtn.textContent = 'Unmark';
+          }
+        });
+
+        const noteBtn = mkBtn('Note', '#9b9892');
+        noteBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          window.open('/u/' + encodeURIComponent(username), '_blank');
+        });
+
+        row3.appendChild(profileBtn);
+        row3.appendChild(banBtn);
+        row3.appendChild(unmarkBtn);
+        row3.appendChild(noteBtn);
+        wrap.appendChild(row3);
+
+        wrap.setAttribute('data-sus-row', username);
+        body.appendChild(wrap);
+      });
+    }
+    pop.appendChild(body);
+
+    // Footer
+    const foot = document.createElement('div');
+    foot.style.cssText = 'border-top:1px solid #2a2825;padding:4px 10px;display:flex;align-items:center;gap:8px';
+    const footText = document.createElement('span');
+    footText.style.cssText = 'color:#5a5752;font-size:9px;flex:1';
+    footText.textContent = 'Click 🚩 username to open profile · ';
+    const footLink = document.createElement('a');
+    footLink.href = '/users';
+    footLink.target = '_blank';
+    footLink.rel = 'noopener';
+    footLink.style.cssText = 'color:#5a5752;font-size:9px';
+    footLink.textContent = 'Open full /users page →';
+    foot.appendChild(footText);
+    foot.appendChild(footLink);
+    pop.appendChild(foot);
+
+    document.body.appendChild(pop);
+
+    // Close handlers
+    closeBtn.addEventListener('click', function() { _closePop(); });
+
+    function _closePop() {
+      pop.remove();
+      document.removeEventListener('click', _outsideClick, true);
+      document.removeEventListener('keydown', pop._escHandler);
+    }
+    setTimeout(function() {
+      _outsideClick = function(ev) {
+        if (!pop.contains(ev.target) && ev.target !== anchor) { _closePop(); }
+      };
+      document.addEventListener('click', _outsideClick, true);
+    }, 0);
+    var _outsideClick;
+    pop._escHandler = function(ev) { if (ev.key === 'Escape') { _closePop(); } };
+    document.addEventListener('keydown', pop._escHandler);
+  }
+
+  // v10.7.1 TP.2: Death Row inline popover — snapshot of pending DR entries
+  function _showDrPopover(anchor) {
+    const POP_ID = 'gam-dr-popover';
+    const existing = document.getElementById(POP_ID);
+    if (existing) { existing.remove(); return; }
+
+    const drList = getDeathRow().filter(function(d) { return d && d.status === 'waiting'; });
+    const count = drList.length;
+
+    const pop = document.createElement('div');
+    pop.id = POP_ID;
+    pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:340px;max-width:420px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
+    const r = anchor.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(window.innerWidth - 420, r.left)) + 'px';
+    pop.style.bottom = (window.innerHeight - r.top + 6) + 'px';
+    pop.style.top = '';
+
+    // Header
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'background:#0a0a0b;border-bottom:1px solid #2a2825;padding:6px 10px;display:flex;align-items:center;gap:8px';
+    const title = document.createElement('span');
+    title.style.cssText = 'color:#ffd84d;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:10px';
+    title.textContent = 'DEATH ROW — ' + count + ' PENDING';
+    const spacer = document.createElement('span');
+    spacer.style.flex = '1';
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = 'background:transparent;border:none;color:#5a5752;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1';
+    hdr.appendChild(title); hdr.appendChild(spacer); hdr.appendChild(closeBtn);
+    pop.appendChild(hdr);
+
+    // Body
+    const body = document.createElement('div');
+    body.style.cssText = 'padding:6px 10px;max-height:320px;overflow-y:auto';
+
+    if (count === 0) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'color:#5a5752;text-align:center;padding:16px 0;font-size:10px';
+      empty.textContent = 'No Death Row entries';
+      body.appendChild(empty);
+    } else {
+      drList.forEach(function(entry) {
+        const username = entry.username || '';
+        const reason = entry.reason || '';
+        const queuedAt = entry.queuedAt || 0;
+        const executeAt = entry.executeAt || 0;
+
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'padding:6px 0;border-bottom:1px solid #1e1c1a;display:flex;flex-direction:column;gap:3px';
+        wrap.setAttribute('data-dr-row', username);
+
+        // Row 1: skull + username
+        const row1 = document.createElement('div');
+        row1.style.cssText = 'display:flex;align-items:center;gap:6px';
+
+        const skull = document.createElement('span');
+        skull.textContent = '💀';
+
+        const uLink = document.createElement('a');
+        uLink.href = '/u/' + encodeURIComponent(username);
+        uLink.target = '_blank';
+        uLink.rel = 'noopener';
+        uLink.style.cssText = 'color:#ffd84d;font-weight:600;text-decoration:none';
+        uLink.textContent = username;
+
+        row1.appendChild(skull);
+        row1.appendChild(uLink);
+        wrap.appendChild(row1);
+
+        // Row 2: timing
+        const timingEl = document.createElement('div');
+        timingEl.style.cssText = 'color:#9b9892;font-size:10px;padding-left:16px';
+        const qAgo = queuedAt ? timeAgo(new Date(queuedAt).toISOString()) : '?';
+        const exUntil = executeAt ? timeUntil(executeAt) : '?';
+        timingEl.textContent = 'queued ' + qAgo + ', fires in ' + exUntil;
+        wrap.appendChild(timingEl);
+
+        // Row 3: reason
+        if (reason) {
+          const reasonEl = document.createElement('div');
+          reasonEl.style.cssText = 'color:#c8c5c0;font-size:10px;padding-left:16px';
+          reasonEl.textContent = reason.length > 80 ? reason.slice(0, 80) + '…' : reason;
+          wrap.appendChild(reasonEl);
+        }
+
+        // Row 4: actions
+        const row4 = document.createElement('div');
+        row4.style.cssText = 'display:flex;align-items:center;gap:6px;padding-left:16px';
+        const actSpacer = document.createElement('span');
+        actSpacer.style.flex = '1';
+        row4.appendChild(actSpacer);
+
+        function mkBtn(label, color) {
+          const b = document.createElement('button');
+          b.textContent = label;
+          b.style.cssText = 'background:transparent;border:1px solid ' + color + ';color:' + color + ';padding:1px 5px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
+          return b;
+        }
+
+        const profileBtn = mkBtn('Profile', '#66ccff');
+        profileBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          window.open('/u/' + encodeURIComponent(username), '_blank');
+        });
+
+        const cancelBtn = mkBtn('Cancel', '#ff9933');
+        cancelBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          cancelBtn.disabled = true;
+          cancelBtn.textContent = '...';
+          try {
+            withUndo(function() { removeFromDeathRow(username); return Promise.resolve(); }, {
+              tier: 'B', label: 'DR cancel ' + username,
+              inverse: function() {
+                if (entry.delayMs) {
+                  addToDeathRow(username, entry.delayMs, reason);
+                }
+                return Promise.resolve();
+              }
+            });
+            wrap.remove();
+            title.textContent = 'DEATH ROW — ' + pop.querySelectorAll('[data-dr-row]').length + ' PENDING';
+            try { snack('✓ ' + username + ' removed from Death Row', 'success'); } catch(_){}
+          } catch(err) {
+            try { snack('Cancel failed: ' + (err && err.message || err), 'error'); } catch(_){}
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = 'Cancel';
+          }
+        });
+
+        row4.appendChild(profileBtn);
+        row4.appendChild(cancelBtn);
+        wrap.appendChild(row4);
+        body.appendChild(wrap);
+      });
+    }
+    pop.appendChild(body);
+
+    // Footer
+    const foot = document.createElement('div');
+    foot.style.cssText = 'border-top:1px solid #2a2825;padding:4px 10px';
+    const footLink = document.createElement('a');
+    footLink.href = '/users?tab=deathrow';
+    footLink.target = '_blank';
+    footLink.rel = 'noopener';
+    footLink.style.cssText = 'color:#5a5752;font-size:9px';
+    footLink.textContent = 'Open full Death Row view →';
+    foot.appendChild(footLink);
+    pop.appendChild(foot);
+
+    document.body.appendChild(pop);
+
+    closeBtn.addEventListener('click', function() { _closePop(); });
+
+    function _closePop() {
+      pop.remove();
+      document.removeEventListener('click', _outsideClick, true);
+      document.removeEventListener('keydown', pop._escHandler);
+    }
+    setTimeout(function() {
+      _outsideClick = function(ev) {
+        if (!pop.contains(ev.target) && ev.target !== anchor) { _closePop(); }
+      };
+      document.addEventListener('click', _outsideClick, true);
+    }, 0);
+    var _outsideClick;
+    pop._escHandler = function(ev) { if (ev.key === 'Escape') { _closePop(); } };
+    document.addEventListener('keydown', pop._escHandler);
+  }
+
+  // v10.7.1 TP.3: Queue inline popover — snapshot count + escape link (no client-side queue item store)
+  function _showQueuePopover(anchor) {
+    const POP_ID = 'gam-queue-popover';
+    const existing = document.getElementById(POP_ID);
+    if (existing) { existing.remove(); return; }
+
+    const queueCount = (typeof _firehoseState === 'object' && _firehoseState)
+      ? (_firehoseState.postsQueued || 0)
+      : 0;
+
+    const pop = document.createElement('div');
+    pop.id = POP_ID;
+    pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:300px;max-width:380px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
+    const r = anchor.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(window.innerWidth - 380, r.left)) + 'px';
+    pop.style.bottom = (window.innerHeight - r.top + 6) + 'px';
+    pop.style.top = '';
+
+    // Header
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'background:#0a0a0b;border-bottom:1px solid #2a2825;padding:6px 10px;display:flex;align-items:center;gap:8px';
+    const title = document.createElement('span');
+    title.style.cssText = 'color:#66ccff;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:10px';
+    title.textContent = 'QUEUE — ' + queueCount + ' ITEMS';
+    const spacer = document.createElement('span');
+    spacer.style.flex = '1';
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = 'background:transparent;border:none;color:#5a5752;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1';
+    hdr.appendChild(title); hdr.appendChild(spacer); hdr.appendChild(closeBtn);
+    pop.appendChild(hdr);
+
+    // Body
+    const body = document.createElement('div');
+    body.style.cssText = 'padding:12px 10px;color:#9b9892;font-size:10px;text-align:center';
+
+    const msg = document.createElement('div');
+    msg.textContent = queueCount + ' post' + (queueCount === 1 ? '' : 's') + ' awaiting review in the mod queue.';
+    body.appendChild(msg);
+
+    const note = document.createElement('div');
+    note.style.cssText = 'color:#5a5752;margin-top:4px';
+    note.textContent = 'Open the queue page to triage items.';
+    body.appendChild(note);
+
+    const qBtn = document.createElement('a');
+    qBtn.href = '/queue';
+    qBtn.target = '_blank';
+    qBtn.rel = 'noopener';
+    qBtn.style.cssText = 'display:inline-block;margin-top:10px;background:transparent;border:1px solid #66ccff;color:#66ccff;padding:3px 10px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;text-decoration:none';
+    qBtn.textContent = 'Open /queue page →';
+    body.appendChild(qBtn);
+
+    pop.appendChild(body);
+    document.body.appendChild(pop);
+
+    closeBtn.addEventListener('click', function() { _closePop(); });
+
+    function _closePop() {
+      pop.remove();
+      document.removeEventListener('click', _outsideClick, true);
+      document.removeEventListener('keydown', pop._escHandler);
+    }
+    setTimeout(function() {
+      _outsideClick = function(ev) {
+        if (!pop.contains(ev.target) && ev.target !== anchor) { _closePop(); }
+      };
+      document.addEventListener('click', _outsideClick, true);
+    }, 0);
+    var _outsideClick;
+    pop._escHandler = function(ev) { if (ev.key === 'Escape') { _closePop(); } };
+    document.addEventListener('keydown', pop._escHandler);
+  }
+
   function _showSiteHealthPopover(anchor){
     const existing = document.getElementById('gam-site-health-popover');
     if (existing){ existing.remove(); return; }
@@ -16936,21 +17375,22 @@ Analyze this comment against the community rules. Then write a brief, profession
       const states = [];
       try {
         if (typeof _firehoseState === 'object' && _firehoseState && _firehoseState.postsQueued > 0) {
-          states.push({ msg: _firehoseState.postsQueued + ' POSTS Q', color: 'var(--bb-cyan, #66ccff)', target: '/queue' });
+          // v10.7.1 TP.4: kind field added for popover dispatch
+          states.push({ msg: _firehoseState.postsQueued + ' POSTS Q', color: 'var(--bb-cyan, #66ccff)', target: '/queue', kind: 'queue' });
         }
         if (typeof STATE !== 'undefined' && STATE && typeof STATE.unread === 'number' && STATE.unread > 0) {
-          states.push({ msg: STATE.unread + ' MODMAIL', color: 'var(--bb-amber, #ff9933)', target: '__chat__', pulse: true });
+          states.push({ msg: STATE.unread + ' MODMAIL', color: 'var(--bb-amber, #ff9933)', target: '__chat__', pulse: true, kind: 'modmail' });
         }
         const drCount = (lsGet(K.DEATHROW, []) || []).length;
         if (drCount > 0) {
-          states.push({ msg: drCount + ' DR PENDING', color: 'var(--bb-yellow, #ffd84d)', target: null });
+          states.push({ msg: drCount + ' DR PENDING', color: 'var(--bb-yellow, #ffd84d)', target: null, kind: 'dr' });
         }
         const susCount = (typeof _susState === 'object' && _susState && _susState.rows) ? _susState.rows.size : 0;
         if (susCount > 0) {
-          states.push({ msg: susCount + ' SUS', color: 'var(--bb-red, #ff3b3b)', target: '/users' });
+          states.push({ msg: susCount + ' SUS', color: 'var(--bb-red, #ff3b3b)', target: '/users', kind: 'sus' });
         }
         if (states.length === 0) {
-          states.push({ msg: 'site quiet', color: 'var(--bb-ink-faint, #5a5752)', target: null });
+          states.push({ msg: 'site quiet', color: 'var(--bb-ink-faint, #5a5752)', target: null, kind: 'quiet' });
         }
       } catch(_e){ /* swallow */ }
       __tickerStates = states;
@@ -16961,12 +17401,16 @@ Analyze this comment against the community rules. Then write a brief, profession
       tickerEl.dataset.target = cur.target || '';
       tickerEl.classList.toggle('gam-ticker-pulse', !!cur.pulse);
     }
+    // v10.7.1 TP.4: inline popovers replace navigation — mod sees data without leaving page
     tickerEl.addEventListener('click', (e)=>{
       e.stopPropagation();
-      const t = tickerEl.dataset.target;
-      if (!t) return;
-      if (t === '__chat__') { try { ModChat.openPanel(); } catch(_){} return; }
-      try { window.location.href = t; } catch(_){}
+      const cur = __tickerStates[__tickerIdx];
+      if (!cur) return;
+      if (cur.kind === 'modmail') { try { ModChat.openPanel(); } catch(_){} return; }
+      if (cur.kind === 'sus') { try { _showSusPopover(tickerEl); } catch(err) { console.warn('[TP.1]', err); } return; }
+      if (cur.kind === 'dr') { try { _showDrPopover(tickerEl); } catch(err) { console.warn('[TP.2]', err); } return; }
+      if (cur.kind === 'queue') { try { _showQueuePopover(tickerEl); } catch(err) { console.warn('[TP.3]', err); } return; }
+      // quiet / unknown kind — no-op (no nav)
     });
     setInterval(__updateTicker, 30_000);
     setInterval(()=>{ __tickerIdx = (__tickerIdx + 1) % Math.max(1, __tickerStates.length); __updateTicker(); }, 4000);
