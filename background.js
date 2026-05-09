@@ -3003,6 +3003,109 @@ const RPC_HANDLERS = {
     }
   },
 
+  // v10.9.0 A1: op-deletes feed — GET /mod/op-deletes?since=<ts>&limit=<n>.
+  modOpDeletes: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    schema: {
+      since: { type: 'number', required: false },
+      limit: { type: 'number', required: false, max: 50 }
+    },
+    async handler(args) {
+      if (!secretCache.workerModToken && !secretCache.leadModToken) {
+        try { await loadSecrets(); } catch (e) {}
+      }
+      const since = (args && args.since) || (Date.now() - 24 * 3600 * 1000);
+      const limit = Math.min(50, (args && args.limit) || 20);
+      const ctrl = new AbortController();
+      const timer = setTimeout(function() { try { ctrl.abort(); } catch (_) {} }, 15000);
+      try {
+        const headers = new Headers();
+        if (secretCache.workerModToken) headers.set('X-Mod-Token', secretCache.workerModToken);
+        headers.set('X-Extension-Id', chrome.runtime.id);
+        const r = await fetch(
+          WORKER_BASE + '/mod/op-deletes?since=' + encodeURIComponent(since) + '&limit=' + limit,
+          { method: 'GET', headers: headers, signal: ctrl.signal }
+        );
+        const text = await r.text();
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch (_) {}
+        return { ok: r.ok, status: r.status, data: parsed, text: text };
+      } catch (e) {
+        return { ok: false, status: 0, error: 'network failure', code: 'OP_DELETES_NETWORK' };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  },
+
+  // v10.9.0 A2: brigade new-cluster detection — GET /mod/brigade/new-cluster?thread_id=<id>.
+  modBrigadeNewCluster: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    schema: {
+      thread_id: { type: 'string', required: true, max: 128 }
+    },
+    async handler(args) {
+      if (!secretCache.workerModToken && !secretCache.leadModToken) {
+        try { await loadSecrets(); } catch (e) {}
+      }
+      const thread_id = String((args && args.thread_id) || '').trim().slice(0, 128);
+      if (!thread_id) return { ok: false, status: 400, error: 'thread_id required' };
+      const ctrl = new AbortController();
+      const timer = setTimeout(function() { try { ctrl.abort(); } catch (_) {} }, 15000);
+      try {
+        const headers = new Headers();
+        if (secretCache.workerModToken) headers.set('X-Mod-Token', secretCache.workerModToken);
+        headers.set('X-Extension-Id', chrome.runtime.id);
+        const r = await fetch(
+          WORKER_BASE + '/mod/brigade/new-cluster?thread_id=' + encodeURIComponent(thread_id),
+          { method: 'GET', headers: headers, signal: ctrl.signal }
+        );
+        const text = await r.text();
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch (_) {}
+        return { ok: r.ok, status: r.status, data: parsed, text: text };
+      } catch (e) {
+        return { ok: false, status: 0, error: 'network failure', code: 'BRIGADE_CLUSTER_NETWORK' };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  },
+
+  // v10.9.0 A3: lookalike-confirmed lookup — GET /mod/user/lookalike-confirmed?username=<u>.
+  modUserLookalikeConfirmed: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    schema: {
+      username: { type: 'string', required: true, max: 64 }
+    },
+    async handler(args) {
+      if (!secretCache.workerModToken && !secretCache.leadModToken) {
+        try { await loadSecrets(); } catch (e) {}
+      }
+      const username = String((args && args.username) || '').trim().slice(0, 64);
+      if (!username) return { ok: false, status: 400, error: 'username required' };
+      const ctrl = new AbortController();
+      const timer = setTimeout(function() { try { ctrl.abort(); } catch (_) {} }, 15000);
+      try {
+        const headers = new Headers();
+        if (secretCache.workerModToken) headers.set('X-Mod-Token', secretCache.workerModToken);
+        headers.set('X-Extension-Id', chrome.runtime.id);
+        const r = await fetch(
+          WORKER_BASE + '/mod/user/lookalike-confirmed?username=' + encodeURIComponent(username),
+          { method: 'GET', headers: headers, signal: ctrl.signal }
+        );
+        const text = await r.text();
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch (_) {}
+        return { ok: r.ok, status: r.status, data: parsed, text: text };
+      } catch (e) {
+        return { ok: false, status: 0, error: 'network failure', code: 'LOOKALIKE_CONFIRMED_NETWORK' };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  },
+
   // ASK-031: ban-confirm RPC — fire-and-forget audit correlation after apiBan returns.
   // Never blocks the ban flow. Errors are logged and swallowed.
   modBanConfirm: {
@@ -3121,7 +3224,11 @@ const _RPC_LIMITS = {
   modBanConfirm:     { maxPerMin: 30 },
   // v10.8.0 A3/A4: queue snapshot (ticker popover) + user cadence (TARD-1 chip).
   modGetQueueSnapshot: { maxPerMin: 30 },
-  modUserCadence:      { maxPerMin: 60 }
+  modUserCadence:      { maxPerMin: 60 },
+  // v10.9.0 A1-A3: op-deletes, brigade new-cluster, lookalike-confirmed.
+  modOpDeletes:                { maxPerMin: 30 },
+  modBrigadeNewCluster:        { maxPerMin: 60 },
+  modUserLookalikeConfirmed:   { maxPerMin: 60 }
 };
 
 function _rpcRateCheck(name) {

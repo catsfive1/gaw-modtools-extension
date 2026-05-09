@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v10.8.0';
+  const VERSION = 'v10.9.0';
 
   // v10.6.1 HOTFIX: FEATURE_FLAGS must be declared BEFORE any synchronous IIFE
   // that references it. The earliest reference is __v80ParkUI at line ~3398
@@ -6364,7 +6364,62 @@
       }
       return { id: 8, label: 'Lookalikes', body };
     }
-    return [sec1(), sec2(), sec3(), sec4(), sec5(), sec6(), sec7(), sec8()];
+    // v10.9.0 M3 (ASK-052): OP self-delete count chip in Intel Drawer
+    async function sec9() {
+      const body = el('div');
+      try {
+        const since30 = Date.now() - 30 * 86400 * 1000;
+        const res = await rpcCall('modOpDeletes', { since: since30, limit: 50 });
+        if (res && res.ok && Array.isArray(res.deletes)) {
+          const userDels = res.deletes.filter(function(d) { return String(d.author || '').toLowerCase() === String(id).toLowerCase(); });
+          if (userDels.length > 0) {
+            const chip = el('span', {
+              style: 'display:inline-flex;align-items:center;gap:5px;background:rgba(255,59,59,0.1);border:1px solid #ff3b3b;color:#ff3b3b;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;padding:2px 7px'
+            }, userDels.length + ' OP self-deleted post' + (userDels.length !== 1 ? 's' : '') + ' in last 30d');
+            body.appendChild(chip);
+          } else {
+            body.appendChild(el('em', { style: 'color:#9b9892;font-size:10px' }, 'No OP self-deletions in last 30d.'));
+          }
+        } else {
+          body.appendChild(el('em', { style: 'color:#9b9892;font-size:10px' }, 'No data.'));
+        }
+      } catch(err) {
+        body.appendChild(el('em', { style: 'color:#9b9892;font-size:10px' }, 'OP delete data unavailable.'));
+      }
+      return { id: 9, label: 'OP Deletes', body };
+    }
+    // v10.9.0 M5 (TARD-4): lookalike-confirmed badge in Intel Drawer
+    async function sec10() {
+      const body = el('div');
+      try {
+        const res = await rpcCall('modUserLookalikeConfirmed', { username: id });
+        if (res && res.ok && res.is_confirmed_lookalike) {
+          const score = typeof res.similarity_score === 'number' ? Math.round(res.similarity_score * 100) : '?';
+          const matched = escapeHtml(String(res.matched_banned_user || ''));
+          const wrap = el('div', {
+            style: 'background:rgba(255,59,59,0.08);border:1px solid #ff3b3b;padding:6px 9px;display:flex;align-items:center;gap:8px'
+          });
+          const label = el('span', { style: 'color:#ff3b3b;font:700 10px ui-monospace,monospace;flex:1' },
+            '⚠ LOOKALIKE: matches banned user ‘' + matched + '’ (similarity ' + score + '%)');
+          const viewBtn = el('button', {
+            style: 'background:transparent;border:1px solid #ff3b3b;color:#ff3b3b;padding:2px 7px;cursor:pointer;font:600 9px ui-monospace,monospace;white-space:nowrap'
+          }, 'View matched user');
+          viewBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            window.open('/u/' + encodeURIComponent(res.matched_banned_user), '_blank');
+          });
+          wrap.appendChild(label);
+          wrap.appendChild(viewBtn);
+          body.appendChild(wrap);
+        } else {
+          body.appendChild(el('em', { style: 'color:#9b9892;font-size:10px' }, 'No confirmed lookalike on record.'));
+        }
+      } catch(err) {
+        body.appendChild(el('em', { style: 'color:#9b9892;font-size:10px' }, 'Lookalike data unavailable.'));
+      }
+      return { id: 10, label: 'Lookalike', body };
+    }
+    return [sec1(), sec2(), sec3(), sec4(), sec5(), sec6(), sec7(), sec8(), sec9(), sec10()];
   }
 
   // ---- CHUNK 5: Thread-kind adapter (modmail) ----
@@ -7655,6 +7710,7 @@
       { id:'note',    label:'Note',    icon:'\u{1F4CB}' },
       { id:'message', label:'Message', icon:'\u{21A9}\u{FE0F}' },
       { id:'quick',   label:'Quick',   icon:'\u{26A1}' },
+      { id:'opdel',   label:'OP Deletes', icon:'\u{1F5D1}' }, // v10.9.0 M3 (ASK-052)
     ];
     const nav = el('div', { cls:'gam-mc-tabs' });
     const panels = el('div', { cls:'gam-mc-panels' });
@@ -7673,6 +7729,7 @@
       if (id==='note')    renderNoteTab(el2, username, item);
       if (id==='message') renderMessageTab(el2, username, item);
       if (id==='quick')   renderQuickTab(el2, username, item);
+      if (id==='opdel')   _renderOpDelTab(el2); // v10.9.0 M3 (ASK-052)
       // v5.2.0 fun fix: auto-focus the primary textarea so the mod can start typing immediately.
       setTimeout(()=>{
         const ta = el2.querySelector('#mc-ban-msg, #mc-note-body, #mc-msg-body');
@@ -7698,6 +7755,37 @@
     panelOpen = 'modconsole';
     // v8.1 ux: focus trap on Mod Console popover (flag-gated inside helper).
     try { if (mc) installFocusTrap(mc); } catch(e){}
+  }
+
+  // v10.9.0 M3 (ASK-052): OP DELETES tab in Mod Console
+  function _renderOpDelTab(root) {
+    root.innerHTML = '<div class="gam-mc-loading" style="padding:10px">\u{1F50D} Loading OP deletions...</div>';
+    rpcCall('modOpDeletes', { since: Date.now() - 24 * 3600 * 1000, limit: 20 }).then(function(res) {
+      root.innerHTML = '';
+      const hdr = el('div', { cls: 'gam-mc-h', style: 'margin-bottom:6px' }, '\u{1F5D1} OP Self-Deletions — last 24h');
+      root.appendChild(hdr);
+      if (!res || !res.ok || !res.deletes || !res.deletes.length) {
+        root.appendChild(el('div', { style: 'color:#9b9892;font-size:11px;padding:6px' }, 'No OP self-deletions in the last 24 hours.'));
+        return;
+      }
+      res.deletes.forEach(function(d) {
+        const row = el('div', { style: 'border-bottom:1px solid #2a2e36;padding:6px 0;font-size:11px' });
+        const titleEl = el('div', { style: 'color:#ff3b3b;font-weight:600' }, escapeHtml(d.title || '(no title)'));
+        const meta = el('div', { style: 'color:#9b9892;font-size:10px;margin-top:2px' },
+          'by ' + escapeHtml(d.author || '?') +
+          (d.subreddit ? ' · ' + escapeHtml(d.subreddit) : '') +
+          (d.deleted_by_op_at ? ' · deleted ' + timeAgo(new Date(d.deleted_by_op_at).toISOString()) : '') +
+          (d.was_in_queue ? ' · ⚠️ was in queue' : '')
+        );
+        const snippet = d.snippet ? el('div', { style: 'color:#a0aec0;font-size:10px;margin-top:2px;font-style:italic' }, '“' + escapeHtml(d.snippet.slice(0, 120)) + '”') : null;
+        row.appendChild(titleEl);
+        row.appendChild(meta);
+        if (snippet) row.appendChild(snippet);
+        root.appendChild(row);
+      });
+    }).catch(function(err) {
+      root.innerHTML = '<div style="color:#ff3b3b;padding:8px;font-size:11px">Error loading OP deletions: ' + escapeHtml(String(err && err.message || err)) + '</div>';
+    });
   }
 
   // ── INTEL tab ─────────────────────────────────────────────────────
@@ -10792,6 +10880,9 @@ Analyze this comment against the community rules. Then write a brief, profession
     addFeatureToggle('Passive Crawler', 'features.crawler', false,
       'Upload /users usernames to the team cloud on each visit.');
 
+    // v10.9.0 M2 (ASK-053): auto-remove opt-in toggle
+    addSection('\u{1F6E1} Auto-Actions');
+    addToggle('Auto-Remove SUS/DR Queue Items', 'autoRemoveSusDr', 'When the queue page is open, automatically remove posts/comments from SUS-marked or Death Row users after a 1.5s undo window. OFF by default.');
     addSection('\u{1F95A} Fun');
     addToggle('Easter Eggs', 'easterEggsEnabled', 'Enable Q-themed easter eggs in the mod interface. \u{1F910}');
 
@@ -12174,6 +12265,34 @@ Analyze this comment against the community rules. Then write a brief, profession
       const h=getUserHistory(a), bc=h.filter(x=>x.type==='ban').length, w=isWatched(a);
       if(bc>0) al.after(el('span',{cls:'gam-inline-badge gam-inline-repeat', title:`${bc} prior ban${bc>1?'s':''}`}, `\u{1F534} x${bc}`));
       if(w) al.after(el('span',{cls:'gam-inline-badge gam-inline-watched', title:'Watchlist'},'\u{1F440}'));
+      // v10.9.0 M1 (ASK-051): inline Approve/Remove buttons for mods on each post row
+      if (isLeadMod() && !item.dataset.gamModBtns) {
+        item.dataset.gamModBtns = '1';
+        const thingId = item.getAttribute('data-id') || '';
+        if (thingId) {
+          function _mkModBtn(label, title, color, action) {
+            const b = document.createElement('button');
+            b.textContent = label;
+            b.title = title;
+            b.style.cssText = 'background:transparent;border:1px solid ' + color + ';color:' + color + ';padding:1px 4px;cursor:pointer;font:600 10px ui-monospace,monospace;border-radius:3px;opacity:0.5;transition:opacity .15s;margin-left:3px';
+            b.addEventListener('mouseenter', function() { b.style.opacity = '1'; });
+            b.addEventListener('mouseleave', function() { b.style.opacity = '0.5'; });
+            b.addEventListener('click', function(e) {
+              e.preventDefault(); e.stopPropagation();
+              action();
+            });
+            return b;
+          }
+          const apprBtn = _mkModBtn('✓', 'Approve post', '#44dd66', function() {
+            withUndo(function() { return apiApprove(thingId, 'post'); }, { tier:'B', label:'Approve post', inverse: function() { return apiRemove(thingId, 'post'); } });
+          });
+          const remBtn = _mkModBtn('✗', 'Remove post (with undo toast)', '#ff3b3b', function() {
+            withUndo(function() { return apiRemove(thingId, 'post'); }, { tier:'B', label:'Remove post', inverse: function() { return apiApprove(thingId, 'post'); } });
+          });
+          al.after(remBtn);
+          al.after(apprBtn);
+        }
+      }
     });
   }
   if(!IS_USERS_PAGE && !IS_BAN_PAGE){
@@ -13940,6 +14059,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (appendedCount === 0){ queueExhausted = true; hideQueueLoader(); return; }
       if (typeof injectBadges === 'function') injectBadges();
       if (typeof injectAllStrips === 'function') injectAllStrips();
+      // v10.9.0 M2 (ASK-053): auto-remove SUS/DR items on queue scroll
+      if (IS_QUEUE_PAGE) _autoRemoveQueueSusDrItems();
       console.log(`[queue-scroll] appended ${appendedCount} NEW items from page ${queuePageIdx} (skipped dupes)`);
     } catch (e) {
       console.warn('[queue-scroll] fetch failed', e);
@@ -14144,6 +14265,44 @@ Analyze this comment against the community rules. Then write a brief, profession
     // 3. Also prefetch once on load (feels instant)
     setTimeout(()=>loadNextQueuePage(), 1200);
     console.log('[queue-scroll] infinite scroll enabled');
+    // v10.9.0 M2 (ASK-053): hook auto-remove into the queue MutationObserver
+    if (getSetting('autoRemoveSusDr', false)) {
+      const _m2Obs = new MutationObserver(function() { _autoRemoveQueueSusDrItems(); });
+      const _m2Root = document.querySelector('.main-content');
+      if (_m2Root) _m2Obs.observe(_m2Root, { childList: true, subtree: true });
+      // Initial sweep on queue page load
+      setTimeout(_autoRemoveQueueSusDrItems, 1500);
+    }
+  }
+
+  // v10.9.0 M2 (ASK-053): auto-remove SUS/DR queue items with 1.5s delayed withUndo
+  // Opt-in: getSetting('autoRemoveSusDr', false). Never fires when flag is off.
+  const _m2AutoRemovedIds = new Set();
+  function _autoRemoveQueueSusDrItems() {
+    if (!IS_QUEUE_PAGE) return;
+    if (!getSetting('autoRemoveSusDr', false)) return;
+    const drSet = new Set((lsGet(K.DEATHROW, []) || []).map(function(d) { return String(d && d.username || '').toLowerCase(); }));
+    document.querySelectorAll('.post[data-id], .comment[data-id]').forEach(function(item) {
+      const id = item.getAttribute('data-id') || '';
+      if (!id || _m2AutoRemovedIds.has(id)) return;
+      const author = (item.querySelector('.author, [data-author]') || {}).textContent || item.getAttribute('data-author') || '';
+      const lAuthor = String(author).toLowerCase().trim();
+      if (!lAuthor) return;
+      const isSus = typeof _susState === 'object' && _susState && _susState.rows && _susState.rows.has(lAuthor);
+      const isDr = drSet.has(lAuthor);
+      if (!isSus && !isDr) return;
+      _m2AutoRemovedIds.add(id);
+      const reason = isSus ? 'SUS user' : 'Death Row user';
+      setTimeout(function() {
+        withUndo(function() { return apiRemove(id, 'post'); }, {
+          tier: 'B',
+          label: 'Auto-removed (' + reason + ') ' + (lAuthor || id),
+          inverse: function() { return apiApprove(id, 'post'); }
+        });
+        logAction({ type: 'auto_removed_sus', id: id, user: lAuthor, reason: reason, source: 'auto-remove-susDr' });
+        try { item.style.opacity = '0.35'; item.title = 'Auto-removed: ' + reason; } catch(_e) {}
+      }, 1500);
+    });
   }
 
   // ╔══════════════════════════════════════════════════════════════════╗
@@ -17636,6 +17795,10 @@ Analyze this comment against the community rules. Then write a brief, profession
         if (susCount > 0) {
           states.push({ msg: susCount + ' SUS', color: 'var(--bb-red, #ff3b3b)', target: '/users', kind: 'sus' });
         }
+        // v10.9.0 M3 (ASK-052): OP self-delete ticker state
+        if (typeof _opDelCount24h === 'number' && _opDelCount24h > 0) {
+          states.push({ msg: _opDelCount24h + ' OP DEL', color: '#ff3b3b', target: null, kind: 'opdel' });
+        }
         if (states.length === 0) {
           states.push({ msg: 'site quiet', color: 'var(--bb-ink-faint, #5a5752)', target: null, kind: 'quiet' });
         }
@@ -17660,12 +17823,27 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (cur.kind === 'sus') { try { _showSusPopover(tickerEl); } catch(err) { console.warn('[TP.1]', err); } return; }
       if (cur.kind === 'dr') { try { _showDrPopover(tickerEl); } catch(err) { console.warn('[TP.2]', err); } return; }
       if (cur.kind === 'queue') { try { _showQueuePopover(tickerEl); } catch(err) { console.warn('[TP.3]', err); } return; }
+      // v10.9.0 M3 (ASK-052): open Mod Console OP DELETES tab on click
+      if (cur.kind === 'opdel') { try { openModConsole(null, null, 'opdel'); } catch(err) { console.warn('[TP.4]', err); } return; }
       // quiet / unknown kind — no-op (no nav)
     });
     setInterval(__updateTicker, 30_000);
     setInterval(()=>{ if (__tickerPaused) return; __tickerIdx = (__tickerIdx + 1) % Math.max(1, __tickerStates.length); __updateTicker(); }, 4000); // v10.8.0 M1: gated on !__tickerPaused
     // AF-26 (Rule 77): scheduleIdle for non-critical boot task
     scheduleIdle(__updateTicker, 800);
+
+    // v10.9.0 M3 (ASK-052): OP delete count poller (refreshes every 5 min)
+    var _opDelCount24h = 0;
+    function _pollOpDelCount() {
+      rpcCall('modOpDeletes', { since: Date.now() - 24 * 3600 * 1000, limit: 20 }).then(function(res) {
+        if (res && res.ok && Array.isArray(res.deletes)) {
+          _opDelCount24h = res.deletes.length;
+          __updateTicker();
+        }
+      }).catch(function(){});
+    }
+    scheduleIdle(_pollOpDelCount, 5000);
+    setInterval(_pollOpDelCount, 5 * 60 * 1000);
 
     // v9.8.0 \u2014 dedicated MODMAIL INBOX icon. Distinct from the modmail-page
     // mmBtn (which only renders on /modmail/thread/<id>). This one is always
@@ -17816,6 +17994,99 @@ Analyze this comment against the community rules. Then write a brief, profession
     setInterval(updateDeathRowCounter, 5000);
     pollSessionHealth();
     setInterval(pollSessionHealth, 2 * 60 * 1000);
+
+    // v10.9.0 M4 (TARD-3): brigade new-cluster chip on thread/post pages
+    (function() {
+      const _pg = __v80Page();
+      if (!_pg.post) return; // only on /p/<id> pages
+      const _threadId = (location.pathname.match(/^\/p\/([^/]+)/) || [])[1];
+      if (!_threadId) return;
+      const _m4DismissKey = 'brigade_dismiss_' + _threadId;
+      if (getSetting(_m4DismissKey, false)) return; // already dismissed this session
+      scheduleIdle(function() {
+        rpcCall('modBrigadeNewCluster', { thread_id: _threadId }).then(function(data) {
+          if (!data || !data.ok || !data.threads || !data.threads.length) return;
+          const cluster = data.threads[0];
+          if (!cluster || !cluster.alert_level) return;
+          const newAuthors = Array.isArray(cluster.new_authors) ? cluster.new_authors : [];
+          const count = newAuthors.length;
+          const lvl = cluster.alert_level; // 'low' | 'medium' | 'high'
+          const borderColor = lvl === 'high' ? '#ff3b3b' : (lvl === 'medium' ? '#ff9933' : '#ffd84d');
+          const chip = document.createElement('div');
+          chip.id = 'gam-brigade-chip';
+          chip.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:9999990;background:#0a0a0b;border:2px solid ' + borderColor + ';padding:8px 14px;font:600 12px ui-monospace,"JetBrains Mono",monospace;color:' + borderColor + ';display:flex;align-items:center;gap:8px;box-shadow:0 4px 24px rgba(0,0,0,0.7);' + (lvl === 'high' ? 'animation:gam-brigade-pulse 1s ease-in-out infinite alternate;' : '');
+          chip.innerHTML = '🚨 BRIGADE: ' + count + ' brand-new account' + (count !== 1 ? 's' : '') + ' active in this thread (last 1h)';
+          // Add CSS pulse animation if needed
+          if (lvl === 'high' && !document.getElementById('gam-brigade-style')) {
+            const s = document.createElement('style');
+            s.id = 'gam-brigade-style';
+            s.textContent = '@keyframes gam-brigade-pulse{from{box-shadow:0 4px 24px rgba(255,59,59,0.3)}to{box-shadow:0 4px 32px rgba(255,59,59,0.8)}}';
+            document.head.appendChild(s);
+          }
+          function _mkChipBtn(label) {
+            const b = document.createElement('button');
+            b.textContent = label;
+            b.style.cssText = 'background:transparent;border:1px solid ' + borderColor + ';color:' + borderColor + ';padding:2px 7px;cursor:pointer;font:600 10px ui-monospace,monospace;border-radius:3px;white-space:nowrap';
+            return b;
+          }
+          const viewBtn = _mkChipBtn('View accounts');
+          const markBtn = _mkChipBtn('Mark all SUS');
+          const dismissBtn = _mkChipBtn('Dismiss');
+          viewBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            // Show a small popover listing authors
+            const pop = document.createElement('div');
+            pop.style.cssText = 'position:fixed;top:110px;left:50%;transform:translateX(-50%);z-index:9999995;background:#12151a;border:1px solid ' + borderColor + ';padding:10px;font:11px ui-monospace,monospace;min-width:260px;max-height:320px;overflow-y:auto';
+            pop.innerHTML = '<div style="font-weight:700;margin-bottom:6px;color:' + borderColor + '">Brigade accounts</div>';
+            newAuthors.forEach(function(u) {
+              const row = document.createElement('div');
+              row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid #1e2330';
+              const uEl = document.createElement('span');
+              uEl.style.cssText = 'flex:1;color:#ccc';
+              uEl.textContent = u;
+              const susBtn = document.createElement('button');
+              susBtn.textContent = 'SUS';
+              susBtn.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 5px;cursor:pointer;font:700 9px ui-monospace,monospace';
+              susBtn.addEventListener('click', function() {
+                rpcCall('modSusMark', { username: u, reason: 'brigade-cluster' }).then(function() {
+                  susBtn.textContent = 'MARKED';
+                  susBtn.disabled = true;
+                }).catch(function(){});
+              });
+              row.appendChild(uEl); row.appendChild(susBtn);
+              pop.appendChild(row);
+            });
+            const closeP = document.createElement('button');
+            closeP.textContent = 'Close';
+            closeP.style.cssText = 'margin-top:6px;background:transparent;border:1px solid #4a5568;color:#9b9892;padding:2px 10px;cursor:pointer;font:11px ui-monospace,monospace';
+            closeP.addEventListener('click', function() { pop.remove(); });
+            pop.appendChild(closeP);
+            document.body.appendChild(pop);
+          });
+          markBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            markBtn.textContent = 'Marking...';
+            markBtn.disabled = true;
+            Promise.all(newAuthors.map(function(u) {
+              return rpcCall('modSusMark', { username: u, reason: 'brigade-cluster' }).catch(function(){});
+            })).then(function() {
+              markBtn.textContent = 'All marked SUS';
+              snack('Marked ' + newAuthors.length + ' brigade accounts SUS', 'warn');
+            });
+          });
+          dismissBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            setSetting(_m4DismissKey, true);
+            chip.remove();
+          });
+          const btnRow = document.createElement('span');
+          btnRow.style.cssText = 'display:inline-flex;gap:5px;margin-left:8px';
+          btnRow.appendChild(viewBtn); btnRow.appendChild(markBtn); btnRow.appendChild(dismissBtn);
+          chip.appendChild(btnRow);
+          document.body.appendChild(chip);
+        }).catch(function(){});
+      }, 2000);
+    })();
 
     // v10.3 Patch 3: Sticky-queue accordion panel (drop-up above bar)
     (function() {
