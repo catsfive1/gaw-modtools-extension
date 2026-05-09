@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v10.7.1';
+  const VERSION = 'v10.7.2';
 
   // v10.6.1 HOTFIX: FEATURE_FLAGS must be declared BEFORE any synchronous IIFE
   // that references it. The earliest reference is __v80ParkUI at line ~3398
@@ -21987,7 +21987,16 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     try {
       const data = await fetchVersionJson();
       if (!data) return;
-      const remote = data.version;
+      // v10.7.2 HOTFIX: read available_version (latest extension release on GitHub),
+      // NOT data.version which is the WORKER version (different number space).
+      // Pre-fix, mods on v10.7.0 saw "latest v9.8.0" banner -- comparing extension
+      // version against worker version. Backward-compat: fall through to data.version
+      // ONLY if available_version is missing AND data.version looks like an extension
+      // version (10.x or higher); otherwise abort.
+      let remote = (data && typeof data.available_version === 'string') ? data.available_version : null;
+      if (!remote && typeof data.version === 'string' && /^v?(?:10|11|12|13)\./.test(data.version)) {
+        remote = data.version;
+      }
       if (!remote) return;
       const cleanNotes = cleanRemoteNotes(data.notes || '');
       lsSet(K_UPDATE, { lastCheck: Date.now(), remote, installer: data.installer||null, notes: cleanNotes });

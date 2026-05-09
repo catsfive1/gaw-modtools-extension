@@ -1199,12 +1199,32 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     const resp = await fetch(VERSION_JSON_URL, { cache: 'no-store' });
     if (!resp.ok) return;
     const data = await resp.json();
-    const remote = (data && typeof data.version === 'string') ? data.version : null;
+    // v10.7.2 HOTFIX: read available_version (latest extension release from GitHub
+    // version.json), NOT data.version which is the WORKER version (different number
+    // space). The pre-fix code compared extension manifest "10.7.0" against worker
+    // "9.8.0" and showed a "latest v9.8.0" downgrade banner.
+    let remote = (data && typeof data.available_version === 'string') ? data.available_version : null;
+    // Backward compat fallback: only accept data.version if it looks like an extension
+    // version (10.x or higher). Worker versions are 9.x and below.
+    if (!remote && typeof data.version === 'string' && /^v?(?:10|11|12|13)\./.test(data.version)) {
+      remote = data.version;
+    }
     if (!remote) return;
     const local = chrome.runtime.getManifest().version;
-    if (remote === local) {
-      // We are current. Clear any stale notification flag so the banner
-      // disappears once the user actually reloads.
+    // SemVer comparison: only set the banner flag if remote is STRICTLY NEWER
+    // than local. Stale GitHub version.json (e.g. 8.0.0) must not trigger a
+    // downgrade banner.
+    function _semverCmp(a, b) {
+      const pa = String(a).replace(/^v/,'').split('.').map(n=>parseInt(n)||0);
+      const pb = String(b).replace(/^v/,'').split('.').map(n=>parseInt(n)||0);
+      for (let i=0; i<Math.max(pa.length,pb.length); i++){
+        const x=pa[i]||0, y=pb[i]||0;
+        if (x !== y) return x < y ? -1 : 1;
+      }
+      return 0;
+    }
+    if (_semverCmp(local, remote) >= 0) {
+      // Local is current or newer than remote. Clear any stale notification flag.
       try { await chrome.storage.local.remove('gam_update_available'); } catch (_) {}
       return;
     }
