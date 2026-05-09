@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v10.7.2';
+  const VERSION = 'v10.7.3';
 
   // v10.6.1 HOTFIX: FEATURE_FLAGS must be declared BEFORE any synchronous IIFE
   // that references it. The earliest reference is __v80ParkUI at line ~3398
@@ -22083,7 +22083,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         const r = await chrome.storage.local.get('gam_update_available');
         const flag = r && r.gam_update_available;
         if (!flag || typeof flag.to !== 'string') return;
-        if (flag.to === String(VERSION).replace(/^v/,'')) return;
+        // v10.7.3: SemVer guard. String-equality (pre-fix) only caught
+        // "exactly the version I'm on" -- it MISSED the case where local is
+        // already NEWER than what the stale flag advertises. With cmpVersion
+        // we early-return when local >= flag.to, killing the stale banner
+        // even if SW hasn't booted to clear the storage flag yet.
+        const _installed = String(VERSION).replace(/^v/,'');
+        if (cmpVersion(_installed, flag.to) >= 0) {
+          // Local current or newer -- stale flag. Best-effort purge from CS.
+          try { chrome.storage.local.remove('gam_update_available').catch(() => {}); } catch (_) {}
+          return;
+        }
         // ER2-C-4: SW round-trip verification. SW only sets the flag from
         // its alarm handler; any other in-extension write (including a
         // compromised content script) won't match SW RAM record.

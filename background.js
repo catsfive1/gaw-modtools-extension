@@ -99,6 +99,20 @@ async function __ensureSessionAccess(){
   } catch (e) { /* older Chrome: access-level API absent; content script will fail gracefully */ }
 }
 
+// v10.7.3: module-scope SemVer comparison for update-flag staleness checks.
+// Was inline in the alarm handler in v10.7.2 -- promoted so loadSecrets and
+// verifyUpdateFlag can also detect a stale flag and purge it instead of
+// waiting 30min for the next alarm tick.
+function _semverCmp(a, b) {
+  const pa = String(a).replace(/^v/,'').split('.').map(n=>parseInt(n)||0);
+  const pb = String(b).replace(/^v/,'').split('.').map(n=>parseInt(n)||0);
+  for (let i=0; i<Math.max(pa.length,pb.length); i++){
+    const x=pa[i]||0, y=pb[i]||0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
 async function loadSecrets() {
   try {
     let s = {};
@@ -125,11 +139,25 @@ async function loadSecrets() {
     // AF-01 P1 fix: restore _UPDATE_FLAG_LAST_SET from durable storage so the
     // update banner survives SW termination. Without this, verifyUpdateFlag
     // returns ok:false after every SW restart until the next alarm fires (~30m).
+    //
+    // v10.7.3: ALSO detect stale flag (local >= flag.to) and PURGE it on boot
+    // instead of restoring + waiting 30min for the alarm to clear it. This is
+    // the self-heal path for the v10.7.2 -> v10.7.3 transition: mods who had
+    // a stale "9.8.0" flag from the pre-fix code path see the flag cleared
+    // immediately on the first SW boot of the new build.
     try {
       if (chrome.storage && chrome.storage.local) {
         const flagOut = await chrome.storage.local.get('gam_update_available');
-        if (flagOut && flagOut.gam_update_available && flagOut.gam_update_available.to) {
-          _UPDATE_FLAG_LAST_SET = flagOut.gam_update_available;
+        const flagPayload = flagOut && flagOut.gam_update_available;
+        if (flagPayload && flagPayload.to) {
+          const _local = chrome.runtime.getManifest().version;
+          if (_semverCmp(_local, flagPayload.to) >= 0) {
+            // Local is current or newer than flag.to. Stale -- purge it.
+            try { await chrome.storage.local.remove('gam_update_available'); } catch (_) {}
+            _UPDATE_FLAG_LAST_SET = null;
+          } else {
+            _UPDATE_FLAG_LAST_SET = flagPayload;
+          }
         }
       }
     } catch (_) {}
@@ -1393,6 +1421,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // ok only if the flag matches the SW's most-recent set.
   if (msg && msg.type === 'verifyUpdateFlag') {
     const presented = msg && msg.flag;
+    // v10.7.3: defensive stale-flag check. If the presented flag's `to` is
+    // current/older than local, refuse verification AND purge the storage key.
+    // This catches the case where a stale flag survived a code update.
+    try {
+      const _local = chrome.runtime.getManifest().version;
+      if (presented && presented.to && _semverCmp(_local, presented.to) >= 0) {
+        chrome.storage.local.remove('gam_update_available').catch(() => {});
+        _UPDATE_FLAG_LAST_SET = null;
+        sendResponse({ ok: false, expected: 'local-current-or-newer-than-flag' });
+        return true;
+      }
+    } catch (_) {}
     const last = _UPDATE_FLAG_LAST_SET;
     const matches = !!(last && presented
       && last.from === presented.from
