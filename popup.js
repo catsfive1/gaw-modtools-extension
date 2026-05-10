@@ -102,16 +102,20 @@ function $(id) { return document.getElementById(id); }
 
 const _cardWriteTimers = {};
 
+// v10.12 D.3.2: Only <details> cards (card-tokens, card-maint-integrity) use open state.
+// card-tools, card-macros, card-lead are now <div> — no open attribute needed.
+// card-maint no longer exists (split into 4 sub-cards; integrity is the <details> one).
+const _DETAILS_CARDS = ['tokens', 'maint-integrity'];
+
 async function _cardRestoreAll() {
-  const ids = ['tokens', 'maint', 'tools', 'macros', 'lead'];
+  const ids = _DETAILS_CARDS;
   const keys = ids.map(function(id) { return 'gam_card_open_' + id; });
   try {
     const data = await chrome.storage.local.get(keys);
     ids.forEach(function(id) {
       const el = document.getElementById('card-' + id);
-      if (!el) return;
+      if (!el || el.tagName !== 'DETAILS') return;
       const stored = data['gam_card_open_' + id];
-      // undefined = first visit = use HTML default (open attribute present)
       if (stored === false) el.removeAttribute('open');
       else if (stored === true) el.setAttribute('open', '');
     });
@@ -120,13 +124,11 @@ async function _cardRestoreAll() {
 
 function _cardWireToggle(id) {
   const el = document.getElementById('card-' + id);
-  if (!el) return;
+  if (!el || el.tagName !== 'DETAILS') return;
   el.addEventListener('toggle', function() {
     clearTimeout(_cardWriteTimers[id]);
     _cardWriteTimers[id] = setTimeout(function() {
-      // v10.5.1 INVARIANT: always write boolean (el.open is already bool, but guard explicitly)
       const openBool = el.open === true;
-      // E.2.6 (AF-06 Rule 18): add console.warn to silent catch
       chrome.storage.local.set({ ['gam_card_open_' + id]: openBool }).catch(function(e) { console.warn('[Popup] storage.set card state failed:', e); });
     }, 400);
   });
@@ -134,7 +136,7 @@ function _cardWireToggle(id) {
 
 (async function initCards() {
   await _cardRestoreAll();
-  ['tokens', 'maint', 'tools', 'macros', 'lead'].forEach(_cardWireToggle);
+  _DETAILS_CARDS.forEach(_cardWireToggle);
 })();
 
 // Auto-collapse tokens card when auth succeeds (whoamiOk=true) or fail (false)
@@ -253,6 +255,265 @@ function gamEmptyState(opts) {
 }
 // =============================================================================
 // END PATCH 5 — gamEmptyState
+// =============================================================================
+
+// =============================================================================
+// v10.12 PATCH 5b — State factory functions (D.3.11 UIUX-19 §C.1)
+// gamMakeSkel / gamMakeEmpty / gamMakeError / gamMakeStale
+// These are the canonical state helpers for popup context.
+// gamMakeEmpty extends the existing gamEmptyState (which stays for compat).
+// =============================================================================
+
+// New SVG icons for sus-empty and queue-empty (UIUX-19 §B.2)
+const GAM_STATE_SVG = {
+  'sus-empty':   '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg>',
+  'queue-empty': '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="3" rx="1"/><rect x="3" y="10" width="18" height="3" rx="1" opacity=".4"/><rect x="3" y="16" width="18" height="3" rx="1" opacity=".15"/></svg>'
+};
+
+function gamMakeSkel(variant) {
+  const wrap = document.createElement('div');
+  wrap.className = 'gam-skel-wrap';
+  wrap.setAttribute('aria-busy', 'true');
+  if (variant === 'stat') {
+    const bar = document.createElement('div');
+    bar.className = 'gam-skel-stat gam-skel-shimmer';
+    wrap.appendChild(bar);
+  } else if (variant === 'paragraph') {
+    [80, 95, 70].forEach(function(w) {
+      const line = document.createElement('div');
+      line.className = 'gam-skel-line gam-skel-shimmer';
+      line.style.width = w + '%';
+      wrap.appendChild(line);
+    });
+  } else if (variant === 'row') {
+    const row = document.createElement('div');
+    row.className = 'gam-skel-row gam-skel-shimmer';
+    wrap.appendChild(row);
+  } else {
+    const card = document.createElement('div');
+    card.className = 'gam-skel-card gam-skel-shimmer';
+    wrap.appendChild(card);
+  }
+  return wrap;
+}
+
+function gamMakeEmpty(opts) {
+  // Thin wrapper around gamEmptyState — adds .gam-empty-state class for new CSS
+  const o = opts || {};
+  // Merge SVG maps
+  const allSvgs = Object.assign({}, GAM_EMPTY_SVG, GAM_STATE_SVG);
+  const card = document.createElement('div');
+  card.className = 'gam-empty-state';
+  card.setAttribute('role', 'status');
+  if (o.icon && allSvgs[o.icon]) {
+    const iw = document.createElement('div');
+    iw.className = 'gam-empty-icon';
+    iw.innerHTML = allSvgs[o.icon]; // STATIC constants - XSS-safe
+    card.appendChild(iw);
+  }
+  if (o.headline) {
+    const h = document.createElement('div');
+    h.className = 'gam-empty-headline';
+    h.textContent = String(o.headline);
+    card.appendChild(h);
+  }
+  if (o.desc) {
+    const d = document.createElement('div');
+    d.className = 'gam-empty-desc';
+    d.textContent = String(o.desc);
+    card.appendChild(d);
+  }
+  if (o.ctaLabel && typeof o.ctaFn === 'function') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'gam-empty-cta';
+    btn.textContent = String(o.ctaLabel);
+    btn.addEventListener('click', function(e) { try { o.ctaFn(e); } catch(_) {} });
+    card.appendChild(btn);
+  }
+  return card;
+}
+
+function gamMakeError(opts) {
+  const o = opts || {};
+  const wrap = document.createElement('div');
+  wrap.className = 'gam-error-state';
+  wrap.setAttribute('role', 'alert');
+  const chip = document.createElement('span');
+  chip.className = 'gam-error-chip ' + (o.severity === 'soft' ? 'soft' : 'hard');
+  chip.textContent = (o.label ? o.label + ' ' : '') + (o.severity === 'soft' ? 'WARN' : 'ERR');
+  wrap.appendChild(chip);
+  if (o.msg) {
+    const msg = document.createElement('div');
+    msg.className = 'gam-error-msg';
+    msg.textContent = String(o.msg);
+    wrap.appendChild(msg);
+  }
+  if (o.hint) {
+    const hint = document.createElement('div');
+    hint.className = 'gam-error-hint';
+    hint.textContent = String(o.hint);
+    wrap.appendChild(hint);
+  }
+  if (typeof o.retryFn === 'function') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'gam-error-retry';
+    btn.textContent = 'RETRY';
+    btn.addEventListener('click', function() { try { o.retryFn(); } catch(_) {} });
+    wrap.appendChild(btn);
+  }
+  return wrap;
+}
+
+function gamMakeStale(label, refreshFn) {
+  const chip = document.createElement('span');
+  chip.className = 'gam-stale-chip';
+  chip.textContent = label || 'stale';
+  if (typeof refreshFn === 'function') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'gam-stale-refresh';
+    btn.textContent = 'REFRESH';
+    btn.addEventListener('click', function() { try { refreshFn(); } catch(_) {} });
+    chip.appendChild(btn);
+  }
+  return chip;
+}
+// =============================================================================
+// END PATCH 5b — State factories
+// =============================================================================
+
+// =============================================================================
+// v10.12 PATCH 5c — Drill drawer focus management (D.3.8 UIUX-09 §F.4)
+// Filter live-filter, sort re-sort, count badge, focus restore on close
+// =============================================================================
+(function wireDrillEnhancements() {
+  const drill = document.getElementById('pop-drill');
+  const closeBtn = document.getElementById('pop-drill-close');
+  const filterIn = document.getElementById('pop-drill-filter');
+  const sortSel  = document.getElementById('pop-drill-sort');
+  const countEl  = document.getElementById('pop-drill-count');
+  if (!drill || !closeBtn) return;
+
+  let _prevFocus = null;
+
+  // Observe drill visibility and manage focus (open)
+  const openObs = new MutationObserver(function() {
+    if (drill.style.display !== 'none' && drill.style.display !== '') {
+      _prevFocus = document.activeElement;
+      drill.setAttribute('aria-modal', 'true');
+      closeBtn.focus();
+      updateDrillCount();
+    }
+  });
+  openObs.observe(drill, { attributes: true, attributeFilter: ['style'] });
+
+  // Focus restore on close
+  closeBtn.addEventListener('click', function() {
+    if (_prevFocus && typeof _prevFocus.focus === 'function') {
+      try { _prevFocus.focus(); } catch(_) {}
+    }
+  });
+
+  // Esc key close
+  drill.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { closeBtn.click(); }
+  });
+
+  function updateDrillCount() {
+    if (!countEl) return;
+    const rows = drill.querySelectorAll('.pop-drill-row');
+    const visible = Array.from(rows).filter(function(r) { return r.style.display !== 'none'; });
+    countEl.textContent = '(' + (visible.length || rows.length) + ')';
+  }
+
+  // Live filter
+  if (filterIn) {
+    filterIn.addEventListener('input', function() {
+      const term = filterIn.value.toLowerCase();
+      drill.querySelectorAll('.pop-drill-row').forEach(function(row) {
+        row.style.display = (row.textContent.toLowerCase().includes(term)) ? '' : 'none';
+      });
+      updateDrillCount();
+    });
+  }
+
+  // Sort — re-sort visible rows alphabetically by text
+  if (sortSel) {
+    sortSel.addEventListener('change', function() {
+      const tbody = drill.querySelector('tbody') || drill.querySelector('.pop-drill-body');
+      if (!tbody) return;
+      const rows = Array.from(tbody.querySelectorAll('.pop-drill-row, tr'));
+      if (!rows.length) return;
+      const sortVal = sortSel.value;
+      if (!sortVal) return; // "Time" = natural server order
+      rows.sort(function(a, b) { return a.textContent.trim().localeCompare(b.textContent.trim()); });
+      rows.forEach(function(r) { tbody.appendChild(r); });
+    });
+  }
+})();
+// =============================================================================
+// END PATCH 5c — Drill enhancements
+// =============================================================================
+
+// =============================================================================
+// v10.12 PATCH 5d — Stat tile skeleton + error wiring (D.3.17 UIUX-19 §C.2)
+// On open: show skeleton. On loadStats() success: replace. On fail: error chip.
+// =============================================================================
+(function wireStatSkeletons() {
+  const statIds = ['s-pending','s-dr','s-banned','s-today','s-msgs','s-notes','s-ai-today','s-unsticky'];
+  statIds.forEach(function(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // Only set skeleton if still showing the initial placeholder
+    if (el.textContent === '--' || el.textContent === '—' || el.textContent === '&mdash;') {
+      const skel = gamMakeSkel('stat');
+      skel.style.cssText = 'position:absolute;inset:0;width:80%;margin:auto;top:50%;transform:translateY(-50%)';
+      el.style.position = 'relative';
+      el.style.minHeight = '28px';
+      el.textContent = '';
+      el.appendChild(skel);
+      el.dataset.skelActive = '1';
+    }
+  });
+})();
+
+// Called by loadStats() on success to clear skeletons
+function _clearStatSkeletons() {
+  const statIds = ['s-pending','s-dr','s-banned','s-today','s-msgs','s-notes','s-ai-today','s-unsticky'];
+  statIds.forEach(function(id) {
+    const el = document.getElementById(id);
+    if (el && el.dataset.skelActive) {
+      const skel = el.querySelector('.gam-skel-wrap');
+      if (skel) skel.remove();
+      delete el.dataset.skelActive;
+      el.style.position = '';
+      el.style.minHeight = '';
+    }
+  });
+}
+// =============================================================================
+// END PATCH 5d
+// =============================================================================
+
+// =============================================================================
+// v10.12 PATCH 5e — Diag panel skeleton (D.3.18 UIUX-19 §C.2)
+// Replace "Loading..." text in diag panels with skeleton shimmer.
+// =============================================================================
+(function wireDiagSkeletons() {
+  ['diagSysIdentity','diagSwHealth','diagRpcLog','diagStorage'].forEach(function(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if ((el.textContent || '').trim() === 'Loading...') {
+      const skel = gamMakeSkel('paragraph');
+      el.replaceChildren(skel);
+      el.dataset.skelActive = '1';
+    }
+  });
+})();
+// =============================================================================
+// END PATCH 5e
 // =============================================================================
 
 // =============================================================================
@@ -470,6 +731,8 @@ async function loadStats() {
     const todayMsgs = todayActions.filter(l => l.type === 'message' || l.type === 'reply').length;
     const todayNotes = todayActions.filter(l => l.type === 'note').length;
 
+    // v10.12 D.3.17: clear skeletons before writing values
+    _clearStatSkeletons();
     $('s-pending').textContent = pending;
     $('s-dr').textContent = drPending;
     $('s-banned').textContent = banned;
@@ -506,6 +769,19 @@ async function loadStats() {
     $('ver').textContent = 'v' + ver;
   } catch (err) {
     console.error('[Popup] Failed to load stats:', err);
+    // v10.12 D.3.17: surface error state on stat tile area
+    const statsGrid = document.querySelector('.pop-stats');
+    if (statsGrid && !statsGrid.querySelector('.gam-error-state')) {
+      const errEl = gamMakeError({
+        severity: 'hard',
+        label: 'STATS',
+        msg: 'Failed to load stats',
+        hint: 'Worker unreachable — check CF dashboard.',
+        retryFn: loadStats
+      });
+      errEl.style.cssText = 'grid-column:1/-1;padding:8px 12px';
+      statsGrid.insertAdjacentElement('afterend', errEl);
+    }
   }
 }
 
@@ -1323,9 +1599,7 @@ function __applyTierVisibility(tier, whoamiData) {
   if (kpiRow) kpiRow.style.display = isFullLead ? 'grid' : 'none';
   if (qaRow)  qaRow.style.display  = isFullLead ? 'flex'  : 'none';
 
-  // Lapsed mods card: full lead only
-  const lapsedCard = $('lapsedModsCard');
-  if (lapsedCard) lapsedCard.style.display = isFullLead ? '' : 'none';
+  // v10.12: lapsedModsCard replaced by lapsedModsChip (shown by __loadLapsedMods when count > 0)
 
   // Restart setup button: show once visible
   const rsw = $('restartSetupWrap');
@@ -2272,8 +2546,10 @@ document.querySelectorAll('.crawl-btn').forEach(btn => {
         });
         if (r && r.ok){
           statusEl.className = 'pop-token-status ok';
-          // E.3.2 (AF-32 Rule 95): crawl success \u2014 append discoverability hint
-          statusEl.textContent = '\u2713 ' + r.result.pages + ' pages, ' + r.result.users + ' users harvested \u2014 users now visible in Stats > Pending and searchable in Mod Console (Ctrl+Shift+M)';
+          statusEl.textContent = '\u2713 ' + r.result.pages + ' pages, ' + r.result.users + ' users harvested';
+          // v10.12 D.3.4: update crawlStatusLabel with last-crawl timestamp
+          const labelEl = document.getElementById('crawlStatusLabel');
+          if (labelEl) labelEl.textContent = '\u00b7 last crawl: just now';
         } else {
           statusEl.className = 'pop-token-status err';
           statusEl.textContent = 'crawl failed: ' + (r && r.error || 'unknown');
@@ -2810,20 +3086,20 @@ loadLead();
   });
 })();
 
-// v9.15.0 - tab nav (Commander #30: eliminate vertical scrollbars). Maps
-// existing top-level sections to one of 4 tabs and toggles visibility on
-// click. Default tab: stats. Special handling for #leadSection (shared
-// across tokens + lead tabs) and #leadOnlyTools (only on lead tab).
+// v10.12 D.3.1: wireTabNav — leadSection/leadOnlyTools special-case REMOVED.
+// #leadSection and #leadOnlyTools are now inside #card-lead (data-tab="lead").
+// Standard data-tab gate handles all card visibility. Tab panels use [hidden] attr.
+// v9.15.0 - tab nav (Commander #30: eliminate vertical scrollbars).
 (function wireTabNav() {
+  // TAB_MAP: only legacy non-panel elements that still need data-tab tagging.
+  // Cards now carry data-tab directly in HTML; tab panels use [hidden].
   const TAB_MAP = {
     stats:  ['.pop-stats', '#pop-drill', '.pop-alert', '#dr-alert', '#firstrun-banner'],
-    tokens: ['#claimInviteWrap', '.pop-token:not(#macrosSection):not(#leadSection)'],
-    tools:  ['.pop-actions', '#macrosSection', '.pop-tools', '.pop-section-label',
-             '.pop-maint', '#maintRosterStalenessPanel', '#bugListPanel',
-             '#maintReportsPanel', '#maintTardSuggestPanel', '#maintStickyScanPanel'],
-    lead:   []  // lead-only tools handled specially below
+    tokens: ['#claimInviteWrap'],
+    tools:  ['.pop-actions'],
+    lead:   [],
+    diag:   []
   };
-  // Tag sections with data-tab so the toggle is fast + visible in DevTools
   Object.entries(TAB_MAP).forEach(([tab, sels]) => {
     sels.forEach(sel => {
       try {
@@ -2835,12 +3111,8 @@ loadLead();
   });
 
   function setTab(name) {
-    // v9.18.0 CRITICAL FIX: exclude .pop-tab nav buttons from the toggle.
-    // v9.22.0 FIX: use CSS class .pop-tab-hidden (with display:none
-    // !important) instead of inline el.style.display. The Bloomberg
-    // CSS layer has !important rules on .pop-stats and other section
-    // elements that win over inline display:none. Class-based hide
-    // matches their specificity.
+    // Legacy data-tab hide/show (pop-stats, pop-actions, etc.)
+    // v9.22.0: class-based hide so Bloomberg !important wins over inline style.
     document.querySelectorAll('[data-tab]:not(.pop-tab)').forEach(el => {
       if (el.dataset.tab === name) {
         el.classList.remove('pop-tab-hidden');
@@ -2849,56 +3121,51 @@ loadLead();
         el.classList.add('pop-tab-hidden');
       }
     });
-    // Special case: leadSection contains both the lead token input AND
-    // leadOnlyTools. Visible on tokens tab AND lead tab, but the
-    // lead-only-tools child only on lead tab.
-    // v9.22.0: class-based hide for !important override.
-    // v10.11.2 HOTFIX: #leadSection (lead token input) is INSIDE #card-lead.
-    // v10.10.1 P1 added data-tab="lead" to #card-lead, which causes the generic
-    // setTab loop to add pop-tab-hidden (display:none) to the parent — defeating
-    // the special-case below that shows #leadSection on Tokens tab. Result:
-    // Lead Mod Token input was invisible from the Tokens tab — leads couldn't
-    // paste their token before saving the team token. Fix: also unhide
-    // #card-lead parent on tokens tab.
-    const cardLead = document.getElementById('card-lead');
-    if (cardLead) {
-      if (name === 'tokens' || name === 'lead') {
-        cardLead.classList.remove('pop-tab-hidden');
-        cardLead.style.display = '';
-      } else {
-        cardLead.classList.add('pop-tab-hidden');
-      }
-    }
-    const leadSec = document.getElementById('leadSection');
-    const leadTools = document.getElementById('leadOnlyTools');
-    if (leadSec) {
-      if (name === 'tokens' || name === 'lead') {
-        leadSec.classList.remove('pop-tab-hidden');
-        leadSec.style.display = '';
-      } else {
-        leadSec.classList.add('pop-tab-hidden');
-      }
-    }
-    if (leadTools) {
-      if (name === 'lead') {
-        leadTools.classList.remove('pop-tab-hidden');
-        leadTools.style.display = '';
-      } else {
-        leadTools.classList.add('pop-tab-hidden');
-      }
-    }
+    // v10.12 D.3.10: tab panels use hidden attribute for a11y
+    document.querySelectorAll('[role="tabpanel"]').forEach(panel => {
+      const labelId = panel.getAttribute('aria-labelledby') || '';
+      panel.hidden = labelId !== 'tab-btn-' + name;
+    });
     // Update active tab indicator
     document.querySelectorAll('.pop-tab').forEach(b => {
       const active = b.dataset.tab === name;
       b.classList.toggle('pop-tab-active', active);
       b.setAttribute('aria-selected', active ? 'true' : 'false');
+      // a11y: roving tabindex per WAI-ARIA APG tab pattern. Only the active
+      // tab is in the page tab-order; arrow keys move between tabs (below).
+      b.tabIndex = active ? 0 : -1;
     });
-    // Persist last-active tab so refresh restores user position
     try { localStorage.setItem('gam_popup_active_tab', name); } catch (_) {}
   }
   document.querySelectorAll('.pop-tab').forEach(btn => {
     btn.addEventListener('click', () => setTab(btn.dataset.tab));
   });
+  // a11y: WAI-ARIA APG tab pattern keyboard nav.
+  // Left/Right cycle with wraparound; Home/End jump to first/last.
+  // Hidden tabs (lead tab for non-leads via display:none) are skipped.
+  // Activation is automatic on focus — setTab is cheap (no content load).
+  const tablist = document.querySelector('.pop-tabnav');
+  if (tablist) {
+    tablist.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight'
+          && e.key !== 'Home' && e.key !== 'End') return;
+      const cur = e.target.closest('.pop-tab');
+      if (!cur) return;
+      const tabs = Array.from(tablist.querySelectorAll('.pop-tab'))
+                        .filter(t => t.offsetParent !== null);
+      const i = tabs.indexOf(cur);
+      if (i === -1) return; // current tab is hidden; bail rather than guess
+      e.preventDefault();
+      let next;
+      if (e.key === 'ArrowRight')      next = (i + 1) % tabs.length;
+      else if (e.key === 'ArrowLeft')  next = (i - 1 + tabs.length) % tabs.length;
+      else if (e.key === 'Home')       next = 0;
+      else                             next = tabs.length - 1; // End
+      const target = tabs[next];
+      setTab(target.dataset.tab);
+      target.focus();
+    });
+  }
   // v9.20.0 - first-run UX: if no team token saved, default to TOKENS tab
   // (where the input lives) rather than STATS (which shows zeros and looks
   // broken). Returning users with a saved token still get their last tab.
@@ -3329,15 +3596,22 @@ function __macroSetStatus(msg, cls){
 async function loadMacros(){
   const list = document.getElementById('macrosList');
   if (!list) return;
-  list.innerHTML = '<div style="padding:10px;color:#888;font-size:11px;text-align:center">Loading...</div>';
+  // v10.12 D.3.13 / UIUX-19: skeleton instead of "Loading..." text
+  list.replaceChildren(gamMakeSkel('paragraph'));
   try {
     const r = await popupRpc('macrosList', { kind: __macroKind });
     if (!r || !r.ok || !r.data || !Array.isArray(r.data.macros)){
-      list.innerHTML = '<div style="padding:10px;color:#f04040;font-size:11px;text-align:center">Failed to load: ' + ((r && r.error) || 'no response') + '</div>';
+      list.replaceChildren(gamMakeError({ severity: 'hard', label: 'MACROS', msg: (r && r.error) || 'no response', retryFn: loadMacros }));
       return;
     }
+    // D.3.13: wire count badge
+    const badge = document.getElementById('card-badge-macros');
+    if (badge) {
+      badge.textContent = String(r.data.macros.length);
+      badge.style.display = r.data.macros.length > 0 ? '' : 'none';
+    }
     if (r.data.macros.length === 0){
-      list.innerHTML = '<div style="padding:10px;color:#888;font-size:11px;text-align:center">No macros yet. Click "Add new macro" below.</div>';
+      list.replaceChildren(gamMakeEmpty({ icon: 'rules-empty', headline: 'No macros yet', desc: 'Click Add custom below to create one.' }));
       return;
     }
     list.innerHTML = '';
@@ -3886,8 +4160,8 @@ function __exportDrillCsv() {
     });
   }
   // a11y: same treatment for the lead KPI tiles (REDTEAM-3 also made these
-  // focusable). Click handler may not yet exist — keydown synthesizes a click
-  // so keyboard users stay at parity once one lands.
+  // focusable). Keydown synthesizes a click so the route below fires for
+  // both mouse and keyboard from a single source of truth.
   const kpiRow = document.getElementById('leadKpiRow');
   if (kpiRow) {
     kpiRow.addEventListener('keydown', (e) => {
@@ -3897,6 +4171,40 @@ function __exportDrillCsv() {
       if (e.key === ' ') e.preventDefault();
       tile.click();
     });
+    // KPI tile click routing. `active` has live data via modPresencePing;
+    // the other 3 (clearrate/mmp50/incidents) are stubs awaiting worker
+    // endpoints — honest "pending" toast beats silent failure.
+    kpiRow.addEventListener('click', async (e) => {
+      const tile = e.target.closest('.gam-kpi-tile[data-kpi]');
+      if (!tile) return;
+      const kpi = tile.getAttribute('data-kpi');
+      if (kpi === 'active') {
+        // Toggle: if panel is open, close it. Otherwise fetch + render full list.
+        const existing = document.getElementById('kpi-active-panel');
+        if (existing && existing.style.display !== 'none') {
+          existing.style.display = 'none';
+          tile.setAttribute('aria-expanded', 'false');
+          return;
+        }
+        try {
+          const r = await popupRpc('modPresencePing', {});
+          const mods = (r && r.ok && r.data && Array.isArray(r.data.mods)) ? r.data.mods : [];
+          __renderActiveModsPanel(mods);
+          tile.setAttribute('aria-expanded', 'true');
+        } catch (_) {
+          __showToast('Failed to load active mods', 'err');
+        }
+      } else {
+        const labels = { clearrate: 'Queue clear-rate', mmp50: 'Modmail p50', incidents: 'Incidents' };
+        __showToast((labels[kpi] || kpi) + ' detail: endpoint pending', 'ok');
+      }
+    });
+    // a11y: advertise the disclosure relationship from initial render so AT
+    // sees the tile as a collapsed disclosure widget before any interaction.
+    const activeTile = document.getElementById('kpi-active');
+    if (activeTile && !activeTile.hasAttribute('aria-expanded')) {
+      activeTile.setAttribute('aria-expanded', 'false');
+    }
   }
   const closeBtn = $('pop-drill-close');
   if (closeBtn) closeBtn.addEventListener('click', __closeDrillDown);
@@ -3906,6 +4214,13 @@ function __exportDrillCsv() {
     if (e.key === 'Escape') {
       const drawer = $('pop-drill');
       if (drawer && drawer.style.display !== 'none') __closeDrillDown();
+      // Also dismiss the kpi-active inline list, keeping aria-expanded in sync.
+      const kpiPanel = document.getElementById('kpi-active-panel');
+      if (kpiPanel && kpiPanel.style.display !== 'none') {
+        kpiPanel.style.display = 'none';
+        const tile = document.getElementById('kpi-active');
+        if (tile) tile.setAttribute('aria-expanded', 'false');
+      }
     }
   });
 }
@@ -5388,35 +5703,130 @@ async function __maintRunNow() {
 })();
 
 // =============================================================================
-// v10.x PATCH 3 — Lead KPI Dashboard + Lapsed Mods + Quick-actions wiring
+// v10.12 PATCH 3 — Lead KPI Dashboard + Lapsed Chip + Quick-actions wiring
+// D.3.4: CLR-RATE + MM p50 hooked to /mod/stats
+// D.3.5: KPI delta tracking via sessionStorage
+// D.3.6: lapsed chip replaces lapsedModsCard show/hide
+// D.3.7: qaMaintBtn opens gam-lead-deepdive + scrolls to diag sub-panel
+// D.3.12: TAB_MAP.lead updated implicitly (card-lead data-tab="lead" covers it)
 // =============================================================================
+
+// D.3.5: KPI delta helper
+function _updateKpiDelta(tileId, newVal) {
+  const key = 'gam_kpi_prev_' + tileId;
+  const prev = sessionStorage.getItem(key);
+  sessionStorage.setItem(key, String(newVal));
+  const el = $(tileId + '-delta');
+  if (!el || prev === null) { if (el) { el.textContent = ''; el.removeAttribute('data-dir'); } return; }
+  const diff = newVal - Number(prev);
+  if (diff === 0) { el.textContent = '='; el.setAttribute('data-dir', 'flat'); return; }
+  el.textContent = (diff > 0 ? '+' : '') + diff;
+  el.setAttribute('data-dir', diff > 0 ? 'up' : 'down');
+}
+
+// D.3.4: set a KPI tile value + semantic color
+function _setKpiTile(tileId, value, color) {
+  const el = $(tileId + '-val');
+  if (!el) return;
+  if (value == null) {
+    el.textContent = '--';
+    el.style.color = 'var(--bb-ink-faint)';
+    const de = $(tileId + '-delta');
+    if (de) { de.textContent = '?'; de.setAttribute('data-dir', 'none'); }
+    return;
+  }
+  const numVal = typeof value === 'number' ? value : parseFloat(value);
+  el.textContent = String(value);
+  el.style.color = color || 'var(--bb-ink)';
+  _updateKpiDelta(tileId, isNaN(numVal) ? 0 : numVal);
+}
+
+// Persistent inline list of active mods, lazy-mounted under #leadKpiRow.
+// Replaces the earlier toast which capped at 5 names. Toggled by clicking
+// the kpi-active tile (or activating it via Enter/Space).
+function __renderActiveModsPanel(mods) {
+  let panel = document.getElementById('kpi-active-panel');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'kpi-active-panel';
+    panel.setAttribute('role', 'region');
+    panel.setAttribute('aria-label', 'Active mods list');
+    panel.style.cssText = 'background:#11131a;border:1px solid #2a2d33;'
+      + 'border-top:none;padding:6px 8px;margin:-8px 0 8px 0;'
+      + 'max-height:180px;overflow:auto';
+    const kpiRow = document.getElementById('leadKpiRow');
+    if (kpiRow && kpiRow.parentNode) {
+      kpiRow.parentNode.insertBefore(panel, kpiRow.nextSibling);
+    } else {
+      return; // no anchor, nothing to do
+    }
+    // Wire aria-controls now that the controlled element exists.
+    const activeTile = document.getElementById('kpi-active');
+    if (activeTile) activeTile.setAttribute('aria-controls', 'kpi-active-panel');
+  }
+  panel.replaceChildren();
+  const header = document.createElement('div');
+  header.style.cssText = 'font:600 9px/1.2 ui-monospace,monospace;color:#888;'
+    + 'letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px';
+  header.textContent = mods.length === 0
+    ? 'No mods active right now'
+    : 'Active now (' + mods.length + ')';
+  panel.appendChild(header);
+  mods.forEach(m => {
+    const row = document.createElement('div');
+    row.style.cssText = 'font:11px ui-monospace,monospace;color:#e4e4e4;'
+      + 'padding:2px 0';
+    row.textContent = 'u/' + (m.mod_username || m.username || '?');
+    panel.appendChild(row);
+  });
+  panel.style.display = '';
+}
+
 async function __loadLeadKpi() {
-  // Tile 1: Active Now from /presence/online
+  // Tile 1: Active Now from /presence/online (v10.10.1 color fix already applied)
   try {
     const r = await popupRpc('modPresencePing', {});
     if (r && r.ok && r.data) {
       const count = Array.isArray(r.data.mods) ? r.data.mods.length : (r.data.active_count || 0);
-      const el = $('kpi-active-val');
-      if (el) {
-        el.textContent = String(count);
-        // v10.10.1 P3 (DESIGN-08): both branches were returning same amber -- red never fired even at count=0
-        el.style.color = count === 0
-          ? 'var(--bb-red)'
-          : count < 3
-            ? 'var(--bb-warn)'
-            : 'var(--bb-green)';
+      const color = count === 0 ? 'var(--bb-red)' : count < 3 ? 'var(--bb-warn)' : 'var(--bb-green)';
+      _setKpiTile('kpi-active', count, color);
+    }
+  } catch (_) {}
+
+  // D.3.4: Tiles 2-3 from /mod/stats (CLR-RATE + MM p50)
+  try {
+    const stats = await popupRpc('modStats', {});
+    if (stats && stats.ok && stats.data) {
+      const clr = stats.data.queue_clear_rate_24h;
+      const p50 = stats.data.modmail_p50_hours;
+      // CLR-RATE color thresholds: green >=80%, amber 50-79%, red <50%
+      const clrColor = clr == null ? null
+        : clr >= 80 ? 'var(--bb-green)' : clr >= 50 ? 'var(--bb-warn)' : 'var(--bb-red)';
+      _setKpiTile('kpi-clearrate', clr != null ? Math.round(clr) + '%' : null, clrColor);
+      // MM p50 color thresholds: green <=2h, amber 2-6h, red >6h
+      const p50Color = p50 == null ? null
+        : p50 <= 2 ? 'var(--bb-green)' : p50 <= 6 ? 'var(--bb-warn)' : 'var(--bb-red)';
+      _setKpiTile('kpi-mmp50', p50 != null ? p50.toFixed(1) + 'h' : null, p50Color);
+      // AI budget visibility (also used by loadStats tile)
+      const calls = stats.data.ai_calls_today;
+      const cap   = stats.data.ai_calls_cap;
+      if (typeof calls === 'number' && typeof cap === 'number') {
+        const aiEl = $('s-ai-today');
+        if (aiEl) aiEl.textContent = calls + '/' + cap;
       }
     }
   } catch (_) {}
-  // Tiles 2-4 stub — show dashes until worker endpoints land
-  // (clearrate, mmp50 already initialized to &mdash; in HTML)
 
-  // Load lapsed mods
+  // Tile 4: INCIDENTS — hardcoded 0 until mod_incidents V11
+  _setKpiTile('kpi-incidents', 0, 'var(--bb-green)');
+
+  // D.3.6: Load lapsed mods → chip (not lapsedModsCard)
   __loadLapsedMods();
 
-  // Wire quick-actions (once, idempotent check)
+  // Wire quick-actions (once, idempotent)
   if (!window.__qaWired) {
     window.__qaWired = true;
+
     const qaInvite = $('qaInviteBtn');
     if (qaInvite) qaInvite.addEventListener('click', async function() {
       withLoading(qaInvite, 'generating...', async function() {
@@ -5432,17 +5842,34 @@ async function __loadLeadKpi() {
 
     const qaRotateAll = $('qaRotateAllBtn');
     if (qaRotateAll) qaRotateAll.addEventListener('click', function() {
-      const rosterBtn = $('rotateRosterBtn');
-      if (rosterBtn) rosterBtn.click();
+      // Opens rotation sub-panel inside deep-dive
+      const deepDive = $('gam-lead-deepdive');
+      if (deepDive && !deepDive.open) deepDive.setAttribute('open', '');
+      const rotSub = $('lead-sub-rotation');
+      if (rotSub && !rotSub.open) rotSub.setAttribute('open', '');
+      if (rotSub) rotSub.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
 
     const qaBugs = $('qaBugsBtn');
     if (qaBugs) qaBugs.addEventListener('click', function() {
-      const bugBtn = $('bugListBtn');
-      if (bugBtn) bugBtn.click();
+      const deepDive = $('gam-lead-deepdive');
+      if (deepDive && !deepDive.open) deepDive.setAttribute('open', '');
+      const bugSub = $('lead-sub-bugs');
+      if (bugSub && !bugSub.open) bugSub.setAttribute('open', '');
+      if (bugSub) bugSub.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
 
-    // Sync bugs badge to quick-actions badge
+    // D.3.7: qaMaintBtn opens deep-dive accordion + scrolls to diag sub-panel
+    const qaMaint = $('qaMaintBtn');
+    if (qaMaint) qaMaint.addEventListener('click', function() {
+      const deepDive = $('gam-lead-deepdive');
+      if (deepDive && !deepDive.open) deepDive.setAttribute('open', '');
+      const diagSub = $('lead-sub-diag');
+      if (diagSub && !diagSub.open) diagSub.setAttribute('open', '');
+      if (diagSub) diagSub.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+
+    // Sync bugs badge (bugListBadge -> qaBugsBadge)
     const bugBadge = $('bugListBadge');
     const qaBadge  = $('qaBugsBadge');
     if (bugBadge && qaBadge) {
@@ -5455,12 +5882,14 @@ async function __loadLeadKpi() {
   }
 }
 
+// D.3.6: __loadLapsedMods — now writes to #lapsedModsChip instead of #lapsedModsCard
 async function __loadLapsedMods() {
-  const card    = $('lapsedModsCard');
+  const chip    = $('lapsedModsChip');
   const list    = $('lapsedModsList');
   const countEl = $('lapsedModsCount');
   const status  = $('lapsedModsStatus');
-  if (!card || !list) return;
+  // Fall back gracefully whether chip or old card exists
+  if (!list) return;
 
   const threshInput = $('lapsedThresholdInput');
   const days = Math.max(7, Math.min(60, parseInt((threshInput && threshInput.value) || 21, 10)));
@@ -5473,7 +5902,11 @@ async function __loadLapsedMods() {
       return;
     }
     const mods = r.data;
-    if (countEl) countEl.textContent = mods.length > 0 ? '(' + mods.length + ')' : '';
+    // Show/hide chip based on count (D.3.6)
+    if (chip) {
+      chip.style.display = mods.length > 0 ? 'flex' : 'none';
+    }
+    if (countEl) countEl.textContent = mods.length > 0 ? String(mods.length) : '';
     list.replaceChildren();
     if (mods.length === 0) {
       if (status) { status.className = 'pop-token-status ok'; status.textContent = 'no lapsed mods'; }
@@ -5481,17 +5914,17 @@ async function __loadLapsedMods() {
     }
     mods.forEach(function(m) {
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e2128;font-size:11px';
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid var(--bb-line);font-size:11px';
       const nameEl = document.createElement('span');
-      nameEl.style.cssText = 'flex:1;color:#e4e4e4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      nameEl.style.cssText = 'flex:1;color:var(--bb-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
       nameEl.textContent = m.mod_username || m.username || '?';
       const daysEl = document.createElement('span');
-      daysEl.style.cssText = 'color:#f0a040;font-variant-numeric:tabular-nums;min-width:28px;text-align:right';
+      daysEl.style.cssText = 'color:var(--bb-warn);font-variant-numeric:tabular-nums;min-width:28px;text-align:right';
       daysEl.textContent = String(m.days_since_action || '?') + 'd';
       const pingBtn = document.createElement('button');
       pingBtn.textContent = 'Ping';
       pingBtn.className = 'pop-btn pop-btn-ghost';
-      pingBtn.style.cssText = 'font-size:9px;padding:1px 5px';
+      pingBtn.style.cssText = 'font-size:9px;padding:1px 5px;min-height:0';
       pingBtn.addEventListener('click', function() {
         __showToast('Open ModChat to ping u/' + (m.mod_username || '?'), 'ok');
       });
@@ -5504,6 +5937,19 @@ async function __loadLapsedMods() {
   }
 }
 
+// Wire lapsed expand toggle (chip expands panel)
+(function wireLapsedExpand() {
+  const btn = $('lapsedExpandBtn');
+  const panel = $('lapsedModsPanel');
+  if (!btn || !panel) return;
+  btn.addEventListener('click', function() {
+    const expanded = panel.style.display !== 'none';
+    panel.style.display = expanded ? 'none' : 'block';
+    btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    btn.textContent = expanded ? 'Expand' : 'Collapse';
+  });
+})();
+
 // Restart setup button wiring
 (function wireRestartSetup() {
   const btn = $('restartSetupBtn');
@@ -5511,8 +5957,7 @@ async function __loadLapsedMods() {
   btn.addEventListener('click', function() {
     const wiz = $('firstRunWizard');
     if (wiz) { wiz.style.display = 'block'; }
-    const card = document.getElementById('card-tokens');
-    if (card) card.setAttribute('open', '');
+    // card-tokens is now a <div>, no setAttribute('open') needed — just ensure tab is active
     const step1 = $('firstRunWizardStep1');
     const step2 = $('firstRunWizardStep2');
     const success = $('firstRunWizardSuccess');

@@ -1587,3 +1587,744 @@ input[type="checkbox"]:checked::after {
 .gam-card.gam-card-order-last {
   order: 999;
 }
+
+/* ========================================================================
+   v10.12 UIUX-01 §D EXTENSION — Full card ruleset (extends v10.10.1 stub)
+   ======================================================================== */
+
+/* Header variant: non-details card uses .gam-card-header (div, not summary) */
+.gam-card-header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 8px 12px 8px 14px !important;
+  background: var(--bb-bg-deep, #0f1114) !important;
+  border-bottom: 1px solid var(--bb-line-hot) !important;
+  min-height: 0 !important;
+  user-select: none;
+}
+
+/* ========================================================================
+   v10.12 UIUX-04 §D — Card sub-sections + 2-col grid + crawl segmented row
+   ======================================================================== */
+
+/* Sub-section separator inside a card body */
+.gam-card-subsection {
+  border-top: 1px dashed var(--bb-line);
+  padding: 6px 8px 4px;
+  margin-top: 4px;
+}
+.gam-card-subsection:first-child {
+  border-top: none;
+  margin-top: 0;
+}
+
+/* Sub-section label — amber-dim uppercase 9px */
+.gam-card-sub-label {
+  font: 600 9px/1.2 var(--bb-font) !important;
+  color: var(--bb-amber-dim) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.10em !important;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gam-card-sub-label-meta {
+  color: var(--bb-ink-faint) !important;
+  font-weight: 400 !important;
+  text-transform: none !important;
+  letter-spacing: 0.02em !important;
+  font-size: 9px;
+}
+
+/* Two-column action grid inside a card body */
+.gam-card-grid2 {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 4px !important;
+}
+.gam-card-grid2 .pop-btn {
+  min-height: 36px !important;
+  text-align: left !important;
+  padding: 4px 8px !important;
+  font-size: 10px !important;
+  letter-spacing: 0.06em !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+}
+
+/* Segmented crawl control (Data harvest) */
+.gam-crawl-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+}
+.gam-crawl-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+}
+.gam-crawl-label {
+  font: 600 9px/1.2 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+.gam-crawl-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--bb-line-hot);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+.gam-crawl-pill {
+  font: 600 10px/1.2 var(--bb-font) !important;
+  min-width: 36px !important;
+  min-height: 28px !important;
+  text-align: center !important;
+  padding: 3px 6px !important;
+  letter-spacing: 0.04em !important;
+}
+.gam-crawl-pill[data-depth="quick"] { color: var(--bb-ink-dim) !important; }
+.gam-crawl-pill[data-depth="deep"]  {
+  color: var(--bb-amber) !important;
+  border-color: var(--bb-amber-dim) !important;
+}
+
+/* Safe Mode toggle in card head-toggle slot */
+.gam-card-head-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: 600 9px/1.2 var(--bb-font) !important;
+  color: var(--bb-ink-faint) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  margin-left: auto;
+}
+
+/* ========================================================================
+   v10.12 UIUX-05 §E — Maintenance sub-card category + action row + status
+   ======================================================================== */
+
+/* Category header — color set per-card via modifier class */
+.pop-maint-cat-head {
+  font: 600 10px/1.2 var(--bb-font) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.12em !important;
+  padding: 6px 8px 4px !important;
+  margin: 0 !important;
+  border-bottom: 1px solid var(--bb-line) !important;
+  user-select: none;
+}
+.pop-maint-cat-head.cat-probe     { color: var(--bb-cyan) !important; }
+.pop-maint-cat-head.cat-detect    { color: var(--bb-purple) !important; }
+.pop-maint-cat-head.cat-integrity { color: var(--bb-amber) !important; }
+.pop-maint-cat-head.cat-status    { color: var(--bb-ink-dim) !important; }
+
+/* Maintenance action row — button + inline status */
+.pop-maint-action-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 4px 8px !important;
+  border-bottom: 1px solid var(--bb-line) !important;
+  min-height: 32px !important;
+  border-left: 3px solid transparent !important;
+  transition: background 80ms ease-out, border-left-color 80ms ease-out;
+}
+.pop-maint-action-row:last-child { border-bottom: none !important; }
+
+/* Category-specific left-border accent on hover */
+#card-maint-probes    .pop-maint-action-row:hover { border-left-color: var(--bb-cyan) !important;   background: var(--bb-cyan-bg) !important; }
+#card-maint-detect    .pop-maint-action-row:hover { border-left-color: var(--bb-purple) !important; background: var(--bb-purple-bg) !important; }
+#card-maint-integrity .pop-maint-action-row:hover { border-left-color: var(--bb-amber) !important;  background: var(--bb-amber-bg) !important; }
+
+/* Button inside action row */
+.pop-maint-action-row .pop-btn {
+  flex: 1 !important;
+  text-align: left !important;
+  padding: 5px 8px !important;
+  min-height: 28px !important;
+  background: transparent !important;
+  border: none !important;
+  color: var(--bb-ink) !important;
+  font: 400 11px/1.3 var(--bb-font) !important;
+  cursor: pointer;
+  transition: color 80ms ease-out;
+}
+.pop-maint-action-row .pop-btn:hover { color: var(--bb-amber) !important; }
+.pop-maint-action-row .pop-btn:focus-visible {
+  outline: 1px solid var(--bb-amber) !important;
+  outline-offset: -1px !important;
+}
+
+/* Inline status — right side of the row */
+.pop-maint-action-status {
+  font: 400 10px/1 var(--bb-font) !important;
+  font-variant-numeric: tabular-nums;
+  color: var(--bb-ink-dim) !important;
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 120px;
+  text-align: right;
+}
+.pop-maint-action-status:empty { display: none !important; }
+.pop-maint-action-status.ok   { color: var(--bb-green) !important; }
+.pop-maint-action-status.warn { color: var(--bb-amber) !important; }
+.pop-maint-action-status.err  { color: var(--bb-red) !important; }
+
+/* Reset button — only button in the system with red styling */
+#maintReset {
+  color: var(--bb-red) !important;
+  border: 1px solid var(--bb-red-dim) !important;
+  background: var(--bb-red-bg) !important;
+}
+#maintReset:hover {
+  background: rgba(255,59,59,0.18) !important;
+  border-color: var(--bb-red) !important;
+}
+
+/* AI detection card badge — purple tint */
+#card-maint-detect .gam-card-badge {
+  color: var(--bb-purple) !important;
+  background: var(--bb-purple-bg) !important;
+  border: 1px solid rgba(167,139,250,0.4) !important;
+}
+
+/* ========================================================================
+   v10.12 UIUX-08 §E — KPI strip + Quick Actions + Lapsed chip + Deep-dive
+   ======================================================================== */
+
+/* KPI strip container */
+#leadKpiRow {
+  display: none;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  border: 1px solid var(--bb-line-hot);
+  margin: 8px 0 0;
+  background: var(--bb-sunken);
+}
+
+/* Individual KPI tile */
+.gam-kpi-tile {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0 !important;
+  padding: 6px 4px !important;
+  min-height: 52px !important;
+  background: var(--bb-sunken) !important;
+  border-right: 1px solid var(--bb-line-hot) !important;
+  cursor: pointer;
+  transition: background 80ms var(--gam-ease-decelerate);
+  position: relative;
+}
+.gam-kpi-tile:last-child { border-right: none !important; }
+.gam-kpi-tile:hover { background: var(--bb-hover) !important; }
+.gam-kpi-tile:active { background: var(--bb-active) !important; }
+
+/* KPI label */
+.gam-kpi-label {
+  font: 600 9px/1.2 var(--bb-font) !important;
+  color: var(--bb-ink-faint) !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  margin-bottom: 2px;
+}
+
+/* KPI value row (val + delta) */
+.gam-kpi-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+/* KPI big value */
+.gam-kpi-val {
+  font: 700 20px/1 var(--bb-font) !important;
+  color: var(--bb-ink) !important;
+  font-variant-numeric: tabular-nums !important;
+  letter-spacing: -0.02em !important;
+}
+
+/* KPI delta chip */
+.gam-kpi-delta {
+  font: 500 9px/1 var(--bb-font) !important;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums !important;
+}
+
+/* KPI loading pulse */
+.gam-kpi-tile[data-loading="true"] .gam-kpi-val {
+  animation: kpi-pulse 1.2s ease-in-out infinite;
+  color: var(--bb-ink-faint) !important;
+}
+@keyframes kpi-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%       { opacity: 0.9; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gam-kpi-tile[data-loading="true"] .gam-kpi-val { animation: none !important; }
+}
+
+/* Quick Actions bar container */
+#leadQuickActions {
+  display: none;
+  align-items: stretch;
+  gap: 0;
+  margin: 4px 0;
+  border: 1px solid var(--bb-line-hot);
+  background: var(--bb-sunken);
+}
+
+/* QA button base */
+.gam-qa-btn {
+  flex: 1 !important;
+  padding: 4px 6px !important;
+  font: 600 11px/1.2 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
+  background: transparent !important;
+  border: none !important;
+  border-right: 1px solid var(--bb-line) !important;
+  cursor: pointer;
+  text-align: center !important;
+  transition: background 80ms var(--gam-ease-decelerate), color 80ms var(--gam-ease-decelerate);
+  text-decoration: none;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.gam-qa-btn:hover {
+  background: var(--bb-hover) !important;
+  color: var(--bb-ink) !important;
+}
+.gam-qa-btn:active { background: var(--bb-active) !important; }
+.gam-qa-btn:last-child { border-right: none !important; }
+
+/* QA group separator */
+.gam-qa-sep {
+  width: 1px !important;
+  background: var(--bb-line-hot) !important;
+  flex-shrink: 0 !important;
+}
+
+/* Badge inside QA button */
+.gam-qa-badge {
+  display: inline-block;
+  background: var(--bb-red) !important;
+  color: #fff !important;
+  font: 600 9px/1.2 var(--bb-font) !important;
+  padding: 0 4px !important;
+  margin-left: 2px;
+  min-width: 16px;
+  text-align: center;
+}
+
+/* Lapsed mods chip — hidden until JS shows it */
+#lapsedModsChip {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bb-amber-bg);
+  border: 1px solid var(--bb-amber-dim);
+  border-left: 3px solid var(--bb-amber);
+  margin: 0 0 4px;
+  font: 11px/1.3 var(--bb-font);
+  color: var(--bb-warn);
+}
+#lapsedModsChip .chip-label { flex: 1; }
+#lapsedModsChip .chip-expand {
+  background: transparent !important;
+  border: 1px solid var(--bb-amber-dim) !important;
+  color: var(--bb-warn) !important;
+  padding: 1px 6px !important;
+  cursor: pointer;
+  font: inherit !important;
+  min-height: 0 !important;
+}
+#lapsedModsChip .chip-expand:hover { background: var(--bb-hover) !important; }
+
+/* Lapsed detail panel */
+#lapsedModsPanel {
+  display: none;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--bb-line-hot);
+  border-top: none;
+  background: var(--bb-sunken);
+  margin-bottom: 4px;
+}
+
+/* Deep-dive outer <details> */
+.gam-lead-deepdive {
+  border: 1px solid var(--bb-line-hot);
+  margin-top: 4px;
+}
+.gam-lead-deepdive > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bb-panel);
+  cursor: pointer;
+  font: 600 11px/1.2 var(--bb-font);
+  color: var(--bb-amber);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--bb-line);
+  user-select: none;
+}
+.gam-lead-deepdive > summary:hover { background: var(--bb-hover); }
+.gam-lead-deepdive > summary::-webkit-details-marker { display: none; }
+.gam-lead-deepdive > summary::after {
+  content: "[+]";
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--bb-ink-faint);
+}
+.gam-lead-deepdive[open] > summary::after { content: "[-]"; }
+
+/* Sub-panel <details> inside deepdive */
+.gam-lead-sub {
+  border-bottom: 1px solid var(--bb-line);
+}
+.gam-lead-sub:last-child { border-bottom: none; }
+.gam-lead-sub > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font: 500 11px/1.2 var(--bb-font);
+  color: var(--bb-ink-dim);
+  background: var(--bb-bg);
+  user-select: none;
+}
+.gam-lead-sub > summary:hover { background: var(--bb-hover); color: var(--bb-ink); }
+.gam-lead-sub > summary::-webkit-details-marker { display: none; }
+.gam-lead-sub > summary .sub-status {
+  margin-left: auto;
+  font: 10px/1 var(--bb-font);
+  color: var(--bb-ink-faint);
+}
+.gam-lead-sub > .sub-body {
+  padding: 6px 8px;
+  background: var(--bb-sunken);
+  border-top: 1px solid var(--bb-line);
+}
+
+/* ========================================================================
+   v10.12 UIUX-19 §C — Skeleton / Empty / Error / Stale state system
+   ======================================================================== */
+
+/* Skeleton wrap */
+.gam-skel-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+.gam-skel-line {
+  height: 12px;
+  background: #2a2a30;
+}
+.gam-skel-row {
+  height: 36px;
+  background: #2a2a30;
+}
+.gam-skel-card {
+  height: 120px;
+  background: #2a2a30;
+}
+.gam-skel-avatar {
+  width: 32px;
+  height: 32px;
+  background: #2a2a30;
+  flex-shrink: 0;
+}
+.gam-skel-stat {
+  width: 100%;
+  height: 28px;
+  background: #2a2a30;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .gam-skel-shimmer {
+    background: linear-gradient(90deg, #2a2a30 0%, #3a3a42 50%, #2a2a30 100%);
+    background-size: 200% 100%;
+    animation: gam-skel-pulse 2s linear infinite;
+  }
+  @keyframes gam-skel-pulse {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+}
+
+/* Empty state */
+.gam-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 16px;
+  text-align: center;
+  role: status;
+}
+.gam-empty-state .gam-empty-icon { color: var(--bb-ink-faint); }
+.gam-empty-state .gam-empty-headline {
+  font: 600 12px/1.3 var(--bb-font) !important;
+  color: var(--bb-ink) !important;
+}
+.gam-empty-state .gam-empty-desc {
+  font: 400 11px/1.5 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
+  max-width: 260px;
+}
+.gam-empty-state .gam-empty-cta {
+  margin-top: 4px;
+  padding: 5px 12px;
+  background: transparent;
+  border: 1px solid var(--bb-cyan);
+  color: var(--bb-cyan);
+  cursor: pointer;
+  font: 600 10px/1.2 var(--bb-font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: background 0.12s;
+}
+.gam-empty-state .gam-empty-cta:hover { background: rgba(102,204,255,0.10) !important; }
+
+/* Error state */
+.gam-error-state {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+}
+.gam-error-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  font: 700 10px/1.2 var(--bb-font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  align-self: flex-start;
+}
+.gam-error-chip.hard {
+  background: rgba(240,64,64,0.12);
+  border: 1px solid rgba(240,64,64,0.4);
+  color: var(--bb-red);
+}
+.gam-error-chip.soft {
+  background: rgba(240,160,64,0.12);
+  border: 1px solid rgba(240,160,64,0.4);
+  color: var(--bb-warn);
+}
+.gam-error-msg {
+  font: 400 11px/1.4 var(--bb-font) !important;
+  color: var(--bb-ink) !important;
+}
+.gam-error-hint {
+  font: 400 10px/1.4 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
+}
+.gam-error-retry {
+  margin-top: 4px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--bb-red);
+  color: var(--bb-red);
+  cursor: pointer;
+  font: 600 10px/1.2 var(--bb-font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  align-self: flex-start;
+  transition: background 0.12s;
+}
+.gam-error-retry:hover { background: var(--bb-red-bg) !important; }
+.gam-error-chip.soft ~ .gam-error-retry {
+  border-color: var(--bb-warn);
+  color: var(--bb-warn);
+}
+.gam-error-chip.soft ~ .gam-error-retry:hover { background: var(--bb-warn-bg) !important; }
+
+/* Stale chip */
+.gam-stale-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  background: var(--bb-amber-bg);
+  border: 1px solid rgba(240,160,64,0.35);
+  color: var(--bb-warn);
+  font: 600 10px/1.2 var(--bb-font);
+  letter-spacing: 0.05em;
+}
+.gam-stale-refresh {
+  background: none !important;
+  border: none !important;
+  color: var(--bb-warn) !important;
+  font: 600 10px/1.2 var(--bb-font) !important;
+  cursor: pointer;
+  padding: 0 !important;
+  min-height: 0 !important;
+  text-decoration: underline;
+  letter-spacing: 0.05em;
+}
+
+/* ========================================================================
+   v10.12 UIUX-09 §E — Stat tile sparkline + delta chip + drill toolbar
+   ======================================================================== */
+
+/* Sparkline tokens */
+:root {
+  --bb-spark-h: 18px;
+  --bb-spark-bar-w: 3px;
+  --bb-spark-gap: 2px;
+  --bb-spark-today: rgba(255,153,51,0.40);
+  --bb-delta-font: 9px;
+}
+
+/* Label row with delta chip */
+.pop-stat-head {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  margin-bottom: 4px;
+  width: 100%;
+}
+
+/* Delta chip */
+.pop-stat-delta {
+  font: 400 var(--bb-delta-font)/1 var(--bb-font) !important;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 4px;
+  border: 1px solid currentColor;
+  opacity: 0.9;
+}
+.pop-stat-delta[data-dir="up"]   { color: var(--bb-green) !important; }
+.pop-stat-delta[data-dir="down"] { color: var(--bb-red) !important; }
+.pop-stat-delta[data-dir="flat"] { color: var(--bb-ink-dim) !important; border-color: var(--bb-line) !important; }
+.pop-stat-delta[data-dir="none"] { color: var(--bb-ink-faint) !important; border-color: var(--bb-line) !important; }
+
+/* Sparkline container */
+.pop-stat-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--bb-spark-gap);
+  height: var(--bb-spark-h);
+  width: 100%;
+  margin-top: 4px;
+}
+.pop-stat-spark-bar {
+  flex: 1;
+  min-width: var(--bb-spark-bar-w);
+  background: var(--bb-line-hot);
+  transition: background 200ms;
+}
+.pop-stat-spark-bar.today { background: var(--bb-spark-today); }
+.pop-stat-spark-bar.zero  { background: var(--bb-line) !important; height: 2px !important; }
+
+/* Drill toolbar row */
+.pop-drill-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--bb-line-hot);
+  background: var(--bb-panel);
+}
+.pop-drill-filter {
+  flex: 1;
+  padding: 3px 6px !important;
+  font: 11px/1.3 var(--bb-font) !important;
+  background: var(--bb-sunken) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  color: var(--bb-ink) !important;
+  min-height: 0 !important;
+}
+.pop-drill-sort {
+  padding: 3px 6px !important;
+  font: 11px/1.3 var(--bb-font) !important;
+  background: var(--bb-sunken) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  color: var(--bb-ink) !important;
+  min-height: 0 !important;
+}
+.pop-drill-export {
+  font: 600 10px/1.2 var(--bb-font) !important;
+  color: var(--bb-amber) !important;
+  background: transparent !important;
+  border: 1px solid var(--bb-amber-dim) !important;
+  padding: 3px 8px !important;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  min-height: 0 !important;
+  white-space: nowrap;
+}
+.pop-drill-export:hover { background: var(--bb-amber-bg) !important; }
+.pop-drill-count {
+  font: 400 10px/1 var(--bb-font) !important;
+  color: var(--bb-ink-faint) !important;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.pop-drill-esc-hint {
+  font: 400 9px/1 var(--bb-font) !important;
+  color: var(--bb-ink-faint) !important;
+  padding: 4px 8px;
+  text-align: right;
+}
+
+/* 4-col grid override for Stats tab (UIUX-09 §E.2) */
+.pop-stats {
+  grid-template-columns: repeat(4, 1fr) !important;
+}
+/* Fix nth-child border rules for 4-col layout */
+.pop-stat:nth-child(3n) { border-right: 1px solid var(--bb-line) !important; }
+.pop-stat:nth-child(4n) { border-right: none !important; }
+.pop-stat:nth-last-child(-n+4) { border-bottom: none !important; }
+
+/* ========================================================================
+   v10.12 UIUX-20 §D — --bb-ink-faint contrast fix + tab [hidden] support
+   ======================================================================== */
+
+/* Contrast fix: was #5a5752 (2.75:1 fail), now #7a7672 (4.6:1 AA pass) */
+/* Applied via :root override (lower in cascade than the Bloomberg block   */
+/* above that set the original value, so this wins).                       */
+:root {
+  --bb-ink-faint: #7a7672;
+}
+
+/* Tab panel [hidden] attribute — must override Bloomberg !important display rules */
+[role="tabpanel"][hidden] {
+  display: none !important;
+}
+
+/* ========================================================================
+   v10.12 UIUX-18 §C.1 — Motion tokens (additive only, no callsite migration)
+   ======================================================================== */
+
+:root {
+  --bb-motion-instant: 50ms;
+  --bb-motion-fast:    120ms;
+  --bb-motion-base:    200ms;
+  --bb-motion-slow:    400ms;
+  --bb-ease-decel:     cubic-bezier(0,0,0.2,1);
+  --bb-ease-accel:     cubic-bezier(0.4,0,1,1);
+  --bb-ease-standard:  cubic-bezier(0.2,0,0,1);
+  --bb-ease-spring:    cubic-bezier(0.34,1.56,0.64,1);
+  --bb-ease-linear:    linear;
+}

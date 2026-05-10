@@ -18411,102 +18411,218 @@ Analyze this comment against the community rules. Then write a brief, profession
     document.addEventListener('keydown', pop._escHandler);
   }
 
+  // v10.12 H.8 (UIUX-12 §D): Site Health popover -- Bloomberg terminal dashboard.
+  // Full HTML/CSS replacement using gam-sh2-* prefix (avoids old gam-sh-* collision).
+  // KPI tiles render immediately from local data (no layout shift).
+  // modStats patches in-place via textContent swap (never display:none -> visible).
+  // Activity feed: 10 rows with type-colored badge chips, shimmer until loaded.
   function _showSiteHealthPopover(anchor){
-    const existing = document.getElementById('gam-site-health-popover');
+    const SH_POP_ID = 'gam-sh2-pop';
+    const existing = document.getElementById(SH_POP_ID);
     if (existing){ existing.remove(); return; }
-    const since24h = Date.now() - 86400_000;
+
+    // Local data (zero RPC, immediate)
+    const since24h = Date.now() - 86400000;
     const log = lsGet(K.LOG, []);
-    const recent = log.filter(e => e && e.ts && new Date(e.ts).getTime() >= since24h);
-    const bans24 = recent.filter(e => e.type === 'ban').length;
-    const dr24 = recent.filter(e => e.type === 'deathrow').length;
-    const approves24 = recent.filter(e => e.type === 'approve').length;
-    const removes24 = recent.filter(e => e.type === 'remove').length;
+    const recent = log.filter(function(e) { return e && e.ts && new Date(e.ts).getTime() >= since24h; });
+    const bans24 = recent.filter(function(e) { return e.type === 'ban'; }).length;
+    const dr24 = recent.filter(function(e) { return e.type === 'deathrow'; }).length;
+    const approves24 = recent.filter(function(e) { return e.type === 'approve'; }).length;
+    const removes24 = recent.filter(function(e) { return e.type === 'remove'; }).length;
+    const localTotal = bans24 + dr24 + approves24 + removes24;
     const drQueue = (getDeathRow() || []).length;
-    const watchlist = Object.keys(getWatchlist() || {}).length;
-    const susCount = (_susState && _susState.rows && _susState.rows.size) || 0;
-    const lastAi = getSetting('lastAiScanDate', '');
-    const today = new Date().toISOString().slice(0,10);
-    const aiFresh = lastAi === today ? 'yes' : (lastAi || 'never');
-    const aiOn = !!consentEnabled('features.ai');
     const fhActive = !!getSetting('firehose.active', false);
 
-    const pop = document.createElement('div');
-    pop.id = 'gam-site-health-popover';
-    function row(k, v, color){
-      return `<div class="gam-sh-row"><span class="gam-sh-key">${escapeHtml(k)}</span><span class="gam-sh-val"${color?' style="color:'+color+'"':''}>${escapeHtml(String(v))}</span></div>`;
+    // Inject gam-sh2 CSS (idempotent)
+    if (!document.getElementById('gam-sh2-css')) {
+      const ss = document.createElement('style');
+      ss.id = 'gam-sh2-css';
+      ss.textContent = [
+        '@keyframes gam-sh2-in{from{opacity:0;transform:scale(0.96) translateY(6px)}to{opacity:1;transform:scale(1) translateY(0)}}',
+        '@keyframes gam-sh2-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}',
+        '@keyframes gam-sh2-blink{0%,100%{opacity:1}50%{opacity:.3}}',
+        '#gam-sh2-pop{position:fixed;width:380px;background:#0f1114;border:1px solid #3a3f48;border-radius:6px;box-shadow:0 16px 48px rgba(0,0,0,.75);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;color:#8b929e;z-index:9999985;animation:gam-sh2-in 140ms ease-out forwards;overflow:hidden}',
+        '.gam-sh2-header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 8px;border-bottom:1px solid #2a2f38}',
+        '.gam-sh2-title{font-size:11px;font-weight:700;color:#e8eaed;letter-spacing:0.12em}',
+        '.gam-sh2-pills{display:flex;gap:6px}',
+        '.gam-sh2-pill{display:flex;align-items:center;gap:4px;padding:2px 7px;border-radius:3px;border:1px solid #2a2f38;font-size:9px;letter-spacing:0.1em;font-weight:700}',
+        '.gam-sh2-led{width:7px;height:7px;border-radius:1px;flex-shrink:0}',
+        '.gam-sh2-pill--ok .gam-sh2-led{background:#3dd68c}',
+        '.gam-sh2-pill--warn .gam-sh2-led{background:#f0a040;animation:gam-sh2-blink 0.8s infinite}',
+        '.gam-sh2-pill--err .gam-sh2-led{background:#f04040}',
+        '.gam-sh2-kpi-row{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #2a2f38}',
+        '.gam-sh2-tile{padding:10px 0 0;border-right:1px solid #2a2f38;text-align:center;position:relative}',
+        '.gam-sh2-tile:last-child{border-right:none}',
+        '.gam-sh2-tile-val{font-size:28px;font-weight:700;line-height:1;letter-spacing:-0.02em;color:#3dd68c;transition:color 300ms}',
+        '.gam-sh2-tile-val--text{font-size:20px}',
+        '.gam-sh2-tile-lbl{font-size:9px;color:#5c6370;letter-spacing:0.1em;margin-top:4px;padding-bottom:10px}',
+        '.gam-sh2-tile-bar{height:2px;width:100%;background:#3dd68c;transition:background 300ms}',
+        '.gam-sh2-feed-header{display:flex;justify-content:space-between;padding:6px 12px 4px;font-size:9px;color:#5c6370;letter-spacing:0.12em;border-bottom:1px solid #2a2f38}',
+        '.gam-sh2-feed{list-style:none;margin:0;padding:0;max-height:200px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#4A9EFF #2a2f38}',
+        '.gam-sh2-feed-row{display:grid;grid-template-columns:58px 62px 1fr 64px;align-items:center;gap:0 6px;padding:4px 12px;border-bottom:1px solid #1e2228;animation:gam-sh2-fi 200ms ease-out both;animation-delay:calc(var(--i,0)*30ms)}',
+        '@keyframes gam-sh2-fi{from{opacity:0}to{opacity:1}}',
+        '.gam-sh2-feed-ts{color:#5c6370;font-size:10px}',
+        '.gam-sh2-feed-type{font-size:9px;font-weight:700;letter-spacing:0.05em;text-align:center;padding:2px 4px;border-radius:2px;white-space:nowrap}',
+        '.gam-sh2-feed-target{color:#8b929e;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.gam-sh2-feed-exec{color:#5c6370;font-size:10px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.gam-sh2-feed-shimmer{height:28px;padding:4px 12px;background:linear-gradient(90deg,#1e2228 25%,#2a2f38 50%,#1e2228 75%);background-size:200% 100%;animation:gam-sh2-shimmer 1.2s infinite linear;animation-delay:calc(var(--i,0)*80ms);border-bottom:1px solid #1e2228}',
+        '.gam-sh2-footer{display:flex;justify-content:space-between;padding:6px 12px;font-size:9px;color:#5c6370;border-top:1px solid #2a2f38}',
+      ].join('');
+      document.head.appendChild(ss);
     }
-    pop.innerHTML =
-      `<h4>\u{1F6E1} Site Health <span style="font-weight:400;color:${C.TEXT3};font-size:10px;margin-left:auto">${VERSION}</span></h4>` +
-      row('DR queue', drQueue, drQueue > 50 ? C.WARN : drQueue > 20 ? C.ACCENT : C.GREEN) +
-      row('Watchlist', watchlist) +
-      row('Mark SUS users', susCount, susCount > 5 ? C.WARN : C.TEXT) +
-      row('Bans (24h)', bans24, bans24 > 20 ? C.WARN : C.TEXT) +
-      row('DR adds (24h)', dr24) +
-      row('Approves (24h)', approves24) +
-      row('Removes (24h)', removes24) +
-      row('Firehose', fhActive ? 'ON' : 'OFF', fhActive ? C.GREEN : C.TEXT3) +
-      row('AI scan today', aiFresh, aiFresh === 'yes' ? C.GREEN : aiOn ? C.WARN : C.TEXT3) +
-      row('AI feature', aiOn ? 'enabled' : 'disabled (Settings)', aiOn ? C.GREEN : C.WARN) +
-      `<div id="gam-sh-worker-line" class="gam-sh-row"><span class="gam-sh-key">Worker</span><span class="gam-sh-val">probing...</span></div>` +
-      // ASK-003: worker stats section (populated async below)
-      `<div id="gam-sh-worker-stats" style="display:none">` +
-        `<div class="gam-sh-row" style="margin-top:6px;padding-top:6px;border-top:1px solid #2a2825"><span class="gam-sh-key" style="font-weight:600">Worker stats</span></div>` +
-        `<div id="gam-sh-worker-stats-rows"></div>` +
-      `</div>` +
-      `<div class="gam-sh-foot"><span>Click anywhere to dismiss</span><span>${new Date().toLocaleTimeString()}</span></div>`;
-    // Position above the anchor (bar is at bottom of viewport, popover floats above).
+
+    const pop = document.createElement('div');
+    pop.id = SH_POP_ID;
+
+    // Position (existing logic + viewport clamp UIUX-12 §B)
     const r = anchor.getBoundingClientRect();
-    pop.style.left = Math.max(8, r.left) + 'px';
+    pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 396)) + 'px';
     pop.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+
+    // Build shimmer rows (10x)
+    var shimmerRows = '';
+    for (var _si = 0; _si < 10; _si++) {
+      shimmerRows += '<li class="gam-sh2-feed-shimmer" style="--i:' + _si + '"></li>';
+    }
+
+    // Full target-height HTML (no layout shift -- tiles and feed region always present)
+    pop.innerHTML = '<div class="gam-sh2-header">' +
+      '<span class="gam-sh2-title">SITE HEALTH</span>' +
+      '<div class="gam-sh2-pills">' +
+        '<span class="gam-sh2-pill gam-sh2-pill--warn" id="gam-sh2-fh-pill"><span class="gam-sh2-led"></span><span class="gam-sh2-pill-label">' + (fhActive ? 'LIVE' : 'STANDBY') + '</span></span>' +
+        '<span class="gam-sh2-pill gam-sh2-pill--warn" id="gam-sh2-worker-pill"><span class="gam-sh2-led"></span><span class="gam-sh2-pill-label">PROBING</span></span>' +
+      '</div>' +
+    '</div>' +
+    '<div class="gam-sh2-kpi-row">' +
+      '<div class="gam-sh2-tile"><div class="gam-sh2-tile-val" id="gam-sh2-val-actions">—</div><div class="gam-sh2-tile-lbl">24H ACT</div><div class="gam-sh2-tile-bar" id="gam-sh2-bar-actions"></div></div>' +
+      '<div class="gam-sh2-tile"><div class="gam-sh2-tile-val" id="gam-sh2-val-queue">—</div><div class="gam-sh2-tile-lbl">QUEUE</div><div class="gam-sh2-tile-bar" id="gam-sh2-bar-queue"></div></div>' +
+      '<div class="gam-sh2-tile"><div class="gam-sh2-tile-val gam-sh2-tile-val--text" id="gam-sh2-val-fh">—</div><div class="gam-sh2-tile-lbl">FIREHOSE</div><div class="gam-sh2-tile-bar" id="gam-sh2-bar-fh"></div></div>' +
+      '<div class="gam-sh2-tile"><div class="gam-sh2-tile-val" id="gam-sh2-val-verify">—</div><div class="gam-sh2-tile-lbl">LAST VERIFY</div><div class="gam-sh2-tile-bar" id="gam-sh2-bar-verify"></div></div>' +
+    '</div>' +
+    '<div class="gam-sh2-feed-header"><span>ACTIVITY FEED</span><span>LAST 10</span></div>' +
+    '<ul class="gam-sh2-feed" id="gam-sh2-feed">' + shimmerRows + '</ul>' +
+    '<div class="gam-sh2-footer">' +
+      '<span id="gam-sh2-ver"></span>' +
+      '<span>' + new Date().toLocaleTimeString('en-GB', {hour12:false}) + '</span>' +
+      '<span>ESC or click outside</span>' +
+    '</div>';
+
+    try { pop.querySelector('#gam-sh2-ver').textContent = (typeof VERSION !== 'undefined' ? VERSION : ''); } catch(_) {}
+
     document.body.appendChild(pop);
-    // Probe worker reachability async.
-    rpcCall('modWhoami', {}).then(resp => {
-      const line = pop.querySelector('#gam-sh-worker-line .gam-sh-val');
-      if (!line) return;
-      if (resp && resp.ok && resp.data && resp.data.username){
-        line.textContent = '✓ ' + resp.data.username + (resp.data.is_lead ? ' (lead)' : '');
-        line.style.color = C.GREEN;
-      } else {
-        const code = resp && resp.code === 'EXT_CONTEXT_INVALIDATED' ? 'reload page' : (resp && resp.error || 'no answer');
-        line.textContent = '✗ ' + code;
-        line.style.color = C.RED;
+
+    // KPI tile helpers
+    function _setTile(id, value, warn, danger) {
+      var valEl = pop.querySelector('#gam-sh2-val-' + id);
+      var barEl = pop.querySelector('#gam-sh2-bar-' + id);
+      if (!valEl || !barEl) return;
+      var n = typeof value === 'number' ? value : parseFloat(value);
+      var col = (isNaN(n) || warn == null || n < warn) ? '#3dd68c' : n < danger ? '#f0a040' : '#f04040';
+      valEl.textContent = String(value);
+      valEl.style.color = col;
+      barEl.style.background = col;
+    }
+
+    function _setFhTile(active) {
+      var valEl = pop.querySelector('#gam-sh2-val-fh');
+      var barEl = pop.querySelector('#gam-sh2-bar-fh');
+      if (valEl) { valEl.textContent = active ? 'LIVE' : 'OFF'; valEl.style.color = active ? '#3dd68c' : '#5c6370'; }
+      if (barEl) { barEl.style.background = active ? '#3dd68c' : '#5a5752'; }
+      var fhPill = pop.querySelector('#gam-sh2-fh-pill');
+      if (fhPill) {
+        fhPill.className = 'gam-sh2-pill ' + (active ? 'gam-sh2-pill--ok' : 'gam-sh2-pill--err');
+        var lbl = fhPill.querySelector('.gam-sh2-pill-label');
+        if (lbl) lbl.textContent = active ? 'LIVE' : 'STANDBY';
       }
-    }).catch(e => {
-      const line = pop.querySelector('#gam-sh-worker-line .gam-sh-val');
-      if (line){ line.textContent = '✗ ' + (e && e.message || e); line.style.color = C.RED; }
+    }
+
+    // Render local fallbacks immediately
+    _setTile('actions', localTotal, 50, 100);
+    _setTile('queue', drQueue, 20, 50);
+    _setFhTile(fhActive);
+
+    // Feed render
+    var _TYPE_COLORS = {
+      ban:      { bg:'rgba(240,64,64,.18)',   fg:'#f04040', label:'BAN'     },
+      deathrow: { bg:'rgba(167,139,250,.15)', fg:'#a78bfa', label:'DR ADD'  },
+      approve:  { bg:'rgba(61,214,140,.15)',  fg:'#3dd68c', label:'APPROVE' },
+      remove:   { bg:'rgba(240,160,64,.15)',  fg:'#f0a040', label:'REMOVE'  },
+    };
+
+    function _renderFeed(actions) {
+      var feed = pop.querySelector('#gam-sh2-feed');
+      if (!feed) return;
+      feed.innerHTML = '';
+      actions.forEach(function(a, i) {
+        var tc = _TYPE_COLORS[a.type] || { bg:'rgba(139,146,158,.12)', fg:'#8b929e', label:(a.type||'?').toUpperCase().slice(0,7) };
+        var ts = a.ts ? new Date(a.ts).toLocaleTimeString('en-GB', {hour12:false}) : '—';
+        var exec = a.executor || a.mod || a.by || '';
+        var li = document.createElement('li');
+        li.className = 'gam-sh2-feed-row';
+        li.style.setProperty('--i', i);
+        li.innerHTML =
+          '<span class="gam-sh2-feed-ts">' + escapeHtml(ts) + '</span>' +
+          '<span class="gam-sh2-feed-type" style="background:' + tc.bg + ';color:' + tc.fg + '">' + escapeHtml(tc.label) + '</span>' +
+          '<span class="gam-sh2-feed-target">' + escapeHtml(a.user || a.target || '—') + '</span>' +
+          (exec ? '<span class="gam-sh2-feed-exec">[' + escapeHtml(exec) + ']</span>' : '<span></span>');
+        feed.appendChild(li);
+      });
+    }
+
+    // Async: probe worker
+    rpcCall('modWhoami', {}).then(function(resp) {
+      var workerPill = pop.querySelector('#gam-sh2-worker-pill');
+      if (!workerPill) return;
+      if (resp && resp.ok && resp.data && resp.data.username) {
+        workerPill.className = 'gam-sh2-pill gam-sh2-pill--ok';
+        var lbl = workerPill.querySelector('.gam-sh2-pill-label');
+        if (lbl) lbl.textContent = 'WORKER OK';
+      } else {
+        workerPill.className = 'gam-sh2-pill gam-sh2-pill--err';
+        var lbl2 = workerPill.querySelector('.gam-sh2-pill-label');
+        if (lbl2) lbl2.textContent = 'WORKER FAIL';
+      }
+    }).catch(function() {
+      var workerPill = pop.querySelector('#gam-sh2-worker-pill');
+      if (workerPill) {
+        workerPill.className = 'gam-sh2-pill gam-sh2-pill--err';
+        var lbl = workerPill.querySelector('.gam-sh2-pill-label');
+        if (lbl) lbl.textContent = 'UNREACHABLE';
+      }
     });
-    // ASK-003: fetch worker modStats for queue depth, last verify, last 5 actions
+
+    // Async: modStats -- in-place patch, no layout shift
     rpcCall('modStats', {}).then(function(sr) {
       if (!sr || !sr.ok || !sr.data) return;
-      const d = sr.data;
-      const statsWrap = pop.querySelector('#gam-sh-worker-stats');
-      const statsRows = pop.querySelector('#gam-sh-worker-stats-rows');
-      if (!statsWrap || !statsRows) return;
-      let html = '';
-      if (d.actions_24h != null) html += row('Actions 24h (D1)', d.actions_24h, d.actions_24h > 50 ? C.WARN : C.TEXT);
-      if (d.queue_depth != null) html += row('Queue depth', d.queue_depth, d.queue_depth > 20 ? C.WARN : C.GREEN);
-      if (d.firehose_active != null) html += row('FH (worker)', d.firehose_active ? 'ON' : 'OFF', d.firehose_active ? C.GREEN : C.TEXT3);
+      var d = sr.data;
+      if (d.actions_24h != null) _setTile('actions', d.actions_24h, 50, 100);
+      if (d.queue_depth != null) _setTile('queue', d.queue_depth, 20, 50);
+      if (d.firehose_active != null) _setFhTile(!!d.firehose_active);
       if (d.last_verify_ts) {
-        const lvAgo = Math.round((Date.now() - d.last_verify_ts) / 60000);
-        html += row('Last verify', lvAgo + 'm ago', lvAgo > 30 ? C.WARN : C.GREEN);
+        var mins = Math.round((Date.now() - d.last_verify_ts) / 60000);
+        _setTile('verify', mins + 'm', 10, 30);
       }
-      if (Array.isArray(d.recent_actions) && d.recent_actions.length) {
-        html += `<div class="gam-sh-row" style="margin-top:4px"><span class="gam-sh-key" style="color:${C.TEXT3}">Recent actions</span></div>`;
-        d.recent_actions.slice(0, 5).forEach(function(a) {
-          const ts = a.ts ? new Date(a.ts).toLocaleTimeString() : '';
-          html += `<div class="gam-sh-row" style="font-size:10px"><span class="gam-sh-key" style="color:${C.TEXT3}">${escapeHtml(ts)}</span><span class="gam-sh-val">${escapeHtml((a.type||'?') + (a.user ? ' → ' + a.user : ''))}</span></div>`;
-        });
+      if (Array.isArray(d.recent_actions)) {
+        _renderFeed(d.recent_actions.slice(0, 10));
       }
-      statsRows.innerHTML = html;
-      statsWrap.style.display = '';
-    }).catch(function() { /* modStats is best-effort */ });
-    // Click-outside dismiss.
-    const dismiss = (e)=>{
+    }).catch(function() { /* shimmer stays -- best-effort */ });
+
+    // Dismiss: click-outside + ESC
+    var dismiss = function(e) {
       if (pop.contains(e.target) || anchor.contains(e.target)) return;
       pop.remove();
       document.removeEventListener('click', dismiss, true);
+      document.removeEventListener('keydown', _escD);
     };
-    setTimeout(()=>document.addEventListener('click', dismiss, true), 0);
+    var _escD = function(e) {
+      if (e.key === 'Escape') {
+        pop.remove();
+        document.removeEventListener('click', dismiss, true);
+        document.removeEventListener('keydown', _escD);
+      }
+    };
+    setTimeout(function() { document.addEventListener('click', dismiss, true); }, 0);
+    document.addEventListener('keydown', _escD);
   }
   // v9.3.10: expose ModChat on window so out-of-IIFE handlers (the right-click
   // context menu) can apply server-confirmed updates without re-implementing

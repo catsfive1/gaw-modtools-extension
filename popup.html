@@ -63,45 +63,82 @@
 
   <!-- M4.3 REDTEAM-3: stats tab panel wrapper (role="tabpanel") -->
   <div id="tab-panel-stats" role="tabpanel" aria-labelledby="tab-btn-stats">
-  <!-- v9.4.5: stat cards are clickable. data-drill key routes to renderDrillDown(key)
-       in popup.js. Tooltip text in title= attribute (browser-native hover). -->
+  <!-- v10.12 UIUX-09: 4-col 8-tile grid. Each tile gets label-row + val + sparkline (data from loadStats()) -->
   <div class="pop-stats">
     <div class="pop-stat" data-drill="pending" title="Users awaiting first-decision triage. Click to list."
-         role="button" tabindex="0" aria-label="Pending users — click to list">
+         role="button" tabindex="0" aria-label="Pending: — click to list">
+      <div class="pop-stat-head">
+        <div class="pop-stat-label">Pending</div>
+        <span class="pop-stat-delta" id="d-pending" data-dir="none"></span>
+      </div>
       <div class="pop-stat-val" id="s-pending">&mdash;</div>
-      <div class="pop-stat-label">Pending</div>
+      <div class="pop-stat-spark" id="spark-pending" aria-hidden="true"></div>
     </div>
     <div class="pop-stat" data-drill="dr" title="Death Row queue: scheduled bans pending execution. Click to list."
-         role="button" tabindex="0" aria-label="Death Row queue — click to list">
-      <div class="pop-stat-val" id="s-dr" style="color:#a78bfa">&mdash;</div>
-      <div class="pop-stat-label">Death Row</div>
+         role="button" tabindex="0" aria-label="Death Row: — click to list">
+      <div class="pop-stat-head">
+        <div class="pop-stat-label">Death Row</div>
+        <span class="pop-stat-delta" id="d-dr" data-dir="none"></span>
+      </div>
+      <div class="pop-stat-val" id="s-dr" style="color:var(--bb-purple)">&mdash;</div>
+      <div class="pop-stat-spark" id="spark-dr" aria-hidden="true"></div>
     </div>
     <div class="pop-stat" data-drill="banned" title="Users in your roster with status=banned. Click to list."
-         role="button" tabindex="0" aria-label="Banned users — click to list">
-      <div class="pop-stat-val" id="s-banned" style="color:#f04040">&mdash;</div>
-      <div class="pop-stat-label">Banned</div>
+         role="button" tabindex="0" aria-label="Banned: — click to list">
+      <div class="pop-stat-head">
+        <div class="pop-stat-label">Banned</div>
+        <span class="pop-stat-delta" id="d-banned" data-dir="none"></span>
+      </div>
+      <div class="pop-stat-val" id="s-banned" style="color:var(--bb-red)">&mdash;</div>
+      <div class="pop-stat-spark" id="spark-banned" aria-hidden="true"></div>
     </div>
     <div class="pop-stat" data-drill="bans24" title="Mod actions tagged 'ban' in the last 24h (your local log). Click for detail."
-         role="button" tabindex="0" aria-label="Bans in the last 24 hours — click for detail">
-      <div class="pop-stat-val" id="s-today" style="color:#4A9EFF">&mdash;</div>
-      <div class="pop-stat-label">Bans / 24h</div>
+         role="button" tabindex="0" aria-label="Bans / 24h: — click for detail">
+      <div class="pop-stat-head">
+        <div class="pop-stat-label">Bans / 24h</div>
+        <span class="pop-stat-delta" id="d-today" data-dir="none"></span>
+      </div>
+      <div class="pop-stat-val" id="s-today" style="color:var(--bb-cyan)">&mdash;</div>
+      <div class="pop-stat-spark" id="spark-today" aria-hidden="true"></div>
     </div>
     <div class="pop-stat" data-drill="msgs24" title="Messages and replies sent in the last 24h. Click for detail."
-         role="button" tabindex="0" aria-label="Messages in the last 24 hours — click for detail">
-      <div class="pop-stat-val" id="s-msgs" style="color:#3dd68c">&mdash;</div>
-      <div class="pop-stat-label">Msgs / 24h</div>
+         role="button" tabindex="0" aria-label="Msgs / 24h: — click for detail">
+      <div class="pop-stat-head">
+        <div class="pop-stat-label">Msgs / 24h</div>
+        <span class="pop-stat-delta" id="d-msgs" data-dir="none"></span>
+      </div>
+      <div class="pop-stat-val" id="s-msgs" style="color:var(--bb-green)">&mdash;</div>
+      <div class="pop-stat-spark" id="spark-msgs" aria-hidden="true"></div>
     </div>
     <div class="pop-stat" data-drill="notes24" title="Mod notes written in the last 24h. Click for detail."
-         role="button" tabindex="0" aria-label="Notes written in the last 24 hours — click for detail">
-      <div class="pop-stat-val" id="s-notes" style="color:#f0a040">&mdash;</div>
-      <div class="pop-stat-label">Notes / 24h</div>
+         role="button" tabindex="0" aria-label="Notes / 24h: — click for detail">
+      <div class="pop-stat-head">
+        <div class="pop-stat-label">Notes / 24h</div>
+        <span class="pop-stat-delta" id="d-notes" data-dir="none"></span>
+      </div>
+      <div class="pop-stat-val" id="s-notes" style="color:var(--bb-warn)">&mdash;</div>
+      <div class="pop-stat-spark" id="spark-notes" aria-hidden="true"></div>
     </div>
-    <!-- ASK-086 / WAVE-B-AUX A.3: AI budget visibility. Value populated by loadStats() via /mod/stats. -->
-    <!-- v10.10.1 P5 (DESIGN-09): AI tile needed data-drill for parity with other 7 tiles -->
-    <div class="pop-stat" data-drill="ai24" title="AI calls used today vs your daily cap (e.g. 47/500). Click for per-call log. Populated from worker /mod/stats."
-         role="button" tabindex="0" aria-label="AI calls today vs cap — click for per-call log">
+    <!-- ASK-086 / WAVE-B-AUX A.3: AI budget visibility. v10.10.1 P5: data-drill="ai24" -->
+    <div class="pop-stat" data-drill="ai24" title="AI calls used today vs your daily cap (e.g. 47/500). Click for per-call log."
+         role="button" tabindex="0" aria-label="AI today: — click for per-call log">
+      <div class="pop-stat-head">
+        <div class="pop-stat-label">AI today</div>
+        <span class="pop-stat-delta" id="d-ai" data-dir="none"></span>
+      </div>
       <div class="pop-stat-val" id="s-ai-today" style="color:#c084fc">&mdash;</div>
-      <div class="pop-stat-label">AI today</div>
+      <div class="pop-stat-spark" id="spark-ai" aria-hidden="true"></div>
+    </div>
+    <!-- 8th tile placeholder — v10.12.1 unsticky24 data source -->
+    <!-- data source: v10.12.1+ unsticky24 RPC -->
+    <div class="pop-stat" data-drill="unsticky24" title="Posts auto-unstickied in last 24h. Click for log."
+         role="button" tabindex="0" aria-label="Auto-unsticky 24h: — click for log">
+      <div class="pop-stat-head">
+        <div class="pop-stat-label">Auto-UNS</div>
+        <span class="pop-stat-delta" id="d-unsticky" data-dir="none"></span>
+      </div>
+      <div class="pop-stat-val" id="s-unsticky" style="color:var(--bb-cyan)">--</div>
+      <div class="pop-stat-spark" id="spark-unsticky" aria-hidden="true"></div>
     </div>
   </div>
 
@@ -111,15 +148,27 @@
        clicked. Header (title + close X), scrollable body (table or empty
        state), footer (CSV export). Hidden by default. Populated by
        renderDrillDown() in popup.js. -->
-  <div id="pop-drill" class="pop-drill" style="display:none">
+  <!-- v10.12 UIUX-09 §F.3: drill drawer with toolbar (filter + sort + csv moved here from footer) -->
+  <div id="pop-drill" class="pop-drill" role="dialog" aria-modal="true" aria-labelledby="pop-drill-title" style="display:none">
     <div class="pop-drill-head">
       <span class="pop-drill-title" id="pop-drill-title"></span>
-      <button class="pop-drill-close" id="pop-drill-close" title="Close (Esc)">&times;</button>
+      <span class="pop-drill-count" id="pop-drill-count"></span>
+      <button class="pop-drill-close" id="pop-drill-close" title="Close (Esc)" aria-label="Close drill panel">&times;</button>
+    </div>
+    <!-- Toolbar: filter + sort + export -->
+    <div class="pop-drill-toolbar">
+      <input type="search" id="pop-drill-filter" class="pop-drill-filter" placeholder="filter rows..." aria-label="Filter drill rows">
+      <select id="pop-drill-sort" class="pop-drill-sort" aria-label="Sort drill rows">
+        <option value="">Sort: Time</option>
+        <option value="user">Username</option>
+        <option value="status">Status</option>
+      </select>
+      <button id="pop-drill-csv" class="pop-drill-export" title="Export visible rows as CSV">Export CSV</button>
     </div>
     <div class="pop-drill-body" id="pop-drill-body"></div>
     <div class="pop-drill-foot">
       <span class="pop-drill-meta" id="pop-drill-meta"></span>
-      <button class="pop-link" id="pop-drill-csv" title="Download the rows in this drill panel as a CSV (mod log, roster, death-row, etc.) for spreadsheet analysis.">Export rows</button>
+      <span class="pop-drill-esc-hint">ESC to close</span>
     </div>
   </div>
 
@@ -168,172 +217,198 @@
        runs automatically; no button needed. -->
   <!-- M4.3 REDTEAM-3: tools tab panel wrapper -->
   <div id="tab-panel-tools" role="tabpanel" aria-labelledby="tab-btn-tools">
-  <!-- v10.x: Collapsible card — Tools (Diagnostics + Data harvest) -->
-  <details class="gam-card" id="card-tools" data-tab="tools" open>
-    <summary class="gam-card-head">
-      <span class="gam-card-chevron" aria-hidden="true"></span>
+  <!-- v10.12 UIUX-01: <details> -> <div> permanent panel. UIUX-04: 2-col Diagnostics + segmented crawl -->
+  <div class="gam-card" id="card-tools" data-tab="tools">
+    <div class="gam-card-header">
       <span class="gam-card-title">Tools</span>
       <span class="gam-card-badge" id="card-badge-tools" style="display:none"></span>
-    </summary>
+    </div>
     <div class="gam-card-body">
-  <div class="pop-section-label">Diagnostics</div>
-  <div class="pop-tools">
-    <button id="debugBtn" class="pop-btn pop-btn-ghost">&#x1F9EA; Debug snapshot</button>
-    <button id="dashBtn" class="pop-btn pop-btn-ghost">&#x1F4CA; Dashboard</button>
-  </div>
-
-  <div class="pop-section-label">Data harvest</div>
-  <div class="pop-tools">
-    <button class="pop-btn pop-btn-ghost crawl-btn" data-section="users" data-pages="10">&#x1F578; Crawl /users (10)</button>
-    <button class="pop-btn pop-btn-ghost crawl-btn" data-section="users" data-pages="30">&#x1F578; Crawl /users (30)</button>
-    <button class="pop-btn pop-btn-ghost crawl-btn" data-section="queue" data-pages="5">&#x1F578; Crawl /queue (5)</button>
-  </div>
-  <div id="crawlStatus" class="pop-token-status" style="padding: 0 12px 4px;"></div>
+      <!-- Diagnostics sub-section: 2-col grid (UIUX-04 §E.1) -->
+      <div class="gam-card-subsection">
+        <div class="gam-card-sub-label">Diagnostics</div>
+        <div class="gam-card-grid2">
+          <button id="debugBtn" class="pop-btn pop-btn-ghost">&#x1F9EA; Debug snapshot</button>
+          <button id="dashBtn" class="pop-btn pop-btn-ghost">&#x1F4CA; Dashboard</button>
+        </div>
+      </div>
+      <!-- Data harvest sub-section: segmented crawl row (UIUX-04 §E.1) -->
+      <div class="gam-card-subsection">
+        <div class="gam-card-sub-label">
+          Data Harvest
+          <span class="gam-card-sub-label-meta" id="crawlStatusLabel"></span>
+        </div>
+        <div class="gam-crawl-row">
+          <div class="gam-crawl-group">
+            <span class="gam-crawl-label">/USERS</span>
+            <button class="pop-btn pop-btn-ghost gam-crawl-pill crawl-btn" data-section="users" data-pages="10" data-depth="quick">&times;10</button>
+            <button class="pop-btn pop-btn-ghost gam-crawl-pill crawl-btn" data-section="users" data-pages="30" data-depth="deep">&times;30</button>
+          </div>
+          <div class="gam-crawl-sep"></div>
+          <div class="gam-crawl-group">
+            <span class="gam-crawl-label">/QUEUE</span>
+            <button class="pop-btn pop-btn-ghost gam-crawl-pill crawl-btn" data-section="queue" data-pages="5" data-depth="quick">&times;5</button>
+          </div>
+        </div>
+        <div id="crawlStatus" class="pop-token-status" style="margin-top:4px;font-size:10px"></div>
+      </div>
     </div><!-- /.gam-card-body tools -->
-  </details><!-- /#card-tools -->
+  </div><!-- /#card-tools -->
 
-  <!-- v10.x: Collapsible card — Maintenance -->
-  <details class="gam-card" id="card-maint" data-tab="tools" open>
-    <summary class="gam-card-head">
-      <span class="gam-card-chevron" aria-hidden="true"></span>
-      <span class="gam-card-title">&#x1F527; Maintenance</span>
-      <span class="gam-card-badge" id="card-badge-maint" style="display:none"></span>
-    </summary>
-    <div class="gam-card-body">
-  <!-- v9.5.0: Maintenance Mode. One-click self-heal routines for non-tech mods.
-       Each row is a separate routine (#1-8 below); each logs to gam_diag_log via
-       the modtools.js content-script handler. Lead-tier maintenance rows live
-       inside #leadSection (rendered further down) so the existing __applyLeadGate
-       in popup.js handles visibility - no separate gate is added here. -->
-  <div id="maintWarningBanner" class="pop-maint-banner" style="display:none"></div>
-  <!-- v10.1: pareto cut (advocate groan #1: "11 stacked Maintenance buttons
-       with developer jargon"). Top 4 are mod-friendly recovery + AI helpers
-       that any mod uses regularly; remaining 6 are advanced/diagnostic
-       routines folded into a <details> accordion. Same handlers, same IDs;
-       structure is purely visual reorganization. -->
-  <div class="pop-maint">
-    <!-- E.2.3 (Rule 52): Safe Mode toggle row — amber when active. Top of Maintenance. -->
-    <div class="pop-maint-row pop-maint-row-safemode" id="safeModeRow" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #2a2f38;margin-bottom:4px">
-      <span style="flex:1;font-size:11px;color:#aaa" title="Disables firehose, AI, animations, presence ping, auto-DR. Keeps: token entry, ban hammer, modmail send, mod log, settings.">&#x26A0; Safe Mode</span>
-      <label class="gam-toggle" id="safeModeToggleLabel" style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px">
-        <input type="checkbox" id="safeModeToggle" style="display:none">
-        <span id="safeModeToggleTrack" class="gam-toggle-track" style="display:inline-block;width:32px;height:16px;border-radius:8px;background:#2a2f38;position:relative;transition:background .2s">
-          <span id="safeModeToggleThumb" style="position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#5c6370;transition:left .2s,background .2s"></span>
+  <!-- ================================================================
+       v10.12 UIUX-05: Maintenance split into 4 separate cards.
+       Replaces single #card-maint. All 13+ button IDs preserved.
+       badge IDs: -status / -probes / -detect / -integrity
+       ================================================================ -->
+
+  <!-- Card 1: System Status (always visible, no collapse) -->
+  <div class="gam-card" id="card-maint-status" data-tab="tools">
+    <div class="gam-card-header">
+      <span class="gam-card-title">[SYS] System Status</span>
+      <span class="gam-card-badge" id="card-badge-maint-status" style="display:none"></span>
+    </div>
+    <div class="gam-card-body" style="padding:0">
+      <div id="maintWarningBanner" class="pop-maint-banner" style="display:none"></div>
+      <!-- Safe Mode toggle row -->
+      <div class="pop-maint-action-row" id="safeModeRow">
+        <span class="pop-btn" style="flex:1;text-align:left;border:none;background:transparent"
+              title="Disables firehose, AI, animations, presence ping, auto-DR. Keeps: token entry, ban hammer, modmail send, mod log, settings.">
+          &#x26A0; Safe Mode
         </span>
-        <span id="safeModeToggleLabel2" style="color:#5c6370">OFF</span>
-      </label>
+        <label class="gam-toggle" id="safeModeToggleLabel" style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="checkbox" id="safeModeToggle" style="display:none">
+          <span id="safeModeToggleTrack" class="gam-toggle-track"
+                style="display:inline-block;width:32px;height:16px;background:var(--bb-line);position:relative;transition:background .2s">
+            <span id="safeModeToggleThumb"
+                  style="position:absolute;top:2px;left:2px;width:12px;height:12px;background:var(--bb-ink-faint);transition:left .2s,background .2s"></span>
+          </span>
+          <span id="safeModeToggleLabel2" style="font-size:11px;color:var(--bb-ink-faint)">OFF</span>
+        </label>
+      </div>
+      <!-- Feature Health row -->
+      <div class="pop-maint-action-row" id="featureHealthRow" style="display:none;flex-direction:column;align-items:flex-start">
+        <div style="font-size:10px;color:var(--bb-ink-dim);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px">&#x2764; Feature Health</div>
+        <div id="featureHealthList" style="font-size:11px;color:var(--bb-ink-faint)">All features healthy</div>
+      </div>
     </div>
-    <!-- E.2.4 (Rule 54): Feature Health row — lists auto-disabled features with Re-enable buttons -->
-    <div class="pop-maint-row" id="featureHealthRow" style="display:none;flex-direction:column;padding:6px 0;border-bottom:1px solid #2a2f38;margin-bottom:4px">
-      <div style="font-size:10px;color:#aaa;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.06em">&#x2764; Feature Health</div>
-      <div id="featureHealthList" style="font-size:11px;color:#5c6370">All features healthy</div>
-    </div>
-    <div class="pop-maint-row">
-      <button id="maintCookies" class="pop-btn pop-btn-ghost"
-              title="Clears stuck XSRF/session/cf_* cookies on greatawakening.win plus per-tab localStorage. Use when GAW gives 403/CSRF errors.">
-        &#x1F36A; Clear stuck cookies + localStorage
-      </button>
-      <div id="maintCookiesStatus" class="pop-token-status pop-maint-status"></div>
-    </div>
-    <div class="pop-maint-row">
-      <button id="maintToken" class="pop-btn pop-btn-ghost"
-              title="Pings worker /mod/whoami, reports token age + lead status. Color-coded by age (green &lt;60d / yellow 60-90d / red &gt;90d).">
-        &#x1F511; Token health probe
-      </button>
-      <div id="maintTokenStatus" class="pop-token-status pop-maint-status"></div>
-    </div>
-    <!-- v9.11.0 - AI tard / sus-pattern suggester (Commander #23/#24).
-         Calls /ai/tards/suggest which scans recent gaw_users via firehose
-         and returns up to 6 patterns Llama identifies as worth flagging. -->
-    <div class="pop-maint-row">
-      <button id="maintTardSuggest" class="pop-btn pop-btn-ghost"
-              title="Llama scans the last 80 usernames seen via firehose and proposes patterns worth flagging (hate speech, troll archetypes, etc.). Counts against your daily AI budget.">
-        &#x2728; AI: suggest tard / sus patterns
-      </button>
-      <div id="maintTardSuggestStatus" class="pop-token-status pop-maint-status"></div>
-    </div>
-    <div id="maintTardSuggestPanel" style="display:none"></div>
-    <!-- v9.12.0 - AI sticky-request detector (Commander #17). Scans recent
-         modmail_messages for "sticky pls" / "please sticky" / etc., asks
-         Llama to confirm genuine request, returns up to 10 with confidence. -->
-    <div class="pop-maint-row">
-      <button id="maintStickyScan" class="pop-btn pop-btn-ghost"
-              title="Scans the last 7 days of modmail messages for sticky requests, AI-confirms intent, returns flagged threads.">
-        &#x1F4CC; AI: scan modmail for sticky requests
-      </button>
-      <div id="maintStickyScanStatus" class="pop-token-status pop-maint-status"></div>
-    </div>
-    <div id="maintStickyScanPanel" style="display:none"></div>
+  </div><!-- /#card-maint-status -->
 
-    <details class="pop-maint-advanced">
-      <summary>System diagnostics (advanced)</summary>
-      <div class="pop-maint-row">
-        <button id="maintStorage" class="pop-btn pop-btn-ghost"
+  <!-- Card 2: Probes (read-only diagnostics) -->
+  <div class="gam-card" id="card-maint-probes" data-tab="tools">
+    <div class="gam-card-header">
+      <span class="gam-card-title">[PRB] Probes</span>
+      <span class="gam-card-badge" id="card-badge-maint-probes" style="display:none"></span>
+    </div>
+    <div class="gam-card-body" style="padding:0">
+      <div class="pop-maint-action-row">
+        <button id="maintToken" class="pop-btn"
+                title="Pings worker /mod/whoami, reports token age + lead status. Color-coded by age (green &lt;60d / yellow 60-90d / red &gt;90d).">
+          &#x1F511; Token health probe
+        </button>
+        <div id="maintTokenStatus" class="pop-maint-action-status"></div>
+      </div>
+      <div class="pop-maint-action-row">
+        <button id="maintStorage" class="pop-btn"
                 title="Reads chrome.storage.local usage + top-5 largest keys. Trim button evicts oldest 50% of intel cache + caps diag log.">
           &#x1F4CA; Storage health probe
         </button>
-        <div id="maintStorageStatus" class="pop-token-status pop-maint-status"></div>
+        <div id="maintStorageStatus" class="pop-maint-action-status"></div>
       </div>
-      <div class="pop-maint-row">
-        <button id="maintSelectorDrift" class="pop-btn pop-btn-ghost"
-                title="Lists learned-selector promotions from gam_learned_selectors so you can see if GAW changed their layout. Surfaced for awareness.">
+      <div class="pop-maint-action-row">
+        <button id="maintSelectorDrift" class="pop-btn"
+                title="Lists learned-selector promotions from gam_learned_selectors so you can see if GAW changed their layout.">
           &#x1FA7A; Selector drift report
         </button>
-        <div id="maintSelectorDriftStatus" class="pop-token-status pop-maint-status"></div>
+        <div id="maintSelectorDriftStatus" class="pop-maint-action-status"></div>
       </div>
-      <div class="pop-maint-row">
-        <button id="maintDiag" class="pop-btn pop-btn-ghost"
+      <div class="pop-maint-action-row">
+        <button id="maintDiag" class="pop-btn"
                 title="Counts diag log entries. Buttons: Export (clipboard, redacted JSON) and Purge oldest 50%.">
           &#x1F4DC; Diag log status + purge
         </button>
-        <div id="maintDiagStatus" class="pop-token-status pop-maint-status"></div>
+        <div id="maintDiagStatus" class="pop-maint-action-status"></div>
       </div>
-      <div class="pop-maint-row">
-        <button id="maintSchema" class="pop-btn pop-btn-ghost"
-                title="Compares stored gam_settings.schema_version against the code-side constant. If mismatch, runs additive migration (safe defaults).">
-          &#x2699; Schema migration check
+    </div>
+  </div><!-- /#card-maint-probes -->
+
+  <!-- Card 3: Detection — AI-budget routines -->
+  <div class="gam-card" id="card-maint-detect" data-tab="tools">
+    <div class="gam-card-header">
+      <span class="gam-card-title">[AI] Detection</span>
+      <span class="gam-card-badge" id="card-badge-maint-detect" style="display:none"></span>
+    </div>
+    <div class="gam-card-body" style="padding:0">
+      <div class="pop-maint-action-row">
+        <button id="maintTardSuggest" class="pop-btn"
+                title="Llama scans the last 80 usernames seen via firehose and proposes patterns worth flagging. Counts against your daily AI budget.">
+          &#x2728; AI: suggest tard / sus patterns
         </button>
-        <div id="maintSchemaStatus" class="pop-token-status pop-maint-status"></div>
+        <div id="maintTardSuggestStatus" class="pop-maint-action-status"></div>
       </div>
-      <!-- v9.16.0 - manual modmail history backfill (Commander #6). Walks
-           /modmail?page=1..N and ingests historical threads + messages into
-           the inbox-intel pipeline. Throttled at 1.5s/page. Use once to seed
-           historical data, then ambient ingest takes over. -->
-      <div class="pop-maint-row">
-        <button id="maintModmailBackfill" class="pop-btn pop-btn-ghost"
+      <div id="maintTardSuggestPanel" style="display:none"></div>
+      <div class="pop-maint-action-row">
+        <button id="maintStickyScan" class="pop-btn"
+                title="Scans the last 7 days of modmail messages for sticky requests, AI-confirms intent, returns flagged threads.">
+          &#x1F4CC; AI: scan modmail for sticky requests
+        </button>
+        <div id="maintStickyScanStatus" class="pop-maint-action-status"></div>
+      </div>
+      <div id="maintStickyScanPanel" style="display:none"></div>
+    </div>
+  </div><!-- /#card-maint-detect -->
+
+  <!-- Card 4: Integrity — state-mutating and destructive ops (collapsed by default) -->
+  <details class="gam-card" id="card-maint-integrity" data-tab="tools">
+    <summary class="gam-card-head">
+      <span class="gam-card-chevron" aria-hidden="true"></span>
+      <span class="gam-card-title">[INT] Integrity</span>
+      <span class="gam-card-badge" id="card-badge-maint-integrity" style="display:none"></span>
+    </summary>
+    <div class="gam-card-body" style="padding:0">
+      <div class="pop-maint-action-row">
+        <button id="maintCookies" class="pop-btn"
+                title="Clears stuck XSRF/session/cf_* cookies on greatawakening.win plus per-tab localStorage. Use when GAW gives 403/CSRF errors.">
+          &#x1F36A; Clear stuck cookies + localStorage
+        </button>
+        <div id="maintCookiesStatus" class="pop-maint-action-status"></div>
+      </div>
+      <div class="pop-maint-action-row">
+        <button id="maintModmailBackfill" class="pop-btn"
                 title="Walks /modmail page 1..10 in your active GAW tab and ingests historical threads + messages. ~15s for 10 pages. Run once.">
           &#x1F5C2; Backfill modmail history
         </button>
-        <div id="maintModmailBackfillStatus" class="pop-token-status pop-maint-status"></div>
+        <div id="maintModmailBackfillStatus" class="pop-maint-action-status"></div>
       </div>
-      <!-- v10.5.1 AF-07 Rule 21: non-destructive shape repair. Fills missing/mistyped
-           keys with safe defaults; never wipes tokens or UX preferences. -->
-      <div class="pop-maint-row">
-        <button id="maintRepair" class="pop-btn pop-btn-ghost"
+      <div class="pop-maint-action-row">
+        <button id="maintSchema" class="pop-btn"
+                title="Compares stored gam_settings.schema_version against the code-side constant. If mismatch, runs additive migration (safe defaults).">
+          &#x2699; Schema migration check
+        </button>
+        <div id="maintSchemaStatus" class="pop-maint-action-status"></div>
+      </div>
+      <div class="pop-maint-action-row">
+        <button id="maintRepair" class="pop-btn"
                 title="Non-destructive. Checks gam_settings for missing or wrong-type keys and fills them with safe defaults. Tokens + UX prefs are never touched.">
           &#x1F527; Repair settings
         </button>
-        <div id="maintRepairStatus" class="pop-token-status pop-maint-status"></div>
+        <div id="maintRepairStatus" class="pop-maint-action-status"></div>
       </div>
-      <div class="pop-maint-row">
-        <button id="maintReset" class="pop-btn pop-btn-ghost"
+      <div class="pop-maint-action-row">
+        <button id="maintReset" class="pop-btn"
                 title="DESTRUCTIVE. Wipes gam_settings feature flags (preserves tokens). Triple-confirms before running. Use only when 'everything seems weird'.">
           &#x1F198; Reset settings to defaults
         </button>
-        <div id="maintResetStatus" class="pop-token-status pop-maint-status"></div>
+        <div id="maintResetStatus" class="pop-maint-action-status"></div>
       </div>
-    </details>
-  </div>
-    </div><!-- /.gam-card-body maint -->
-  </details><!-- /#card-maint -->
+    </div>
+  </details><!-- /#card-maint-integrity -->
 
-  <!-- v10.x: Collapsible card — Macros -->
-  <details class="gam-card" id="card-macros" data-tab="tools" open>
-    <summary class="gam-card-head">
-      <span class="gam-card-chevron" aria-hidden="true"></span>
+  <!-- v10.12 UIUX-01: <details> -> <div> permanent panel -->
+  <div class="gam-card" id="card-macros" data-tab="tools">
+    <div class="gam-card-header">
       <span class="gam-card-title">&#x1F4DD; Team Macros</span>
       <span class="gam-card-badge" id="card-badge-macros" style="display:none"></span>
-    </summary>
+    </div>
     <div class="gam-card-body">
 
   <!-- v9.6.0: Team Macros (shared canned messages) — visible to ALL mods,
@@ -346,7 +421,11 @@
       <button class="pop-btn pop-btn-ghost gam-macro-tab" data-kind="mm_reply" style="flex:1">&#x1F4EC; Modmail replies</button>
     </div>
     <div id="macrosList" style="margin-top:8px;max-height:240px;overflow:auto;border:1px solid #2a2d33;border-radius:4px;background:#0e1115">
-      <div style="padding:10px;color:#888;font-size:11px;text-align:center">Loading...</div>
+      <!-- v10.12 UIUX-20 §D: inline color -> token; UIUX-19: "Loading..." -> skeleton -->
+      <div class="gam-skel-wrap gam-skel-shimmer" style="padding:10px" aria-busy="true">
+        <div class="gam-skel-line gam-skel-shimmer" style="width:80%;margin:0 auto"></div>
+        <div class="gam-skel-line gam-skel-shimmer" style="width:60%;margin:0 auto"></div>
+      </div>
     </div>
     <div class="pop-tools" style="margin-top:6px;display:flex;gap:4px">
       <button id="macroAddBtn" class="pop-btn pop-btn-ghost" style="flex:1">&#x2795; Add custom</button>
@@ -354,8 +433,11 @@
     </div>
     <div id="macroEditWrap" style="display:none;margin-top:8px;padding:8px;background:#0e1115;border:1px solid #2a2d33;border-radius:4px">
       <input type="hidden" id="macroEditId" value="">
-      <input id="macroEditLabel" placeholder="Label (max 80 chars)" maxlength="80" aria-label="Macro label (max 80 chars)" style="width:100%;padding:6px 8px;background:#161a20;color:#dcdcdc;border:1px solid #2a2d33;border-radius:3px;font:11px inherit;margin-bottom:6px">
-      <textarea id="macroEditBody" placeholder="Body of the macro..." maxlength="4000" rows="4" aria-label="Macro body text (max 4000 chars)" style="width:100%;padding:6px 8px;background:#161a20;color:#dcdcdc;border:1px solid #2a2d33;border-radius:3px;font:12px inherit;resize:vertical"></textarea>
+      <!-- v10.12 UIUX-20 §G P1: explicit <label for> pairs (were placeholder-only) -->
+      <label for="macroEditLabel" style="font-size:10px;color:var(--bb-ink-dim);text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:2px">Label</label>
+      <input id="macroEditLabel" placeholder="Label (max 80 chars)" maxlength="80" style="width:100%;padding:6px 8px;background:var(--bb-sunken);color:var(--bb-ink);border:1px solid var(--bb-line-hot);font:11px inherit;margin-bottom:6px">
+      <label for="macroEditBody" style="font-size:10px;color:var(--bb-ink-dim);text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:2px">Body</label>
+      <textarea id="macroEditBody" placeholder="Body of the macro..." maxlength="4000" rows="4" style="width:100%;padding:6px 8px;background:var(--bb-sunken);color:var(--bb-ink);border:1px solid var(--bb-line-hot);font:12px inherit;resize:vertical"></textarea>
       <div class="pop-tools" style="margin-top:6px;display:flex;gap:4px">
         <button id="macroSaveBtn" class="pop-btn pop-btn-ghost" style="flex:1">Save</button>
         <button id="macroCancelBtn" class="pop-btn pop-btn-ghost" style="flex:1">Cancel</button>
@@ -364,19 +446,17 @@
     <div id="macrosStatus" class="pop-token-status"></div>
   </div>
     </div><!-- /.gam-card-body macros -->
-  </details><!-- /#card-macros -->
+  </div><!-- /#card-macros -->
   </div><!-- /#tab-panel-tools (M4.3 REDTEAM-3) -->
 
   <!-- M4.3 REDTEAM-3: tokens tab panel wrapper -->
   <div id="tab-panel-tokens" role="tabpanel" aria-labelledby="tab-btn-tokens">
-  <!-- v10.x: Collapsible card — Tokens (team token + lead token + wizard + claim invite) -->
-  <!-- v10.10.1 P1 (DESIGN-01): added data-tab="tokens" -- card was invisible to tab system -->
-  <details class="gam-card" id="card-tokens" data-tab="tokens" open>
-    <summary class="gam-card-head">
-      <span class="gam-card-chevron" aria-hidden="true"></span>
+  <!-- v10.12 UIUX-01: <details> -> <div> permanent panel. data-tab="tokens" -->
+  <div class="gam-card" id="card-tokens" data-tab="tokens">
+    <div class="gam-card-header">
       <span class="gam-card-title">&#x1F511; Tokens</span>
       <span class="gam-card-badge" id="card-badge-tokens" style="display:none"></span>
-    </summary>
+    </div>
     <div class="gam-card-body">
 
   <div class="pop-token">
@@ -435,228 +515,267 @@
 
   <!-- M4.3 REDTEAM-3: lead tab panel wrapper -->
   <div id="tab-panel-lead" role="tabpanel" aria-labelledby="tab-btn-lead">
-  <!-- v10.x: Collapsible card — Lead (token + KPI + tools) -->
-  <!-- v10.10.1 P1 (DESIGN-01): added data-tab="lead" -- card was invisible to tab system -->
-  <details class="gam-card" id="card-lead" data-tab="lead" open>
-    <summary class="gam-card-head">
-      <span class="gam-card-chevron" aria-hidden="true"></span>
+  <!-- v10.12 UIUX-01: outer card stays <details> per CTO ruling (UIUX-08 inner deep-dive is nested <details>). -->
+  <!-- v10.12 UIUX-08: KPI / QA / lapsed moved INSIDE card; orphan divs eliminated. -->
+  <div class="gam-card" id="card-lead" data-tab="lead">
+    <div class="gam-card-header">
       <span class="gam-card-title">&#x1F451; Lead</span>
       <span class="gam-card-badge" id="card-badge-lead" style="display:none"></span>
-    </summary>
+    </div>
     <div class="gam-card-body">
-  <!-- v9.6.1: leadSection always visible so user can paste lead token before
-       team token is saved. Pre-fix the section was display:none until
-       __applyLeadGate confirmed is_lead via /mod/whoami, but whoami needs
-       the team token saved first -- chicken-and-egg. Now: token input is
-       always visible; only the lead-only tools (#leadOnlyTools) hide. -->
+
+  <!-- Lead token input (always visible for token-paste flow — v9.6.1 rule) -->
   <div class="pop-token" id="leadSection">
     <label for="leadInput">&#x1F451; Lead Mod Token</label>
     <div class="pop-token-hint">Lead-only: rotation roster, invite generation, mod HUD</div>
     <input id="leadInput" type="password" placeholder="lead-mod token — enables HUD + invites">
     <button id="leadSave" class="pop-btn pop-btn-ghost">Save</button>
     <div id="leadStatus" class="pop-token-status"></div>
-    <!-- v9.6.1: lead-only tools wrapped here. Gated by __applyLeadGate. -->
+
+    <!-- Lead-only tools — gated by __applyLeadGate -->
     <div id="leadOnlyTools" style="display:none">
-    <!-- v10.x: loading shimmy for senior_lead tier while tools initialise -->
-    <div id="srLeadEmptyHint" style="display:none;color:#9b9892;font-size:10.5px;
-         padding:6px 0;border-bottom:1px solid #1e2128;margin-bottom:6px">
-      Loading elevated tools&hellip;
-    </div>
-    <!-- v9.4.4: margin-top 8 -> 4 across lead sub-rows. -->
-    <div class="pop-tools" style="margin-top:4px">
-      <button id="inviteBtn" class="pop-btn pop-btn-ghost">&#x1F4E8; Generate invite link</button>
-    </div>
-    <div id="inviteResult" class="pop-token-status"></div>
-    <!-- v8.5.2: lead-only mod rotation roster. Replaces the v8.5.1
-         single-issue button with a roster view: see every mod, their
-         rotation status, click to issue per-mod, OR one button to issue
-         for all unrotated at once. -->
-    <div class="pop-tools" style="margin-top:4px">
-      <button id="rotateRosterBtn" class="pop-btn pop-btn-ghost">&#x1F465; Mod rotation roster</button>
-    </div>
-    <div id="rotateInviteResult" class="pop-token-status"></div>
-    <div id="rotateRosterPanel" style="display:none"></div>
-
-    <!-- v10.x: Settings + Maintenance accordion (infrequent ops, collapsed by default) -->
-    <details class="pop-maint-advanced" id="leadSettingsAccordion">
-      <summary>Settings &amp; Maintenance (advanced)</summary>
-    <!-- v9.3.1 (P0-4): team-wide settings. First setting is the username
-         flag TTL (default 30d). Lead writes; all mods read on the next
-         /flags/read (server enforces filter).
-         v9.4.4: margin-top 10 -> 8 (was off-grid). Input padding 4/6 -> 4/8,
-         Save button padding 3/10 -> 4/8. All values now snap to 4/8 grid. -->
-    <div class="pop-section-label" style="margin-top:8px">Team settings</div>
-    <div class="pop-tools" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <label for="flagTtlInput" style="font-size:11px;color:#aaa;flex:1 1 auto">Flag expiry (days)</label>
-      <input id="flagTtlInput" type="number" min="1" max="365" step="1" placeholder="30"
-             style="width:64px;padding:4px 8px;background:#11131a;color:#e5e9f0;border:1px solid #3b414d;border-radius:4px;font:inherit">
-      <button id="flagTtlSave" class="pop-btn pop-btn-ghost" style="font-size:11px;padding:4px 8px">Save</button>
-    </div>
-    <div id="flagTtlStatus" class="pop-token-status"></div>
-
-    <!-- v9.4.4: bug-report triage. Lead-only section. Visibility config lets
-         the lead grant non-lead mods read access (comma list, "all", or
-         "leads"). The "Open bug reports" button opens an inline panel
-         listing each open report with click-to-expand + status controls. -->
-    <div class="pop-section-label" style="margin-top:8px">Bug reports</div>
-    <div class="pop-tools">
-      <button id="bugListBtn" class="pop-btn pop-btn-ghost" style="font-size:11px">
-        &#x1F41B; Open bug reports <span id="bugListBadge" style="display:none;background:#cc3333;color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px"></span>
-      </button>
-    </div>
-    <div id="bugListStatus" class="pop-token-status"></div>
-    <div id="bugListPanel" style="display:none;max-height:400px;overflow:auto;background:#11131a;border:1px solid #3b414d;border-radius:4px;padding:6px;margin:6px 0;font-size:11px"></div>
-
-    <div class="pop-tools" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px">
-      <label for="bugVisInput" style="font-size:11px;color:#aaa;flex:1 1 100%">Who can read bug reports? (<code>leads</code> | <code>all</code> | <code>user1,user2</code>)</label>
-      <input id="bugVisInput" type="text" placeholder="leads"
-             style="flex:1 1 auto;padding:4px 8px;background:#11131a;color:#e5e9f0;border:1px solid #3b414d;border-radius:4px;font:inherit;min-width:160px">
-      <button id="bugVisSave" class="pop-btn pop-btn-ghost" style="font-size:11px;padding:4px 8px">Save</button>
-    </div>
-    <div id="bugVisStatus" class="pop-token-status"></div>
-
-    <!-- v9.5.0: Lead-tier Maintenance. Heavier diagnostics that depend on
-         lead-only worker endpoints. Inside #leadSection so the existing
-         __applyLeadGate (whoami-driven) handles visibility automatically. -->
-    <div class="pop-section-label" style="margin-top:8px">&#x1F527; Maintenance (lead)</div>
-    <div class="pop-maint">
-      <div class="pop-maint-row">
-        <button id="maintAuditVerify" class="pop-btn pop-btn-ghost"
-                title="Calls /admin/audit/verify and surfaces last verified ts + next required boundary. Red badge if entry_hmac_null_post_boundary is set.">
-          &#x1F50D; Audit chain verify
-        </button>
-        <div id="maintAuditVerifyStatus" class="pop-token-status pop-maint-status"></div>
+      <!-- Loading shimmer hint (v10.x sr-lead tier) -->
+      <div id="srLeadEmptyHint" style="display:none;color:var(--bb-ink-faint);font-size:10.5px;padding:6px 0;border-bottom:1px solid var(--bb-line);margin-bottom:6px">
+        Loading elevated tools&hellip;
       </div>
-      <div class="pop-maint-row">
-        <button id="maintFullReport" class="pop-btn pop-btn-ghost"
-                title="Runs every user-tier routine + audit verify in sequence. ~5s. Outputs single JSON to clipboard + downloads file.">
-          &#x1F6E1; Full health report
-        </button>
-        <div id="maintFullReportStatus" class="pop-token-status pop-maint-status"></div>
-      </div>
-      <div class="pop-maint-row">
-        <button id="maintRosterStaleness" class="pop-btn pop-btn-ghost"
-                title="Pulls /admin/mod/list and color-codes by days_since_rotated. Click Rotate per-row to issue a 72h invite.">
-          &#x1F4CB; Roster staleness audit
-        </button>
-        <div id="maintRosterStalenessStatus" class="pop-token-status pop-maint-status"></div>
-      </div>
-      <div id="maintRosterStalenessPanel" style="display:none"></div>
-      <div class="pop-maint-row">
-        <button id="maintMigrationDebt" class="pop-btn pop-btn-ghost"
-                title="Scans for known-deferred legacy items (legacy claim path, MOD_TOKEN env-var still configured, NULL hmac legacy rows). Reports counts.">
-          &#x1F4E6; Migration debt scanner
-        </button>
-        <div id="maintMigrationDebtStatus" class="pop-token-status pop-maint-status"></div>
-      </div>
-    </div>
 
-    <!-- v9.5.0: Autonomous weekly maintenance + Llama analysis. Lead-only
-         surface. Toggles team-wide autonomous-uploads on/off via
-         team_settings.maintenance_autonomous_enabled, plus a list view of
-         the last 14 days of reports across all mods. -->
-    <div class="pop-section-label" style="margin-top:8px">&#x1F916; Autonomous maintenance (Llama)</div>
-    <div class="pop-tools" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <label for="maintAutoToggle" style="font-size:11px;color:#aaa;flex:1 1 auto">
-        Auto-run weekly + LLM analysis
-      </label>
-      <select id="maintAutoToggle"
-              style="padding:4px 8px;background:#11131a;color:#e5e9f0;border:1px solid #3b414d;border-radius:4px;font:inherit;font-size:11px">
-        <option value="1">enabled</option>
-        <option value="0">disabled</option>
-      </select>
-      <button id="maintAutoSave" class="pop-btn pop-btn-ghost"
-              style="font-size:11px;padding:4px 8px">Save</button>
-    </div>
-    <div id="maintAutoStatus" class="pop-token-status"></div>
-    <div class="pop-tools" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
-      <button id="maintReportsList" class="pop-btn pop-btn-ghost"
-              title="Lists last 14 days of weekly maintenance reports across all mods. Click row to expand the raw routine output and the Llama analysis JSON.">
-        &#x1F4CA; Maintenance reports (14d)
-      </button>
-      <select id="maintReportsSeverity"
-              style="padding:4px 8px;background:#11131a;color:#e5e9f0;border:1px solid #3b414d;border-radius:4px;font:inherit;font-size:11px">
-        <option value="">all severities</option>
-        <option value="ok">ok</option>
-        <option value="info">info</option>
-        <option value="warning">warning</option>
-        <option value="critical">critical</option>
-      </select>
-      <button id="maintRunNow" class="pop-btn pop-btn-ghost"
-              style="font-size:11px;padding:4px 8px"
-              title="Force a weekly run right now (development / smoke test).">
-        &#x26A1; Run now
-      </button>
-    </div>
-    <div id="maintReportsStatus" class="pop-token-status"></div>
-    <div id="maintReportsPanel" style="display:none;max-height:360px;overflow:auto;background:#11131a;border:1px solid #3b414d;border-radius:4px;padding:6px;margin:6px 0;font-size:11px"></div>
-    </details><!-- /#leadSettingsAccordion -->
+      <!-- [1] KPI Strip (UIUX-08 §F — moved inside leadOnlyTools) -->
+      <div id="leadKpiRow" style="display:none" role="list" aria-label="Lead KPI metrics">
+        <div class="gam-kpi-tile" id="kpi-active" data-kpi="active"
+             role="listitem" tabindex="0" aria-label="Active mods now — click for list"
+             title="Active mods now (presence ping in last 5m). Click for list.">
+          <div class="gam-kpi-label">ACTIVE NOW</div>
+          <div class="gam-kpi-value-row">
+            <span id="kpi-active-val" class="gam-kpi-val">&mdash;</span>
+            <span id="kpi-active-delta" class="gam-kpi-delta"></span>
+          </div>
+        </div>
+        <div class="gam-kpi-tile" id="kpi-clearrate" data-kpi="clearrate"
+             role="listitem" tabindex="0" aria-label="Queue clear rate 24h — click for detail"
+             title="Queue clear-rate 24h. From /mod/stats queue_clear_rate_24h.">
+          <div class="gam-kpi-label">CLR-RATE</div>
+          <div class="gam-kpi-value-row">
+            <span id="kpi-clearrate-val" class="gam-kpi-val">&mdash;</span>
+            <span id="kpi-clearrate-delta" class="gam-kpi-delta"></span>
+          </div>
+        </div>
+        <div class="gam-kpi-tile" id="kpi-mmp50" data-kpi="mmp50"
+             role="listitem" tabindex="0" aria-label="Modmail p50 response latency — click for detail"
+             title="Modmail p50 response latency. From /mod/stats modmail_p50_hours.">
+          <div class="gam-kpi-label">MM p50</div>
+          <div class="gam-kpi-value-row">
+            <span id="kpi-mmp50-val" class="gam-kpi-val">&mdash;</span>
+            <span id="kpi-mmp50-delta" class="gam-kpi-delta"></span>
+          </div>
+        </div>
+        <div class="gam-kpi-tile" id="kpi-incidents" data-kpi="incidents"
+             role="listitem" tabindex="0" aria-label="Open incidents — click for detail"
+             title="Open incidents (approx from flag queue until V11 mod_incidents).">
+          <div class="gam-kpi-label">INCIDENTS</div>
+          <div class="gam-kpi-value-row">
+            <span id="kpi-incidents-val" class="gam-kpi-val">0</span>
+            <span id="kpi-incidents-delta" class="gam-kpi-delta"></span>
+          </div>
+        </div>
+      </div><!-- /#leadKpiRow -->
+
+      <!-- [2] Quick Actions Bar (UIUX-08 §F — moved inside leadOnlyTools) -->
+      <div id="leadQuickActions" style="display:none" role="toolbar" aria-label="Lead quick actions">
+        <!-- Group A: immediate one-shots -->
+        <button id="qaInviteBtn" class="gam-qa-btn"
+                title="Generate invite link and copy to clipboard.">+ Invite</button>
+        <button id="qaRotateAllBtn" class="gam-qa-btn"
+                title="Open mod rotation roster.">Rotate</button>
+        <!-- Group separator -->
+        <div class="gam-qa-sep" role="separator" aria-orientation="vertical"></div>
+        <!-- Group B: panel openers -->
+        <button id="qaBugsBtn" class="gam-qa-btn"
+                title="Open bug reports panel." aria-haspopup="true">
+          Bugs<span id="qaBugsBadge" class="gam-qa-badge" style="display:none" aria-label="open bug reports"></span>
+        </button>
+        <button id="qaMaintBtn" class="gam-qa-btn"
+                title="Open maintenance &amp; diagnostics deep-dive." aria-haspopup="true">Maint</button>
+        <a id="qaChatBtn" class="gam-qa-btn"
+           href="https://greatawakening.win/mod/chat" target="_blank"
+           rel="noopener noreferrer" role="button"
+           aria-label="Open ModChat in new tab"
+           title="ModChat (new tab)">Chat &#x2197;</a>
+      </div><!-- /#leadQuickActions -->
+
+      <!-- [3] Lapsed Mods Chip — replaces always-rendered #lapsedModsCard (UIUX-08 §F) -->
+      <div id="lapsedModsChip" style="display:none" aria-live="polite" aria-label="Lapsed mods alert">
+        <span class="chip-label">
+          LAPSED&nbsp;<strong id="lapsedModsCount"></strong>&nbsp;mods &gt;21d
+        </span>
+        <button id="lapsedPingAllBtn" class="pop-btn pop-btn-ghost"
+                style="font-size:10px;padding:2px 6px;min-height:0">Ping all</button>
+        <button id="lapsedExpandBtn" class="chip-expand"
+                aria-expanded="false" aria-controls="lapsedModsPanel">Expand</button>
+        <label for="lapsedThresholdInput" style="font-size:10px;color:var(--bb-ink-faint)">Threshold:</label>
+        <input id="lapsedThresholdInput" type="number" min="7" max="60" value="21"
+               style="width:40px;padding:2px 4px;background:var(--bb-sunken);color:var(--bb-ink);border:1px solid var(--bb-line-hot);font:inherit;font-size:10px">
+      </div>
+      <div id="lapsedModsPanel" style="display:none" aria-label="Lapsed mods list">
+        <div id="lapsedModsList" style="max-height:180px;overflow:auto"></div>
+      </div>
+      <div id="lapsedModsStatus" class="pop-token-status"></div>
+
+      <!-- [4] Deep-Dive Accordion — replaces #leadSettingsAccordion (UIUX-08 §F) -->
+      <details class="gam-lead-deepdive" id="gam-lead-deepdive">
+        <summary>Deep Dive</summary>
+
+        <!-- 4a: Discord DM Rotation -->
+        <details class="gam-lead-sub" id="lead-sub-rotation">
+          <summary>
+            Discord DM Rotation
+            <span class="sub-status" id="lead-sub-rotation-status"></span>
+          </summary>
+          <div class="sub-body">
+            <div class="pop-tools" style="margin-top:0">
+              <button id="inviteBtn" class="pop-btn pop-btn-ghost">&#x1F4E8; Generate invite link</button>
+            </div>
+            <div id="inviteResult" class="pop-token-status"></div>
+            <div class="pop-tools" style="margin-top:4px">
+              <button id="rotateRosterBtn" class="pop-btn pop-btn-ghost">&#x1F465; Mod rotation roster</button>
+            </div>
+            <div id="rotateInviteResult" class="pop-token-status"></div>
+            <div id="rotateRosterPanel" style="display:none"></div>
+          </div>
+        </details>
+
+        <!-- 4b: Bug Reports -->
+        <details class="gam-lead-sub" id="lead-sub-bugs">
+          <summary>
+            Bug Reports
+            <span class="sub-status">
+              <span id="bugListBadge" style="display:none;background:var(--bb-red);color:#fff;padding:0 var(--bb-s2);font-size:10px"></span>
+            </span>
+          </summary>
+          <div class="sub-body">
+            <div class="pop-tools" style="margin-top:0">
+              <button id="bugListBtn" class="pop-btn pop-btn-ghost" style="font-size:11px">
+                &#x1F41B; Open bug reports
+              </button>
+            </div>
+            <div id="bugListStatus" class="pop-token-status"></div>
+            <div id="bugListPanel" style="display:none;max-height:400px;overflow:auto;background:var(--bb-sunken);border:1px solid var(--bb-line-hot);padding:6px;margin:4px 0;font-size:11px"></div>
+            <div class="pop-tools" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px">
+              <label for="bugVisInput" style="font-size:11px;color:var(--bb-ink-dim);flex:1 1 100%">
+                Who can read bug reports? (<code>leads</code> | <code>all</code> | <code>user1,user2</code>)
+              </label>
+              <input id="bugVisInput" type="text" placeholder="leads"
+                     style="flex:1 1 auto;padding:4px 8px;background:var(--bb-sunken);color:var(--bb-ink);border:1px solid var(--bb-line-hot);font:inherit;min-width:140px">
+              <button id="bugVisSave" class="pop-btn pop-btn-ghost" style="font-size:11px;padding:4px 8px">Save</button>
+            </div>
+            <div id="bugVisStatus" class="pop-token-status"></div>
+          </div>
+        </details>
+
+        <!-- 4c: Maintenance Reports (14d) -->
+        <details class="gam-lead-sub" id="lead-sub-maintreports">
+          <summary>
+            Maintenance Reports (14d)
+            <span class="sub-status" id="lead-sub-maintreports-status"></span>
+          </summary>
+          <div class="sub-body">
+            <div class="pop-tools" style="margin-top:0;align-items:center;gap:8px;flex-wrap:wrap">
+              <button id="maintReportsList" class="pop-btn pop-btn-ghost"
+                      title="Last 14 days of weekly maintenance reports across all mods.">
+                &#x1F4CA; List reports
+              </button>
+              <select id="maintReportsSeverity"
+                      style="padding:4px 8px;background:var(--bb-sunken);color:var(--bb-ink);border:1px solid var(--bb-line-hot);font:inherit;font-size:11px">
+                <option value="">all severities</option>
+                <option value="ok">ok</option>
+                <option value="info">info</option>
+                <option value="warning">warning</option>
+                <option value="critical">critical</option>
+              </select>
+              <button id="maintRunNow" class="pop-btn pop-btn-ghost"
+                      style="font-size:11px;padding:4px 8px"
+                      title="Force a weekly run right now (development / smoke test).">
+                &#x26A1; Run now
+              </button>
+            </div>
+            <div id="maintReportsStatus" class="pop-token-status"></div>
+            <div id="maintReportsPanel" style="display:none;max-height:360px;overflow:auto;background:var(--bb-sunken);border:1px solid var(--bb-line-hot);padding:6px;margin:4px 0;font-size:11px"></div>
+          </div>
+        </details>
+
+        <!-- 4d: Diagnostics & Audit -->
+        <details class="gam-lead-sub" id="lead-sub-diag">
+          <summary>
+            Diagnostics &amp; Audit
+            <span class="sub-status" id="lead-sub-diag-status"></span>
+          </summary>
+          <div class="sub-body">
+            <div class="pop-maint">
+              <div class="pop-maint-row">
+                <button id="maintAuditVerify" class="pop-btn pop-btn-ghost"
+                        title="Calls /admin/audit/verify and surfaces last verified ts + next required boundary.">
+                  &#x1F50D; Audit chain verify
+                </button>
+                <div id="maintAuditVerifyStatus" class="pop-token-status pop-maint-status"></div>
+              </div>
+              <div class="pop-maint-row">
+                <button id="maintFullReport" class="pop-btn pop-btn-ghost"
+                        title="Runs every user-tier routine + audit verify in sequence. ~5s. Outputs single JSON to clipboard.">
+                  &#x1F6E1; Full health report
+                </button>
+                <div id="maintFullReportStatus" class="pop-token-status pop-maint-status"></div>
+              </div>
+              <div class="pop-maint-row">
+                <button id="maintRosterStaleness" class="pop-btn pop-btn-ghost"
+                        title="Pulls /admin/mod/list and color-codes by days_since_rotated.">
+                  &#x1F4CB; Roster staleness audit
+                </button>
+                <div id="maintRosterStalenessStatus" class="pop-token-status pop-maint-status"></div>
+              </div>
+              <div id="maintRosterStalenessPanel" style="display:none"></div>
+              <div class="pop-maint-row">
+                <button id="maintMigrationDebt" class="pop-btn pop-btn-ghost"
+                        title="Scans for known-deferred legacy items (legacy claim path, env vars, NULL hmac rows).">
+                  &#x1F4E6; Migration debt scanner
+                </button>
+                <div id="maintMigrationDebtStatus" class="pop-token-status pop-maint-status"></div>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <!-- 4e: Settings -->
+        <details class="gam-lead-sub" id="lead-sub-settings">
+          <summary>Settings<span class="sub-status"></span></summary>
+          <div class="sub-body">
+            <div class="pop-section-label">Team settings</div>
+            <div class="pop-tools" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:0">
+              <label for="flagTtlInput" style="font-size:11px;color:var(--bb-ink-dim);flex:1 1 auto">Flag expiry (days)</label>
+              <input id="flagTtlInput" type="number" min="1" max="365" step="1" placeholder="30"
+                     style="width:64px;padding:4px 8px;background:var(--bb-sunken);color:var(--bb-ink);border:1px solid var(--bb-line-hot);font:inherit">
+              <button id="flagTtlSave" class="pop-btn pop-btn-ghost" style="font-size:11px;padding:4px 8px">Save</button>
+            </div>
+            <div id="flagTtlStatus" class="pop-token-status"></div>
+            <div class="pop-section-label" style="margin-top:8px">&#x1F916; Autonomous maintenance (Llama)</div>
+            <div class="pop-tools" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:0">
+              <label for="maintAutoToggle" style="font-size:11px;color:var(--bb-ink-dim);flex:1 1 auto">Auto-run weekly + LLM analysis</label>
+              <select id="maintAutoToggle"
+                      style="padding:4px 8px;background:var(--bb-sunken);color:var(--bb-ink);border:1px solid var(--bb-line-hot);font:inherit;font-size:11px">
+                <option value="1">enabled</option>
+                <option value="0">disabled</option>
+              </select>
+              <button id="maintAutoSave" class="pop-btn pop-btn-ghost" style="font-size:11px;padding:4px 8px">Save</button>
+            </div>
+            <div id="maintAutoStatus" class="pop-token-status"></div>
+          </div>
+        </details>
+
+      </details><!-- /#gam-lead-deepdive -->
+
     </div><!-- /#leadOnlyTools -->
   </div><!-- /#leadSection -->
 
-  <!-- v10.x Patch 3: Lead KPI dashboard (ship-tonight minimal) -->
-  <!-- 4-tile KPI row - Active Now reads /presence/online; tiles 2-4 stub OK -->
-  <div id="leadKpiRow" style="display:none;grid-template-columns:repeat(4,1fr);gap:2px;margin:8px 0;border:1px solid #2a2d33"><!-- v10.6.2 HOTFIX UIUX-01: removed duplicate display:grid that defeated display:none -->
-    <div class="gam-kpi-tile" id="kpi-active" data-kpi="active"
-         style="background:#11131a;padding:8px 6px;text-align:center;cursor:pointer;border-right:1px solid #2a2d33"
-         title="Active mods now (presence ping in last 5m). Click for list."
-         role="button" tabindex="0" aria-label="Active mods now — click for list">
-      <div style="font:600 9px/1.2 ui-monospace,monospace;color:#888;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">ACTIVE NOW</div>
-      <div id="kpi-active-val" style="font:700 22px/1 ui-monospace,monospace;color:#f0a040">&mdash;</div>
-    </div>
-    <div class="gam-kpi-tile" id="kpi-clearrate" data-kpi="clearrate"
-         style="background:#11131a;padding:8px 6px;text-align:center;cursor:pointer;border-right:1px solid #2a2d33"
-         title="Queue clear-rate 24h. Stub until /metrics/queue-pressure endpoint lands."
-         role="button" tabindex="0" aria-label="Queue clear rate 24h — click for detail">
-      <div style="font:600 9px/1.2 ui-monospace,monospace;color:#888;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">CLR-RATE</div>
-      <div id="kpi-clearrate-val" style="font:700 22px/1 ui-monospace,monospace;color:#f0a040">&mdash;</div>
-    </div>
-    <div class="gam-kpi-tile" id="kpi-mmp50" data-kpi="mmp50"
-         style="background:#11131a;padding:8px 6px;text-align:center;cursor:pointer;border-right:1px solid #2a2d33"
-         title="Modmail p50 response latency. Stub until /metrics/modmail-sla endpoint lands."
-         role="button" tabindex="0" aria-label="Modmail p50 response latency — click for detail">
-      <div style="font:600 9px/1.2 ui-monospace,monospace;color:#888;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">MM p50</div>
-      <div id="kpi-mmp50-val" style="font:700 22px/1 ui-monospace,monospace;color:#f0a040">&mdash;</div>
-    </div>
-    <div class="gam-kpi-tile" id="kpi-incidents" data-kpi="incidents"
-         style="background:#11131a;padding:8px 6px;text-align:center;cursor:pointer"
-         title="Open incidents. Coming v11.3 (mod_incidents table)."
-         role="button" tabindex="0" aria-label="Open incidents — click for detail">
-      <div style="font:600 9px/1.2 ui-monospace,monospace;color:#888;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">INCIDENTS</div>
-      <div id="kpi-incidents-val" style="font:700 22px/1 ui-monospace,monospace;color:#f0a040">0</div>
-    </div>
-  </div>
-
-  <!-- v10.x: Quick-actions row (lead-only, same visibility as leadKpiRow) -->
-  <div id="leadQuickActions" style="display:none;gap:4px;margin:0 0 8px"><!-- v10.6.2 HOTFIX UIUX-01: removed duplicate display:flex that defeated display:none -->
-    <button id="qaInviteBtn" class="pop-btn pop-btn-ghost" style="flex:1;font-size:11px"
-            title="Generate invite link and copy to clipboard immediately.">+ Invite</button>
-    <button id="qaRotateAllBtn" class="pop-btn pop-btn-ghost" style="flex:1;font-size:11px"
-            title="Issue rotation invites for all mods past their rotation window.">Rotate all</button>
-    <button id="qaBugsBtn" class="pop-btn pop-btn-ghost" style="flex:1;font-size:11px"
-            title="Open bug reports panel.">Bugs <span id="qaBugsBadge" style="display:none;background:#cc3333;color:#fff;padding:1px 5px;border-radius:8px;font-size:10px;margin-left:2px"></span></button>
-    <a id="qaChatBtn" class="pop-btn pop-btn-ghost" style="flex:1;font-size:11px;text-align:center"
-       href="https://greatawakening.win/mod/chat" target="_blank"
-       title="Open ModChat (new tab until embeddable).">Chat</a>
-  </div>
-
-  <!-- v10.x: Lapsed mods card (lead-only) -->
-  <div id="lapsedModsCard" style="display:none;margin:0 0 8px;border:1px solid #2a2d33;background:#11131a">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-bottom:1px solid #2a2d33">
-      <span style="font:600 10px/1 ui-monospace,monospace;color:#f0a040;text-transform:uppercase;letter-spacing:0.1em">LAPSED <span id="lapsedModsCount"></span></span>
-      <button id="lapsedPingAllBtn" class="pop-btn pop-btn-ghost" style="font-size:10px;padding:2px 6px">Ping all</button>
-    </div>
-    <div id="lapsedModsList" style="max-height:180px;overflow:auto"></div>
-    <div style="padding:4px 8px;border-top:1px solid #2a2d33;display:flex;align-items:center;gap:6px">
-      <label style="font-size:10px;color:#888;flex:1">Lapse threshold (days)</label>
-      <input id="lapsedThresholdInput" type="number" min="7" max="60" value="21"
-             style="width:50px;padding:2px 6px;background:#050507;color:#e5e9f0;border:1px solid #3b414d;font:inherit;font-size:10px">
-    </div>
-    <div id="lapsedModsStatus" class="pop-token-status"></div>
-  </div>
-
     </div><!-- /.gam-card-body lead -->
-  </details><!-- /#card-lead -->
+  </div><!-- /#card-lead -->
   </div><!-- /#tab-panel-lead (M4.3 REDTEAM-3) -->
 
   <!-- v7.2 Platform Hardening: Claim invite button. When platformHardening is
@@ -678,7 +797,7 @@
     </button>
   </div>
     </div><!-- /.gam-card-body tokens -->
-  </details><!-- /#card-tokens -->
+  </div><!-- /#card-tokens -->
   </div><!-- /#tab-panel-tokens (M4.3 REDTEAM-3) -->
 
   <!-- E.3.1 (Rule 94): Diagnostics tab section — data-tab="diag", hidden by default via wireTabNav -->
