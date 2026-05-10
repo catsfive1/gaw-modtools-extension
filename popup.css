@@ -1457,3 +1457,133 @@ input[type="checkbox"]:checked::after {
 [data-tab].pop-tab-hidden {
   display: none !important;
 }
+
+/* v10.10.1 P1 (DESIGN-01): .gam-card visual definition -- was zero CSS before, browser-default render */
+/* Bloomberg Terminal card panel: border, amber rail, header bar, body padding, inter-card gap.        */
+/* Applies to all 5 .gam-card instances: #card-tools, #card-maint, #card-macros, #card-tokens,        */
+/* #card-lead. Each card gets an explicit visual boundary for the first time.                           */
+
+.gam-card {
+  display: block !important;
+  margin: 0 0 8px 0 !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  background: var(--bb-bg) !important;
+  position: relative;
+}
+
+/* Amber left rail -- Bloomberg panel accent line. */
+.gam-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--bb-amber) !important;
+  pointer-events: none;
+  z-index: 1;
+  transition: width 120ms ease;
+}
+
+/* Rail thickens on hover to signal interactivity of the card header. */
+.gam-card:hover::before {
+  width: 4px;
+}
+
+/* Lead card: purple authority rail instead of amber. */
+#card-lead::before {
+  background: var(--bb-purple) !important;
+}
+#card-lead:hover::before {
+  background: var(--bb-purple) !important;
+}
+
+/* Summary header -- amber uppercase Bloomberg label. */
+.gam-card > summary.gam-card-head,
+.gam-card-head {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 8px 12px 8px 14px !important;
+  background: var(--bb-bg-deep, #0f1114) !important;
+  border-bottom: 1px solid var(--bb-line-hot) !important;
+  list-style: none;
+  cursor: default;
+  user-select: none;
+  min-height: 0 !important;
+}
+
+/* Remove default <details> triangle marker in all browsers. */
+.gam-card > summary.gam-card-head::-webkit-details-marker { display: none; }
+.gam-card > summary.gam-card-head::marker { display: none; }
+
+.gam-card-title {
+  font: 700 10px/1.2 var(--bb-font, ui-monospace, monospace) !important;
+  color: var(--bb-amber) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  flex: 1 1 auto;
+}
+
+/* Lead card title: purple to signal authority tier. */
+#card-lead .gam-card-title {
+  color: var(--bb-purple) !important;
+}
+
+/* Badge pill on card header (count indicator). */
+.gam-card-badge {
+  font: 700 10px/1 var(--bb-font, ui-monospace, monospace) !important;
+  color: var(--bb-bg, #0a0a0b) !important;
+  background: var(--bb-amber) !important;
+  padding: 1px 4px !important;
+  border-radius: 0 !important;
+  letter-spacing: 0.04em;
+  min-width: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.gam-card-badge.warn {
+  background: var(--bb-red) !important;
+}
+
+/* Chevron: rotate when <details> is open. */
+.gam-card-chevron {
+  font-size: 9px;
+  color: var(--bb-ink-faint, #5a5752);
+  display: inline-block;
+  transition: transform 160ms ease;
+  margin-right: 2px;
+}
+.gam-card[open] .gam-card-chevron {
+  transform: rotate(90deg);
+}
+
+/* Card body: 8px 12px padding, left-inset to clear the 2px amber rail. */
+.gam-card-body {
+  padding: 8px 12px 8px 14px !important;
+  background: var(--bb-bg) !important;
+}
+
+/* Inter-card gap: 8px margin-bottom already set on .gam-card.              */
+/* Double-border guard: .pop-maint inside a card body gets no extra border. */
+.gam-card-body > .pop-maint {
+  border: none !important;
+}
+
+/* Urgent state: amber outer border + pulsing rail. */
+.gam-card.gam-card-urgent {
+  border-color: var(--bb-amber) !important;
+}
+.gam-card.gam-card-urgent::before {
+  animation: gam-card-rail-pulse 1.8s ease-in-out infinite;
+}
+@keyframes gam-card-rail-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+/* Order-last: appended to end of card stack when token confirmed OK. */
+.gam-card.gam-card-order-last {
+  order: 999;
+}

@@ -70,7 +70,8 @@
       <div class="pop-stat-label">Notes / 24h</div>
     </div>
     <!-- ASK-086 / WAVE-B-AUX A.3: AI budget visibility. Value populated by loadStats() via /mod/stats. -->
-    <div class="pop-stat" title="AI calls used today vs your daily cap (e.g. 47/500). Populated from worker /mod/stats.">
+    <!-- v10.10.1 P5 (DESIGN-09): AI tile needed data-drill for parity with other 7 tiles -->
+    <div class="pop-stat" data-drill="ai24" title="AI calls used today vs your daily cap (e.g. 47/500). Click for per-call log. Populated from worker /mod/stats.">
       <div class="pop-stat-val" id="s-ai-today" style="color:#c084fc">&mdash;</div>
       <div class="pop-stat-label">AI today</div>
     </div>
@@ -334,7 +335,8 @@
   </details><!-- /#card-macros -->
 
   <!-- v10.x: Collapsible card — Tokens (team token + lead token + wizard + claim invite) -->
-  <details class="gam-card" id="card-tokens" open>
+  <!-- v10.10.1 P1 (DESIGN-01): added data-tab="tokens" -- card was invisible to tab system -->
+  <details class="gam-card" id="card-tokens" data-tab="tokens" open>
     <summary class="gam-card-head">
       <span class="gam-card-chevron" aria-hidden="true"></span>
       <span class="gam-card-title">&#x1F511; Tokens</span>
@@ -397,7 +399,8 @@
   </div>
 
   <!-- v10.x: Collapsible card — Lead (token + KPI + tools) -->
-  <details class="gam-card" id="card-lead" open>
+  <!-- v10.10.1 P1 (DESIGN-01): added data-tab="lead" -- card was invisible to tab system -->
+  <details class="gam-card" id="card-lead" data-tab="lead" open>
     <summary class="gam-card-head">
       <span class="gam-card-chevron" aria-hidden="true"></span>
       <span class="gam-card-title">&#x1F451; Lead</span>

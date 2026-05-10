@@ -3498,7 +3498,8 @@ const __DRILL_TITLES = {
   banned:  'Banned users (roster)',
   bans24:  'Bans (last 24h)',
   msgs24:  'Messages / replies (last 24h)',
-  notes24: 'Notes (last 24h)'
+  notes24: 'Notes (last 24h)',
+  ai24:    'AI usage today'   // v10.10.1 P5 (DESIGN-09)
 };
 const __DRILL_EMPTY_HINT = {
   pending: 'No users waiting on triage. Run a /users crawl to refresh the roster.',
@@ -3506,7 +3507,8 @@ const __DRILL_EMPTY_HINT = {
   banned:  'No banned users in your local roster. Crawl /users with status=banned to import.',
   bans24:  'No ban actions logged in the last 24h.',
   msgs24:  'No mod messages or replies sent in the last 24h.',
-  notes24: 'No mod notes written in the last 24h.'
+  notes24: 'No mod notes written in the last 24h.',
+  ai24:    'No AI calls logged today, or usage data not yet available from /mod/stats. Full AI usage drill-down coming v10.11.'  // v10.10.1 P5 (DESIGN-09)
 };
 
 // Format an ms-epoch or ISO ts as "HH:MM" if today, else "Mon DD".
@@ -3771,6 +3773,7 @@ async function renderDrillDown(key) {
     else if (key === 'bans24')  await __renderBans24(body);
     else if (key === 'msgs24')  await __renderMsgs24(body);
     else if (key === 'notes24') await __renderNotes24(body);
+    else if (key === 'ai24')    __renderAi24(body);  // v10.10.1 P5 (DESIGN-09)
     else { __renderDrillEmpty(key); }
   } catch (e) {
     body.textContent = '';
@@ -3780,6 +3783,31 @@ async function renderDrillDown(key) {
     body.appendChild(errBox);
     __setDrillMeta('error');
   }
+}
+
+// v10.10.1 P5 (DESIGN-09): AI tile drill-down placeholder.
+// Full per-call log with timestamps ships v10.11 once /mod/stats exposes ai_calls_today array.
+// For now: shows current AI Today value from the tile + a clear placeholder message.
+function __renderAi24(body) {
+  const aiVal = ($('s-ai-today') || {}).textContent || '—';
+  const wrap = document.createElement('div');
+  wrap.className = 'pop-drill-empty';
+  wrap.style.cssText = 'padding:16px 14px;text-align:left;';
+  const valLine = document.createElement('p');
+  valLine.style.cssText = 'font-size:22px;font-weight:600;color:#c084fc;margin:0 0 8px;font-variant-numeric:tabular-nums;';
+  valLine.textContent = aiVal;
+  const labelLine = document.createElement('p');
+  labelLine.style.cssText = 'font-size:11px;color:#9b9892;margin:0 0 12px;text-transform:uppercase;letter-spacing:0.08em;';
+  labelLine.textContent = 'AI calls today';
+  const hint = document.createElement('p');
+  hint.style.cssText = 'font-size:10px;color:#5a5752;margin:0;line-height:1.5;';
+  hint.textContent = 'Per-call log (timestamp, action type, token cost) coming v10.11 -- requires /mod/stats ai_calls_today array from worker.';
+  wrap.appendChild(valLine);
+  wrap.appendChild(labelLine);
+  wrap.appendChild(hint);
+  body.appendChild(wrap);
+  __setDrillMeta('AI usage drill-down -- v10.11');
+  __lastDrill = { key: 'ai24', rows: [], cols: [] };
 }
 
 function __closeDrillDown() {
@@ -5321,7 +5349,12 @@ async function __loadLeadKpi() {
       const el = $('kpi-active-val');
       if (el) {
         el.textContent = String(count);
-        el.style.color = count === 0 ? '#f04040' : count < 2 ? '#f0a040' : '#f0a040';
+        // v10.10.1 P3 (DESIGN-08): both branches were returning same amber -- red never fired even at count=0
+        el.style.color = count === 0
+          ? 'var(--bb-red)'
+          : count < 3
+            ? 'var(--bb-warn)'
+            : 'var(--bb-green)';
       }
     }
   } catch (_) {}

@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v10.10.0';
+  const VERSION = 'v10.10.1';
 
   // v10.6.1 HOTFIX: FEATURE_FLAGS must be declared BEFORE any synchronous IIFE
   // that references it. The earliest reference is __v80ParkUI at line ~3398
@@ -272,14 +272,65 @@
       }
     } catch (_){}
   }
-  // ============================================================================
-  const C = {
-    BG:'#0f1114', BG2:'#181b20', BG3:'#252a31',
-    BORDER:'#2a2f38', BORDER2:'#3a3f48',
-    ACCENT:'#4A9EFF', GREEN:'#3dd68c', RED:'#f04040',
-    WARN:'#f0a040', PURPLE:'#a78bfa', YELLOW:'#ffd60a',
-    TEXT:'#e8eaed', TEXT2:'#8b929e', TEXT3:'#5c6370', WHITE:'#fff',
-  };
+  // v10.10.1 P2 (DESIGN-03): expand const C to 35-key mirror of popup.css tokens; brand=AMBER, form=BLUE separated explicitly
+  // All existing keys are preserved at their original values for call-site compat.
+  // New keys added: AMBER (brand primary), BG/BG2/BG3 reconciled, ink variants, alpha fills.
+  // IMPORTANT: C.ACCENT (#4A9EFF blue) retained for backward compat with existing call sites;
+  //            new code should use C.AMBER for brand surfaces and C.BLUE for form inputs.
+  //            Full call-site sweep (ACCENT -> AMBER where brand, ACCENT -> BLUE where form) ships v10.11.
+  const C = Object.freeze({
+    // === Backgrounds (content-script side -- reconciled from C.BG/BG2/BG3) ===
+    BG:      '#0f1114',    // content-script canvas (was C.BG)
+    BG2:     '#181b20',    // content-script panel (was C.BG2)
+    BG3:     '#252a31',    // content-script surface 3 (was C.BG3)
+    // === Popup-side backgrounds (for future use in injected token sheet) ===
+    POPUP_BG:    '#0a0a0b',    // deepest bg (--bb-bg)
+    POPUP_PANEL: '#131316',    // card panels (--bb-panel)
+    SUNKEN:      '#050507',    // inset fields (--bb-sunken)
+    HOVER:       '#1c1c20',    // interactive hover (--bb-hover)
+    ACTIVE:      '#25252a',    // selected/pressed (--bb-active)
+    // === Borders (cool -- content-script context) ===
+    BORDER:  '#2a2f38',    // normal border (was C.BORDER)
+    BORDER2: '#3a3f48',    // elevated border (was C.BORDER2)
+    // === Borders (warm -- popup context) ===
+    LINE:     '#2a2825',   // warm divider (--bb-line)
+    LINE_HOT: '#3d3a35',   // warm elevated (--bb-line-hot)
+    // === Ink / Text ===
+    TEXT:    '#e8eaed',    // content-script primary (was C.TEXT)
+    TEXT2:   '#8b929e',    // content-script secondary (was C.TEXT2)
+    TEXT3:   '#5c6370',    // content-script tertiary (was C.TEXT3)
+    INK:     '#e8e6e1',    // popup primary (--bb-ink)
+    INK_DIM: '#9b9892',    // popup secondary (--bb-ink-dim)
+    // === Brand / Signal ===
+    AMBER:   '#ff9933',    // PRIMARY BRAND -- Bloomberg amber (--bb-amber). NEW in v10.10.1.
+    AMBER_WARM: '#f0a040', // warn-adjacent amber (--bb-amber-warm)
+    AMBER_COOL: '#E8A317', // halo/pulse amber (--bb-amber-cool)
+    WARN:    '#f0a040',    // canonical warn color (was C.WARN, alias of AMBER_WARM)
+    RED:     '#f04040',    // content-script red (was C.RED)
+    RED_BRIGHT: '#ff3b3b', // popup red (--bb-red)
+    GREEN:   '#3dd68c',    // content-script green (was C.GREEN)
+    GREEN_POP: '#44dd66',  // popup green (--bb-green)
+    CYAN:    '#66ccff',    // queue / informational (--bb-cyan)
+    PURPLE:  '#a78bfa',    // auto-queue / AI states (was C.PURPLE)
+    YELLOW:  '#ffd60a',    // data flag (was C.YELLOW)
+    YELLOW_POP: '#ffd84d', // popup yellow (--bb-yellow)
+    // === Interactive (content-script forms ONLY -- NOT brand) ===
+    BLUE:    '#4A9EFF',    // form inputs, selects, interactive chrome (--bb-blue)
+    ACCENT:  '#4A9EFF',    // LEGACY ALIAS -- equals BLUE. Use AMBER for brand, BLUE for forms. Remove in v10.11.
+    // === Utility ===
+    WHITE:   '#fff',       // (was C.WHITE)
+    BLACK:   '#000000',
+    TRANSPARENT: 'transparent',
+    // === Alpha fills (pre-computed for cssText -- var() cannot be used in injected DOM) ===
+    AMBER_BG:  'rgba(255,153,51,0.10)',
+    AMBER_GLOW:'rgba(255,153,51,0.25)',
+    RED_BG:    'rgba(255,59,59,0.10)',
+    RED_GLOW:  'rgba(255,59,59,0.35)',
+    GREEN_BG:  'rgba(68,221,102,0.10)',
+    CYAN_BG:   'rgba(102,204,255,0.10)',
+    PURPLE_BG: 'rgba(167,139,250,0.10)',
+    WARN_BG:   'rgba(240,160,64,0.10)',
+  });
 
   const USERS_BAN_REASON_DEFAULT = 'Inappropriate/obscene username - permanent ban.';
   // v5.1.9: dynamic getter respects user-set Settings.banMessageTemplate
@@ -6037,16 +6088,24 @@
       const isRepeat = banCount >= 2;
 
       // Build the username node -- halo-wrapped if repeat offender.
+      // v10.10.1 P4 (DESIGN-13): username was non-clickable strong element -- restore click-to-profile
       let userNode;
+      const usernameLink = el('a', {
+        href: '/u/' + String(id),
+        target: '_blank',
+        rel: 'noopener',
+        style: 'color:inherit;font-weight:700;text-decoration:none;',
+        title: 'View profile for ' + String(id)
+      }, String(id));
       if (isRepeat) {
         const badge = el('span', {cls: 'gam-repeat-badge'}, '\xD7' + String(banCount));
         const haloWrap = el('span', {cls: 'gam-repeat-halo gam-repeat-halo--pulse',
           role: 'button', tabindex: '0', title: 'Click to expand ban history'});
-        haloWrap.appendChild(el('strong', null, String(id)));
+        haloWrap.appendChild(usernameLink);
         haloWrap.appendChild(badge);
         userNode = haloWrap;
       } else {
-        userNode = el('strong', null, String(id));
+        userNode = usernameLink;
       }
 
       body.appendChild(el('p', null, stateChip({kind:'primary', value: primary}), ' ', userNode));
@@ -10557,6 +10616,7 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     const ctxWatched = isWatched(ctxU);
     const menu = el('div', { cls: 'gam-ctx-menu', id: 'gam-ctx-menu', role: 'menu' });
+    // v10.10.2 SUS-DR FIX: include DR option in right-click menu -- Commander UX gap
     menu.innerHTML =
       '<div class="gam-ctx-head">' + escapeHtml(ctxU) + '</div>' +
       '<div class="gam-ctx-item" role="menuitem" tabindex="-1" data-act="console">' +
@@ -10566,6 +10626,9 @@ Analyze this comment against the community rules. Then write a brief, profession
       '<div class="gam-ctx-item gam-ctx-item--danger" role="menuitem" tabindex="-1" data-act="ban">' +
         '<span class="gam-ctx-label">Ban...</span>' +
         '<span class="gam-ctx-kbd"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd></span>' +
+      '</div>' +
+      '<div class="gam-ctx-item gam-ctx-item--danger" role="menuitem" tabindex="-1" data-act="dr">' +
+        '<span class="gam-ctx-label">💀 Death Row (72h)...</span>' +
       '</div>' +
       '<div class="gam-ctx-item" role="menuitem" tabindex="-1" data-act="watch">' +
         '<span class="gam-ctx-label">' + (ctxWatched ? 'Unwatch' : 'Watch') + '</span>' +
@@ -10591,6 +10654,20 @@ Analyze this comment against the community rules. Then write a brief, profession
       const act = ctxItem.dataset.act;
       if (act === 'console') openModConsole(ctxU, null, 'intel');
       else if (act === 'ban')     openModConsole(ctxU, null, 'ban');
+      else if (act === 'dr') {
+        // v10.10.2 SUS-DR FIX: Death Row from right-click menu -- confirm guard, 72h default
+        const alreadyDr = getDeathRow().some(d => d.username.toLowerCase() === String(ctxU || '').toLowerCase());
+        if (alreadyDr){ snack(`${ctxU} already on death row`, 'warn'); return; }
+        if (!confirm(`Add ${ctxU} to Death Row (72h)?\n\nThis will queue a ban. You can undo within 20s via the status bar.`)) return;
+        const hours = getSetting('defaultDeathRowHours', 72);
+        const added = addToDeathRow(ctxU, hours * 3600 * 1000, 'sus-flag', { fromUserAction: true });
+        if (added){
+          logAction({ type:'deathrow', user:ctxU, delay:`${hours} hours`, source:'ctx-menu-sus-dr' });
+          snack(`\u{1F480} ${ctxU} on Death Row (${hours}h) -- Ctrl+Z to undo`, 'warn');
+        } else {
+          snack(`${ctxU} already on death row`, 'warn');
+        }
+      }
       else if (act === 'watch') {
         const nw = toggleWatch(ctxU);
         // AF-34 (Rule 101): withUndo on toggleWatch (context menu site)
@@ -11265,9 +11342,11 @@ Analyze this comment against the community rules. Then write a brief, profession
     // depending. Click prompts for reason (Mark) or just clears (Clear).
     const isAlreadySus = _susState.rows.has(String(username || '').toLowerCase());
     const susLabel = isAlreadySus ? '\u{1F6AB} Clear SUS' : '\u{1F6A9} Mark SUS';
+    // v10.10.2 SUS-DR FIX: add DR button to pinned tooltip for SUS users -- Commander UX gap
     controls.innerHTML = `
       <button class="gam-tip-ctrl-btn" data-pin-act="intel">Open Intel</button>
       <button class="gam-tip-ctrl-btn gam-tip-ctrl-sus" data-pin-act="sus">${susLabel}</button>
+      <button class="gam-tip-ctrl-btn gam-tip-ctrl-dr" data-pin-act="dr">\u{1F480} Death Row</button>
       <button class="gam-tip-ctrl-btn" data-pin-act="copy">Copy name</button>
       <button class="gam-tip-ctrl-btn gam-tip-ctrl-x" data-pin-act="close">&times;</button>
     `;
@@ -11287,6 +11366,21 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       else if (act === 'copy'){ copyAndNotify(username, 'Username copied'); }
       else if (act === 'close'){ unpinTooltip(); }
+      else if (act === 'dr'){
+        // v10.10.2 SUS-DR FIX: one-click DR from tooltip (72h default, confirm guard)
+        const alreadyDr = getDeathRow().some(d => d.username.toLowerCase() === String(username || '').toLowerCase());
+        if (alreadyDr){ snack(`${username} already on death row`, 'warn'); return; }
+        if (!confirm(`Add ${username} to Death Row (72h)?\n\nThis will queue a ban. You can undo within 20s via the status bar.`)) return;
+        const hours = getSetting('defaultDeathRowHours', 72);
+        const added = addToDeathRow(username, hours * 3600 * 1000, 'sus-flag', { fromUserAction: true });
+        if (added){
+          logAction({ type:'deathrow', user:username, delay:`${hours} hours`, source:'tooltip-sus-dr' });
+          snack(`\u{1F480} ${username} on Death Row (${hours}h) -- Ctrl+Z to undo`, 'warn');
+        } else {
+          snack(`${username} already on death row`, 'warn');
+        }
+        unpinTooltip();
+      }
       else if (act === 'sus'){
         // v9.3.4 (P1-3): Mark/Clear SUS via worker RPC.
         const lk = String(username || '').toLowerCase();
@@ -19591,6 +19685,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-tip-ctrl-btn{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT2};cursor:pointer;padding:3px 8px;font:10px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:all .15s}
 .gam-tip-ctrl-btn:hover{border-color:${C.ACCENT};color:${C.TEXT}}
 .gam-tip-ctrl-x{margin-left:auto;width:22px;height:22px;padding:0;font-size:14px;line-height:1;border-radius:50%}
+.gam-tip-ctrl-dr{border-color:${C.RED};color:${C.RED}}
+.gam-tip-ctrl-dr:hover{background:rgba(240,64,64,.12);border-color:${C.RED};color:${C.RED}}
 
 /* session health pill + fallback indicator (both live in status bar) */
 #gam-sess-pill{font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;letter-spacing:.3px}
