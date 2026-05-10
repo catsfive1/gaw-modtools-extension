@@ -50,6 +50,9 @@ const MAINT_WEEKLY_PERIOD_MIN = 60 * 24 * 7;   // every 7 days
 // AF-05 (Rule 14): SW health heartbeat — logs vault status + storage usage every 5 min.
 const HEALTH_ALARM = 'gam_health';
 const HEALTH_PERIOD_MIN = 5;
+// v10.10.0 S4: auto-action poll alarm constants.
+const AUTO_POLL_ALARM = 'gam_auto_action_poll';
+const AUTO_POLL_PERIOD_MIN = 1; // 1 minute -- worker cron runs every 5 min so 1-min poll is responsive without overload
 // Storage / log shape constants kept in sync with popup.js + modtools.js.
 const MAINT_DIAG_KEY = 'gam_diag_log';
 const MAINT_DIAG_MAX = 500;
@@ -324,6 +327,8 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     chrome.alarms.create(MAINT_INTEL_EVICT_ALARM, { periodInMinutes: MAINT_INTEL_EVICT_PERIOD_MIN });
     chrome.alarms.create(MAINT_WEEKLY_ALARM, { periodInMinutes: MAINT_WEEKLY_PERIOD_MIN });
     chrome.alarms.create(HEALTH_ALARM, { periodInMinutes: HEALTH_PERIOD_MIN });
+    // v10.10.0 S1: auto-action poll alarm creation.
+    chrome.alarms.create(AUTO_POLL_ALARM, { periodInMinutes: AUTO_POLL_PERIOD_MIN });
   } catch (e) { console.warn('[ModTools] alarm create failed', e); }
   // v8.6.9: AWAIT __ensureSessionAccess so subsequent storage calls don't
   // fire before the session-area access level is set. Pre-fix race: the
@@ -371,6 +376,11 @@ chrome.runtime.onStartup?.addListener(async () => {
     chrome.alarms.get(HEALTH_ALARM, (a) => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get HEALTH_ALARM:', chrome.runtime.lastError.message); return; }
       if (!a) chrome.alarms.create(HEALTH_ALARM, { periodInMinutes: HEALTH_PERIOD_MIN });
+    });
+    // v10.10.0 S1: auto-action poll alarm resurrection on SW wake.
+    chrome.alarms.get(AUTO_POLL_ALARM, (a) => {
+      if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get AUTO_POLL_ALARM:', chrome.runtime.lastError.message); return; }
+      if (!a) chrome.alarms.create(AUTO_POLL_ALARM, { periodInMinutes: AUTO_POLL_PERIOD_MIN });
     });
   } catch (e) {}
   // v8.6.9: AWAIT both bootstrap calls so the SW is fully ready before
@@ -1212,9 +1222,122 @@ async function _maintWeeklyRun() {
   }
 }
 
+// v10.10.0 S2: auto-action poll -- claim pending unsticky actions from worker
+// and dispatch to open GAW content-script tabs for execution.
+async function _autoActionPoll() {
+  // Gate: respect opt-in setting. Read gam_settings.auto_unsticky_enabled
+  // (default false). If disabled, return.
+  try {
+    const out = await chrome.storage.local.get('gam_settings');
+    const enabled = !!(out && out.gam_settings && out.gam_settings.auto_unsticky_enabled);
+    if (!enabled) return;
+  } catch(_) { return; }
+
+  // Need a mod token to call worker. If no token cached, return.
+  if (!secretCache || !secretCache.workerModToken) {
+    try { await loadSecrets(); } catch(_) {}
+  }
+  if (!secretCache.workerModToken) return;
+
+  // 1. Claim up to 3 pending actions from worker.
+  let claimed = [];
+  try {
+    const r = await fetch(WORKER_BASE + '/mod/auto-actions/claim', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-mod-token': secretCache.workerModToken,
+        'x-extension-id': chrome.runtime.id
+      },
+      body: JSON.stringify({ action: 'unsticky', limit: 3 })
+    });
+    if (!r.ok) {
+      // v10.10.0 S3: diag on claim failure.
+      await _maintAppendDiag('auto-action-poll', 'warn', { claimed_count: 0, dispatched_count: 0, failed_count: 0, claim_http: r.status });
+      return;
+    }
+    const data = await r.json();
+    claimed = (data && data.claimed) || [];
+  } catch(e) {
+    await _maintAppendDiag('auto-action-poll', 'warn', { claimed_count: 0, dispatched_count: 0, failed_count: 0, claim_err: String(e && e.message || e) });
+    return;
+  }
+
+  if (claimed.length === 0) return; // v10.10.0 S3: skip diag log when nothing claimed and no error.
+
+  // 2. For each claimed action, dispatch to an open GAW tab. If no tab is open
+  //    on greatawakening.win, leave the actions claimed -- the next poll
+  //    cycle will retry. (Worker has its own claim-timeout handling for
+  //    truly orphaned claims.)
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({ url: ['*://greatawakening.win/*', '*://*.greatawakening.win/*'] });
+  } catch(_) {}
+  if (!tabs || tabs.length === 0) {
+    // Mark each claimed action as failed-no-tab so worker can re-pend or
+    // the next poll re-claim. Use complete endpoint with a sentinel error.
+    for (const act of claimed) {
+      _autoActionReportFailure(act.id, 0, 'no_gaw_tab_open').catch(() => {});
+    }
+    // v10.10.0 S3: diag on no-tab failure.
+    await _maintAppendDiag('auto-action-poll', 'warn', { claimed_count: claimed.length, dispatched_count: 0, failed_count: claimed.length, reason: 'no_gaw_tab_open' });
+    return;
+  }
+
+  // Pick the first GAW tab that's "complete" (page loaded).
+  const tab = tabs.find(t => t.status === 'complete') || tabs[0];
+
+  // 3. Send each claimed action to the content script for execution.
+  let dispatched = 0;
+  let failed = 0;
+  for (const act of claimed) {
+    try {
+      const resp = await chrome.tabs.sendMessage(tab.id, {
+        type: 'gam_auto_action_execute',
+        action: act
+      });
+      // Content script should return {ok, status, error?}.
+      if (resp && resp.ok) {
+        dispatched++;
+        _autoActionReportSuccess(act.id, resp.status || 200).catch(() => {});
+      } else {
+        failed++;
+        _autoActionReportFailure(act.id, (resp && resp.status) || 0, (resp && resp.error) || 'unknown_failure').catch(() => {});
+      }
+    } catch (err) {
+      // Content script not loaded or tab navigated away.
+      failed++;
+      _autoActionReportFailure(act.id, 0, 'cs_unreachable: ' + String(err && err.message || err)).catch(() => {});
+    }
+  }
+
+  // v10.10.0 S3: diag entry only when something was claimed.
+  try {
+    await _maintAppendDiag('auto-action-poll', 'info', { claimed_count: claimed.length, dispatched_count: dispatched, failed_count: failed });
+  } catch(_) {}
+}
+
+async function _autoActionReportSuccess(id, status) {
+  return fetch(WORKER_BASE + '/mod/auto-actions/' + encodeURIComponent(id) + '/complete', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-mod-token': secretCache.workerModToken, 'x-extension-id': chrome.runtime.id },
+    body: JSON.stringify({ result_status: status, result_error: null })
+  });
+}
+
+async function _autoActionReportFailure(id, status, errMsg) {
+  return fetch(WORKER_BASE + '/mod/auto-actions/' + encodeURIComponent(id) + '/complete', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-mod-token': secretCache.workerModToken, 'x-extension-id': chrome.runtime.id },
+    body: JSON.stringify({ result_status: status, result_error: errMsg })
+  });
+}
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   // AF-05 (Rule 14): health heartbeat -- check vault + storage every 5 min.
   if (alarm.name === HEALTH_ALARM) { await _healthCheck(); return; }
+  // v10.10.0 S1: auto-action poll dispatch.
+  if (alarm.name === AUTO_POLL_ALARM) { await _autoActionPoll(); return; }
   if (alarm.name === BUG_POLL_ALARM) { await _bugPollAndBadge(); return; }
   // v9.5.0 maintenance alarms.
   if (alarm.name === MAINT_QUOTA_ALARM)        { await _maintQuotaCheck();    return; }
@@ -3106,6 +3229,40 @@ const RPC_HANDLERS = {
     }
   },
 
+  // v10.10.0 S5: recent auto-actions feed -- GET /mod/auto-actions/recent?limit=N.
+  // Used by GEAR Auto-Unsticky panel to render status line + popover table.
+  modAutoActionRecent: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    schema: {
+      limit: { type: 'number', required: false, max: 100 }
+    },
+    async handler(args) {
+      if (!secretCache.workerModToken && !secretCache.leadModToken) {
+        try { await loadSecrets(); } catch (e) {}
+      }
+      const limit = Math.min(100, (args && args.limit) || 20);
+      const ctrl = new AbortController();
+      const timer = setTimeout(function() { try { ctrl.abort(); } catch (_) {} }, 15000);
+      try {
+        const headers = new Headers();
+        if (secretCache.workerModToken) headers.set('X-Mod-Token', secretCache.workerModToken);
+        headers.set('X-Extension-Id', chrome.runtime.id);
+        const r = await fetch(
+          WORKER_BASE + '/mod/auto-actions/recent?limit=' + limit,
+          { method: 'GET', headers: headers, signal: ctrl.signal }
+        );
+        const text = await r.text();
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch (_) {}
+        return { ok: r.ok, status: r.status, data: parsed, text: text };
+      } catch (e) {
+        return { ok: false, status: 0, error: 'network failure', code: 'AUTO_ACTION_RECENT_NETWORK' };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  },
+
   // ASK-031: ban-confirm RPC — fire-and-forget audit correlation after apiBan returns.
   // Never blocks the ban flow. Errors are logged and swallowed.
   modBanConfirm: {
@@ -3228,7 +3385,9 @@ const _RPC_LIMITS = {
   // v10.9.0 A1-A3: op-deletes, brigade new-cluster, lookalike-confirmed.
   modOpDeletes:                { maxPerMin: 30 },
   modBrigadeNewCluster:        { maxPerMin: 60 },
-  modUserLookalikeConfirmed:   { maxPerMin: 60 }
+  modUserLookalikeConfirmed:   { maxPerMin: 60 },
+  // v10.10.0 S5: auto-action recent feed.
+  modAutoActionRecent:         { maxPerMin: 30 }
 };
 
 function _rpcRateCheck(name) {

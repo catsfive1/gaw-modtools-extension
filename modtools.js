@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v10.9.0';
+  const VERSION = 'v10.10.0';
 
   // v10.6.1 HOTFIX: FEATURE_FLAGS must be declared BEFORE any synchronous IIFE
   // that references it. The earliest reference is __v80ParkUI at line ~3398
@@ -10880,6 +10880,85 @@ Analyze this comment against the community rules. Then write a brief, profession
     addFeatureToggle('Passive Crawler', 'features.crawler', false,
       'Upload /users usernames to the team cloud on each visit.');
 
+    // v10.10.0 M2: Auto-Unsticky Monitoring section (lead-only).
+    // Worker cron monitors GAW; dispatches queued actions to any open GAW
+    // tab via SW. Thresholds mirror worker-side team_settings namespace.
+    if (isLeadMod()) {
+      addSection('\u{1F501} Auto-Unsticky Monitoring');
+      addToggle('Auto-unsticky enabled', 'auto_unsticky_enabled',
+        'Worker monitors GAW every 5 min. When a stickied post crosses BOTH age and upvote thresholds, the queued action is executed by the next mod with a GAW tab open. OFF by default -- lead must opt in.');
+      {
+        var _auIdH = 'gam-set-auto_unsticky_max_hours';
+        var _auIdU = 'gam-set-auto_unsticky_min_upvotes';
+        var _auRow = el('div', { cls: 'gam-settings-row' });
+        var _auCurH = Number(getSetting('auto_unsticky_max_hours', 10)) || 10;
+        var _auCurU = Number(getSetting('auto_unsticky_min_upvotes', 110)) || 110;
+        _auRow.innerHTML =
+          '<div class="gam-settings-info">' +
+          '<label class="gam-settings-lbl">Auto-unsticky thresholds</label>' +
+          '<div class="gam-settings-desc">Post must exceed BOTH max age (hours) AND min upvotes to be queued. Worker reads these on each cron tick.</div>' +
+          '<div style="display:flex;gap:8px;margin-top:6px;align-items:center">' +
+            '<label style="font-size:10px;color:#9b9892">max age hrs</label>' +
+            '<input id="' + _auIdH + '" type="number" min="1" max="240" value="' + _auCurH + '" style="width:60px;padding:3px 6px;background:#050507;color:#e8e6e1;border:1px solid #3d3a35;font:11px ui-monospace,monospace;font-variant-numeric:tabular-nums">' +
+            '<label style="font-size:10px;color:#9b9892;margin-left:8px">min upvotes</label>' +
+            '<input id="' + _auIdU + '" type="number" min="1" max="10000" value="' + _auCurU + '" style="width:80px;padding:3px 6px;background:#050507;color:#e8e6e1;border:1px solid #3d3a35;font:11px ui-monospace,monospace;font-variant-numeric:tabular-nums">' +
+          '</div>' +
+          '</div>';
+        _auRow.querySelector('#' + _auIdH).addEventListener('change', function(e) {
+          var v = Math.max(1, Math.min(240, parseInt(e.target.value, 10) || 10));
+          setSetting('auto_unsticky_max_hours', v);
+          e.target.value = v;
+        });
+        _auRow.querySelector('#' + _auIdU).addEventListener('change', function(e) {
+          var v = Math.max(1, Math.min(10000, parseInt(e.target.value, 10) || 110));
+          setSetting('auto_unsticky_min_upvotes', v);
+          e.target.value = v;
+        });
+        c.appendChild(_auRow);
+      }
+      // Status line: last-poll info + queued/executed counts. Clicking opens
+      // the M3 recent-actions popover. Reads from modAutoActionRecent RPC.
+      {
+        var _auStatusRow = el('div', { cls: 'gam-settings-row' });
+        var _auStatusId = 'gam-auto-unsticky-status';
+        _auStatusRow.innerHTML =
+          '<div class="gam-settings-info" style="cursor:pointer" id="' + _auStatusId + '">' +
+          '<span class="gam-settings-desc" style="font-size:10px;color:#5a5752">' +
+          'Last poll: -- &middot; -- queued &middot; -- executed in 24h' +
+          ' <span style="color:#4A9EFF;text-decoration:underline;cursor:pointer">[view recent]</span>' +
+          '</span></div>';
+        c.appendChild(_auStatusRow);
+        // Populate status line via RPC (fail-safe: --  if unavailable)
+        (function() {
+          function _auRelTime(ms) {
+            var d = Date.now() - ms;
+            if (d < 0) return 'just now';
+            var s = Math.floor(d / 1000);
+            if (s < 90) return s + 's ago';
+            var m = Math.floor(d / 60000);
+            if (m < 90) return m + 'm ago';
+            return Math.floor(d / 3600000) + 'h ago';
+          }
+          rpcCall('modAutoActionRecent', { limit: 50 }).then(function(res) {
+            var statusEl = document.getElementById(_auStatusId);
+            if (!statusEl) return;
+            var rows = (res && res.ok && Array.isArray(res.actions)) ? res.actions : null;
+            if (!rows) { return; }
+            var pending = rows.filter(function(a) { return a.status === 'pending'; }).length;
+            var now = Date.now();
+            var executed24 = rows.filter(function(a) { return a.status === 'done' && a.executed_at && (now - new Date(a.executed_at).getTime()) < 86400000; }).length;
+            var lastPoll = (res.last_poll_at) ? _auRelTime(new Date(res.last_poll_at).getTime()) : '--';
+            statusEl.querySelector('.gam-settings-desc').innerHTML =
+              'Last poll: ' + lastPoll + ' &middot; ' + pending + ' queued &middot; ' + executed24 + ' executed in 24h' +
+              ' <span style="color:#4A9EFF;text-decoration:underline;cursor:pointer">[view recent]</span>';
+          }).catch(function(){});
+          document.getElementById(_auStatusId) && document.getElementById(_auStatusId).addEventListener('click', function() {
+            try { _showAutoUnstickyPopover(tickerEl); } catch(_){}
+          });
+        })();
+      }
+    }
+
     // v10.9.0 M2 (ASK-053): auto-remove opt-in toggle
     addSection('\u{1F6E1} Auto-Actions');
     addToggle('Auto-Remove SUS/DR Queue Items', 'autoRemoveSusDr', 'When the queue page is open, automatically remove posts/comments from SUS-marked or Death Row users after a 1.5s undo window. OFF by default.');
@@ -16851,6 +16930,107 @@ Analyze this comment against the community rules. Then write a brief, profession
   }
 
   // v10.7.1 TP.1: SUS users inline popover — no navigation, data snapshot above bar
+  // v10.10.0 M3: Recent auto-unsticky actions popover. Opens from ticker
+  // 'AUTO Q' state or from the GEAR status line. Reads modAutoActionRecent.
+  function _showAutoUnstickyPopover(anchor) {
+    var POP_ID = 'gam-auto-unsticky-popover';
+    var existing = document.getElementById(POP_ID);
+    if (existing) { existing.remove(); return; }
+
+    var pop = document.createElement('div');
+    pop.id = POP_ID;
+    pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:520px;max-width:640px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
+    var r = anchor.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(window.innerWidth - 640, r.left)) + 'px';
+    pop.style.bottom = (window.innerHeight - r.top + 6) + 'px';
+    pop.style.top = '';
+
+    var hdr = document.createElement('div');
+    hdr.style.cssText = 'background:#0a0a0b;border-bottom:1px solid #2a2825;padding:6px 10px;display:flex;align-items:center;gap:8px';
+    var title = document.createElement('span');
+    title.style.cssText = 'color:#c084fc;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:10px';
+    title.textContent = 'AUTO-UNSTICKY -- RECENT';
+    var spacer = document.createElement('span');
+    spacer.style.flex = '1';
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = 'background:transparent;border:none;color:#5a5752;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1';
+    closeBtn.addEventListener('click', function() { pop.remove(); });
+    hdr.appendChild(title); hdr.appendChild(spacer); hdr.appendChild(closeBtn);
+    pop.appendChild(hdr);
+
+    var body = document.createElement('div');
+    body.style.cssText = 'padding:6px 10px;max-height:360px;overflow-y:auto';
+
+    var loadingEl = document.createElement('div');
+    loadingEl.style.cssText = 'color:#5a5752;text-align:center;padding:16px 0;font-size:10px';
+    loadingEl.textContent = 'Loading...';
+    body.appendChild(loadingEl);
+    pop.appendChild(body);
+    document.body.appendChild(pop);
+
+    // Close on outside click
+    function _outerClick(e) {
+      if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', _outerClick, true); }
+    }
+    setTimeout(function() { document.addEventListener('click', _outerClick, true); }, 50);
+
+    function _auPRelTime(ms) {
+      var d = Date.now() - ms;
+      if (d < 0) return 'just now';
+      var s = Math.floor(d / 1000);
+      if (s < 90) return s + 's ago';
+      var m = Math.floor(d / 60000);
+      if (m < 90) return m + 'm ago';
+      return Math.floor(d / 3600000) + 'h ago';
+    }
+
+    rpcCall('modAutoActionRecent', { limit: 20 }).then(function(res) {
+      body.innerHTML = '';
+      var rows = (res && res.ok && Array.isArray(res.actions)) ? res.actions : [];
+      if (rows.length === 0) {
+        var empty = document.createElement('div');
+        empty.style.cssText = 'color:#5a5752;text-align:center;padding:16px 0;font-size:10px';
+        empty.textContent = 'No recent auto-unsticky actions';
+        body.appendChild(empty);
+        return;
+      }
+      // Table header
+      var tbl = document.createElement('table');
+      tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:10px';
+      var thead = document.createElement('thead');
+      thead.innerHTML = '<tr style="color:#5a5752;border-bottom:1px solid #2a2825">' +
+        '<th style="text-align:left;padding:3px 6px">Status</th>' +
+        '<th style="text-align:left;padding:3px 6px">Target</th>' +
+        '<th style="text-align:left;padding:3px 6px">Queued</th>' +
+        '<th style="text-align:left;padding:3px 6px">Executor</th>' +
+        '<th style="text-align:left;padding:3px 6px">Result</th>' +
+        '</tr>';
+      tbl.appendChild(thead);
+      var tbody = document.createElement('tbody');
+      rows.forEach(function(a) {
+        var statusColor = a.status === 'done' ? '#4ade80' : a.status === 'failed' ? '#f87171' : '#c084fc';
+        var queuedAt = a.queued_at ? _auPRelTime(new Date(a.queued_at).getTime()) : '--';
+        var executor = a.executed_by || (a.status === 'pending' ? '--' : '--');
+        var resultTxt = a.status === 'done' ? String(a.http_status || 200) :
+                        a.status === 'failed' ? (a.http_status || '0') + '/' + (a.error || 'err') : '--';
+        var tr = document.createElement('tr');
+        tr.style.cssText = 'border-bottom:1px solid #1e1c1a';
+        tr.innerHTML =
+          '<td style="padding:4px 6px;color:' + statusColor + '">' + (a.status || '?') + '</td>' +
+          '<td style="padding:4px 6px;font-family:ui-monospace,monospace">' + (a.target_thing_id || '--') + '</td>' +
+          '<td style="padding:4px 6px;color:#9b9892">' + queuedAt + '</td>' +
+          '<td style="padding:4px 6px;color:#9b9892">' + executor + '</td>' +
+          '<td style="padding:4px 6px;color:#9b9892">' + resultTxt + '</td>';
+        tbody.appendChild(tr);
+      });
+      tbl.appendChild(tbody);
+      body.appendChild(tbl);
+    }).catch(function(e) {
+      body.innerHTML = '<div style="color:#f87171;padding:12px 0;font-size:10px">Failed to load: ' + String(e && e.message || e) + '</div>';
+    });
+  }
+
   function _showSusPopover(anchor) {
     const POP_ID = 'gam-sus-popover';
     const existing = document.getElementById(POP_ID);
@@ -17799,6 +17979,10 @@ Analyze this comment against the community rules. Then write a brief, profession
         if (typeof _opDelCount24h === 'number' && _opDelCount24h > 0) {
           states.push({ msg: _opDelCount24h + ' OP DEL', color: '#ff3b3b', target: null, kind: 'opdel' });
         }
+        // v10.10.0 M4: pending auto-actions count (lead-only; var init'd below)
+        if (typeof _autoPendingCount === 'number' && _autoPendingCount > 0) {
+          states.push({ msg: _autoPendingCount + ' AUTO Q', color: 'var(--bb-purple, #c084fc)', target: null, kind: 'auto' });
+        }
         if (states.length === 0) {
           states.push({ msg: 'site quiet', color: 'var(--bb-ink-faint, #5a5752)', target: null, kind: 'quiet' });
         }
@@ -17825,6 +18009,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (cur.kind === 'queue') { try { _showQueuePopover(tickerEl); } catch(err) { console.warn('[TP.3]', err); } return; }
       // v10.9.0 M3 (ASK-052): open Mod Console OP DELETES tab on click
       if (cur.kind === 'opdel') { try { openModConsole(null, null, 'opdel'); } catch(err) { console.warn('[TP.4]', err); } return; }
+      // v10.10.0 M4: open auto-unsticky recent popover on AUTO Q click
+      if (cur.kind === 'auto') { try { _showAutoUnstickyPopover(tickerEl); } catch(err) { console.warn('[TP.5]', err); } return; }
       // quiet / unknown kind — no-op (no nav)
     });
     setInterval(__updateTicker, 30_000);
@@ -17844,6 +18030,20 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
     scheduleIdle(_pollOpDelCount, 5000);
     setInterval(_pollOpDelCount, 5 * 60 * 1000);
+
+    // v10.10.0 M4: Auto-unsticky pending count poller for ticker state.
+    // Only runs for lead mods (feature is lead-only). Polls every 5 min.
+    var _autoPendingCount = 0;
+    function _pollAutoPendingCount() {
+      if (!isLeadMod()) return;
+      rpcCall('modAutoActionRecent', { limit: 50 }).then(function(res) {
+        var rows = (res && res.ok && Array.isArray(res.actions)) ? res.actions : [];
+        _autoPendingCount = rows.filter(function(a) { return a.status === 'pending'; }).length;
+        __updateTicker();
+      }).catch(function(){});
+    }
+    scheduleIdle(_pollAutoPendingCount, 7000);
+    setInterval(_pollAutoPendingCount, 5 * 60 * 1000);
 
     // v9.8.0 \u2014 dedicated MODMAIL INBOX icon. Distinct from the modmail-page
     // mmBtn (which only renders on /modmail/thread/<id>). This one is always
@@ -23669,6 +23869,35 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           .then(stats => sendResponse({ ok: true, stats }))
           .catch(e => sendResponse({ ok: false, error: String(e && e.message || e) }));
         return true;
+      }
+      // v10.10.0 M1: SW dispatches queued auto-actions to us. We execute via
+      // the existing apiUnsticky helper (which uses this tab's authenticated
+      // session + CSRF) and return the result so SW can report back to worker.
+      if (msg && msg.type === 'gam_auto_action_execute') {
+        (async function() {
+          try {
+            var act = msg.action;
+            if (!act || !act.action || !act.target_thing_id) {
+              sendResponse({ ok: false, status: 0, error: 'malformed_action' });
+              return;
+            }
+            if (act.action === 'unsticky') {
+              var r = await apiUnsticky(act.target_thing_id);
+              var ok = !!(r && (r.ok || (r.status >= 200 && r.status < 300)));
+              var status = (r && (r.status || (ok ? 200 : 0))) || 0;
+              if (ok) {
+                try { logAction({ type: 'auto_unsticky', target: act.target_thing_id, meta: act.target_meta || null, queue_id: act.id }); } catch(_){}
+              }
+              sendResponse({ ok: ok, status: status, error: ok ? null : ((r && r.error) || 'unsticky_failed') });
+              return;
+            }
+            // Future: add 'remove', 'approve', etc. here.
+            sendResponse({ ok: false, status: 0, error: 'unsupported_action: ' + act.action });
+          } catch (err) {
+            sendResponse({ ok: false, status: 0, error: String(err && err.message || err) });
+          }
+        })();
+        return true; // keep channel open for async sendResponse
       }
     });
 
