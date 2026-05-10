@@ -389,17 +389,27 @@ function copyWithPulse(btn, text) {
     } catch(_){}
   }
   // Pulse the button regardless of which layer succeeded; bail-out is silent.
+  // v10.13.5 P0-E (RALPH AUDIT COPY-CLIPBOARD F7): double-click within 1200ms
+  // permanently corrupted the label. Click 1 captured origLabel='COPY URL',
+  // label became 'COPIED'. Click 2 at T=800ms captured origLabel='COPIED'
+  // (current text), so timer 2 restored stale 'COPIED' permanently. Fix:
+  // stash the original label ONCE on the button (sticky across re-clicks),
+  // and clear the prior timer before setting a new one. Mirrored exactly
+  // in modtools.js:7199-7212 (the same defect lived in both files).
   if (btn && copied) {
     try {
-      var origLabel = btn.textContent;
+      if (btn.__copyPulseTimer) { clearTimeout(btn.__copyPulseTimer); btn.__copyPulseTimer = null; }
+      if (!btn.__copyPulseOrigLabel) { btn.__copyPulseOrigLabel = btn.textContent; }
       btn.textContent = 'COPIED';
       btn.classList.add('gam-copy-flash');
       btn.style.animation = 'gam-copy-flash 800ms ease-out';
-      setTimeout(function() {
+      btn.__copyPulseTimer = setTimeout(function() {
         try {
-          btn.textContent = origLabel;
+          if (btn.__copyPulseOrigLabel) btn.textContent = btn.__copyPulseOrigLabel;
           btn.classList.remove('gam-copy-flash');
           btn.style.animation = '';
+          btn.__copyPulseOrigLabel = null;
+          btn.__copyPulseTimer = null;
         } catch(_){}
       }, 1200);
     } catch(_){}
@@ -1907,7 +1917,12 @@ async function __applyTierGate() {
     let _ageDays = -1;
     try {
       const _st = await chrome.storage.local.get('gam_settings');
-      const _ra = _st && _st.gam_settings && _st.gam_settings.rotated_at;
+      // v10.13.5 P0-A (RALPH AUDIT): __applyTierGate previously read only
+      // gam_settings.rotated_at, but the local first-run/claim path writes
+      // workerModToken_issued_at (background.js:2408). Without the fallback,
+      // the W2 60/90d age tier banner was structurally unreachable for every
+      // typical mod -- "Token active" forever regardless of real token age.
+      const _ra = _st && _st.gam_settings && (_st.gam_settings.rotated_at || _st.gam_settings.workerModToken_issued_at);
       if (_ra) _ageDays = Math.floor((Date.now() - new Date(_ra).getTime()) / 86400000);
     } catch(_) {}
     try {
@@ -1964,9 +1979,14 @@ function __applyTierVisibility(tier, whoamiData) {
   const r = whoamiData || {};
   const data = r.data || r || {};
 
-  // Lead nav tab: only full leads
+  // v10.13.5 P1-02 (RALPH AUDIT W2 F4 + TOKENS F3 + LEADDAILY F1): Lead nav
+  // tab routes to an empty panel (#tab-panel-lead has display:none baseline,
+  // not cleared by setTab). 3 agents corroborated. Lead content lives on the
+  // Tokens tab (Quick Actions + Lead KPIs). Keep the tab hidden for ALL
+  // tiers so clicking it never shows nothing. Was: leadTab.style.display
+  // toggled on for tier === 'lead'.
   const leadTab = document.querySelector('[data-tab="lead"]');
-  if (leadTab) leadTab.style.display = (tier === 'lead') ? '' : 'none';
+  if (leadTab) leadTab.style.display = 'none';
 
   // #leadOnlyTools: visible for senior_lead AND lead
   const tools = $('leadOnlyTools');
@@ -4315,18 +4335,44 @@ function __macroBeginDelconfirm(row, m){
   const timer = setTimeout(function(){
     if (done) return;
     done = true;
+    // v10.13.5 P1-14: clear text countdown interval on auto-cancel timeout.
+    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
     __macroEndDelconfirm(row);
   }, 4000);
+  // v10.13.5 P1-14 (RALPH AUDIT MACROS F4): under prefers-reduced-motion,
+  // the CSS countdown bar freezes at scaleX(0.5) for the full 4s -- the
+  // mod has zero countdown signal even though the JS timer still fires.
+  // Add a text countdown on the cancel button as an a11y-honest alternative.
+  let countdownInterval = null;
+  try {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const startTs = Date.now();
+      const baseLabel = cancelBtn.textContent;
+      function _updateCancelLabel() {
+        const remaining = Math.max(0, Math.ceil((4000 - (Date.now() - startTs)) / 1000));
+        if (remaining <= 0) {
+          cancelBtn.textContent = baseLabel;
+          if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+          return;
+        }
+        cancelBtn.textContent = baseLabel + ' (Auto-cancel in ' + remaining + 's)';
+      }
+      _updateCancelLabel();
+      countdownInterval = setInterval(_updateCancelLabel, 1000);
+    }
+  } catch(_) {}
   cancelBtn.addEventListener('click', function(){
     if (done) return;
     done = true;
     clearTimeout(timer);
+    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
     __macroEndDelconfirm(row);
   });
   okBtn.addEventListener('click', async function(){
     if (done) return;
     done = true;
     clearTimeout(timer);
+    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
     okBtn.disabled = true;
     cancelBtn.disabled = true;
     okBtn.textContent = 'deleting...';
@@ -6483,7 +6529,14 @@ function _updateKpiDelta(tileId, newVal) {
   const diff = newVal - Number(prev);
   if (diff === 0) { el.textContent = '='; el.setAttribute('data-dir', 'flat'); return; }
   el.textContent = (diff > 0 ? '+' : '') + diff;
-  el.setAttribute('data-dir', diff > 0 ? 'up' : 'down');
+  // v10.13.5 P1-12 (RALPH AUDIT LEADDAILY F8): inverted-color tiles where
+  // numeric "up" means "worse" (e.g. MM p50 latency, INCIDENTS count). For
+  // these, "up" should render red and "down" green. Driven by data-invert
+  // on the tile element + CSS rules in popup.css.
+  const tileEl = $(tileId);
+  const inverted = tileEl && tileEl.getAttribute('data-invert') === 'true';
+  const dir = diff > 0 ? 'up' : 'down';
+  el.setAttribute('data-dir', inverted ? (dir === 'up' ? 'down' : 'up') : dir);
 }
 
 // D.3.4: set a KPI tile value + semantic color
@@ -6579,8 +6632,16 @@ async function __loadLeadKpi() {
     }
   } catch (_) {}
 
-  // Tile 4: INCIDENTS — hardcoded 0 until mod_incidents V11
-  _setKpiTile('kpi-incidents', 0, 'var(--bb-green)');
+  // Tile 4: INCIDENTS — endpoint not yet wired (V11 mod_incidents).
+  // v10.13.5 P1-13 (RALPH AUDIT LEADDAILY F3, UIUX2-06 F.8): was hardcoded
+  // `0, var(--bb-green)` which actively misled leads to read "no incidents"
+  // when in fact NOTHING has been measured. Render "--" stub + tooltip
+  // explaining the wire status, per spec verbatim.
+  _setKpiTile('kpi-incidents', null, null);
+  try {
+    const incTile = $('kpi-incidents');
+    if (incTile) incTile.title = 'INCIDENTS endpoint not yet wired (V11)';
+  } catch(_){}
 
   // D.3.6: Load lapsed mods → chip (not lapsedModsCard)
   __loadLapsedMods();
@@ -7010,7 +7071,11 @@ async function renderDiagTab() {
 // This is a utility for modtools.js to call via RPC; popup.js handles the
 // local-side cleanup on popup open (prunes stale TTL entries).
 // =============================================================================
-var DRAFT_TTL_MODMAIL_MS = 4  * 60 * 60 * 1000;  // 4 hours
+// v10.13.5 P1-07 (RALPH AUDIT W4 + MODMAIL-DEEP F4): TTL contract was split
+// across files -- modtools.js read with 24h (W4 widening), but popup.js
+// purge here was still 4h. Mod opening popup at hour 5 silently nuked the
+// local mirror BEFORE panel could read it. Now both sides agree on 24h.
+var DRAFT_TTL_MODMAIL_MS = 24 * 60 * 60 * 1000;  // 24 hours (was 4h)
 var DRAFT_TTL_MACRO_MS   = 24 * 60 * 60 * 1000;  // 24 hours
 
 (async function purgeStaleDrafts() {

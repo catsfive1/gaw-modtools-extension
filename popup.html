@@ -56,7 +56,7 @@
     <button id="tab-btn-stats" class="pop-tab pop-tab-active" data-tab="stats" role="tab" aria-selected="true" aria-controls="tab-panel-stats">Stats</button>
     <button id="tab-btn-tokens" class="pop-tab" data-tab="tokens" role="tab" aria-selected="false" aria-controls="tab-panel-tokens">Tokens</button>
     <button id="tab-btn-tools" class="pop-tab" data-tab="tools" role="tab" aria-selected="false" aria-controls="tab-panel-tools">Tools</button>
-    <button id="tab-btn-lead" class="pop-tab" data-tab="lead" role="tab" aria-selected="false" aria-controls="tab-panel-lead">Lead</button>
+    <button id="tab-btn-lead" class="pop-tab" data-tab="lead" role="tab" aria-selected="false" aria-controls="tab-panel-lead" style="display:none">Lead</button>
     <!-- E.3.1 (Rule 94): Diagnostics tab — 5th nav tab -->
     <button id="tab-btn-diag" class="pop-tab" data-tab="diag" role="tab" aria-selected="false" aria-controls="tab-panel-diag">Diag</button>
   </nav>
@@ -613,9 +613,9 @@
             <span id="kpi-clearrate-delta" class="gam-kpi-delta"></span>
           </div>
         </div>
-        <div class="gam-kpi-tile" id="kpi-mmp50" data-kpi="mmp50"
+        <div class="gam-kpi-tile" id="kpi-mmp50" data-kpi="mmp50" data-invert="true"
              role="listitem" tabindex="0" aria-label="Modmail p50 response latency — click for detail"
-             title="Modmail p50 response latency. From /mod/stats modmail_p50_hours.">
+             title="Modmail p50 response latency. From /mod/stats modmail_p50_hours. Inverted: up = worse.">
           <div class="gam-kpi-label">MM p50</div>
           <div class="gam-kpi-value-row">
             <span id="kpi-mmp50-val" class="gam-kpi-val">&mdash;</span>

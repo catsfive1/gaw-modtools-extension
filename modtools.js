@@ -4172,6 +4172,51 @@
   }
   // --- end v8.1 ux ---
 
+  // v10.13.5 P1-08 (RALPH AUDIT FOCUS-TRAPS R1): shared popover focus-trap +
+  // ESC helper. Was inlined per-popover in W3 (DR + SUS only); 4 of the 5
+  // status-bar popovers (Queue, Health, ActiveMods, AutoUnsticky) leaked
+  // Tab into the page DOM and 2 (ActiveMods, AutoUnsticky) had no ESC
+  // handler at all. This helper consolidates the pattern: pass the popover
+  // element + close fn; it wires Tab-cycle + ESC dismiss + focus restore on
+  // close. Caller invokes the returned cleanup from its existing close path.
+  function _installPopoverTrap(pop, closeFn) {
+    if (!pop || typeof closeFn !== 'function') return function(){};
+    const _prevFocus = document.activeElement;
+    function _getFocusable() {
+      return Array.prototype.slice.call(pop.querySelectorAll(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter(function(el) { return el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement; });
+    }
+    function _trap(ev) {
+      if (ev.key === 'Escape') { ev.preventDefault(); closeFn(); return; }
+      if (ev.key !== 'Tab') return;
+      const focusable = _getFocusable();
+      if (focusable.length === 0) { ev.preventDefault(); return; }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (ev.shiftKey) {
+        if (document.activeElement === first || !pop.contains(document.activeElement)) {
+          ev.preventDefault(); last.focus();
+        }
+      } else {
+        if (document.activeElement === last) { ev.preventDefault(); first.focus(); }
+      }
+    }
+    pop.addEventListener('keydown', _trap);
+    document.addEventListener('keydown', _trap);
+    setTimeout(function() {
+      const focusable = _getFocusable();
+      if (focusable.length) { try { focusable[0].focus(); } catch(_){} }
+    }, 0);
+    function _cleanup() {
+      try { pop.removeEventListener('keydown', _trap); } catch(_){}
+      try { document.removeEventListener('keydown', _trap); } catch(_){}
+      try { if (_prevFocus && typeof _prevFocus.focus === 'function') _prevFocus.focus(); } catch(_){}
+    }
+    try { pop._gamPopTrapCleanup = _cleanup; } catch(_){}
+    return _cleanup;
+  }
+
   // --- v8.1 ux: aria-live ---
   // Two screen-reader live regions mounted on boot when flag on. snack() pipes
   // messages here; existing visual snack DOM is byte-identical to v8.0.
@@ -7196,17 +7241,23 @@
         if (ok) copied = 'execCommand';
       } catch(_){}
     }
+    // v10.13.5 P0-E (RALPH AUDIT COPY-CLIPBOARD F7): double-click within 1200ms
+    // permanently corrupted the label. See popup.js:392-406 for the same fix --
+    // these MUST be patched in lockstep to avoid drift across files.
     if (btn && copied) {
       try {
-        const orig = btn.textContent;
+        if (btn.__copyPulseTimer) { clearTimeout(btn.__copyPulseTimer); btn.__copyPulseTimer = null; }
+        if (!btn.__copyPulseOrigLabel) { btn.__copyPulseOrigLabel = btn.textContent; }
         btn.textContent = 'COPIED';
         btn.classList.add('gam-copy-flash');
         btn.style.animation = 'gam-copy-flash 800ms ease-out';
-        setTimeout(() => {
+        btn.__copyPulseTimer = setTimeout(() => {
           try {
-            btn.textContent = orig;
+            if (btn.__copyPulseOrigLabel) btn.textContent = btn.__copyPulseOrigLabel;
             btn.classList.remove('gam-copy-flash');
             btn.style.animation = '';
+            btn.__copyPulseOrigLabel = null;
+            btn.__copyPulseTimer = null;
           } catch(_){}
         }, 1200);
       } catch(_){}
@@ -7562,6 +7613,9 @@
         setTimeout(function(){ try { s.remove(); } catch(_) {} }, 200);
         if (s._gamCountdownInterval) clearInterval(s._gamCountdownInterval);
         if (s._gamDismissTimer) clearTimeout(s._gamDismissTimer);
+        // v10.13.5 P0-D: detach scoped ESC so a delayed ESC press after
+        // explicit UNDO doesn't fire the no-op dismiss path.
+        if (s._gamSnackEsc) { try { document.removeEventListener('keydown', s._gamSnackEsc, true); } catch(_){} s._gamSnackEsc = null; }
       });
       s.appendChild(btn);
       // Snack must accept clicks on the action button even though parent has pointer-events:none
@@ -7606,10 +7660,40 @@
     } catch(e){}
     document.body.appendChild(s);
     requestAnimationFrame(()=>s.classList.add('gam-snack-show'));
+    // v10.13.5 P0-D (RALPH AUDIT FOCUS-TRAPS B.3 + DAILYMOD F4): when the
+    // snack carries an action button (e.g. DR Cancel-All UNDO), the action
+    // was keyboard-untouchable -- ESC did not dismiss, focus did not move
+    // to the action button, and auto-dismiss at 10s killed the only path
+    // to undo. Now: focus moves to the action button on mount (skipping the
+    // move if the user is mid-typing in an input/textarea/contenteditable
+    // per Risk 3 mitigation), and a snack-scoped ESC handler dismisses
+    // without firing onAction (i.e. the action is the explicit "click UNDO"
+    // path; ESC is "give up, let the action stand").
+    if (hasAction) {
+      try {
+        const actBtn = s.querySelector('.gam-snack-action');
+        const ae = document.activeElement;
+        const aeIsTyping = ae && ae.matches && ae.matches('input, textarea, [contenteditable], [contenteditable="true"]');
+        if (actBtn && !aeIsTyping) {
+          setTimeout(function(){ try { actBtn.focus(); } catch(_){} }, 50);
+        }
+      } catch(_){}
+      s._gamSnackEsc = function(ev) {
+        if (ev.key !== 'Escape') return;
+        ev.preventDefault();
+        s.classList.remove('gam-snack-show');
+        setTimeout(function(){ try { s.remove(); } catch(_){} }, 200);
+        if (s._gamCountdownInterval) { clearInterval(s._gamCountdownInterval); s._gamCountdownInterval = null; }
+        if (s._gamDismissTimer) { clearTimeout(s._gamDismissTimer); s._gamDismissTimer = null; }
+        try { document.removeEventListener('keydown', s._gamSnackEsc, true); } catch(_){}
+      };
+      document.addEventListener('keydown', s._gamSnackEsc, true);
+    }
     s._gamDismissTimer = setTimeout(()=>{
       s.classList.remove('gam-snack-show');
       setTimeout(()=>{ try { s.remove(); } catch(_){} },300);
       if (s._gamCountdownInterval) { clearInterval(s._gamCountdownInterval); s._gamCountdownInterval = null; }
+      if (s._gamSnackEsc) { try { document.removeEventListener('keydown', s._gamSnackEsc, true); } catch(_){} s._gamSnackEsc = null; }
     }, durationMs);
   }
   function showBackdrop(fn){
@@ -8294,7 +8378,11 @@
       { label: '48h', hours: 48 },
       { label: '7d',  hours: 168 }
     ];
-    let _curHours = 24;
+    // v10.13.5 P1-15 (RALPH AUDIT MODCONSOLE F3): _curHours was closure-local
+    // and reset to 24h every modal open -- a 7d filter selection was lost on
+    // every reopen. Persist via setSetting/getSetting so the selection rides
+    // out the modal lifecycle.
+    let _curHours = parseInt(getSetting('opdelWindowHours', 24), 10) || 24;
 
     function _filterLabel(h) {
       const f = FILTERS.find(function(x){ return x.hours === h; });
@@ -8321,6 +8409,7 @@
       });
       sel.addEventListener('change', function(){
         _curHours = parseInt(sel.value, 10) || 24;
+        try { setSetting('opdelWindowHours', _curHours); } catch(_){}
         _load();
       });
       hdr.appendChild(hdrTitle);
@@ -8996,6 +9085,11 @@ Analyze this comment against the community rules. Then write a brief, profession
     const subIn = root.querySelector('#mc-ban-subj');
     const msgIn = root.querySelector('#mc-ban-msg');
     // V10_BUGS/02: restore macro draft if mod had edited a macro for this user
+    // v10.13.5 P1-11 (RALPH AUDIT RECOVERY R-01): mirror is WRITTEN by
+    // _mirrorDraftToLocal but was never READ on cold session -- mods lost
+    // typed ban messages on SW restart. Fall back to local mirror with 24h
+    // TTL when session cache misses. Pattern mirrored exactly from W4
+    // modmail fix at modtools.js:17298-17319 (verified-safe template).
     (function() {
       const _rKind = 'ban_msg';
       const _rUser = (username || '').toLowerCase();
@@ -9003,12 +9097,27 @@ Analyze this comment against the community rules. Then write a brief, profession
       chrome.storage.session.get('gam_macro_drafts').then(function(out) {
         const stored = (out && out.gam_macro_drafts) || {};
         const entry = stored[_rKind + ':' + _rUser];
-        if (!entry || !entry.body || entry.body === entry.base_body) return;
-        if ((msgIn.value || '').trim()) return;
-        msgIn.value = entry.body;
-        if (typeof SuperMod !== 'undefined' && SuperMod._showDraftChip) {
-          SuperMod._showDraftChip(msgIn, entry, _rKind, _rUser);
+        if (entry && entry.body && entry.body !== entry.base_body) {
+          if ((msgIn.value || '').trim()) return;
+          msgIn.value = entry.body;
+          if (typeof SuperMod !== 'undefined' && SuperMod._showDraftChip) {
+            SuperMod._showDraftChip(msgIn, entry, _rKind, _rUser);
+          }
+          return;
         }
+        // Cold-session fallback to local mirror (24h TTL).
+        chrome.storage.local.get('gam_macro_drafts_local').then(function(lo) {
+          const localStore = lo && lo.gam_macro_drafts_local;
+          if (!localStore || !localStore.drafts) return;
+          if ((Date.now() - (localStore.savedAt || 0)) >= 24 * 60 * 60 * 1000) return;
+          const lEntry = localStore.drafts[_rKind + ':' + _rUser];
+          if (!lEntry || !lEntry.body || lEntry.body === lEntry.base_body) return;
+          if ((msgIn.value || '').trim()) return;
+          msgIn.value = lEntry.body;
+          if (typeof SuperMod !== 'undefined' && SuperMod._showDraftChip) {
+            SuperMod._showDraftChip(msgIn, lEntry, _rKind, _rUser);
+          }
+        }).catch(function() {});
       }).catch(function() {});
     })();
     const durRow = root.querySelector('#mc-ban-durs');
@@ -10048,6 +10157,9 @@ Analyze this comment against the community rules. Then write a brief, profession
     // receives ai_used=1 + ai_tone when a mod sends an AI-drafted reply.
     let _lastSelectedAiTone = null;
     // V10_BUGS/02: restore macro draft (mm_reply) if mod had edited a macro for this user
+    // v10.13.5 P1-11 (RALPH AUDIT RECOVERY R-01): cold-session fallback to
+    // local mirror (24h TTL). Mirrors W4 modmail pattern -- read-only path,
+    // does not change write semantics.
     (function() {
       const _mmrKind = 'mm_reply';
       const _mmrUser = (username || '').toLowerCase();
@@ -10055,12 +10167,26 @@ Analyze this comment against the community rules. Then write a brief, profession
       chrome.storage.session.get('gam_macro_drafts').then(function(out) {
         const stored = (out && out.gam_macro_drafts) || {};
         const entry = stored[_mmrKind + ':' + _mmrUser];
-        if (!entry || !entry.body || entry.body === entry.base_body) return;
-        if ((body.value || '').trim()) return;
-        body.value = entry.body;
-        if (typeof SuperMod !== 'undefined' && SuperMod._showDraftChip) {
-          SuperMod._showDraftChip(body, entry, _mmrKind, _mmrUser);
+        if (entry && entry.body && entry.body !== entry.base_body) {
+          if ((body.value || '').trim()) return;
+          body.value = entry.body;
+          if (typeof SuperMod !== 'undefined' && SuperMod._showDraftChip) {
+            SuperMod._showDraftChip(body, entry, _mmrKind, _mmrUser);
+          }
+          return;
         }
+        chrome.storage.local.get('gam_macro_drafts_local').then(function(lo) {
+          const localStore = lo && lo.gam_macro_drafts_local;
+          if (!localStore || !localStore.drafts) return;
+          if ((Date.now() - (localStore.savedAt || 0)) >= 24 * 60 * 60 * 1000) return;
+          const lEntry = localStore.drafts[_mmrKind + ':' + _mmrUser];
+          if (!lEntry || !lEntry.body || lEntry.body === lEntry.base_body) return;
+          if ((body.value || '').trim()) return;
+          body.value = lEntry.body;
+          if (typeof SuperMod !== 'undefined' && SuperMod._showDraftChip) {
+            SuperMod._showDraftChip(body, lEntry, _mmrKind, _mmrUser);
+          }
+        }).catch(function() {});
       }).catch(function() {});
     })();
 
@@ -12167,6 +12293,15 @@ Analyze this comment against the community rules. Then write a brief, profession
   document.addEventListener('keydown', e=>{
     const inI = e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA' || e.target.isContentEditable;
     const k = e.key.toLowerCase();
+    // v10.13.5 P1-09 (RALPH AUDIT FOCUS-TRAPS R5, UIUX2-33 §E.2): pinned
+    // tooltip with 5 buttons (Open Intel, Mark SUS, DR, Copy, x) had no
+    // ESC handler. Mouse-only dismiss was the only path. Check before the
+    // panelOpen branch since tooltip can coexist with closed panels.
+    if (k === 'escape' && tooltipPinned) {
+      try { unpinTooltip(); } catch(_){}
+      e.preventDefault();
+      return;
+    }
     if(k==='escape' && panelOpen){ closeAllPanels(); e.preventDefault(); return; }
     if(IS_USERS_PAGE && k==='escape'){ closeTriagePopover(); return; }
     // v5.2.0 fun fix: Ctrl+Shift+A must work while the modmail reply box is focused.
@@ -17884,20 +18019,30 @@ Analyze this comment against the community rules. Then write a brief, profession
         groups.stale.forEach(_addRow);
       }
     }
+    // v10.13.5 P1-08 (RALPH AUDIT FOCUS-TRAPS R1): focus trap + ESC dismiss
+    // were missing from ActiveMods popover. Hook a single _amClose path so
+    // outer-click, dataset.close, and trap-ESC all funnel through cleanup.
+    var _amClose = function() {
+      try { if (pop._gamPopTrapCleanup) pop._gamPopTrapCleanup(); } catch(_){}
+      try { document.removeEventListener('click', _amOuter, true); } catch(_){}
+      try { pop.remove(); } catch(_){}
+    };
     pop.addEventListener('click', e => {
       const btn = e.target.closest('button');
       if (!btn) return;
       // Allow page-link anchors to work normally
       if (e.target.closest('a.gam-am-page')) return;
       e.stopPropagation();
-      if (btn.dataset.close) { pop.remove(); return; }
+      if (btn.dataset.close) { _amClose(); return; }
       const w = parseInt(btn.dataset.w, 10);
       if (Number.isFinite(w)) loadWindow(w);
     });
+    var _amOuter;
     setTimeout(() => {
-      const close = (ev) => { if (!pop.contains(ev.target) && ev.target !== anchor) { pop.remove(); document.removeEventListener('click', close, true); } };
-      document.addEventListener('click', close, true);
+      _amOuter = (ev) => { if (!pop.contains(ev.target) && ev.target !== anchor) { _amClose(); } };
+      document.addEventListener('click', _amOuter, true);
     }, 0);
+    _installPopoverTrap(pop, _amClose);
     const initial = getSetting('activeModsWindow', 4) || 4;
     loadWindow(initial);
   }
@@ -17928,7 +18073,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     var closeBtn = document.createElement('button');
     closeBtn.textContent = '×';
     closeBtn.style.cssText = 'background:transparent;border:none;color:#5a5752;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1';
-    closeBtn.addEventListener('click', function() { pop.remove(); });
+    closeBtn.addEventListener('click', function() { _auClose(); });
     hdr.appendChild(title); hdr.appendChild(spacer); hdr.appendChild(closeBtn);
     pop.appendChild(hdr);
 
@@ -17942,11 +18087,19 @@ Analyze this comment against the community rules. Then write a brief, profession
     pop.appendChild(body);
     document.body.appendChild(pop);
 
-    // Close on outside click
+    // v10.13.5 P1-08 (RALPH AUDIT FOCUS-TRAPS R1): focus trap + ESC dismiss
+    // were missing from AutoUnsticky popover. Single close path funnels
+    // outer-click, close button, and trap-ESC through one cleanup.
+    function _auClose() {
+      try { if (pop._gamPopTrapCleanup) pop._gamPopTrapCleanup(); } catch(_){}
+      try { document.removeEventListener('click', _outerClick, true); } catch(_){}
+      try { pop.remove(); } catch(_){}
+    }
     function _outerClick(e) {
-      if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', _outerClick, true); }
+      if (!pop.contains(e.target)) { _auClose(); }
     }
     setTimeout(function() { document.addEventListener('click', _outerClick, true); }, 50);
+    _installPopoverTrap(pop, _auClose);
 
     function _auPRelTime(ms) {
       var d = Date.now() - ms;
@@ -18144,17 +18297,33 @@ Analyze this comment against the community rules. Then write a brief, profession
           unmarkBtnEx.addEventListener('click', async function(e) {
             e.stopPropagation();
             unmarkBtnEx.disabled = true; unmarkBtnEx.textContent = '…';
+            // v10.13.5 P1-16 (RALPH AUDIT RECOVERY R-02): SUS Unmark had NO
+            // undo path -- 1 click + accidentally fat-fingered = SUS state
+            // gone, no recovery. Now: snapshot the SUS reason BEFORE
+            // unmarking, then withUndo Tier B (5s window) re-marks via
+            // modSusMark on inverse fire. Snack action button surfaces UNDO.
+            const lk = String(username).toLowerCase();
+            const snapshot = (typeof _susState === 'object' && _susState && _susState.rows)
+              ? _susState.rows.get(lk) : null;
+            const susReason = (snapshot && snapshot.reason) || 'previously flagged';
             try {
-              await rpcCall('modSusClear', { username: username, client_op_id: __makeReqId() });
+              const r = await withUndo(
+                () => rpcCall('modSusClear', { username: username, client_op_id: __makeReqId() }),
+                {
+                  tier: 'B',
+                  label: username + ' unmarked SUS',
+                  inverse: () => rpcCall('modSusMark', { username: username, reason: susReason, client_op_id: __makeReqId() })
+                }
+              );
+              if (!r || !r.ok) throw new Error((r && r.error) || 'unmark failed');
               if (typeof _susState === 'object' && _susState && _susState.rows) {
-                _susState.rows.delete(String(username).toLowerCase());
+                _susState.rows.delete(lk);
               }
               try { _susApplyDecorations(true); } catch(_){}
               const rowWrap = drillEl.closest('[data-sus-row]');
               if (rowWrap) rowWrap.remove();
               const remaining = pop.querySelectorAll('[data-sus-row]').length;
               title.textContent = '\u{1F6A9} SUS — ' + remaining + ' FLAGGED';
-              try { snack('✓ ' + username + ' unmarked SUS', 'success'); } catch(_){}
             } catch(err) {
               try { snack('Unmark failed: ' + (err && err.message || err), 'error'); } catch(_){}
               unmarkBtnEx.disabled = false; unmarkBtnEx.textContent = 'Unmark';
@@ -18295,17 +18464,32 @@ Analyze this comment against the community rules. Then write a brief, profession
       unmarkStripBtn.addEventListener('click', async function(ev) {
         ev.stopPropagation();
         unmarkStripBtn.disabled = true; unmarkStripBtn.textContent = '...';
+        // v10.13.5 P1-16 (RALPH AUDIT RECOVERY R-02): collapsed-strip Unmark
+        // gets the same Tier B undo treatment as the drill-panel Unmark.
+        // Without this the 1-click strip Unmark is a faster footgun than
+        // the v10.12.3 dialog-confirm path it replaced.
+        const lkS = String(username).toLowerCase();
+        const snapS = (typeof _susState === 'object' && _susState && _susState.rows)
+          ? _susState.rows.get(lkS) : null;
+        const susReasonS = (snapS && snapS.reason) || 'previously flagged';
         try {
-          await rpcCall('modSusClear', { username: username, client_op_id: __makeReqId() });
+          const r = await withUndo(
+            () => rpcCall('modSusClear', { username: username, client_op_id: __makeReqId() }),
+            {
+              tier: 'B',
+              label: username + ' unmarked SUS',
+              inverse: () => rpcCall('modSusMark', { username: username, reason: susReasonS, client_op_id: __makeReqId() })
+            }
+          );
+          if (!r || !r.ok) throw new Error((r && r.error) || 'unmark failed');
           if (typeof _susState === 'object' && _susState && _susState.rows) {
-            _susState.rows.delete(String(username).toLowerCase());
+            _susState.rows.delete(lkS);
           }
           try { _susApplyDecorations(true); } catch(_){}
           // Remove the row from the popover
           if (outerWrap && outerWrap.parentNode) outerWrap.parentNode.removeChild(outerWrap);
           const remaining = pop.querySelectorAll('[data-sus-row]').length;
           title.textContent = '\u{1F6A9} SUS — ' + remaining + ' FLAGGED';
-          try { snack('✓ ' + username + ' unmarked SUS', 'success'); } catch(_){}
         } catch(err) {
           unmarkStripBtn.disabled = false; unmarkStripBtn.textContent = 'Unmark';
           try { snack('Unmark failed: ' + (err && err.message || err), 'error'); } catch(_){}
@@ -19035,6 +19219,8 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     function _closePop() {
       clearInterval(pop._timerInterval);
+      // v10.13.5 P1-08: cleanup popover focus trap on every dismissal path.
+      try { if (pop._gamPopTrapCleanup) pop._gamPopTrapCleanup(); } catch(_){}
       pop.remove();
       document.removeEventListener('click', _outsideClick, true);
       document.removeEventListener('keydown', pop._escHandler);
@@ -19048,6 +19234,12 @@ Analyze this comment against the community rules. Then write a brief, profession
     var _outsideClick;
     pop._escHandler = function(ev) { if (ev.key === 'Escape') { _closePop(); } };
     document.addEventListener('keydown', pop._escHandler);
+    // v10.13.5 P1-08 (RALPH AUDIT FOCUS-TRAPS R1): DR popover Tab leaked into
+    // page DOM (only SUS had a trap pre-fix). _installPopoverTrap restores
+    // focus to anchor on close via _prevFocus snapshot. The pre-existing
+    // _escHandler is a duplicate ESC path -- trap's ESC is harmless via
+    // idempotent _closePop.
+    _installPopoverTrap(pop, _closePop);
   }
 
   // v10.12 H.7 (UIUX-11 §H): Queue popover — per-row APPR/REM/OPEN triage.
@@ -19355,6 +19547,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     function _closePop() {
       // Clear any pending undo timers
       if (pop._undoIntervals) pop._undoIntervals.forEach(function(id) { clearInterval(id); });
+      // v10.13.5 P1-08: cleanup popover focus trap on every dismissal path.
+      try { if (pop._gamPopTrapCleanup) pop._gamPopTrapCleanup(); } catch(_){}
       pop.remove();
       document.removeEventListener('click', _outsideClick, true);
       document.removeEventListener('keydown', pop._escHandler);
@@ -19368,6 +19562,9 @@ Analyze this comment against the community rules. Then write a brief, profession
     var _outsideClick;
     pop._escHandler = function(ev) { if (ev.key === 'Escape') { _closePop(); } };
     document.addEventListener('keydown', pop._escHandler);
+    // v10.13.5 P1-08 (RALPH AUDIT FOCUS-TRAPS R1): Queue popover Tab leaked
+    // into page DOM pre-fix. ESC dismissal is preserved via existing handler.
+    _installPopoverTrap(pop, _closePop);
   }
 
   // v10.12 H.8 (UIUX-12 §D): Site Health popover -- Bloomberg terminal dashboard.
@@ -19674,21 +19871,26 @@ Analyze this comment against the community rules. Then write a brief, profession
     }).catch(function() { /* shimmer stays -- best-effort */ });
 
     // Dismiss: click-outside + ESC
-    var dismiss = function(e) {
-      if (pop.contains(e.target) || anchor.contains(e.target)) return;
-      pop.remove();
+    // v10.13.5 P1-08 (RALPH AUDIT FOCUS-TRAPS R1): Health popover Tab leaked
+    // into page DOM. Single _shClose path now funnels click-outside, ESC,
+    // and trap-cleanup through one call. Trap-installed ESC is harmless
+    // duplicate of _escD (both call _shClose -> idempotent removal).
+    var _shClose = function() {
+      try { if (pop._gamPopTrapCleanup) pop._gamPopTrapCleanup(); } catch(_){}
+      try { pop.remove(); } catch(_){}
       document.removeEventListener('click', dismiss, true);
       document.removeEventListener('keydown', _escD);
     };
+    var dismiss = function(e) {
+      if (pop.contains(e.target) || anchor.contains(e.target)) return;
+      _shClose();
+    };
     var _escD = function(e) {
-      if (e.key === 'Escape') {
-        pop.remove();
-        document.removeEventListener('click', dismiss, true);
-        document.removeEventListener('keydown', _escD);
-      }
+      if (e.key === 'Escape') { _shClose(); }
     };
     setTimeout(function() { document.addEventListener('click', dismiss, true); }, 0);
     document.addEventListener('keydown', _escD);
+    _installPopoverTrap(pop, _shClose);
   }
   // v9.3.10: expose ModChat on window so out-of-IIFE handlers (the right-click
   // context menu) can apply server-confirmed updates without re-implementing
@@ -20883,6 +21085,14 @@ Analyze this comment against the community rules. Then write a brief, profession
    Plus: _gamOrphanBackdropSweep() runs on init + every 30s and removes any
    backdrop with no associated open modal.
    ════════════════════════════════════════════════════════════════════════ */
+/* v10.13.5 P1-05 (RALPH AUDIT CLICK-TARGETS F-2): 13 of 17 content-script
+   button classes were sub-32px (.gam-btn 24px, .gam-mc-send-btn 25px,
+   .gam-strip-btn 16px, .gam-mm-bar-btn 23px, .gam-snack-action 17px, etc.).
+   This single base rule lifts every interactive chip in the GAM surface to
+   the WCAG 2.5.5-recommended 32px minimum. box-sizing is normalized to
+   border-box so existing per-class padding doesn't push tiles off-grid. */
+.gam-btn, .gam-mc-send-btn, .gam-strip-btn, .gam-bar-btn, .gam-modal-close, .gam-empty-cta, .gam-mm-bar-btn, .gam-snack-action, .gam-tip-ctrl-btn, .gam-sus-dr-btn, .gam-drawer-close, .gam-t-flush-btn, .gam-park-btn, .gam-mc-tab, .gam-modal-tab, .gam-settings-promote-btn { min-height: 32px; box-sizing: border-box; }
+
 /* Snack / Toast */
 /* v6.0.1: snack sits 100px from the right edge (was right:14px). Status bar
    now centered, so notifications have clean real-estate on the right. */
@@ -21255,7 +21465,12 @@ Analyze this comment against the community rules. Then write a brief, profession
    override doesn't tint it orange (was: data-gam-harmonized rule at the
    bottom of GAM_CSS used --gam-accent which GAW's site-CSS sets to a
    saffron/orange, leaking through). */
-.gam-bar-icon-brand{background:none;border:none;width:22px;height:22px;border-radius:11px;cursor:pointer;font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;transition:background .1s,color .1s,transform .1s;padding:0;color:${C.ACCENT} !important}
+/* v10.13.5 P1-04 (RALPH AUDIT CLICK-TARGETS F-5): brand chip is its own
+   class -- W5 only added ::after to .gam-bar-icon, leaving the leftmost
+   shield at 22x22 with no hit-zone extension. Merge ::after into a shared
+   selector so the brand chip gets the same vertical hit zone post-P0-C. */
+.gam-bar-icon-brand{background:none;border:none;width:22px;height:22px;border-radius:11px;cursor:pointer;font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;transition:background .1s,color .1s,transform .1s;padding:0 6px;color:${C.ACCENT} !important;position:relative}
+.gam-bar-icon-brand::after{content:"";position:absolute;inset:-10px 0}
 .gam-bar-icon-brand:hover{background:rgba(74,158,255,.18);transform:scale(1.12)}
 .gam-bar-icon-brand:active{transform:scale(.94)}
 /* v9.6.0: Modmail hints panel — floating reference card on modmail surfaces */
@@ -21494,9 +21709,14 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-unverified{font-size:9px;color:${C.WARN};font-weight:700;letter-spacing:.3px}
 .gam-t-actions{display:flex;gap:3px;position:relative;justify-content:flex-end;align-items:center}
 .gam-t-done{font-size:10px;color:${C.TEXT3};text-transform:uppercase;letter-spacing:.5px;align-self:center}
-.gam-t-act{width:22px;height:22px;border:1px solid ${C.BORDER};border-radius:3px;background:transparent;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:background .1s,border-color .1s,transform .1s;color:${C.TEXT2};flex-shrink:0;position:relative}
+.gam-t-act{width:22px;height:22px;border:1px solid ${C.BORDER};border-radius:3px;background:transparent;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:background .1s,border-color .1s,transform .1s;color:${C.TEXT2};flex-shrink:0;position:relative;padding:0 4px;box-sizing:content-box}
 /* v10.13.2 W5 (UIUX2-34 P0): 34px tap zone within 34px row via ::after extension */
-.gam-t-act::after{content:'';position:absolute;inset:-6px;pointer-events:auto}
+/* v10.13.5 P0-C (RALPH AUDIT CLICK-TARGETS C-3): inset:-6px caused 9px
+   horizontal overlap between adjacent action chips (Ban beats Pattern beats
+   DR beats Watch). Vertical-only inset keeps the vertical 34px tap zone
+   without stealing clicks from horizontal neighbors. Box-sizing:content-box
+   + padding:0 4px on the chip itself recovers the lost horizontal hit zone. */
+.gam-t-act::after{content:'';position:absolute;inset:-6px 0;pointer-events:auto}
 .gam-t-act:hover{color:${C.TEXT};border-color:${C.BORDER2};transform:scale(1.08)}
 .gam-t-act:active{transform:scale(.96)}
 .gam-t-stat-val{font-size:20px}
@@ -21954,7 +22174,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   border-radius: var(--bb-r) !important;
   background: transparent !important;
   color: var(--bb-ink-dim) !important;
-  padding: 2px 4px !important;
+  /* v10.13.5 P0-C: was 2px 4px. Horizontal padding doubled to 8px so the
+     real button click zone widens without relying on the ::after extension
+     (which previously caused 14px overlap with the next icon over). */
+  padding: 2px 8px !important;
   min-width: 22px;
   min-height: 22px;
   border: 1px solid transparent !important;
@@ -21965,7 +22188,14 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 #gam-status-bar .gam-bar-icon::after {
   content: "";
   position: absolute;
-  inset: -10px;   /* 22 + 2*10 = 42px hit area; 44 with 2px visible padding */
+  /* v10.13.5 P0-C (RALPH AUDIT W5 A.2 + CLICK-TARGETS C-2): inset:-10px
+     extended the hit zone to 50px in a 6px-gap layout, so adjacent icons
+     overlapped 14px and CSS paint-order made the rightmost icon silently
+     steal clicks from every left-neighbor (Ban hammer wins every collision).
+     Fix: vertical-only inset extends the hit zone vertically (22+2*10=42px
+     vertical tap area) without bleeding into horizontal neighbors. Real
+     button padding is bumped (above) to recover horizontal hit zone. */
+  inset: -10px 0;
 }
 #gam-status-bar .gam-bar-icon:hover {
   color: var(--bb-amber) !important;

@@ -1219,6 +1219,19 @@ input:focus, textarea:focus, select:focus {
   letter-spacing: -0.01em;
   display: block;
 }
+/* v10.13.5 P1-01 (RALPH AUDIT W1 F-1 + STATS F5): restore .pop-stat-val
+   typographic base. W1 deleted this rule under a false-clobber claim --
+   stats tile values were falling through to body-default font (12-13px /
+   weight 400) instead of the intended 20px / 700 / #e8eaed. Wires
+   --bb-t-stat-md token (W1's previously-orphaned token) so the migration
+   sweep also closes one TOKEN-CALLSITES finding for free. */
+.pop-stat-val {
+  font: 700 var(--bb-t-stat-md, 20px)/1 var(--bb-font) !important;
+  color: #e8eaed;
+  font-variant-numeric: tabular-nums slashed-zero;
+  letter-spacing: -0.4px;
+  display: block;
+}
 /* v10.13.0 W1 (P0-03): data-state drives color, replacing inline style="color:..."
    on 6 of 8 stat tiles. Existing selectors targeted `.value` only -- popup.html
    actually emits `.pop-stat-val`, so the rules were inert. Added `.pop-stat-val`
@@ -1457,7 +1470,11 @@ input:focus, textarea:focus, select:focus {
   border-color: var(--bb-red, #f04040) !important;
   color: var(--bb-red, #f04040) !important;
 }
-@media (prefers-reduced-motion: reduce) {
+/* v10.13.5 P1-06 (RALPH AUDIT CLICK-TARGETS D + F-4): hover-revealed action
+   trio is invisible on touch devices (no hover state), making the effective
+   click target 0px. PRM was the wrong gate -- swap to (hover:none) so touch
+   devices always see the actions. WCAG 2.5.5 + 2.5.7 conformance. */
+@media (hover: none) {
   .gam-macro-item-actions { opacity: 1; transition: none; }
 }
 
@@ -2703,6 +2720,13 @@ input[type="checkbox"]:checked::after {
 .pop-stat-delta[data-dir="down"] { color: var(--bb-red) !important; }
 .pop-stat-delta[data-dir="flat"] { color: var(--bb-ink-dim) !important; border-color: var(--bb-line) !important; }
 .pop-stat-delta[data-dir="none"] { color: var(--bb-ink-faint) !important; border-color: var(--bb-line) !important; }
+/* v10.13.5 P0-B (RALPH AUDIT, UIUX2-01 §D L165): hide empty delta chips so
+   first-open of a fresh session does not draw 6 visible 1px-bordered hollow
+   ghost boxes next to the delta-bearing tiles. _updateStatDelta correctly
+   skips writing arrows/numbers when prev=null, but the [data-dir="none"]
+   rule above still painted a faint border. The :empty selector below makes
+   the empty chip vanish entirely until real data lands. */
+.pop-stat-delta:empty { display: none !important; }
 
 /* Sparkline container */
 .pop-stat-spark {
