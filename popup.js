@@ -2310,52 +2310,75 @@ async function saveLead() {
   }
 }
 
-async function generateInvite() {
-  const resultEl = $('inviteResult');
-  resultEl.className = 'pop-token-status';
-  resultEl.textContent = 'requesting...';
+// v10.14.2 LD2: shared invite-click helper. Pre-fix the deep-dive #inviteBtn
+// flow (generateInvite) and the Quick-Actions #qaInviteBtn flow had divergent
+// implementations that drifted (PARAM-SHAPE bug at qaInvite L6925, FIELD-NAME
+// bug L6926, default-target bug L6928 caught in v10.12.1). Centralizing the
+// invite ask + RPC + URL extract into _handleInviteClick keeps both buttons
+// in lockstep. Caller passes `target = 'deep'` (writes inviteResult inline)
+// or `target = 'qa'` (uses snack/toast + copyWithPulse).
+async function _handleInviteClick(target) {
+  const isQa = target === 'qa';
+  const resultEl = isQa ? null : $('inviteResult');
+  if (resultEl) {
+    resultEl.className = 'pop-token-status';
+    resultEl.textContent = 'requesting...';
+  }
   try {
-    const { gam_settings } = await chrome.storage.local.get('gam_settings');
-    const s = gam_settings || {};
-    const tok = s.workerModToken || '';
-    const lead = s.leadModToken || '';
-    if (!tok || !lead){
-      resultEl.className = 'pop-token-status err';
-      resultEl.textContent = 'need both team + lead token first';
-      return;
+    if (!isQa) {
+      const { gam_settings } = await chrome.storage.local.get('gam_settings');
+      const s = gam_settings || {};
+      const tok = s.workerModToken || '';
+      const lead = s.leadModToken || '';
+      if (!tok || !lead){
+        resultEl.className = 'pop-token-status err';
+        resultEl.textContent = 'need both team + lead token first';
+        return;
+      }
     }
-    // v7.2 CHUNK 13: __popupAskText under flag-on; prompt() on flag-off.
+    // Username prompt -- deep-dive treats target as optional (audit-only),
+    // qa makes it required (matches the v10.12.1 fix that prompted explicitly).
     let who;
     if (await __hardeningOnPopup()) {
       const raw = await __popupAskText({
         title: 'Invite target',
-        label: 'GAW username this invite is for (optional, for audit)',
+        label: isQa ? 'GAW username this invite is for' : 'GAW username this invite is for (optional, for audit)',
         placeholder: 'username',
         max: 24,
         validate: function (v) {
-          if (!v) return '';
+          if (!v) return isQa ? 'Required.' : '';
           return /^[A-Za-z0-9_-]{3,24}$/.test(v) ? '' : 'Username 3-24 chars.';
         }
       });
-      if (raw == null) { resultEl.textContent = 'cancelled'; return; }
+      if (raw == null) {
+        if (resultEl) resultEl.textContent = 'cancelled';
+        return;
+      }
       who = raw;
+      if (isQa && !who) return;
     } else {
-      who = prompt('GAW username this invite is for (optional, for audit):', '') || '';
+      who = prompt(isQa ? 'GAW username this invite is for:' : 'GAW username this invite is for (optional, for audit):', '') || '';
+      if (isQa && !who) return;
     }
-    // v5.0-Phase-1: route through RPC vault; background attaches tokens.
     const rInv = await popupRpc('adminInviteCreate', { mod: who });
-    if (!rInv || !rInv.ok){
-      resultEl.className = 'pop-token-status err';
-      resultEl.textContent = 'rejected (HTTP ' + (rInv && rInv.status || '?') + ')';
+    const url = rInv && rInv.ok && rInv.data && (rInv.data.url || rInv.data.invite_url);
+    if (!url) {
+      if (isQa) {
+        try { __showToast('Invite failed: ' + ((rInv && rInv.error) || 'unknown'), 'err'); } catch(_){}
+      } else {
+        resultEl.className = 'pop-token-status err';
+        resultEl.textContent = 'rejected (HTTP ' + (rInv && rInv.status || '?') + ')';
+      }
       return;
     }
-    const data = rInv.data || {};
-    const url = data.url || '';
+    if (isQa) {
+      const qaBtn = $('qaInviteBtn');
+      if (qaBtn) copyWithPulse(qaBtn, url);
+      try { __showToast('Invite for ' + who + ' copied to clipboard', 'ok'); } catch(_){}
+      return;
+    }
+    // Deep-dive path: render link inline + auto-copy to clipboard.
     resultEl.className = 'pop-token-status ok';
-    // v5.8.1 security fix: was innerHTML (XSS vector if server return is
-    // attacker-influenced). Now: DOM construction + textContent + href setter.
-    // href is still attribute-set so browser URL parsing happens, and we
-    // explicitly whitelist http(s) schemes to block javascript: / data: URIs.
     resultEl.textContent = '';
     const check = document.createTextNode('\u2713 invite: ');
     resultEl.appendChild(check);
@@ -2373,10 +2396,17 @@ async function generateInvite() {
       resultEl.appendChild(em);
     } catch(e){}
   } catch (e) {
-    resultEl.className = 'pop-token-status err';
-    resultEl.textContent = 'network error: ' + e.message;
+    if (isQa) {
+      try { __showToast('Invite failed: ' + (e && e.message || e), 'err'); } catch(_){}
+    } else if (resultEl) {
+      resultEl.className = 'pop-token-status err';
+      resultEl.textContent = 'network error: ' + (e && e.message || e);
+    }
   }
 }
+
+// Backwards-compat thin wrapper -- still called from a few legacy paths.
+async function generateInvite() { return _handleInviteClick('deep'); }
 
 $('leadSave').addEventListener('click', function () { withLoading($('leadSave'), 'saving…', saveLead); });
 $('leadInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') withLoading($('leadSave'), 'saving…', saveLead); });
@@ -3571,6 +3601,35 @@ loadLead();
     $('firstRunStatus').textContent = '';
     showStep(1);
   });
+  // v10.14.2 FR3: live username validation in the claim wizard. Shows a
+  // colored hint as the mod types so they catch shape errors before the
+  // worker rejects the claim. Pattern matches the static hint in HTML.
+  (function _wireFirstRunUsernameValidation() {
+    const inp = $('firstRunUsername');
+    const hint = $('firstRunUsernameHint');
+    if (!inp || !hint) return;
+    const _USERNAME_RE = /^[A-Za-z0-9_-]{2,64}$/;
+    const __validate = () => {
+      const v = inp.value || '';
+      if (!v) {
+        hint.textContent = 'Allowed: A-Z a-z 0-9 _ -, 2-64 chars';
+        hint.style.color = '#5a5752';
+        inp.style.borderColor = '#3d3a35';
+        return;
+      }
+      if (_USERNAME_RE.test(v)) {
+        hint.textContent = '✓ valid format';
+        hint.style.color = '#44dd66';
+        inp.style.borderColor = '#44dd66';
+      } else {
+        hint.textContent = '✗ invalid -- A-Z a-z 0-9 _ - only, 2-64 chars';
+        hint.style.color = '#ff6b3d';
+        inp.style.borderColor = '#ff6b3d';
+      }
+    };
+    inp.addEventListener('input', __validate);
+    inp.addEventListener('blur', __validate);
+  })();
   // v10.5.1 AFFORDANCE: Done button on success step — collapses the tokens card
   // so the wizard visually closes. Pre-fix: success screen had no exit affordance.
   const _firstRunDoneBtn = $('firstRunDone');
@@ -3783,6 +3842,10 @@ loadLead();
   detectInitialTab().then(initial => {
     setTab(['stats','tokens','tools','lead','diag'].includes(initial) ? initial : 'stats'); // v10.6.2 HOTFIX UIUX-01: added 'diag' to whitelist
   }).catch(() => setTab('stats'));
+  // v10.14.2 LD3: expose setTab on window so qa* button handlers (defined at
+  // module scope outside this IIFE) can defensively prepend a switch to the
+  // tokens tab before opening lead-deep-dive sub-panels.
+  try { window.setTab = setTab; } catch(_){}
 })();
 
 // =========================================================================
@@ -6836,6 +6899,64 @@ function __renderActiveModsPanel(mods) {
   panel.style.display = '';
 }
 
+// v10.14.2 LD1 (UIUX2-06 F.6/F.12): populate the 3 sub-status spans inside
+// the Lead deep-dive accordion (rotation / maint reports / diagnostics) so
+// the lead sees a one-line summary on each sub-summary without expanding.
+// All values come from local gam_settings -- no RPCs to keep this cheap and
+// safe even when the worker is degraded. Times are humanised via __relTime.
+function __relTime(ts) {
+  if (!ts) return null;
+  const dt = (typeof ts === 'number') ? ts : Date.parse(ts);
+  if (!dt || isNaN(dt)) return null;
+  const diff = Math.max(0, Date.now() - dt);
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + 'm ago';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + 'h ago';
+  const d = Math.floor(h / 24);
+  if (d < 30) return d + 'd ago';
+  return Math.floor(d / 30) + 'mo ago';
+}
+
+async function __renderLeadSubStatuses() {
+  let s = {};
+  try {
+    const out = await chrome.storage.local.get('gam_settings');
+    s = (out && out.gam_settings) || {};
+  } catch(_){}
+  const setSpan = (id, text, color) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text ? '· ' + text : '';
+    el.style.cssText = 'color:' + (color || '#5a5752') + ';font-size:10px;letter-spacing:0.04em;margin-left:6px';
+  };
+  // Rotation: last token rotation timestamp
+  const rotTs = s.rotated_at || s.workerModToken_issued_at || null;
+  const rotRel = __relTime(rotTs);
+  setSpan(
+    'lead-sub-rotation-status',
+    rotRel ? 'rotated ' + rotRel : 'no rotation on file',
+    rotRel ? '#9b9892' : 'var(--bb-warn)'
+  );
+  // Maint reports: last weekly run timestamp
+  const maintTs = s.maintLastRunAt || s.maint_last_run_at || null;
+  const maintRel = __relTime(maintTs);
+  setSpan(
+    'lead-sub-maintreports-status',
+    maintRel ? 'last run ' + maintRel : 'never run',
+    maintRel ? '#9b9892' : 'var(--bb-warn)'
+  );
+  // Diag/audit: last audit verify timestamp
+  const auditTs = s.lastAuditVerifyAt || s.last_audit_verify_at || null;
+  const auditRel = __relTime(auditTs);
+  setSpan(
+    'lead-sub-diag-status',
+    auditRel ? 'verified ' + auditRel : 'not verified',
+    auditRel ? '#9b9892' : '#5a5752'
+  );
+}
+
 async function __loadLeadKpi() {
   // Tile 1: Active Now from /presence/online (v10.10.1 color fix already applied)
   try {
@@ -6885,57 +7006,32 @@ async function __loadLeadKpi() {
   // D.3.6: Load lapsed mods → chip (not lapsedModsCard)
   __loadLapsedMods();
 
+  // v10.14.2 LD1 (UIUX2-06 F.6/F.12): wire 3 deep-dive sub-status spans so
+  // a lead at-a-glance sees rotation freshness / last maint run / last audit
+  // verify without expanding each accordion. Local-only reads (gam_settings)
+  // -- no extra RPCs, fail-silent on missing data.
+  try { await __renderLeadSubStatuses(); } catch(_){}
+
   // Wire quick-actions (once, idempotent)
   if (!window.__qaWired) {
     window.__qaWired = true;
 
     const qaInvite = $('qaInviteBtn');
     if (qaInvite) qaInvite.addEventListener('click', async function() {
-      // v10.12.1 — fix three regressions vs. the deep-dive #inviteBtn flow
-      // (popup.js ~1761):
-      //   1. RPC param name was `username:` — backend `adminInviteCreate` reads
-      //      `args.mod` (background.js ~2246). Wrong-named param landed as
-      //      `{ mod: undefined }` at the worker.
-      //   2. Response field was `r.data.invite_url` — worker returns `data.url`.
-      //      Even when the call succeeded, the success branch never matched, so
-      //      every click dropped to the "Invite failed: unknown" toast.
-      //   3. Target mod defaulted to the LEAD'S OWN username — meaningless,
-      //      since invites are issued FOR a target mod. Now prompts (matches
-      //      the deep-dive flow). Operator's complaint 2026-05-10: "I am
-      //      currently unable to send the other mods tokens! Where did this
-      //      functionality go?"
-      withLoading(qaInvite, 'generating...', async function() {
-        let target;
-        if (await __hardeningOnPopup()) {
-          target = await __popupAskText({
-            title: 'Invite target',
-            label: 'GAW username this invite is for',
-            placeholder: 'username',
-            max: 24,
-            validate: function (v) {
-              if (!v) return 'Required.';
-              return /^[A-Za-z0-9_-]{3,24}$/.test(v) ? '' : 'Username 3-24 chars.';
-            }
-          });
-          if (target == null) return;
-        } else {
-          target = prompt('GAW username this invite is for:', '') || '';
-          if (!target) return;
-        }
-        const r = await popupRpc('adminInviteCreate', { mod: target });
-        const url = r && r.ok && r.data && (r.data.url || r.data.invite_url);
-        if (url) {
-          // v10.14.1 CC1: route via copyWithPulse for 3-layer fallback + COPIED flash
-          copyWithPulse(qaInvite, url);
-          __showToast('Invite for ' + target + ' copied to clipboard', 'ok');
-        } else {
-          __showToast('Invite failed: ' + ((r && r.error) || 'unknown'), 'err');
-        }
-      });
+      // v10.14.2 LD3: defensive prepend setTab('tokens') so the lead deep-dive
+      // (which lives inside the tokens-tab panel after Wave A's three-state
+      // machine) is visible if the user clicked QA from a different tab.
+      try { if (typeof window.setTab === 'function') window.setTab('tokens'); } catch(_){}
+      // v10.14.2 LD2: route via shared _handleInviteClick to keep deep-dive
+      // and qa flows in lockstep. The previous separate handler had drifted
+      // (caught + fixed in v10.12.1).
+      withLoading(qaInvite, 'generating...', function() { return _handleInviteClick('qa'); });
     });
 
     const qaRotateAll = $('qaRotateAllBtn');
     if (qaRotateAll) qaRotateAll.addEventListener('click', function() {
+      // v10.14.2 LD3: defensive setTab('tokens') prepend.
+      try { if (typeof window.setTab === 'function') window.setTab('tokens'); } catch(_){}
       // Opens rotation sub-panel inside deep-dive
       const deepDive = $('gam-lead-deepdive');
       if (deepDive && !deepDive.open) deepDive.setAttribute('open', '');
@@ -6956,6 +7052,8 @@ async function __loadLeadKpi() {
     // D.3.7: qaMaintBtn opens deep-dive accordion + scrolls to diag sub-panel
     const qaMaint = $('qaMaintBtn');
     if (qaMaint) qaMaint.addEventListener('click', function() {
+      // v10.14.2 LD3: defensive setTab('tokens') prepend.
+      try { if (typeof window.setTab === 'function') window.setTab('tokens'); } catch(_){}
       const deepDive = $('gam-lead-deepdive');
       if (deepDive && !deepDive.open) deepDive.setAttribute('open', '');
       const diagSub = $('lead-sub-diag');

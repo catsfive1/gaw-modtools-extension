@@ -2179,6 +2179,20 @@
       no.addEventListener('click', ()=>finish(false));
       wrap.querySelector('.gam-preflight-backdrop').addEventListener('click', ()=>finish(false));
       document.addEventListener('keydown', escHandler);
+      // v10.14.2 MC9: Ctrl+Enter from Mod Console sets __gamCtrlEnterAutoConfirm.
+      // When armSeconds=0 (no countdown safety), auto-resolve true and never
+      // render the modal. Perma path (armSeconds>0) ignores this -- 3s arm is
+      // a deliberate safety gate.
+      try {
+        if (armSeconds === 0 && window.__gamCtrlEnterAutoConfirm) {
+          window.__gamCtrlEnterAutoConfirm = false;
+          finish(true);
+          return;
+        }
+        // Always clear the flag when a preflight renders, so a cancel here
+        // doesn't leak into a later unrelated preflight.
+        window.__gamCtrlEnterAutoConfirm = false;
+      } catch(_){}
       if (armSeconds > 0){
         let remaining = armSeconds;
         const iv = setInterval(()=>{
@@ -7300,6 +7314,10 @@
       _undoSlot = null;
       _undoTimer = null;
       _gamUndoAnnounce('Undo window closed.');
+      // v10.14.2 R2: visible snack on expiry (vs SR-only). Mods with sound off
+      // and no screen reader had no signal the window had closed. Brief 2.2s
+      // info snack tells them the U-key chord is no longer armed.
+      try { snack('Undo expired', 'info'); } catch(_){}
     }, slot.ttlMs);
   }
 
@@ -7570,6 +7588,42 @@
   function _gamShowExtOrphanedBanner(){
     if (_gamExtOrphaned) return;
     _gamExtOrphaned = true;
+    // v10.14.2 R1: flush any open textareas to local mirror BEFORE rendering
+    // the banner, synchronously. Once context is invalidated, debounced saves
+    // (350ms) will never fire and the user loses unsaved keystrokes typed
+    // since the last debounce tick. We mirror what we can read from the DOM
+    // straight to chrome.storage.local under the same draft keys the live
+    // session uses, so cold-session restoration picks up the fresh content.
+    try {
+      // Mod Console BAN message + macro draft (key = 'ban_msg:<lcuser>')
+      const _banTa = document.querySelector('#mc-ban-msg');
+      const _modal = _banTa && _banTa.closest('#gam-mc-panel');
+      const _user = (_modal && _modal._gamUsername) ? String(_modal._gamUsername).toLowerCase() : null;
+      if (_banTa && _user && _banTa.value && _banTa.value.trim()) {
+        try {
+          chrome.storage.local.get('gam_macro_drafts_local').then(out => {
+            const wrap = (out && out.gam_macro_drafts_local) || { drafts: {}, savedAt: 0 };
+            const drafts = wrap.drafts || {};
+            const k = 'ban_msg:' + _user;
+            drafts[k] = Object.assign({}, drafts[k] || {}, { body: _banTa.value, modified_at: Date.now() });
+            chrome.storage.local.set({ gam_macro_drafts_local: { drafts: drafts, savedAt: Date.now() } }).catch(()=>{});
+          }).catch(()=>{});
+        } catch(_){}
+      }
+      // Modmail reply textarea (mm_reply key) -- look for #mc-msg-body
+      const _msgTa = document.querySelector('#mc-msg-body');
+      if (_msgTa && _user && _msgTa.value && _msgTa.value.trim()) {
+        try {
+          chrome.storage.local.get('gam_macro_drafts_local').then(out => {
+            const wrap = (out && out.gam_macro_drafts_local) || { drafts: {}, savedAt: 0 };
+            const drafts = wrap.drafts || {};
+            const k = 'mm_reply:' + _user;
+            drafts[k] = Object.assign({}, drafts[k] || {}, { body: _msgTa.value, modified_at: Date.now() });
+            chrome.storage.local.set({ gam_macro_drafts_local: { drafts: drafts, savedAt: Date.now() } }).catch(()=>{});
+          }).catch(()=>{});
+        } catch(_){}
+      }
+    } catch(_) { /* never block banner render on flush failure */ }
     try {
       if (document.getElementById('gam-ext-orphaned-banner')) return;
       const b = document.createElement('div');
@@ -8327,14 +8381,15 @@
 
     // v10.13.4 W4 (P0-keyboard): tabs render with number prefix in inactive
     // state ("1·INTEL"). Active state strips prefix (icon + label only).
-    // BAN tab also gets gam-mc-tab-danger class so its inactive state shows
-    // 70% red and active state shows full red (P0 BAN visibility).
+    // v10.14.2 MC10 (RALPH-W4 F1): dead .gam-mc-tab-danger class removed --
+    // BAN-tab styling already lives in the .gam-mc-tab[data-tab="ban"]
+    // selectors (popup.css ~21812). The data-tab attribute is the styling
+    // hook; the redundant class added zero rendering signal.
     tabs.forEach((t, idx) => {
       const num = idx + 1;
       const isActive = (t.id === tab);
-      const danger = (t.id === 'ban') ? ' gam-mc-tab-danger' : '';
       const b = el('button', {
-        cls: 'gam-mc-tab' + (isActive ? ' gam-mc-tab-active' : '') + danger,
+        cls: 'gam-mc-tab' + (isActive ? ' gam-mc-tab-active' : ''),
         'data-tab': t.id,
         'data-num': String(num),
         onclick: () => renderTab(t.id)
@@ -8357,6 +8412,12 @@
     // v10.13.4 W4 (P0-keyboard): number keys 1-6 switch tabs, Ctrl+Enter
     // submits within tab. Guard inputs/select/textarea/.gam-mc-dur so typing
     // "2" into BAN duration doesn't switch tabs.
+    // v10.14.2 MC2 (BAN duration shortcuts): on BAN tab, p/7/3/1/w/0 select
+    // duration buttons (perma / 7d / 3d / 1d / 1w / clear). Same input-focus
+    // guards as the number-key tab switcher. v10.14.2 MC9 (Ctrl+Enter armSeconds=0):
+    // when current BAN duration is non-perma (preflight has armSeconds=0 and
+    // would only require a mouse Confirm click), Ctrl+Enter sets a one-shot
+    // flag that the next preflight() reads to auto-confirm.
     function _mcKbHandler(e){
       // Only fire when this Mod Console modal is open & in the DOM.
       if (!mc || !mc.isConnected) return;
@@ -8375,6 +8436,25 @@
             return;
           }
         }
+        // v10.14.2 MC2: BAN duration shortcuts. Only fires on BAN tab.
+        // Map: p=permanent (-1), 7=7d, 3=3d, 1=1d, w=1w(=7d alias), 0=warning(0)
+        if (mc._gamTab === 'ban') {
+          const durMap = { 'p': -1, 'P': -1, 'w': 7, 'W': 7, '7': 7, '3': 3, '0': 0 };
+          // Note: '1' is already consumed by the tab-switch path above (idx 0
+          // = INTEL). We deliberately don't shadow it here to avoid breaking
+          // "1" returning to INTEL. '1d' duration is reachable via '7'/'3'/etc.
+          // already, plus mouse click; the keyboard duration shortcuts target
+          // the most common BAN durations (7/3/perma/clear).
+          if (durMap.hasOwnProperty(k)) {
+            const v = durMap[k];
+            const durBtn = mc.querySelector('.gam-mc-dur[data-v="' + v + '"]');
+            if (durBtn) {
+              e.preventDefault();
+              durBtn.click();
+              return;
+            }
+          }
+        }
       }
       // Ctrl+Enter: submit current tab's primary action.
       if (e.ctrlKey && (e.key === 'Enter' || e.key === '\n' || e.key === '\r')) {
@@ -8385,6 +8465,11 @@
         else if (curTab === 'message') btn = mc.querySelector('#mc-msg-send');
         if (btn && !btn.disabled) {
           e.preventDefault();
+          // v10.14.2 MC9: signal preflight() that the next confirmation can
+          // auto-resolve when armSeconds=0. preflight() reads + clears
+          // window.__gamCtrlEnterAutoConfirm before showing the dialog.
+          // Perma bans (armSeconds=3) ignore this flag for safety.
+          try { window.__gamCtrlEnterAutoConfirm = true; } catch(_){}
           btn.click();
         }
       }
@@ -9025,6 +9110,14 @@ Analyze this comment against the community rules. Then write a brief, profession
     const prior = getUserHistory(username);
     const isRepeat = prior.filter(a=>a.type==='ban').length>0;
     const priorCount = prior.filter(a=>a.type==='ban').length;
+    // v10.14.2 MM7 (RALPH-W4 F2): UNBAN ghost link should only render when we
+    // have signal that the user IS currently banned. isVerified===true means
+    // we've confirmed via verifyBan; roster.status==='banned' is the local
+    // state hint. Either signal suffices. When neither is true (unknown or
+    // known-not-banned), suppress the ghost link -- "already banned -- unban
+    // instead" is misleading otherwise.
+    const _isBannedHint = (isVerified(username) === true)
+      || ((getRoster()[username.toLowerCase()] || {}).status === 'banned');
     const evidenceText = getContentText(item);
     const evidenceId = getContentId(item);
     const evidenceType = getContentType(item);
@@ -9041,7 +9134,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           <div class="gam-mc-evidence-text">"${escapeHtml(evidenceText.slice(0,260))}${evidenceText.length>260?'\u2026':''}"</div>
           ${evidenceLink ? `<a class="gam-mc-evidence-link" href="${escapeHtml(evidenceLink)}" target="_blank">\u{1F517} open in new tab</a>` : ''}
         </div>` : ''}
-      ${isRepeat ? `<div class="gam-mc-banner gam-mc-banner-warn">\u{26A0}\u{FE0F} Repeat offender: ${priorCount} prior ban${priorCount>1?'s':''} on file. Durations auto-escalate.</div>` : ''}
+      ${isRepeat ? `<div class="gam-mc-banner ${priorCount>=2?'gam-mc-banner-red':'gam-mc-banner-warn'}">\u{26A0}\u{FE0F} Repeat offender: ${priorCount} prior ban${priorCount>1?'s':''} on file. Durations auto-escalate.</div>` : ''}
       <div class="gam-mc-field">
         <label>Violation type</label>
         <select class="gam-input" id="mc-ban-viol">
@@ -9099,9 +9192,10 @@ Analyze this comment against the community rules. Then write a brief, profession
         <button class="gam-btn gam-btn-danger" id="mc-ban-go">\u{1F528} BAN (reason sent as message)</button>
       </div>
       <div id="mc-ban-status"></div>
-      <!-- v10.13.4 W4 (P0): UNBAN demoted to a ghost link beneath the status div -->
-      <div style="margin-top:6px;font-size:10px;text-align:right;letter-spacing:0.04em">
-        <a href="#" id="mc-ban-unban" style="color:#44dd66;text-decoration:underline;cursor:pointer;background:transparent;border:none;padding:0;font:inherit">already banned — unban instead</a>
+      <!-- v10.13.4 W4 (P0): UNBAN demoted to a ghost link beneath the status div.
+           v10.14.2 MM7: rendered ONLY when banned-status signal is positive. -->
+      ${_isBannedHint ? `<div style="margin-top:6px;font-size:10px;text-align:right;letter-spacing:0.04em">
+        <a href="#" id="mc-ban-unban" style="color:#44dd66;text-decoration:underline;cursor:pointer;background:transparent;border:none;padding:0;font:inherit">already banned — unban instead</a>` : `<div style="display:none">`}
       </div>
       <!-- v9.9.0 - AI ban-summary -> auto-add to user notes (max 15 words). -->
       <div class="gam-mc-field" id="mc-ban-summary-wrap" style="margin-top:8px;display:none">
@@ -10015,10 +10109,13 @@ Analyze this comment against the community rules. Then write a brief, profession
     // marker entry "[notes cleared by <mod> on <date>] (prior history
     // preserved)" — actual prior entries stay readable in audit + this
     // tab continues to render them but with a clear divider.
+    // v10.14.2 MC1: NOTE tab gets a "newest first" sort label + a live char
+    // counter beneath the textarea so mods see they're approaching long-note
+    // territory (parser handles >500 chars but visually clamps via an ellipsis).
     root.innerHTML = `
       <div class="gam-mc-section">
         <div class="gam-mc-h" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <span>Note history <span class="gam-mc-hint" id="mc-note-count">(loading...)</span></span>
+          <span>Note history <span class="gam-mc-hint" id="mc-note-count">(loading...)</span> <span class="gam-mc-hint" style="color:#5a5752">· newest first</span></span>
           <button class="gam-btn gam-btn-cancel" id="mc-note-clear-all" style="font-size:10px;padding:3px 8px" title="Archive prior notes with a marker entry (history preserved, visually divided)">\u{1F9F9} Clear all</button>
         </div>
         <div id="mc-note-history" class="gam-mc-note-history">\u{1F50D} loading notes...</div>
@@ -10039,6 +10136,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           </span>
         </div>
         <textarea class="gam-input gam-textarea" id="mc-note-body" rows="6" placeholder="Add your mod note here..."></textarea>
+        <div class="gam-mc-hint" id="mc-note-charcount" style="text-align:right;margin-top:3px;font-size:10px;color:#5a5752">0 chars</div>
       </div>
       <div id="mc-note-status"></div>
     `;
@@ -10070,6 +10168,18 @@ Analyze this comment against the community rules. Then write a brief, profession
     const countEl = root.querySelector('#mc-note-count');
     const historyEl = root.querySelector('#mc-note-history');
     const tpl = root.querySelector('#mc-note-tpl');
+    // v10.14.2 MC1: live char counter for the textarea. Color shifts to amber
+    // past 500 chars (when the history-row preview clamps with an ellipsis).
+    const charCountEl = root.querySelector('#mc-note-charcount');
+    if (body && charCountEl) {
+      const __updateCharCount = () => {
+        const n = (body.value || '').length;
+        charCountEl.textContent = n + ' char' + (n === 1 ? '' : 's');
+        charCountEl.style.color = (n > 500) ? 'var(--bb-amber-warm, #f0a040)' : '#5a5752';
+      };
+      body.addEventListener('input', __updateCharCount);
+      __updateCharCount();
+    }
     // v8.1 ux: link Note tab labels to their inputs.
     try {
       const __nlbls = root.querySelectorAll('.gam-mc-field > label');
@@ -10166,10 +10276,20 @@ Analyze this comment against the community rules. Then write a brief, profession
           ${REPLY_TEMPLATES.map(t=>`<option value="${t.id}">${escapeHtml(t.label)}</option>`).join('')}
         </select>
       </div>
-      <div class="gam-mc-field">
-        <label>Subject</label>
-        <input type="text" class="gam-input" id="mc-msg-subj" placeholder="Subject line...">
-      </div>
+      <!-- v10.14.2 MC3: MESSAGE subject collapse. Most messages don't need a
+           custom subject (templates fill it, otherwise GAW falls back to the
+           generic "Message from a moderator"). Tucking it into a <details>
+           reduces vertical space + visual noise in the common path; mods who
+           need a subject expand it once. Open by default if a template
+           injected a subject (sync'd by the change handler below). -->
+      <details class="gam-mc-field" id="mc-msg-subj-collapse">
+        <summary style="cursor:pointer;color:#9b9892;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;font-weight:600;padding:4px 0;list-style:none">
+          <span style="display:inline-block;width:14px">▸</span>Subject (optional)
+        </summary>
+        <div style="margin-top:6px">
+          <input type="text" class="gam-input" id="mc-msg-subj" placeholder="Subject line...">
+        </div>
+      </details>
       <div class="gam-mc-field">
         <label>Message to ${escapeHtml(username)}</label>
         <textarea class="gam-input gam-textarea" id="mc-msg-body" rows="9" placeholder="Message body..."></textarea>
@@ -10390,6 +10510,13 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (!t) return;
       subj.value = t.subject;
       body.value = t.body.replace(/\{username\}/g, username);
+      // v10.14.2 MC3: when a template injects a non-empty subject, auto-open
+      // the collapsed details so the mod sees what GAW will show as the
+      // thread title.
+      try {
+        const _coll = root.querySelector('#mc-msg-subj-collapse');
+        if (_coll && t.subject) _coll.open = true;
+      } catch(_){}
     });
 
     root.querySelector('#mc-msg-cancel').addEventListener('click', closeAllPanels);
@@ -12575,7 +12702,18 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       // v10.13.4 W4 (P0 modmail hot-path): SUS and DR shortcuts inline so
       // mod doesn't have to detour through Mod Console (UIUX2-37 \u00a7C CR-2/CR-3).
+      // v10.14.2 MM6: state-aware label. Read existing SUS state before the
+      // RPC -- if already-SUS, show the no-op "Already SUS" snack instead of
+      // a misleading "marked SUS" success on a duplicate.
       else if (act === 'sus'){
+        const _alreadySus = !!(typeof _susState === 'object' && _susState && _susState.rows
+          && _susState.rows.has(String(sender || '').toLowerCase()));
+        if (_alreadySus) {
+          snack(`${sender} is already SUS`, 'info');
+          btn.textContent = '\u2713 Already SUS';
+          btn.disabled = true;
+          return;
+        }
         btn.disabled = true;
         const orig = btn.textContent;
         btn.textContent = '\u{1F6A9} marking SUS...';
@@ -12589,6 +12727,14 @@ Analyze this comment against the community rules. Then write a brief, profession
             btn.textContent = '\u2713 SUS marked';
             snack(`${sender} marked SUS`, 'success');
             logAction({ type:'sus', user:sender, source:'modmail-bar' });
+            // v10.14.2 MM6: keep _susState in sync so a second click reads
+            // the fresh state without round-tripping the SW.
+            try {
+              const _lk = String(sender || '').toLowerCase();
+              if (_susState && _susState.rows && _lk) {
+                _susState.rows.set(_lk, (r.data && r.data.row) || { username: sender, reason: 'modmail-bar', marked_by: '(you)', comment_count_24h: 0 });
+              }
+            } catch(_){}
           } else {
             const errMsg = (r && r.error) || 'unknown';
             btn.disabled = false;
@@ -17243,11 +17389,20 @@ Analyze this comment against the community rules. Then write a brief, profession
   // chrome.storage.session.gam_modmail_drafts. _showModmailPopover
   // surfaces cached drafts immediately on open (no AI wait); click
   // ✨ button still fires fresh on demand.
+  // v10.14.2 MM2: first-cycle warm batch size. Initial fire after lazy boot
+  // pre-drafts 10 threads instead of 3 so the inbox has meaningful coverage
+  // on day 0. Subsequent cycles revert to 3/cycle (steady-state AI budget).
+  // Closes UIUX2-40 §A.3 first-day warmup gap.
+  let _ambientFirstCycleDone = false;
   async function _ambientModmailPrefetch() {
     if (!getModToken()) return;
     if (document.visibilityState === 'hidden') return;
     try {
-      const rec = await rpcCall('modmailRecent', { limit: 5 });
+      const _isFirstCycle = !_ambientFirstCycleDone;
+      // Pull a wider thread list on the first cycle so the slice can warm
+      // 10 distinct threads. Steady state still asks for 5 (matches prior).
+      const _recentLimit = _isFirstCycle ? 12 : 5;
+      const rec = await rpcCall('modmailRecent', { limit: _recentLimit });
       if (!rec || !rec.ok || !rec.data || !rec.data.ok) return;
       const threads = rec.data.threads || [];
       if (threads.length === 0) return;
@@ -17259,12 +17414,17 @@ Analyze this comment against the community rules. Then write a brief, profession
       } catch (_) { /* fall through with empty */ }
       const FRESH_MS = 30 * 60 * 1000;
       const now = Date.now();
+      // v10.14.2 MM2: 10 on first cycle, 3 on subsequent cycles.
+      const _batchCap = _isFirstCycle ? 10 : 3;
       const need = threads.filter(t => {
         if (!t.thread_id) return false;
         const cur = cache[t.thread_id];
         if (cur && (now - (cur.cachedAt || 0)) < FRESH_MS) return false;
         return true;
-      }).slice(0, 3);  // pre-fetch at most 3 per cycle (AI budget)
+      }).slice(0, _batchCap);
+      // Mark first cycle complete only when we actually issue the larger fetch
+      // (a no-op cycle with 0 needed shouldn't lock us out of the warm batch).
+      if (_isFirstCycle && need.length > 0) _ambientFirstCycleDone = true;
       for (const t of need) {
         try {
           const ar = await rpcCall('modmailAiReplyForThread', {
@@ -17364,10 +17524,119 @@ Analyze this comment against the community rules. Then write a brief, profession
     const list = panel.querySelector('#gam-mmp-list');
     const detail = panel.querySelector('#gam-mmp-detail');
     let currentThreads = [];
+    // v10.14.2 MM1 (UIUX2-40 R2): scroll-triggered pagination state.
+    // Initial render shows 30 threads (existing behavior). When the sentinel
+    // at the end of the list intersects the viewport, expand the window up to
+    // the worker's hard cap of 50 (`background.js:2637`). Past 50, no further
+    // pages -- worker would need schema/RPC work which is explicitly out of
+    // scope for this wave.
+    const _PAGE_INITIAL = 30;
+    const _PAGE_HARD_CAP = 50; // matches modmailRecent worker cap
+    let _shownCount = 0;
+    let _paginationLoading = false;
+    let _intersectObs = null;
+
+    function _renderRow(t) {
+      const row = document.createElement('div');
+      row.style.cssText = 'min-height:48px;border-bottom:1px solid #2a2825;padding:8px 12px;cursor:pointer;transition:background-color 80ms';
+      row.dataset.threadId = t.thread_id;
+      row.addEventListener('mouseenter', () => row.style.background = '#1c1c20');
+      row.addEventListener('mouseleave', () => { if (row.dataset.selected !== '1') row.style.background = ''; });
+      row.addEventListener('click', () => {
+        list.querySelectorAll('[data-thread-id]').forEach(r => { r.dataset.selected = ''; r.style.background = ''; r.style.borderLeft = ''; r.style.paddingLeft = ''; });
+        row.dataset.selected = '1';
+        row.style.background = 'rgba(255,153,51,0.10)';
+        row.style.borderLeft = '3px solid var(--bb-amber)';
+        row.style.paddingLeft = '9px';
+        renderDetail(t);
+      });
+      const head = document.createElement('div');
+      head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:3px';
+      const who = document.createElement('span');
+      who.style.cssText = 'color:#66ccff;font-weight:600;font-size:11px;flex:0 0 auto';
+      who.textContent = 'u/' + (t.first_user || '?');
+      const status = document.createElement('span');
+      const sc = { new:'#ff3b3b', claimed:'#ffd84d', replied:'#66ccff', resolved:'#44dd66', awaiting:'#9b9892', archived:'#5a5752' };
+      status.style.cssText = 'color:' + (sc[t.status] || '#9b9892') + ';font-size:9px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600';
+      status.textContent = t.status || 'new';
+      head.appendChild(who); head.appendChild(status);
+      const subj = document.createElement('div');
+      subj.style.cssText = 'color:#e8e6e1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:2px';
+      subj.textContent = t.subject || '(no subject)';
+      const preview = document.createElement('div');
+      preview.style.cssText = 'color:#9b9892;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      preview.textContent = (t.last_body || '').slice(0, 80);
+      row.appendChild(head); row.appendChild(subj); row.appendChild(preview);
+      return row;
+    }
+
+    function _detachSentinel() {
+      try { if (_intersectObs) { _intersectObs.disconnect(); _intersectObs = null; } } catch(_){}
+      const old = list.querySelector('[data-mm-sentinel="1"]');
+      if (old) old.remove();
+    }
+
+    async function _loadNextPage() {
+      if (_paginationLoading) return;
+      if (_shownCount >= currentThreads.length && _shownCount >= _PAGE_HARD_CAP) return;
+      _paginationLoading = true;
+      _detachSentinel();
+      try {
+        // If we already have more threads cached than shown, just append them.
+        if (_shownCount < currentThreads.length) {
+          const nextSlice = currentThreads.slice(_shownCount, _shownCount + _PAGE_INITIAL);
+          nextSlice.forEach(t => list.appendChild(_renderRow(t)));
+          _shownCount += nextSlice.length;
+        } else if (currentThreads.length < _PAGE_HARD_CAP) {
+          // Fetch the wider window (up to 50) and append the new arrivals.
+          const wider = await rpcCall('modmailRecent', { limit: _PAGE_HARD_CAP });
+          if (wider && wider.ok && wider.data && wider.data.ok && Array.isArray(wider.data.threads)) {
+            const all = wider.data.threads;
+            const fresh = all.slice(currentThreads.length);
+            fresh.forEach(t => list.appendChild(_renderRow(t)));
+            _shownCount += fresh.length;
+            currentThreads = all;
+          }
+        }
+      } catch(_){}
+      _paginationLoading = false;
+      // Re-attach sentinel only if more cached rows remain to render.
+      // Once we've rendered everything (cached or fetched), terminal hint.
+      if (_shownCount < currentThreads.length) {
+        _attachSentinel();
+      } else {
+        const end = document.createElement('div');
+        end.style.cssText = 'padding:10px 12px;color:#5a5752;font-size:10px;text-align:center;letter-spacing:0.04em;text-transform:uppercase';
+        end.textContent = '— end of recent threads —';
+        list.appendChild(end);
+      }
+    }
+
+    function _attachSentinel() {
+      _detachSentinel();
+      const sentinel = document.createElement('div');
+      sentinel.dataset.mmSentinel = '1';
+      sentinel.style.cssText = 'height:24px;display:flex;align-items:center;justify-content:center;color:#5a5752;font-size:10px;letter-spacing:0.04em;text-transform:uppercase';
+      sentinel.textContent = '… loading more …';
+      list.appendChild(sentinel);
+      try {
+        _intersectObs = new IntersectionObserver(entries => {
+          for (const en of entries) {
+            if (en.isIntersecting) { _loadNextPage(); break; }
+          }
+        }, { root: list, rootMargin: '100px', threshold: 0.01 });
+        _intersectObs.observe(sentinel);
+      } catch(_) {
+        // IntersectionObserver unsupported -- silently degrade (no pagination).
+        sentinel.remove();
+      }
+    }
 
     async function loadList(forceFirehose) {
       // v9.24.0 (Commander 2026-05-08): refresh = ALSO run the firehose
       // backfill so the inbox is always fresh, not stale-D1.
+      _detachSentinel();
+      _shownCount = 0;
       if (forceFirehose) {
         list.innerHTML = '<div style="padding:14px;color:var(--bb-amber);font-size:10px">⏳ Running firehose backfill from /modmail (≈5s)…</div>';
         try {
@@ -17378,7 +17647,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       } else {
         list.innerHTML = '<div style="padding:14px;color:#9b9892">loading...</div>';
       }
-      const res = await rpcCall('modmailRecent', { limit: 30 });
+      const res = await rpcCall('modmailRecent', { limit: _PAGE_INITIAL });
       if (!res || !res.ok || !res.data || !res.data.ok) {
         list.innerHTML = '<div style="padding:14px;color:#ff3b3b">Failed to load: ' + escapeHtml(String((res && res.data && res.data.error) || (res && res.error) || 'unknown')) + '</div>';
         return;
@@ -17401,40 +17670,10 @@ Analyze this comment against the community rules. Then write a brief, profession
         return;
       }
       list.innerHTML = '';
-      currentThreads.forEach(t => {
-        const row = document.createElement('div');
-        row.style.cssText = 'min-height:48px;border-bottom:1px solid #2a2825;padding:8px 12px;cursor:pointer;transition:background-color 80ms';
-        row.dataset.threadId = t.thread_id;
-        row.addEventListener('mouseenter', () => row.style.background = '#1c1c20');
-        row.addEventListener('mouseleave', () => { if (row.dataset.selected !== '1') row.style.background = ''; });
-        row.addEventListener('click', () => {
-          // Mark selected
-          list.querySelectorAll('[data-thread-id]').forEach(r => { r.dataset.selected = ''; r.style.background = ''; r.style.borderLeft = ''; r.style.paddingLeft = ''; });
-          row.dataset.selected = '1';
-          row.style.background = 'rgba(255,153,51,0.10)';
-          row.style.borderLeft = '3px solid var(--bb-amber)';
-          row.style.paddingLeft = '9px';
-          renderDetail(t);
-        });
-        const head = document.createElement('div');
-        head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:3px';
-        const who = document.createElement('span');
-        who.style.cssText = 'color:#66ccff;font-weight:600;font-size:11px;flex:0 0 auto';
-        who.textContent = 'u/' + (t.first_user || '?');
-        const status = document.createElement('span');
-        const sc = { new:'#ff3b3b', claimed:'#ffd84d', replied:'#66ccff', resolved:'#44dd66', awaiting:'#9b9892', archived:'#5a5752' };
-        status.style.cssText = 'color:' + (sc[t.status] || '#9b9892') + ';font-size:9px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600';
-        status.textContent = t.status || 'new';
-        head.appendChild(who); head.appendChild(status);
-        const subj = document.createElement('div');
-        subj.style.cssText = 'color:#e8e6e1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:2px';
-        subj.textContent = t.subject || '(no subject)';
-        const preview = document.createElement('div');
-        preview.style.cssText = 'color:#9b9892;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
-        preview.textContent = (t.last_body || '').slice(0, 80);
-        row.appendChild(head); row.appendChild(subj); row.appendChild(preview);
-        list.appendChild(row);
-      });
+      currentThreads.forEach(t => list.appendChild(_renderRow(t)));
+      _shownCount = currentThreads.length;
+      // Attach sentinel only if there might be more rows (worker cap is 50).
+      if (_shownCount < _PAGE_HARD_CAP) _attachSentinel();
     }
 
     async function renderDetail(t) {
@@ -17678,23 +17917,30 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     const body = pop.querySelector('#gam-modmail-body');
     // v9.15.0 - load ambient pre-fetched drafts cache for instant rendering
+    // v10.14.2 MM5 (RALPH-W4 F5 + RALPH-MODMAIL F5): race fix. Pre-fix the
+    // cache load was fire-and-forget while _loadModmailList(false) was
+    // invoked synchronously below at line 17897 -- so threads rendered with
+    // an empty cache when fast network beat the chrome.storage chain.
+    // Also surfaces a "Draft restored from local" chip on the popover (was
+    // panel-only at L17492) when the local mirror provides the cache.
     let __draftCache = {};
-    try {
-      chrome.storage.session.get('gam_modmail_drafts').then(out => {
+    let __restoredFromLocal = false;
+    const __cachePromise = (async () => {
+      try {
+        const out = await chrome.storage.session.get('gam_modmail_drafts');
         __draftCache = (out && out.gam_modmail_drafts) || {};
-        // v10.13.4 W4 (P0-24 / R-15): fall back to local mirror on cold
-        // session cache. TTL widened to 24h per SHIPMASTER spec.
+        // Fall back to local mirror (24h TTL) on cold session cache.
         if (!Object.keys(__draftCache).length) {
-          chrome.storage.local.get('gam_modmail_drafts_local').then(lo => {
-            const localStore = lo && lo.gam_modmail_drafts_local;
-            if (localStore && localStore.drafts
-                && (Date.now() - (localStore.savedAt || 0)) < 24 * 60 * 60 * 1000) {
-              __draftCache = localStore.drafts;
-            }
-          }).catch(() => {});
+          const lo = await chrome.storage.local.get('gam_modmail_drafts_local');
+          const localStore = lo && lo.gam_modmail_drafts_local;
+          if (localStore && localStore.drafts
+              && (Date.now() - (localStore.savedAt || 0)) < 24 * 60 * 60 * 1000) {
+            __draftCache = localStore.drafts;
+            __restoredFromLocal = true;
+          }
         }
-      }).catch(() => {});
-    } catch (_) {}
+      } catch (_) { /* swallow */ }
+    })();
 
     // v9.24.0 (Commander 2026-05-08): wrap the load chain so REFRESH can
     // re-invoke and so the empty-state path can auto-fire the firehose
@@ -17714,7 +17960,14 @@ Analyze this comment against the community rules. Then write a brief, profession
           body.innerHTML = '<div style="padding:12px;color:#9b9892">loading recent modmail…</div>';
         }
       } catch(_){}
-      return rpcCall('modmailRecent', { limit: 15 }).then(async res => {
+      // v10.14.2 MM5: await the cache promise so rendering doesn't race the
+      // session->local fallback chain. RPC + cache run in parallel via
+      // Promise.all to keep the user-perceived latency identical.
+      const [res] = await Promise.all([
+        rpcCall('modmailRecent', { limit: 15 }),
+        __cachePromise
+      ]);
+      return Promise.resolve(res).then(async res => {
       if (!res || !res.ok || !res.data || !res.data.ok) {
         const err = (res && res.data && res.data.error) || (res && res.error) || 'unknown';
         body.innerHTML = '<div style="padding:12px;color:#ff3b3b">Failed to load: ' + escapeHtml(String(err)) + '</div>';
@@ -17740,6 +17993,15 @@ Analyze this comment against the community rules. Then write a brief, profession
         return;
       }
       body.innerHTML = '';
+      // v10.14.2 MM5: surface "Draft restored from local" chip on popover
+      // (mirrors the full-panel behavior at L17492) when the cache came from
+      // the 24h local mirror rather than session storage.
+      if (__restoredFromLocal && Object.keys(__draftCache).length > 0) {
+        const _chip = document.createElement('div');
+        _chip.style.cssText = 'background:rgba(68,221,102,0.12);color:#44dd66;font-size:10px;padding:4px 12px;border-bottom:1px solid rgba(68,221,102,0.3);letter-spacing:0.04em;text-transform:uppercase;font-weight:600';
+        _chip.textContent = '✓ Drafts restored from local';
+        body.appendChild(_chip);
+      }
       threads.forEach(t => {
         const row = document.createElement('div');
         row.style.cssText = 'border-bottom:1px solid #2a2825;padding:8px 12px;cursor:pointer;transition:background-color 80ms';

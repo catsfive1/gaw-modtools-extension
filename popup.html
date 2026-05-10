@@ -521,7 +521,9 @@
           <input id="firstRunInput" type="password" placeholder="paste here" style="width:100%;background:#060709;border:1px solid #3d3a35;color:#e8e6e1;padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;border-radius:4px;margin-bottom:8px;box-sizing:border-box">
           <div id="firstRunUsernameWrap" style="display:none;margin-bottom:8px">
             <label for="firstRunUsername" style="color:#9b9892;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px">Your GAW username</label>
-            <input id="firstRunUsername" type="text" placeholder="e.g. catsfive" style="width:100%;background:#060709;border:1px solid #3d3a35;color:#e8e6e1;padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;border-radius:4px;box-sizing:border-box">
+            <input id="firstRunUsername" type="text" placeholder="e.g. catsfive" pattern="[A-Za-z0-9_-]{2,64}" maxlength="64" style="width:100%;background:#060709;border:1px solid #3d3a35;color:#e8e6e1;padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;border-radius:4px;box-sizing:border-box">
+            <!-- v10.14.2 FR3: format hint + live validation chip -->
+            <small id="firstRunUsernameHint" style="display:block;margin-top:4px;color:#5a5752;font-size:10px;letter-spacing:0.02em">Allowed: A-Z a-z 0-9 _ -, 2-64 chars</small>
           </div>
           <div style="display:flex;gap:6px">
             <button id="firstRunBack" class="pop-btn pop-btn-ghost" style="flex:0 0 auto">&#x2190; Back</button>
