@@ -203,25 +203,9 @@ html, body {
   border-color: #f04040;
   color: #f04040;
 }
-/* v9.6.0: macro tab active state */
-.gam-macro-tab-active {
-  background: rgba(74,158,255,.18) !important;
-  border-color: #4A9EFF !important;
-  color: #4A9EFF !important;
-}
-/* v9.6.0 UX iter 4: macro row hover affordance + body fade-out for long text */
-.gam-macro-row:hover {
-  background: rgba(74,158,255,.06);
-}
-.gam-macro-row {
-  position: relative;
-}
-/* Visual fade on overflowing bodies so users know there's more without scrollbar bling */
-.gam-macro-row > div:nth-child(2) {
-  position: relative;
-  mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
-}
+/* v10.13.4 W4 (P0-29 / R-08): duplicate .gam-macro-tab-active block removed.
+   The Bloomberg-amber active state at L1403 is now the single source of truth
+   (was being overridden by an old blue !important block here). */
 /* v8.5.3: in-flight state */
 .pop-btn-ghost:disabled,
 .pop-btn-ghost.loading {
@@ -1434,6 +1418,195 @@ input:focus, textarea:focus, select:focus {
   color: var(--bb-ink-faint) !important;
   font-size: var(--bb-t-xs);
   font-variant-numeric: tabular-nums;
+}
+
+/* v10.13.4 W4 (P0-28 / R-09): macros v2 — filter bar, hover trio,
+   delconfirm countdown, AI review panel.
+   Hover-revealed action trio: edit/duplicate/delete buttons hidden by
+   default, fade in on row hover. */
+.gam-macro-item {
+  position: relative;
+  cursor: default;
+}
+.gam-macro-item-actions {
+  display: flex;
+  gap: var(--bb-s2);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.gam-macro-item:hover .gam-macro-item-actions,
+.gam-macro-item:focus-within .gam-macro-item-actions {
+  opacity: 1;
+}
+.gam-macro-item-action {
+  background: transparent !important;
+  border: 1px solid var(--bb-line) !important;
+  color: var(--bb-ink-dim) !important;
+  font: 600 var(--bb-t-xs)/1 var(--bb-font) !important;
+  padding: 2px var(--bb-s2) !important;
+  cursor: pointer !important;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 0 !important;
+}
+.gam-macro-item-action:hover {
+  border-color: var(--bb-amber) !important;
+  color: var(--bb-amber) !important;
+}
+.gam-macro-item-action.danger:hover {
+  border-color: var(--bb-red, #f04040) !important;
+  color: var(--bb-red, #f04040) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gam-macro-item-actions { opacity: 1; transition: none; }
+}
+
+/* Filter bar above macros list */
+.gam-macro-filter {
+  display: flex;
+  gap: var(--bb-s2);
+  margin: var(--bb-s2) 0;
+  align-items: center;
+}
+.gam-macro-filter input[type="search"] {
+  flex: 1;
+  padding: var(--bb-s2) var(--bb-s3);
+  background: var(--bb-sunken);
+  color: var(--bb-ink);
+  border: 1px solid var(--bb-line);
+  font: var(--bb-t-xs) var(--bb-font);
+  border-radius: 0;
+}
+.gam-macro-filter select {
+  padding: var(--bb-s2) var(--bb-s3);
+  background: var(--bb-sunken);
+  color: var(--bb-ink-dim);
+  border: 1px solid var(--bb-line);
+  font: var(--bb-t-xs) var(--bb-font);
+  cursor: pointer;
+  border-radius: 0;
+}
+
+/* Inline delete-confirm row state with 4s countdown bar */
+.gam-macro-item.delconfirm {
+  background: rgba(240,64,64,0.06) !important;
+  border-left: 2px solid var(--bb-red, #f04040) !important;
+}
+.gam-macro-delconfirm {
+  display: flex;
+  gap: var(--bb-s2);
+  align-items: center;
+  padding: var(--bb-s2) 0;
+  font: 600 var(--bb-t-xs) var(--bb-font);
+  color: var(--bb-red, #f04040);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.gam-macro-delconfirm-bar {
+  flex: 1;
+  height: 3px;
+  background: rgba(240,64,64,0.18);
+  position: relative;
+  overflow: hidden;
+}
+.gam-macro-delconfirm-bar > span {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  background: var(--bb-red, #f04040);
+  width: 100%;
+  transform-origin: left center;
+  animation: gam-macro-delconfirm-shrink 4s linear forwards;
+}
+@keyframes gam-macro-delconfirm-shrink {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gam-macro-delconfirm-bar > span { animation: none; transform: scaleX(0.5); }
+}
+.gam-macro-delconfirm button {
+  background: transparent;
+  border: 1px solid var(--bb-red, #f04040);
+  color: var(--bb-red, #f04040);
+  font: 600 var(--bb-t-xs) var(--bb-font);
+  padding: 2px var(--bb-s3);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.gam-macro-delconfirm button.cancel {
+  border-color: var(--bb-line);
+  color: var(--bb-ink-dim);
+}
+
+/* AI review panel: checkbox list with SAVE SELECTED (N) */
+.gam-macro-ai-review {
+  margin-top: var(--bb-s2);
+  padding: var(--bb-s3);
+  background: var(--bb-sunken);
+  border: 1px solid var(--bb-amber-dim, var(--bb-line));
+  display: flex;
+  flex-direction: column;
+  gap: var(--bb-s2);
+}
+.gam-macro-ai-review-head {
+  font: 600 var(--bb-t-xs) var(--bb-font);
+  color: var(--bb-amber);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.gam-macro-ai-review-row {
+  display: flex;
+  gap: var(--bb-s2);
+  padding: var(--bb-s2);
+  background: var(--bb-bg);
+  border: 1px solid var(--bb-line);
+  align-items: flex-start;
+  cursor: pointer;
+}
+.gam-macro-ai-review-row:hover {
+  border-color: var(--bb-line-hot, var(--bb-amber-dim));
+}
+.gam-macro-ai-review-row input[type="checkbox"] {
+  margin-top: 2px;
+  cursor: pointer;
+}
+.gam-macro-ai-review-row .label {
+  font: 600 var(--bb-t-xs) var(--bb-font);
+  color: var(--bb-amber);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.gam-macro-ai-review-row .body {
+  font: var(--bb-t-xs)/1.4 var(--bb-font);
+  color: var(--bb-ink-dim);
+  margin-top: var(--bb-s1);
+  white-space: pre-wrap;
+}
+.gam-macro-ai-review-actions {
+  display: flex;
+  gap: var(--bb-s2);
+  margin-top: var(--bb-s1);
+}
+.gam-macro-ai-review-actions button {
+  background: transparent;
+  border: 1px solid var(--bb-amber);
+  color: var(--bb-amber);
+  font: 600 var(--bb-t-xs) var(--bb-font);
+  padding: var(--bb-s2) var(--bb-s3);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.gam-macro-ai-review-actions button.cancel {
+  border-color: var(--bb-line);
+  color: var(--bb-ink-dim);
+}
+.gam-macro-ai-review-actions button[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* Iter 15: tools row buttons sit tight */

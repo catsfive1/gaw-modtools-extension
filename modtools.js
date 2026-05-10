@@ -8177,8 +8177,22 @@
     function renderTab(id){
       TAB_MEMORY[username.toLowerCase()] = id;
       nav.querySelectorAll('.gam-mc-tab').forEach(t=>{
-        t.classList.toggle('gam-mc-tab-active', t.dataset.tab === id);
+        const isActive = (t.dataset.tab === id);
+        t.classList.toggle('gam-mc-tab-active', isActive);
+        // v10.13.4 W4: rebuild label so active state strips number prefix
+        const numStr = t.dataset.num;
+        const tabDef = tabs.find(tt => tt.id === t.dataset.tab);
+        if (tabDef && numStr) {
+          t.textContent = isActive
+            ? (tabDef.icon + ' ' + tabDef.label)
+            : (numStr + '·' + tabDef.label.toUpperCase());
+        }
       });
+      // Track current tab on the modal so the keydown handler can route Ctrl+Enter.
+      try {
+        const mcRoot = nav.closest('#gam-mc-panel');
+        if (mcRoot) mcRoot._gamTab = id;
+      } catch(_){}
       panels.innerHTML = '';
       const el2 = document.createElement('div');
       el2.className = 'gam-mc-panel';
@@ -8196,12 +8210,22 @@
       }, 30);
     }
 
-    tabs.forEach(t=>{
+    // v10.13.4 W4 (P0-keyboard): tabs render with number prefix in inactive
+    // state ("1·INTEL"). Active state strips prefix (icon + label only).
+    // BAN tab also gets gam-mc-tab-danger class so its inactive state shows
+    // 70% red and active state shows full red (P0 BAN visibility).
+    tabs.forEach((t, idx) => {
+      const num = idx + 1;
+      const isActive = (t.id === tab);
+      const danger = (t.id === 'ban') ? ' gam-mc-tab-danger' : '';
       const b = el('button', {
-        cls:'gam-mc-tab' + (t.id===tab ? ' gam-mc-tab-active' : ''),
+        cls: 'gam-mc-tab' + (isActive ? ' gam-mc-tab-active' : '') + danger,
         'data-tab': t.id,
-        onclick: ()=>renderTab(t.id)
-      }, t.icon + ' ' + t.label);
+        'data-num': String(num),
+        onclick: () => renderTab(t.id)
+      }, isActive
+            ? (t.icon + ' ' + t.label)
+            : (num + '·' + t.label.toUpperCase()));
       nav.appendChild(b);
     });
 
@@ -8214,37 +8238,161 @@
     panelOpen = 'modconsole';
     // v8.1 ux: focus trap on Mod Console popover (flag-gated inside helper).
     try { if (mc) installFocusTrap(mc); } catch(e){}
+
+    // v10.13.4 W4 (P0-keyboard): number keys 1-6 switch tabs, Ctrl+Enter
+    // submits within tab. Guard inputs/select/textarea/.gam-mc-dur so typing
+    // "2" into BAN duration doesn't switch tabs.
+    function _mcKbHandler(e){
+      // Only fire when this Mod Console modal is open & in the DOM.
+      if (!mc || !mc.isConnected) return;
+      const t = e.target;
+      const tn = (t && t.tagName) || '';
+      const inField = (tn === 'INPUT' || tn === 'TEXTAREA' || tn === 'SELECT');
+      const inDurBtn = !!(t && t.classList && t.classList.contains('gam-mc-dur'));
+      // Number keys 1-6: switch tab (skip when typing).
+      if (!e.ctrlKey && !e.altKey && !e.metaKey && !inField && !inDurBtn) {
+        const k = e.key;
+        if (k >= '1' && k <= '6') {
+          const idx = parseInt(k, 10) - 1;
+          if (tabs[idx]) {
+            e.preventDefault();
+            renderTab(tabs[idx].id);
+            return;
+          }
+        }
+      }
+      // Ctrl+Enter: submit current tab's primary action.
+      if (e.ctrlKey && (e.key === 'Enter' || e.key === '\n' || e.key === '\r')) {
+        const curTab = mc._gamTab;
+        let btn = null;
+        if (curTab === 'ban')      btn = mc.querySelector('#mc-ban-go');
+        else if (curTab === 'note')    btn = mc.querySelector('#mc-note-save');
+        else if (curTab === 'message') btn = mc.querySelector('#mc-msg-send');
+        if (btn && !btn.disabled) {
+          e.preventDefault();
+          btn.click();
+        }
+      }
+    }
+    document.addEventListener('keydown', _mcKbHandler, true);
+    if (mc) {
+      const _origRemove = mc.remove.bind(mc);
+      mc.remove = function(){
+        try { document.removeEventListener('keydown', _mcKbHandler, true); } catch(_){}
+        return _origRemove();
+      };
+    }
   }
 
   // v10.9.0 M3 (ASK-052): OP DELETES tab in Mod Console
+  // v10.13.4 W4 (P0): time-filter dropdown (6h/24h/48h/7d), per-row Open
+  // post + Open console buttons, was_in_queue rendered as styled chip.
   function _renderOpDelTab(root) {
-    root.innerHTML = '<div class="gam-mc-loading" style="padding:10px">\u{1F50D} Loading OP deletions...</div>';
-    rpcCall('modOpDeletes', { since: Date.now() - 24 * 3600 * 1000, limit: 20 }).then(function(res) {
+    const FILTERS = [
+      { label: '6h',  hours: 6 },
+      { label: '24h', hours: 24 },
+      { label: '48h', hours: 48 },
+      { label: '7d',  hours: 168 }
+    ];
+    let _curHours = 24;
+
+    function _filterLabel(h) {
+      const f = FILTERS.find(function(x){ return x.hours === h; });
+      return f ? f.label : (h + 'h');
+    }
+
+    function _load() {
+      // Header (filter dropdown lives inside header so it persists across reloads)
       root.innerHTML = '';
-      const hdr = el('div', { cls: 'gam-mc-h', style: 'margin-bottom:6px' }, '\u{1F5D1} OP Self-Deletions — last 24h');
-      root.appendChild(hdr);
-      if (!res || !res.ok || !res.deletes || !res.deletes.length) {
-        root.appendChild(el('div', { style: 'color:#9b9892;font-size:11px;padding:6px' }, 'No OP self-deletions in the last 24 hours.'));
-        return;
-      }
-      res.deletes.forEach(function(d) {
-        const row = el('div', { style: 'border-bottom:1px solid #2a2e36;padding:6px 0;font-size:11px' });
-        const titleEl = el('div', { style: 'color:#ff3b3b;font-weight:600' }, escapeHtml(d.title || '(no title)'));
-        const meta = el('div', { style: 'color:#9b9892;font-size:10px;margin-top:2px' },
-          'by ' + escapeHtml(d.author || '?') +
-          (d.subreddit ? ' · ' + escapeHtml(d.subreddit) : '') +
-          (d.deleted_by_op_at ? ' · deleted ' + timeAgo(new Date(d.deleted_by_op_at).toISOString()) : '') +
-          (d.was_in_queue ? ' · ⚠️ was in queue' : '')
-        );
-        const snippet = d.snippet ? el('div', { style: 'color:#a0aec0;font-size:10px;margin-top:2px;font-style:italic' }, '“' + escapeHtml(d.snippet.slice(0, 120)) + '”') : null;
-        row.appendChild(titleEl);
-        row.appendChild(meta);
-        if (snippet) row.appendChild(snippet);
-        root.appendChild(row);
+      const hdr = el('div', {
+        cls: 'gam-mc-h',
+        style: 'margin-bottom:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap'
       });
-    }).catch(function(err) {
-      root.innerHTML = '<div style="color:#ff3b3b;padding:8px;font-size:11px">Error loading OP deletions: ' + escapeHtml(String(err && err.message || err)) + '</div>';
-    });
+      const hdrTitle = el('span', { style: 'flex:1' }, '\u{1F5D1} OP Self-Deletions — last ' + _filterLabel(_curHours));
+      const sel = document.createElement('select');
+      sel.id = 'mc-opdel-filter';
+      sel.style.cssText = 'background:#0e1115;color:#e8e6e1;border:1px solid #2a2e36;padding:3px 6px;font:11px ui-monospace,JetBrains Mono,monospace;cursor:pointer';
+      FILTERS.forEach(function(f){
+        const o = document.createElement('option');
+        o.value = String(f.hours);
+        o.textContent = f.label;
+        if (f.hours === _curHours) o.selected = true;
+        sel.appendChild(o);
+      });
+      sel.addEventListener('change', function(){
+        _curHours = parseInt(sel.value, 10) || 24;
+        _load();
+      });
+      hdr.appendChild(hdrTitle);
+      hdr.appendChild(sel);
+      root.appendChild(hdr);
+
+      const list = el('div', { cls: 'gam-mc-loading', style: 'padding:10px' }, '\u{1F50D} Loading OP deletions...');
+      root.appendChild(list);
+
+      rpcCall('modOpDeletes', { since: Date.now() - _curHours * 3600 * 1000, limit: 20 }).then(function(res) {
+        list.remove();
+        if (!res || !res.ok || !res.deletes || !res.deletes.length) {
+          root.appendChild(el('div', { style: 'color:#9b9892;font-size:11px;padding:6px' }, 'No OP self-deletions in the last ' + _filterLabel(_curHours) + '.'));
+          return;
+        }
+        res.deletes.forEach(function(d) {
+          const row = el('div', { style: 'border-bottom:1px solid #2a2e36;padding:6px 0;font-size:11px' });
+          const titleEl = el('div', { style: 'color:#ff3b3b;font-weight:600' }, escapeHtml(d.title || '(no title)'));
+          // Meta line: author / subreddit / time / styled was_in_queue chip
+          const meta = document.createElement('div');
+          meta.style.cssText = 'color:#9b9892;font-size:10px;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap';
+          meta.appendChild(document.createTextNode(
+            'by ' + (d.author || '?') +
+            (d.subreddit ? ' · ' + d.subreddit : '') +
+            (d.deleted_by_op_at ? ' · deleted ' + timeAgo(new Date(d.deleted_by_op_at).toISOString()) : '')
+          ));
+          if (d.was_in_queue) {
+            const chip = document.createElement('span');
+            chip.style.cssText = 'background:rgba(245,166,35,0.18);color:#f5a623;font-size:9px;padding:1px 6px;border-radius:8px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;border:1px solid rgba(245,166,35,0.3)';
+            chip.textContent = 'WAS IN QUEUE';
+            meta.appendChild(chip);
+          }
+          const snippet = d.snippet ? el('div', { style: 'color:#a0aec0;font-size:10px;margin-top:2px;font-style:italic' }, '“' + escapeHtml(d.snippet.slice(0, 120)) + '”') : null;
+          // Action buttons row
+          const actions = document.createElement('div');
+          actions.style.cssText = 'display:flex;gap:6px;margin-top:4px';
+          if (d.permalink || d.url) {
+            const openPost = document.createElement('button');
+            openPost.className = 'gam-btn';
+            openPost.style.cssText = 'background:transparent;border:1px solid #2a2825;color:#9b9892;padding:2px 8px;cursor:pointer;font:600 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;text-transform:uppercase';
+            openPost.textContent = '\u{1F517} Open post';
+            openPost.addEventListener('click', function(ev){
+              ev.stopPropagation();
+              const url = d.permalink ? ('https://greatawakening.win' + d.permalink) : d.url;
+              try { window.open(url, '_blank'); } catch(_){}
+            });
+            actions.appendChild(openPost);
+          }
+          if (d.author) {
+            const openConsole = document.createElement('button');
+            openConsole.className = 'gam-btn';
+            openConsole.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:2px 8px;cursor:pointer;font:600 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;text-transform:uppercase';
+            openConsole.textContent = '\u{1F6E1} Open console';
+            openConsole.addEventListener('click', function(ev){
+              ev.stopPropagation();
+              try { openModConsole(d.author, null, 'intel'); } catch(_){}
+            });
+            actions.appendChild(openConsole);
+          }
+          row.appendChild(titleEl);
+          row.appendChild(meta);
+          if (snippet) row.appendChild(snippet);
+          if (actions.children.length) row.appendChild(actions);
+          root.appendChild(row);
+        });
+      }).catch(function(err) {
+        list.remove();
+        root.appendChild(el('div', { style: 'color:#ff3b3b;padding:8px;font-size:11px' }, 'Error loading OP deletions: ' + (err && err.message || err)));
+      });
+    }
+
+    _load();
   }
 
   // ── INTEL tab ─────────────────────────────────────────────────────
@@ -8828,10 +8976,13 @@ Analyze this comment against the community rules. Then write a brief, profession
       </div>
       <div class="gam-mc-actions">
         <button class="gam-btn gam-btn-cancel" id="mc-ban-cancel">Cancel</button>
-        <button class="gam-btn" id="mc-ban-unban" style="background:#0a0a0b;color:#44dd66;border:1px solid #2eaa44">\u{1F513} UNBAN</button>
         <button class="gam-btn gam-btn-danger" id="mc-ban-go">\u{1F528} BAN (reason sent as message)</button>
       </div>
       <div id="mc-ban-status"></div>
+      <!-- v10.13.4 W4 (P0): UNBAN demoted to a ghost link beneath the status div -->
+      <div style="margin-top:6px;font-size:10px;text-align:right;letter-spacing:0.04em">
+        <a href="#" id="mc-ban-unban" style="color:#44dd66;text-decoration:underline;cursor:pointer;background:transparent;border:none;padding:0;font:inherit">already banned — unban instead</a>
+      </div>
       <!-- v9.9.0 - AI ban-summary -> auto-add to user notes (max 15 words). -->
       <div class="gam-mc-field" id="mc-ban-summary-wrap" style="margin-top:8px;display:none">
         <label style="font-size:10px;color:#9b9892;text-transform:uppercase;letter-spacing:0.08em">\u{1F916} AI summary (auto-appended to notes after BAN)</label>
@@ -9449,9 +9600,15 @@ Analyze this comment against the community rules. Then write a brief, profession
     // ban-hammer next to a mod's name (one of his fellow mods), they need to
     // be un-banned afterward. Why open a separate UI flow? Allow the action
     // here. Calls apiUnban + clears verified flag + sets roster to cleared.
+    // v10.13.4 W4 (P0): UNBAN demoted to ghost link below status div.
+    // Anchor element instead of button so handler tweaked: preventDefault on
+    // click; aria-disabled + pointer-events:none drive in-flight UI.
     const unbanBtn = root.querySelector('#mc-ban-unban');
     if (unbanBtn) {
-      unbanBtn.addEventListener('click', async () => {
+      const _origUnbanLabel = unbanBtn.textContent;
+      unbanBtn.addEventListener('click', async (ev) => {
+        try { ev.preventDefault(); } catch(_){}
+        if (unbanBtn.getAttribute('aria-disabled') === 'true') return;
         const statusEl = root.querySelector('#mc-ban-status');
         const ok = await preflight({
           title: `Unban "${username}"?`,
@@ -9460,12 +9617,13 @@ Analyze this comment against the community rules. Then write a brief, profession
           rows: [
             ['Target', username],
             ['Action', 'Remove active ban -- no message sent to user'],
-            ['Source', 'Mod Console BAN tab UNBAN button']
+            ['Source', 'Mod Console BAN tab UNBAN link']
           ]
         });
         if (!ok) return;
-        unbanBtn.disabled = true;
-        unbanBtn.textContent = '⌛ Unbanning...';
+        unbanBtn.setAttribute('aria-disabled', 'true');
+        unbanBtn.style.pointerEvents = 'none';
+        unbanBtn.textContent = '⌛ unbanning...';
         statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Unbanning ${escapeHtml(username)}...</div>`;
         const result = await executeUnban(username);
         if (result) {
@@ -9473,7 +9631,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           markVerified(username, false);
           logAction({ type: 'unban', user: username, source: 'mod-console-ban-tab' });
           statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-green">✓ ${escapeHtml(username)} unbanned</div>`;
-          unbanBtn.textContent = '✓ Unbanned';
+          unbanBtn.textContent = '✓ unbanned';
           snack(`🔓 ${username} unbanned`, 'success');
           // Append to user notes
           try {
@@ -9481,8 +9639,9 @@ Analyze this comment against the community rules. Then write a brief, profession
             await apiAddNote(username, `[${dateTag}] UNBAN via Mod Console (action by ${me() || 'unknown'})`);
           } catch(_) {}
         } else {
-          unbanBtn.disabled = false;
-          unbanBtn.textContent = '🔓 UNBAN';
+          unbanBtn.removeAttribute('aria-disabled');
+          unbanBtn.style.pointerEvents = '';
+          unbanBtn.textContent = _origUnbanLabel;
           statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-red">⚠ Unban failed -- check session, try again</div>`;
           snack('Unban failed', 'error');
         }
@@ -10116,9 +10275,10 @@ Analyze this comment against the community rules. Then write a brief, profession
       })();
       btn.textContent = '\u2713 Sent';
       // v10.6.2 HOTFIX UIUX-04 A.1 P0: re-enable button after 1.5s so mod can send follow-up
+      // v10.13.4 W4 (P0): preserve "\u21a9\ufe0f Send message" emoji on reset (was stripped).
       setTimeout(function() {
         btn.disabled = false;
-        btn.textContent = 'Send message';
+        btn.textContent = '\u{21A9}\u{FE0F} Send message';
         body.value = '';
       }, 1500);
     });
@@ -12198,6 +12358,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       <button class="gam-mm-bar-btn gam-mm-bar-danger" data-mm="ban">\u{1F528} Ban</button>
       <button class="gam-mm-bar-btn gam-mm-bar-warn" data-mm="unban">\u2716 Unban</button>
       <button class="gam-mm-bar-btn" data-mm="note">\u{1F4CB} Note</button>
+      <button class="gam-mm-bar-btn gam-mm-bar-warn" data-mm="sus">\u{1F6A9} Mark SUS</button>
+      <button class="gam-mm-bar-btn gam-mm-bar-danger" data-mm="dr72">\u{2620}\u{FE0F} DR 72h</button>
       <span class="gam-mm-bar-hint">Ctrl+Shift+A archive \u00B7 Ctrl+Shift+M Mod Console \u00B7 R focus reply</span>
     `;
     container.insertBefore(bar, container.firstChild);
@@ -12243,6 +12405,66 @@ Analyze this comment against the community rules. Then write a brief, profession
         } else {
           btn.disabled = false;
           snack(`Failed to unban ${sender}`, 'error');
+        }
+      }
+      // v10.13.4 W4 (P0 modmail hot-path): SUS and DR shortcuts inline so
+      // mod doesn't have to detour through Mod Console (UIUX2-37 \u00a7C CR-2/CR-3).
+      else if (act === 'sus'){
+        btn.disabled = true;
+        const orig = btn.textContent;
+        btn.textContent = '\u{1F6A9} marking SUS...';
+        try {
+          const r = await chrome.runtime.sendMessage({
+            type: 'rpc',
+            name: 'modSusMark',
+            args: { username: sender, reason: 'modmail-bar', client_op_id: __makeReqId() }
+          });
+          if (r && r.ok) {
+            btn.textContent = '\u2713 SUS marked';
+            snack(`${sender} marked SUS`, 'success');
+            logAction({ type:'sus', user:sender, source:'modmail-bar' });
+          } else {
+            const errMsg = (r && r.error) || 'unknown';
+            btn.disabled = false;
+            btn.textContent = orig;
+            snack('SUS mark failed: ' + errMsg, 'error');
+          }
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = orig;
+          snack('SUS mark failed: ' + (e && e.message || e), 'error');
+        }
+      }
+      else if (act === 'dr72'){
+        const confirmed = await preflight({
+          title: `Add ${sender} to Death Row?`,
+          danger: true,
+          armSeconds: 0,
+          rows: [
+            ['Target', sender],
+            ['Action', 'Schedule 72h ban (cancellable from DR queue)'],
+            ['Source', 'Modmail action bar']
+          ]
+        });
+        if (!confirmed) return;
+        btn.disabled = true;
+        const orig = btn.textContent;
+        btn.textContent = '\u2620\u{FE0F} scheduling...';
+        try {
+          const added = addToDeathRow(sender, 72 * 3600 * 1000, 'modmail-bar DR 72h', { fromUserAction: true });
+          if (added) {
+            btn.textContent = '\u2713 DR 72h';
+            snack(`${sender} on Death Row (72h)`, 'success');
+            logAction({ type:'dr-add', user:sender, source:'modmail-bar' });
+          } else {
+            btn.disabled = false;
+            btn.textContent = orig;
+            snack('Already on DR or failed to add', 'error');
+          }
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = orig;
+          snack('DR add failed: ' + (e && e.message || e), 'error');
         }
       }
     });
@@ -17075,29 +17297,55 @@ Analyze this comment against the community rules. Then write a brief, profession
       // Render AI candidates from cache OR fire fresh
       const aiHost = panel.querySelector('#gam-mmp-ai-host');
       let cached = null;
+      let _restoredFromLocal = false;
       try {
         const out = await chrome.storage.session.get('gam_modmail_drafts');
         const cache = (out && out.gam_modmail_drafts) || {};
         cached = cache[t.thread_id];
-        // v10.6.2 HOTFIX UIUX-04 A.2 P0: fall back to local mirror on cold session cache
+        // v10.13.4 W4 (P0-24 / R-15): fall back to local mirror on cold
+        // session cache. TTL widened to 24h per SHIPMASTER spec so drafts
+        // survive SW restarts within a working day.
         if (!cached) {
           try {
             const lo = await chrome.storage.local.get('gam_modmail_drafts_local');
             const localStore = lo && lo.gam_modmail_drafts_local;
             if (localStore && localStore.drafts && localStore.drafts[t.thread_id]
-                && (Date.now() - (localStore.savedAt || 0)) < 4 * 60 * 60 * 1000) {
+                && (Date.now() - (localStore.savedAt || 0)) < 24 * 60 * 60 * 1000) {
               cached = localStore.drafts[t.thread_id];
+              _restoredFromLocal = true;
             }
           } catch (_) {}
         }
       } catch (_) {}
       if (cached && Array.isArray(cached.replies) && cached.replies.length > 0) {
         renderAICards(aiHost, cached.replies, t, false);
+        // v10.13.4 W4: surface "Draft restored" chip when we hit the
+        // local mirror after SW restart so mods know it's recovered state.
+        if (_restoredFromLocal) {
+          try {
+            const chip = document.createElement('div');
+            chip.style.cssText = 'background:rgba(68,221,102,0.12);color:#44dd66;font-size:10px;padding:3px 8px;border:1px solid rgba(68,221,102,0.3);display:inline-block;letter-spacing:0.04em;text-transform:uppercase;font-weight:600;margin-bottom:6px';
+            chip.textContent = '✓ Draft restored from local';
+            aiHost.insertBefore(chip, aiHost.firstChild);
+          } catch (_) {}
+        }
       } else {
         aiHost.innerHTML = '<div style="margin-bottom:6px"><button data-ai-fire="1" style="background:transparent;border:1px solid #ff9933;color:#ff9933;padding:5px 12px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">✨ Generate 4 AI replies</button></div>';
         aiHost.querySelector('[data-ai-fire]').addEventListener('click', async (e) => {
           e.stopPropagation();
-          aiHost.innerHTML = '<div style="color:#9b9892;font-size:11px;padding:8px 0">⌛ AI drafting (4 calls in parallel, ~3-5s)...</div>';
+          // v10.13.4 W4 (P0-22 / R-14): 4-ghost shimmer grid replaces plain
+          // "AI drafting..." text on cold fetch. Port of ban_msg L8983 pattern.
+          aiHost.innerHTML = '';
+          const grid = document.createElement('div');
+          grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px';
+          for (var _gi = 0; _gi < 4; _gi++) {
+            const ghost = document.createElement('div');
+            ghost.className = 'gam-ai-skeleton';
+            ghost.style.cssText = 'background:#1a1a1d;border:1px solid #2a2825;padding:8px;height:80px;border-radius:0;position:relative;overflow:hidden';
+            ghost.innerHTML = '<div style="height:8px;background:#2a2825;width:30%;margin-bottom:6px"></div><div style="height:6px;background:#2a2825;width:90%;margin-bottom:4px"></div><div style="height:6px;background:#2a2825;width:80%;margin-bottom:4px"></div><div style="height:6px;background:#2a2825;width:60%"></div>';
+            grid.appendChild(ghost);
+          }
+          aiHost.appendChild(grid);
           const ar = await rpcCall('modmailAiReplyForThread', {
             thread_id: t.thread_id,
             sender:    t.first_user,
@@ -17127,7 +17375,12 @@ Analyze this comment against the community rules. Then write a brief, profession
           '</div>' +
         '</div>';
       }).join('');
-      host.innerHTML = head + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' + cards + '</div>';
+      // v10.13.4 W4 (P0): host living in the 320px col 3 should render a
+      // single-column grid so cards have horizontal breathing room. Detect
+      // by walking up to #gam-mmp-ai (the 320px sidebar) — if found, use 1fr.
+      const inCol3 = !!(host.closest && host.closest('#gam-mmp-ai'));
+      const gridCols = inCol3 ? '1fr' : '1fr 1fr';
+      host.innerHTML = head + '<div style="display:grid;grid-template-columns:' + gridCols + ';gap:8px">' + cards + '</div>';
       host.querySelectorAll('[data-use-body]').forEach((btn, idx) => {
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
@@ -17149,6 +17402,9 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     // V11 #3: Intel strip renderer
+    // v10.13.4 W4 (P0): capture strip element + isConnected guard before
+    // every async write so a user leaving the thread mid-flight doesn't
+    // throw "Cannot read properties of null" on the chip queries.
     function _renderIntelStrip(t) {
       const strip = panel.querySelector('#gam-mmp-intel');
       if (!strip) return;
@@ -17173,10 +17429,12 @@ Analyze this comment against the community rules. Then write a brief, profession
           } catch(_){}
         }
         if (!intel) return;
-        const ageEl   = panel.querySelector('#gam-intel-age');
-        const banEl   = panel.querySelector('#gam-intel-ban');
-        const susEl   = panel.querySelector('#gam-intel-sus');
-        const watchEl = panel.querySelector('#gam-intel-watch');
+        // Guard: user may have navigated away while we were awaiting RPC.
+        if (!strip.isConnected) return;
+        const ageEl   = strip.querySelector('#gam-intel-age');
+        const banEl   = strip.querySelector('#gam-intel-ban');
+        const susEl   = strip.querySelector('#gam-intel-sus');
+        const watchEl = strip.querySelector('#gam-intel-watch');
         if (ageEl && intel.account_age_days != null) {
           const d = intel.account_age_days;
           ageEl.textContent = d < 30 ? d + 'd' : d < 365 ? Math.floor(d / 30) + 'mo' : Math.floor(d / 365) + 'y';
@@ -17256,12 +17514,13 @@ Analyze this comment against the community rules. Then write a brief, profession
     try {
       chrome.storage.session.get('gam_modmail_drafts').then(out => {
         __draftCache = (out && out.gam_modmail_drafts) || {};
-        // v10.6.2 HOTFIX UIUX-04 A.2 P0: fall back to local mirror on cold session cache
+        // v10.13.4 W4 (P0-24 / R-15): fall back to local mirror on cold
+        // session cache. TTL widened to 24h per SHIPMASTER spec.
         if (!Object.keys(__draftCache).length) {
           chrome.storage.local.get('gam_modmail_drafts_local').then(lo => {
             const localStore = lo && lo.gam_modmail_drafts_local;
             if (localStore && localStore.drafts
-                && (Date.now() - (localStore.savedAt || 0)) < 4 * 60 * 60 * 1000) {
+                && (Date.now() - (localStore.savedAt || 0)) < 24 * 60 * 60 * 1000) {
               __draftCache = localStore.drafts;
             }
           }).catch(() => {});
@@ -17380,9 +17639,20 @@ Analyze this comment against the community rules. Then write a brief, profession
             useBtn.style.cssText = 'background:transparent;border:1px solid #44dd66;color:#44dd66;padding:2px 4px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
             useBtn.addEventListener('click', async (ce) => {
               ce.stopPropagation();
+              // v10.13.4 W4 (P0-23 / R-13): pre-fetched useBtn now fires
+              // modmailTrackResponse so AI usage analytics aren't
+              // under-reported. Mirrors fresh-fetch path L17430.
+              try {
+                rpcCall('modmailTrackResponse', {
+                  thread_id: t.thread_id, sender: t.first_user,
+                  subject: t.subject || '', response_body: rp.body,
+                  ai_used: 1, ai_tone: rp.tone || null,
+                  sent_at: Date.now()
+                }).catch(() => {});
+              } catch(_){}
               try { await navigator.clipboard.writeText(rp.body); } catch(_){}
               window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
-              try { snack('✓ Reply copied. Paste on the GAW thread.', 'success'); } catch(_){}
+              try { snack('✓ Reply copied + tracked. Paste on the GAW thread.', 'success'); } catch(_){}
             });
             card.appendChild(tag); card.appendChild(bodyEl); card.appendChild(useBtn);
             cards.appendChild(card);

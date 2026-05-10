@@ -4043,6 +4043,10 @@ loadBugVisibility();
 // =========================================================================
 let __macroKind = 'ban_msg';
 let __macroEditing = null;
+// v10.13.4 W4 (P0 / R-07): macros v2 — filter + sort state.
+let __macroFilter = '';
+let __macroSort = 'name'; // 'name' | 'use' | 'date'
+let __macroAllItems = [];
 
 function __macroSetStatus(msg, cls){
   const el = document.getElementById('macrosStatus');
@@ -4051,9 +4055,167 @@ function __macroSetStatus(msg, cls){
   el.className = 'pop-token-status' + (cls ? ' ' + cls : '');
 }
 
+// v10.13.4 W4: Edit form lives BELOW the list in the HTML (cannot touch
+// popup.html). On first call, hoist it to sit ABOVE the list so the slide-in
+// pattern matches the spec ("inline edit form slides above list, not below").
+function __macroEnsureEditAbove() {
+  const wrap = document.getElementById('macroEditWrap');
+  const section = document.getElementById('macrosSection');
+  const list = document.getElementById('macrosList');
+  if (!wrap || !section || !list) return;
+  if (wrap.dataset.gamHoisted === '1') return;
+  // Insert immediately before the list (above it, below filter bar).
+  section.insertBefore(wrap, list);
+  wrap.dataset.gamHoisted = '1';
+}
+
+// v10.13.4 W4: filter bar with search + sort dropdown, mounted once.
+function __macroEnsureFilterBar() {
+  if (document.getElementById('macroFilterBar')) return;
+  const section = document.getElementById('macrosSection');
+  const list = document.getElementById('macrosList');
+  if (!section || !list) return;
+  const bar = document.createElement('div');
+  bar.id = 'macroFilterBar';
+  bar.className = 'gam-macro-filter';
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.placeholder = 'Filter macros...';
+  search.setAttribute('aria-label', 'Filter macros');
+  search.value = __macroFilter;
+  search.addEventListener('input', function() {
+    __macroFilter = (search.value || '').trim().toLowerCase();
+    __macroRender();
+  });
+  const sort = document.createElement('select');
+  sort.setAttribute('aria-label', 'Sort macros');
+  [
+    { v: 'name', l: 'Name' },
+    { v: 'use',  l: 'Most used' },
+    { v: 'date', l: 'Recent' }
+  ].forEach(function(o){
+    const op = document.createElement('option');
+    op.value = o.v;
+    op.textContent = o.l;
+    if (o.v === __macroSort) op.selected = true;
+    sort.appendChild(op);
+  });
+  sort.addEventListener('change', function() {
+    __macroSort = sort.value || 'name';
+    __macroRender();
+  });
+  bar.appendChild(search);
+  bar.appendChild(sort);
+  section.insertBefore(bar, list);
+}
+
+// v10.13.4 W4: render the (already-loaded) macros list, applying filter+sort.
+function __macroRender() {
+  const list = document.getElementById('macrosList');
+  if (!list) return;
+  const items = __macroAllItems.slice();
+  // Filter
+  const filtered = __macroFilter
+    ? items.filter(function(m){
+        const hay = ((m.label || '') + ' ' + (m.body || '')).toLowerCase();
+        return hay.indexOf(__macroFilter) !== -1;
+      })
+    : items;
+  // Sort
+  filtered.sort(function(a, b){
+    if (__macroSort === 'use') return (b.use_count || 0) - (a.use_count || 0);
+    if (__macroSort === 'date') {
+      const at = a.updated_at || a.created_at || 0;
+      const bt = b.updated_at || b.created_at || 0;
+      return bt - at;
+    }
+    // name (default)
+    return String(a.label || '').localeCompare(String(b.label || ''));
+  });
+  if (filtered.length === 0) {
+    if (__macroFilter) {
+      list.innerHTML = '<div style="padding:10px;color:#9b9892;font-size:11px;text-align:center">No macros match "' + (__macroFilter.replace(/[<>&"]/g, '')) + '"</div>';
+    } else {
+      list.replaceChildren(gamMakeEmpty({ icon: 'rules-empty', headline: 'No macros yet', desc: 'Click Add custom below to create one.' }));
+    }
+    return;
+  }
+  list.innerHTML = '';
+  filtered.forEach(function(m){
+    list.appendChild(__macroRow(m));
+  });
+}
+
+// v10.13.4 W4 (R-07): row builder uses .gam-macro-item-* classes that already
+// exist in popup.css (previously orphaned). Hover-revealed action trio:
+// edit / duplicate / delete.
+function __macroRow(m) {
+  const row = document.createElement('div');
+  row.className = 'gam-macro-item';
+  row.dataset.id = String(m.id || '');
+
+  const top = document.createElement('div');
+  top.style.cssText = 'display:flex;align-items:center;gap:6px';
+  const lbl = document.createElement('div');
+  lbl.className = 'gam-macro-item-label';
+  lbl.style.flex = '1';
+  lbl.textContent = m.label || '(no label)';
+  const useCount = document.createElement('span');
+  useCount.className = 'gam-macro-item-meta';
+  useCount.textContent = (m.use_count || 0) + 'x';
+
+  const actions = document.createElement('div');
+  actions.className = 'gam-macro-item-actions';
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'gam-macro-item-action';
+  editBtn.type = 'button';
+  editBtn.textContent = 'Edit';
+  editBtn.addEventListener('click', function(){ __macroStartEdit(m); });
+
+  const dupBtn = document.createElement('button');
+  dupBtn.className = 'gam-macro-item-action';
+  dupBtn.type = 'button';
+  dupBtn.textContent = 'Duplicate';
+  dupBtn.addEventListener('click', function(){
+    __macroStartEdit({ id: null, label: (m.label || '') + ' (copy)', body: m.body || '' });
+  });
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'gam-macro-item-action danger';
+  delBtn.type = 'button';
+  delBtn.textContent = 'Delete';
+  delBtn.addEventListener('click', function(){ __macroBeginDelconfirm(row, m); });
+
+  actions.appendChild(editBtn);
+  actions.appendChild(dupBtn);
+  actions.appendChild(delBtn);
+
+  top.appendChild(lbl);
+  top.appendChild(useCount);
+  top.appendChild(actions);
+
+  const body = document.createElement('div');
+  body.className = 'gam-macro-item-body';
+  body.style.cssText = 'white-space:pre-wrap;word-break:break-word;max-height:50px;overflow:hidden';
+  body.textContent = m.body || '';
+
+  const meta = document.createElement('div');
+  meta.className = 'gam-macro-item-meta';
+  meta.textContent = 'by ' + (m.created_by || '?') + (m.updated_by ? ' (edited by ' + m.updated_by + ')' : '');
+
+  row.appendChild(top);
+  row.appendChild(body);
+  row.appendChild(meta);
+  return row;
+}
+
 async function loadMacros(){
   const list = document.getElementById('macrosList');
   if (!list) return;
+  // Hoist the edit form above the list + mount filter bar (idempotent).
+  __macroEnsureFilterBar();
+  __macroEnsureEditAbove();
   // v10.12 D.3.13 / UIUX-19: skeleton instead of "Loading..." text
   list.replaceChildren(gamMakeSkel('paragraph'));
   try {
@@ -4062,54 +4224,14 @@ async function loadMacros(){
       list.replaceChildren(gamMakeError({ severity: 'hard', label: 'MACROS', msg: (r && r.error) || 'no response', hint: 'Worker may be offline or RPC contract changed — retry, or open Diag tab for context.', retryFn: loadMacros }));
       return;
     }
-    // D.3.13: wire count badge
+    __macroAllItems = r.data.macros;
+    // D.3.13: wire count badge (full count, not filtered)
     const badge = document.getElementById('card-badge-macros');
     if (badge) {
       badge.textContent = String(r.data.macros.length);
       badge.style.display = r.data.macros.length > 0 ? '' : 'none';
     }
-    if (r.data.macros.length === 0){
-      list.replaceChildren(gamMakeEmpty({ icon: 'rules-empty', headline: 'No macros yet', desc: 'Click Add custom below to create one.' }));
-      return;
-    }
-    list.innerHTML = '';
-    r.data.macros.forEach(function(m){
-      const row = document.createElement('div');
-      row.className = 'gam-macro-row';
-      row.style.cssText = 'padding:6px 8px;border-bottom:1px solid #1f2227;display:flex;flex-direction:column;gap:2px';
-      const top = document.createElement('div');
-      top.style.cssText = 'display:flex;align-items:center;gap:6px';
-      const lbl = document.createElement('div');
-      lbl.style.cssText = 'flex:1;font-weight:600;color:#dcdcdc;font-size:12px';
-      lbl.textContent = m.label;
-      const useCount = document.createElement('span');
-      useCount.style.cssText = 'color:#666;font-size:10px';
-      useCount.textContent = (m.use_count || 0) + 'x';
-      const editBtn = document.createElement('button');
-      editBtn.className = 'pop-btn pop-btn-ghost';
-      editBtn.style.cssText = 'padding:2px 6px;font-size:10px';
-      editBtn.textContent = 'Edit';
-      editBtn.addEventListener('click', function(){ __macroStartEdit(m); });
-      const delBtn = document.createElement('button');
-      delBtn.className = 'pop-btn pop-btn-ghost';
-      delBtn.style.cssText = 'padding:2px 6px;font-size:10px;color:#f04040';
-      delBtn.textContent = 'Delete';
-      delBtn.addEventListener('click', function(){ __macroDelete(m); });
-      top.appendChild(lbl);
-      top.appendChild(useCount);
-      top.appendChild(editBtn);
-      top.appendChild(delBtn);
-      const body = document.createElement('div');
-      body.style.cssText = 'color:#999;font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:50px;overflow:hidden';
-      body.textContent = m.body;
-      const meta = document.createElement('div');
-      meta.style.cssText = 'color:#555;font-size:9.5px';
-      meta.textContent = 'by ' + (m.created_by || '?') + (m.updated_by ? ' (edited by ' + m.updated_by + ')' : '');
-      row.appendChild(top);
-      row.appendChild(body);
-      row.appendChild(meta);
-      list.appendChild(row);
-    });
+    __macroRender();
   } catch(e){
     list.innerHTML = '<div style="padding:10px;color:#f04040;font-size:11px;text-align:center">Error: ' + (e && e.message || e) + '</div>';
   }
@@ -4152,9 +4274,80 @@ async function __macroSave(){
   }
 }
 
-async function __macroDelete(m){
+// v10.13.4 W4 (P0-28 / R-09): inline delconfirm row state with 4s countdown
+// bar (replaces window.confirm). Click Confirm to delete now; click Cancel
+// or wait 4s for auto-cancel.
+function __macroBeginDelconfirm(row, m){
+  if (!row || !m || !m.id) return;
+  // Already in delconfirm? Toggle off.
+  if (row.classList.contains('delconfirm')) {
+    __macroEndDelconfirm(row);
+    return;
+  }
+  row.classList.add('delconfirm');
+  // Stash original innards so we can restore on cancel/timeout.
+  const orig = row.innerHTML;
+  row.dataset.gamOrig = orig;
+  row.innerHTML = '';
+  const banner = document.createElement('div');
+  banner.className = 'gam-macro-delconfirm';
+  const label = document.createElement('span');
+  label.style.flex = '0 0 auto';
+  label.textContent = 'Delete "' + (m.label || 'macro') + '"?';
+  const bar = document.createElement('div');
+  bar.className = 'gam-macro-delconfirm-bar';
+  const fill = document.createElement('span');
+  bar.appendChild(fill);
+  const okBtn = document.createElement('button');
+  okBtn.type = 'button';
+  okBtn.textContent = 'Confirm';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'cancel';
+  cancelBtn.textContent = 'Cancel';
+  banner.appendChild(label);
+  banner.appendChild(bar);
+  banner.appendChild(okBtn);
+  banner.appendChild(cancelBtn);
+  row.appendChild(banner);
+
+  let done = false;
+  const timer = setTimeout(function(){
+    if (done) return;
+    done = true;
+    __macroEndDelconfirm(row);
+  }, 4000);
+  cancelBtn.addEventListener('click', function(){
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    __macroEndDelconfirm(row);
+  });
+  okBtn.addEventListener('click', async function(){
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    okBtn.disabled = true;
+    cancelBtn.disabled = true;
+    okBtn.textContent = 'deleting...';
+    await __macroDoDelete(m);
+  });
+}
+
+function __macroEndDelconfirm(row){
+  if (!row) return;
+  row.classList.remove('delconfirm');
+  if (row.dataset.gamOrig) {
+    row.innerHTML = row.dataset.gamOrig;
+    delete row.dataset.gamOrig;
+    // Re-wire the action buttons (innerHTML restore drops listeners).
+    // Easiest: re-render the whole list from cache.
+    __macroRender();
+  }
+}
+
+async function __macroDoDelete(m){
   if (!m || !m.id) return;
-  if (!window.confirm('Delete macro "' + m.label + '"? This is sync\'d across the team.')) return;
   __macroSetStatus('deleting...');
   try {
     const r = await popupRpc('macroDelete', { id: m.id });
@@ -4163,16 +4356,20 @@ async function __macroDelete(m){
       loadMacros();
     } else {
       __macroSetStatus('delete failed: ' + ((r && r.data && r.data.error) || (r && r.error) || 'unknown'), 'err');
+      loadMacros();
     }
   } catch(e){
     __macroSetStatus('error: ' + (e && e.message || e), 'err');
+    loadMacros();
   }
 }
 
 // v9.6.1: AI-seed flow. Calls /macros/ai-suggest, presents the returned
-// suggestions in a confirm dialog (label + body preview), and upserts
-// each accepted suggestion. Per Commander: "canned replies that the AI
-// wrote for us to start with".
+// suggestions inline. Per Commander: "canned replies that the AI wrote for
+// us to start with".
+// v10.13.4 W4 (P0-28 / R-09): replaced window.confirm with inline review
+// panel — checkbox per suggestion + SAVE SELECTED (N) button that updates
+// count as boxes toggle.
 async function __macroAiSeed(){
   const btn = document.getElementById('macroAiSeedBtn');
   const orig = btn ? btn.textContent : '';
@@ -4195,14 +4392,92 @@ async function __macroAiSeed(){
     }
     const sugg = r.data.suggestions;
     if (sugg.length === 0){ __macroSetStatus('AI returned 0 suggestions', 'err'); return; }
-    // Confirm with full preview
-    const previewLines = sugg.map((s,i) => (i+1) + '. ' + s.label).join('\n');
-    if (!window.confirm('AI proposed ' + sugg.length + ' ' + __macroKind + ' macros:\n\n' + previewLines + '\n\nAccept all and save? (You can edit/delete individually after.)')) {
-      __macroSetStatus('cancelled', 'info');
-      return;
-    }
+    __macroShowAiReview(sugg);
+    __macroSetStatus('✨ ' + sugg.length + ' AI suggestions — pick which to save', 'info');
+  } catch(e){
+    __macroSetStatus('error: ' + (e && e.message || e), 'err');
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = orig; }
+  }
+}
+
+// v10.13.4 W4: inline AI review panel (replaces window.confirm). All
+// suggestions checked by default. SAVE SELECTED (N) button updates count
+// as user toggles checkboxes.
+function __macroShowAiReview(sugg){
+  // Remove any prior review panel
+  const old = document.getElementById('macroAiReview');
+  if (old) old.remove();
+  const section = document.getElementById('macrosSection');
+  const list = document.getElementById('macrosList');
+  if (!section || !list) return;
+  const panel = document.createElement('div');
+  panel.id = 'macroAiReview';
+  panel.className = 'gam-macro-ai-review';
+  const head = document.createElement('div');
+  head.className = 'gam-macro-ai-review-head';
+  head.textContent = '✨ AI proposed ' + sugg.length + ' ' + __macroKind + ' macros';
+  panel.appendChild(head);
+
+  const checkboxes = [];
+  sugg.forEach(function(s, i){
+    const row = document.createElement('label');
+    row.className = 'gam-macro-ai-review-row';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.dataset.idx = String(i);
+    checkboxes.push(cb);
+    const wrap = document.createElement('div');
+    wrap.style.flex = '1';
+    const lbl = document.createElement('div');
+    lbl.className = 'label';
+    lbl.textContent = s.label || '(no label)';
+    const body = document.createElement('div');
+    body.className = 'body';
+    body.textContent = s.body || '';
+    wrap.appendChild(lbl);
+    wrap.appendChild(body);
+    row.appendChild(cb);
+    row.appendChild(wrap);
+    panel.appendChild(row);
+  });
+
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'gam-macro-ai-review-actions';
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'cancel';
+  cancelBtn.textContent = 'Cancel';
+  actionsRow.appendChild(saveBtn);
+  actionsRow.appendChild(cancelBtn);
+  panel.appendChild(actionsRow);
+
+  function _refreshCount() {
+    const n = checkboxes.filter(function(c){ return c.checked; }).length;
+    saveBtn.textContent = 'Save selected (' + n + ')';
+    saveBtn.disabled = (n === 0);
+  }
+  checkboxes.forEach(function(c){ c.addEventListener('change', _refreshCount); });
+  _refreshCount();
+
+  cancelBtn.addEventListener('click', function(){
+    panel.remove();
+    __macroSetStatus('cancelled', 'info');
+  });
+
+  saveBtn.addEventListener('click', async function(){
+    const picks = checkboxes.filter(function(c){ return c.checked; }).map(function(c){
+      return sugg[parseInt(c.dataset.idx, 10)];
+    });
+    if (!picks.length) return;
+    saveBtn.disabled = true;
+    cancelBtn.disabled = true;
+    saveBtn.textContent = 'saving...';
     let saved = 0, failed = 0;
-    for (const s of sugg) {
+    for (const s of picks) {
       try {
         const upsert = await popupRpc('macroUpsert', { kind: __macroKind, label: s.label, body: s.body });
         if (upsert && upsert.ok && upsert.data && upsert.data.ok) saved++;
@@ -4210,12 +4485,12 @@ async function __macroAiSeed(){
       } catch(_){ failed++; }
     }
     __macroSetStatus('✓ saved ' + saved + (failed ? ' (' + failed + ' failed)' : ''), 'ok');
+    panel.remove();
     loadMacros();
-  } catch(e){
-    __macroSetStatus('error: ' + (e && e.message || e), 'err');
-  } finally {
-    if (btn){ btn.disabled = false; btn.textContent = orig; }
-  }
+  });
+
+  // Mount above list (below filter bar)
+  section.insertBefore(panel, list);
 }
 
 {
