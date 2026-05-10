@@ -1781,6 +1781,23 @@
             hasLeadToken: !!_secretsCache.leadModToken
           });
         } catch(_) {}
+        // v10.14.0 V14-T6 (RALPH-RECOVERY R-03): auto-dismiss the auth-fail
+        // banner when a fresh token lands via storage.onChanged. Pre-fix the
+        // banner stayed visible after a successful re-paste until manual reload.
+        // Re-validate first so we don't dismiss while still broken.
+        try {
+          if (typeof __validateModAuth === 'function') {
+            __validateModAuth().then(function(rv) {
+              if (rv && rv.ok) {
+                var banner = document.getElementById('gam-auth-fail-banner');
+                if (banner) {
+                  try { banner.remove(); } catch(_){}
+                  try { console.log('%c[modtools v10.14.0 V14-T6] auth banner auto-dismissed (storage.onChanged + revalidated ok)', 'color:#3dd68c;font-weight:700'); } catch(_){}
+                }
+              }
+            }).catch(function(){});
+          }
+        } catch(_) {}
       }
     });
   })();
@@ -7521,7 +7538,10 @@
     snackEl.id = 'gam-sw-restart-snack';
     snackEl.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483640;background:#1a1c20;color:#eee;border:1px solid #444;border-radius:6px;padding:10px 14px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.5);display:flex;align-items:center;gap:10px;max-width:360px';
     const msgEl = document.createElement('span');
-    msgEl.textContent = 'ModTools background restarted -- click Retry to resume.';
+    // v10.14.0 V14-T7 (RALPH-RECOVERY R-04): differentiate from ext-reload banner.
+    // Pre-fix both said "Extension was reloaded." This is SW restart (different
+    // event) -- connection between page and SW transparently re-established.
+    msgEl.textContent = 'Connection re-established -- click Retry to resume.';
     const retryBtn = document.createElement('button');
     retryBtn.textContent = 'Retry';
     retryBtn.style.cssText = 'background:#4A9EFF;color:#fff;border:none;border-radius:3px;padding:4px 10px;cursor:pointer;font-weight:600;white-space:nowrap';
@@ -25905,9 +25925,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     if (reason === 'no_token' || reason === 'short_token') {
       return {
         kind: 'setup',
-        // amber-warm (Bloomberg brand-adjacent)
-        bg: 'rgba(245, 158, 11, .95)',
-        borderColor: 'rgba(255, 220, 150, .35)',
+        // v10.14.0 V14-T4: shifted from amber-warm (245,158,11) to blue (74,158,255)
+        // for low-stakes setup info. Pre-fix setup amber and credential amber were
+        // 5% RGB-distance apart; spec G.2 promised 4 distinct tiers but effective
+        // count was 3. Setup is the lowest-stakes mode (no credential ever entered)
+        // so blue/info connotes "fresh start" vs credential's amber "needs update".
+        bg: 'rgba(74, 158, 255, .95)',
+        borderColor: 'rgba(170, 210, 255, .35)',
         title: 'GAW ModTools: setup needed',
         label: reason === 'short_token' ? 'Token incomplete' : 'Setup needed'
       };

@@ -151,13 +151,15 @@ function _cardWireToggle(id) {
   _DETAILS_CARDS.forEach(_cardWireToggle);
 })();
 
-// Auto-collapse tokens card when auth succeeds (whoamiOk=true) or fail (false)
+// Auto-collapse tokens card when auth succeeds (whoamiOk=true) or fail (false).
+// v10.14.0 V14-T1: dead removeAttribute('open') / setAttribute('open','') calls
+// removed -- card-tokens was switched from <details> to <div> in v10.12 UIUX-01,
+// so the open attribute does nothing. Order/urgent classes still drive visual
+// state (gam-card-urgent flips chrome amber, gam-card-order-last reorders).
 async function _cardAutoCollapseTokens(whoamiOk) {
   const card = document.getElementById('card-tokens');
   if (!card) return;
   if (whoamiOk) {
-    card.removeAttribute('open');
-    // E.2.6 (AF-06 Rule 18): add console.warn to silent catch
     chrome.storage.local.set({ gam_card_open_tokens: false }).catch(function(e) { console.warn('[Popup] storage.set card-tokens state failed:', e); });
     card.classList.add('gam-card-order-last');
     card.classList.remove('gam-card-urgent');
@@ -167,7 +169,6 @@ async function _cardAutoCollapseTokens(whoamiOk) {
 function _cardAuthFailed() {
   const card = document.getElementById('card-tokens');
   if (!card) return;
-  card.setAttribute('open', '');
   card.classList.remove('gam-card-order-last');
   card.classList.add('gam-card-urgent');
 }
@@ -175,7 +176,6 @@ function _cardAuthFailed() {
 function _cardWizardComplete() {
   const card = document.getElementById('card-tokens');
   if (!card) return;
-  card.removeAttribute('open');
   card.classList.add('gam-card-order-last');
   const badge = document.getElementById('card-badge-tokens');
   if (badge && !badge.querySelector('.gam-card-rerun')) {
@@ -192,7 +192,7 @@ function _cardWizardComplete() {
       const success = document.getElementById('firstRunWizardSuccess');
       if (step2)   step2.style.display = 'none';
       if (success) success.style.display = 'none';
-      card.setAttribute('open', '');
+      // v10.14.0 V14-T1: dead setAttribute('open','') removed -- card is <div>.
     });
     badge.style.display = '';
     badge.appendChild(btn);
@@ -971,7 +971,32 @@ function _bin7d(log, predicate) {
   return out;
 }
 
+// v10.14.0 V14-S2: threshold-driven data-state setter. Replaces static
+// HTML data-state attributes with JS-driven values per UIUX2-01 §B.3.
+// Tile gets state class based on current value relative to thresholds.
+function _setTileState(tileId, state) {
+  const el = document.getElementById('s-' + tileId);
+  if (!el) return;
+  const tile = el.closest('.pop-stat');
+  if (!tile) return;
+  if (state) tile.dataset.state = state;
+  else delete tile.dataset.state;
+}
+
+// v10.14.0 V14-S6 (UIUX2-06 F.7): data-loading="true" toggling on stat tiles.
+// CSS pulse rule already shipped W1; this wires the callsite that turns it on
+// during loadStats and clears it once data lands. Mirrors the gam-kpi pattern.
+function _setStatLoading(loading) {
+  const tiles = document.querySelectorAll('.pop-stats .pop-stat');
+  tiles.forEach(function(t) {
+    if (loading) t.dataset.loading = 'true';
+    else delete t.dataset.loading;
+  });
+}
+
 async function loadStats() {
+  // v10.14.0 V14-S6: pulse during fetch.
+  _setStatLoading(true);
   try {
     const data = await chrome.storage.local.get([K.LOG, K.ROSTER, K.DR]);
     const log = data[K.LOG] || [];
@@ -1001,6 +1026,17 @@ async function loadStats() {
     $('s-today').textContent = todayBans;
     $('s-msgs').textContent = todayMsgs;
     $('s-notes').textContent = todayNotes;
+
+    // v10.14.0 V14-S2/S3: threshold-driven data-state. Pending = info (always).
+    // DR = warn when drReady>0 else info (NOT danger; SHIPMASTER §CONFLICT 6 keeps
+    // it cyan/purple for v10.13). Banned = warn at >25, danger at >50/24h-rolling.
+    // bans24 = warn at >10. notes24 = warn (always, brand). msgs24 = good.
+    _setTileState('pending', 'info');
+    _setTileState('dr',      drReady > 0 ? 'warn' : 'info');
+    _setTileState('banned',  banned > 50 ? 'danger' : (banned > 25 ? 'warn' : 'info'));
+    _setTileState('today',   todayBans > 10 ? 'warn' : 'info');
+    _setTileState('msgs',    'good');
+    _setTileState('notes',   'warn');
 
     // v10.13.0 W1 (P0-02 / R-01): wire delta chips for the 6 local-data tiles.
     // AI-today + Auto-UNS update inside their respective RPC fire-and-forget
@@ -1034,31 +1070,70 @@ async function loadStats() {
             aiEl.textContent = calls + '/' + cap;
             // v10.13.0 W1 (P0-02): delta on the calls-used number, not the X/Y label
             _updateStatDelta('ai', calls);
+            // v10.14.0 V14-S2: AI tile threshold -- warn when used > 80% of cap.
+            var ratio = cap > 0 ? (calls / cap) : 0;
+            _setTileState('ai-today', ratio > 0.80 ? 'warn' : 'info');
+          } else {
+            _setTileState('ai-today', 'info');
           }
           // If fields missing, leave '--' placeholder (E.2.5 pattern).
+        } else {
+          _setTileState('ai-today', 'info');
         }
       } catch (_) { /* non-fatal — AI budget is informational only */ }
     })();
 
+    // v10.14.0 V14-S1: Auto-UNS 8th tile wiring. Worker has modAutoActionRecent
+    // RPC (background.js:3802); 24h count drives the value. Threshold-driven
+    // data-state: warn at >5 (active automation), good at 1-5, info at 0.
+    (async function() {
+      try {
+        var unsEl = document.getElementById('s-unsticky');
+        if (!unsEl) return;
+        var r = await popupRpc('modAutoActionRecent', { limit: 50 });
+        var rows = (r && r.ok && Array.isArray(r.actions)) ? r.actions
+                 : (r && r.ok && r.data && Array.isArray(r.data.actions)) ? r.data.actions
+                 : [];
+        var cutoff = Date.now() - 86400000;
+        var count24 = rows.filter(function(a) {
+          if (!a) return false;
+          var ts = a.queued_at || a.executed_at || a.ts;
+          if (!ts) return false;
+          var ms = (typeof ts === 'number') ? ts : new Date(ts).getTime();
+          return !isNaN(ms) && ms >= cutoff && a.status === 'done';
+        }).length;
+        unsEl.textContent = String(count24);
+        _updateStatDelta('unsticky', count24);
+        _setTileState('unsticky', count24 > 5 ? 'warn' : (count24 > 0 ? 'good' : 'info'));
+      } catch (_) { /* non-fatal -- Auto-UNS tile is informational */ }
+    })();
+
+    // v10.14.0 V14-S5: dr-alert explicit clear branch. When drReady drops to
+    // 0 between popup opens, the prior open's alert content stayed visible.
+    const drAlert = $('dr-alert');
     if (drReady > 0) {
-      const alert = $('dr-alert');
-      alert.style.display = 'block';
+      if (drAlert) {
+        drAlert.style.display = 'block';
       // v10.13.0 W1 (P1-01 / UIUX2-01): replaced skull color emoji with
       // monochrome SVG warning icon. Keeps the urgency signal but matches
       // the terminal aesthetic and works under accessibility forced-colors
       // / monochrome themes. Static template -- no user content.
-      alert.innerHTML =
-        '<svg viewBox="0 0 24 24" width="14" height="14" fill="none"'
-        + ' stroke="currentColor" stroke-width="2" stroke-linecap="round"'
-        + ' stroke-linejoin="round" aria-hidden="true"'
-        + ' style="vertical-align:-2px;margin-right:4px">'
-        + '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0'
-        + ' 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/>'
-        + '<line x1="12" y1="9" x2="12" y2="13"/>'
-        + '<circle cx="12" cy="17" r="0.5"/>'
-        + '</svg>'
-        + drReady + ' Death Row inmate' + (drReady > 1 ? 's' : '')
-        + ' READY \u2014 visit GAW to execute.';
+        drAlert.innerHTML =
+          '<svg viewBox="0 0 24 24" width="14" height="14" fill="none"'
+          + ' stroke="currentColor" stroke-width="2" stroke-linecap="round"'
+          + ' stroke-linejoin="round" aria-hidden="true"'
+          + ' style="vertical-align:-2px;margin-right:4px">'
+          + '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0'
+          + ' 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/>'
+          + '<line x1="12" y1="9" x2="12" y2="13"/>'
+          + '<circle cx="12" cy="17" r="0.5"/>'
+          + '</svg>'
+          + drReady + ' Death Row inmate' + (drReady > 1 ? 's' : '')
+          + ' READY \u2014 visit GAW to execute.';
+      }
+    } else if (drAlert) {
+      drAlert.style.display = 'none';
+      drAlert.innerHTML = '';
     }
 
     const ver = chrome.runtime.getManifest().version;
@@ -1079,6 +1154,9 @@ async function loadStats() {
       errEl.style.cssText = 'grid-column:1/-1;padding:8px 12px';
       statsGrid.insertAdjacentElement('afterend', errEl);
     }
+  } finally {
+    // v10.14.0 V14-S6: clear loading pulse once stats render (success or fail).
+    _setStatLoading(false);
   }
 }
 
@@ -1881,23 +1959,48 @@ async function __applyTierGate() {
 
   // v10.13.3 W2: explicit timeout fallback. If whoami never resolves AND
   // never rejects within 5s, the Tokens tab would otherwise stay in its
-  // pre-render limbo. Force back to first-run so the user has a clear path.
+  // pre-render limbo.
+  // v10.14.0 V14-T5 (RALPH-RECOVERY A.9 / RALPH-TOKENS F4): pre-fix the timeout
+  // hard-routed to first-run AND set _whoamiTimedOut=true so a late-resolve
+  // was discarded entirely. Now: timeout shows a "Reconnecting..." snack,
+  // routes to first-run (still gives user an actionable path), but does NOT
+  // discard a late resolve -- if whoami eventually returns, re-apply state B.
   let _whoamiTimedOut = false;
   const _whoamiTimer = setTimeout(function() {
     _whoamiTimedOut = true;
     try { __tokSetState('first-run'); } catch(_){}
     try { _cardAuthFailed(); } catch(_){}
+    // v10.14.0 V14-T5: visible reconnecting state so user knows it's in flight.
+    try {
+      var statusEl = document.getElementById('whoamiStatus') || document.getElementById('tokRecoveryStatus');
+      if (!statusEl) {
+        statusEl = document.createElement('div');
+        statusEl.id = 'whoamiStatus';
+        statusEl.className = 'pop-token-status';
+        statusEl.style.cssText = 'color:var(--bb-warn);margin-top:4px;font-size:11px';
+        var card = document.getElementById('card-tokens');
+        if (card) card.appendChild(statusEl);
+      }
+      statusEl.textContent = 'Reconnecting...';
+    } catch(_){}
   }, 5000);
 
   try {
     const r = await popupRpc('modWhoami');
-    if (_whoamiTimedOut) return; // timeout already fired the recovery
     clearTimeout(_whoamiTimer);
     if (!r || !r.ok || !r.data) {
       // v10.13.3 W2: explicit State A on auth fail (no flash)
       try { __tokSetState('first-run'); } catch(_){}
       _cardAuthFailed();
       return;
+    }
+    // v10.14.0 V14-T5: late-resolve recovery -- if the timeout fired earlier,
+    // clear the "Reconnecting..." status and continue rendering State B.
+    if (_whoamiTimedOut) {
+      try {
+        var rs = document.getElementById('whoamiStatus');
+        if (rs) rs.remove();
+      } catch(_){}
     }
     // Backward-compat: tier field or is_lead boolean
     // v10.5.1 INVARIANT: clamp to known enum; unknown server value fails closed to 'mod'
@@ -2039,9 +2142,11 @@ function __applyTierVisibility(tier, whoamiData) {
 
   // v10.12: lapsedModsCard replaced by lapsedModsChip (shown by __loadLapsedMods when count > 0)
 
-  // Restart setup button: show once visible
+  // Restart setup button: v10.14.0 V14-T2 (RALPH-TOKENS F2). Pre-fix only
+  // shown for lead/senior_lead, leaving regular mods with stale tokens no
+  // affordance to re-paste. Workflow-breaking inversion. Show for all tiers.
   const rsw = $('restartSetupWrap');
-  if (rsw && tier !== 'mod') rsw.style.display = '';
+  if (rsw) rsw.style.display = '';
 
   if (tier === 'senior_lead') {
     // Hint auto-hides as soon as content loads
@@ -4066,7 +4171,25 @@ let __macroEditing = null;
 // v10.13.4 W4 (P0 / R-07): macros v2 — filter + sort state.
 let __macroFilter = '';
 let __macroSort = 'name'; // 'name' | 'use' | 'date'
+// v10.14.0 V14-M3: sort direction (asc/desc) with persistence.
+let __macroSortDir = 'asc'; // 'asc' | 'desc'
 let __macroAllItems = [];
+
+// v10.14.0 V14-M3: load persisted sort state. Fire once at module init.
+(async function _macroLoadSortPrefs(){
+  try {
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
+    const data = await chrome.storage.local.get(['gam_macro_sort', 'gam_macro_sort_dir']);
+    if (data.gam_macro_sort && ['name','use','date'].includes(data.gam_macro_sort)) __macroSort = data.gam_macro_sort;
+    if (data.gam_macro_sort_dir === 'asc' || data.gam_macro_sort_dir === 'desc') __macroSortDir = data.gam_macro_sort_dir;
+  } catch (_) {}
+})();
+
+// v10.14.0 V14-M7: SVG icons for action trio. Inline so CSP-clean. 14x14
+// stroke-only matches Bloomberg monochrome aesthetic.
+const _MACRO_ICON_EDIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+const _MACRO_ICON_DUP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const _MACRO_ICON_DEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
 
 function __macroSetStatus(msg, cls){
   const el = document.getElementById('macrosStatus');
@@ -4089,7 +4212,10 @@ function __macroEnsureEditAbove() {
   wrap.dataset.gamHoisted = '1';
 }
 
-// v10.13.4 W4: filter bar with search + sort dropdown, mounted once.
+// v10.14.0 V14-M3: filter bar with search + 3 sort text-buttons (Name/Use/Date)
+// with direction toggle (asc/desc). Click active button to flip direction;
+// click inactive to switch sort key (preserves direction). Persisted to
+// chrome.storage.local under gam_macro_sort + gam_macro_sort_dir.
 function __macroEnsureFilterBar() {
   if (document.getElementById('macroFilterBar')) return;
   const section = document.getElementById('macrosSection');
@@ -4107,25 +4233,50 @@ function __macroEnsureFilterBar() {
     __macroFilter = (search.value || '').trim().toLowerCase();
     __macroRender();
   });
-  const sort = document.createElement('select');
-  sort.setAttribute('aria-label', 'Sort macros');
-  [
+  const sortGroup = document.createElement('div');
+  sortGroup.className = 'gam-macro-sort';
+  sortGroup.setAttribute('role', 'group');
+  sortGroup.setAttribute('aria-label', 'Sort macros');
+  const sortKeys = [
     { v: 'name', l: 'Name' },
-    { v: 'use',  l: 'Most used' },
-    { v: 'date', l: 'Recent' }
-  ].forEach(function(o){
-    const op = document.createElement('option');
-    op.value = o.v;
-    op.textContent = o.l;
-    if (o.v === __macroSort) op.selected = true;
-    sort.appendChild(op);
-  });
-  sort.addEventListener('change', function() {
-    __macroSort = sort.value || 'name';
-    __macroRender();
+    { v: 'use',  l: 'Use'  },
+    { v: 'date', l: 'Date' }
+  ];
+  sortKeys.forEach(function(o){
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'gam-macro-sort-btn';
+    btn.dataset.sort = o.v;
+    btn.setAttribute('aria-pressed', o.v === __macroSort ? 'true' : 'false');
+    const txt = document.createElement('span');
+    txt.textContent = o.l;
+    const dir = document.createElement('span');
+    dir.className = 'dir';
+    dir.textContent = o.v === __macroSort ? (__macroSortDir === 'asc' ? '▲' : '▼') : '';
+    btn.appendChild(txt);
+    btn.appendChild(dir);
+    btn.addEventListener('click', function() {
+      if (__macroSort === o.v) {
+        __macroSortDir = __macroSortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        __macroSort = o.v;
+      }
+      try {
+        chrome.storage.local.set({ gam_macro_sort: __macroSort, gam_macro_sort_dir: __macroSortDir });
+      } catch (_) {}
+      // Refresh button states
+      sortGroup.querySelectorAll('.gam-macro-sort-btn').forEach(function(b) {
+        const isActive = b.dataset.sort === __macroSort;
+        b.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        const d = b.querySelector('.dir');
+        if (d) d.textContent = isActive ? (__macroSortDir === 'asc' ? '▲' : '▼') : '';
+      });
+      __macroRender();
+    });
+    sortGroup.appendChild(btn);
   });
   bar.appendChild(search);
-  bar.appendChild(sort);
+  bar.appendChild(sortGroup);
   section.insertBefore(bar, list);
 }
 
@@ -4141,16 +4292,20 @@ function __macroRender() {
         return hay.indexOf(__macroFilter) !== -1;
       })
     : items;
-  // Sort
+  // Sort. v10.14.0 V14-M3: each key normalized to ASC (a-b), then flipped if desc.
+  // Default direction = asc (alphabetical/oldest/least-used first); user toggles.
   filtered.sort(function(a, b){
-    if (__macroSort === 'use') return (b.use_count || 0) - (a.use_count || 0);
-    if (__macroSort === 'date') {
+    let cmp;
+    if (__macroSort === 'use') {
+      cmp = (a.use_count || 0) - (b.use_count || 0);
+    } else if (__macroSort === 'date') {
       const at = a.updated_at || a.created_at || 0;
       const bt = b.updated_at || b.created_at || 0;
-      return bt - at;
+      cmp = at - bt;
+    } else {
+      cmp = String(a.label || '').localeCompare(String(b.label || ''));
     }
-    // name (default)
-    return String(a.label || '').localeCompare(String(b.label || ''));
+    return __macroSortDir === 'asc' ? cmp : -cmp;
   });
   if (filtered.length === 0) {
     if (__macroFilter) {
@@ -4187,16 +4342,22 @@ function __macroRow(m) {
   const actions = document.createElement('div');
   actions.className = 'gam-macro-item-actions';
 
+  // v10.14.0 V14-M7: SVG icons for action trio. innerHTML safe -- icons are
+  // hardcoded inline SVG constants, no user data interpolated.
   const editBtn = document.createElement('button');
   editBtn.className = 'gam-macro-item-action';
   editBtn.type = 'button';
-  editBtn.textContent = 'Edit';
+  editBtn.title = 'Edit';
+  editBtn.setAttribute('aria-label', 'Edit macro');
+  editBtn.innerHTML = _MACRO_ICON_EDIT;
   editBtn.addEventListener('click', function(){ __macroStartEdit(m); });
 
   const dupBtn = document.createElement('button');
   dupBtn.className = 'gam-macro-item-action';
   dupBtn.type = 'button';
-  dupBtn.textContent = 'Duplicate';
+  dupBtn.title = 'Duplicate';
+  dupBtn.setAttribute('aria-label', 'Duplicate macro');
+  dupBtn.innerHTML = _MACRO_ICON_DUP;
   dupBtn.addEventListener('click', function(){
     __macroStartEdit({ id: null, label: (m.label || '') + ' (copy)', body: m.body || '' });
   });
@@ -4204,7 +4365,9 @@ function __macroRow(m) {
   const delBtn = document.createElement('button');
   delBtn.className = 'gam-macro-item-action danger';
   delBtn.type = 'button';
-  delBtn.textContent = 'Delete';
+  delBtn.title = 'Delete';
+  delBtn.setAttribute('aria-label', 'Delete macro');
+  delBtn.innerHTML = _MACRO_ICON_DEL;
   delBtn.addEventListener('click', function(){ __macroBeginDelconfirm(row, m); });
 
   actions.appendChild(editBtn);
@@ -4257,18 +4420,54 @@ async function loadMacros(){
   }
 }
 
+// v10.14.0 V14-M6: char-counter wiring with warn/err thresholds.
+// LABEL: warn at 40 / err at 50 (visible cap; maxlength keeps 80 forgiving).
+// BODY:  warn at 800 / err at 1000 (visible cap; maxlength keeps 4000 forgiving).
+function __macroUpdateCounter(inputId, counterId, warnAt, errAt) {
+  const input = document.getElementById(inputId);
+  const counter = document.getElementById(counterId);
+  if (!input || !counter) return;
+  const len = (input.value || '').length;
+  counter.textContent = String(len);
+  if (len >= errAt)       counter.dataset.state = 'err';
+  else if (len >= warnAt) counter.dataset.state = 'warn';
+  else                    delete counter.dataset.state;
+}
+
 function __macroStartEdit(m){
+  // v10.14.0 V14-M8: edit/AI mutex. If AI review panel is open, close it
+  // before opening the edit form (and vice versa in __macroAiSeed).
+  const aiPanel = document.getElementById('macroAiReview');
+  if (aiPanel) aiPanel.remove();
+
   __macroEditing = m || { id: null, label: '', body: '' };
   document.getElementById('macroEditId').value = m && m.id ? String(m.id) : '';
   document.getElementById('macroEditLabel').value = m && m.label ? m.label : '';
   document.getElementById('macroEditBody').value = m && m.body ? m.body : '';
-  document.getElementById('macroEditWrap').style.display = '';
+  // v10.14.0 V14-M5: select active KIND radio (default = current tab kind).
+  const kindToSelect = (m && m.kind) || __macroKind;
+  const radios = document.querySelectorAll('input[name="macroEditKind"]');
+  radios.forEach(function(r) { r.checked = (r.value === kindToSelect); });
+  // v10.14.0 V14-M6: prime char counters.
+  __macroUpdateCounter('macroEditLabel', 'macroEditLabelCounter', 40, 50);
+  __macroUpdateCounter('macroEditBody',  'macroEditBodyCounter',  800, 1000);
+  // v10.14.0 V14-M2: slide open via class toggle, no display swap.
+  const wrap = document.getElementById('macroEditWrap');
+  if (wrap) {
+    wrap.classList.add('gam-macro-edit-form-open');
+    wrap.setAttribute('aria-hidden', 'false');
+  }
   try { document.getElementById('macroEditLabel').focus(); } catch(_){}
 }
 
 function __macroCancelEdit(){
   __macroEditing = null;
-  document.getElementById('macroEditWrap').style.display = 'none';
+  // v10.14.0 V14-M2: slide closed via class toggle.
+  const wrap = document.getElementById('macroEditWrap');
+  if (wrap) {
+    wrap.classList.remove('gam-macro-edit-form-open');
+    wrap.setAttribute('aria-hidden', 'true');
+  }
 }
 
 async function __macroSave(){
@@ -4276,12 +4475,18 @@ async function __macroSave(){
   const id = idRaw ? parseInt(idRaw, 10) : null;
   const label = (document.getElementById('macroEditLabel').value || '').trim();
   const body = (document.getElementById('macroEditBody').value || '').trim();
+  // v10.14.0 V14-M5: read selected KIND from radio group, fallback to active tab.
+  let kind = __macroKind;
+  try {
+    const checked = document.querySelector('input[name="macroEditKind"]:checked');
+    if (checked && checked.value) kind = checked.value;
+  } catch(_){}
   if (!label || !body){ __macroSetStatus('label + body required', 'err'); return; }
   if (label.length > 80){ __macroSetStatus('label too long (max 80)', 'err'); return; }
   if (body.length > 4000){ __macroSetStatus('body too long (max 4000)', 'err'); return; }
   __macroSetStatus('saving...');
   try {
-    const r = await popupRpc('macroUpsert', { id: id, kind: __macroKind, label: label, body: body });
+    const r = await popupRpc('macroUpsert', { id: id, kind: kind, label: label, body: body });
     if (r && r.ok && r.data && r.data.ok){
       __macroSetStatus('✓ ' + (r.data.action || 'saved'), 'ok');
       __macroCancelEdit();
@@ -4419,7 +4624,8 @@ async function __macroDoDelete(m){
 async function __macroAiSeed(){
   const btn = document.getElementById('macroAiSeedBtn');
   const orig = btn ? btn.textContent : '';
-  if (btn){ btn.disabled = true; btn.textContent = '✨ Generating...'; }
+  // v10.14.0 V14-M1: drop the sparkle emoji.
+  if (btn){ btn.disabled = true; btn.textContent = 'Generating...'; }
   __macroSetStatus('asking AI for ' + __macroKind + ' suggestions...');
   try {
     // v9.8.0: pass existing labels as anti-list to prevent repetition
@@ -4439,7 +4645,8 @@ async function __macroAiSeed(){
     const sugg = r.data.suggestions;
     if (sugg.length === 0){ __macroSetStatus('AI returned 0 suggestions', 'err'); return; }
     __macroShowAiReview(sugg);
-    __macroSetStatus('✨ ' + sugg.length + ' AI suggestions — pick which to save', 'info');
+    // v10.14.0 V14-M1: drop the sparkle emoji.
+    __macroSetStatus(sugg.length + ' AI suggestions -- pick which to save', 'info');
   } catch(e){
     __macroSetStatus('error: ' + (e && e.message || e), 'err');
   } finally {
@@ -4450,10 +4657,13 @@ async function __macroAiSeed(){
 // v10.13.4 W4: inline AI review panel (replaces window.confirm). All
 // suggestions checked by default. SAVE SELECTED (N) button updates count
 // as user toggles checkboxes.
+// v10.14.0 V14-M8: edit/AI mutex -- close edit form before opening AI panel.
 function __macroShowAiReview(sugg){
   // Remove any prior review panel
   const old = document.getElementById('macroAiReview');
   if (old) old.remove();
+  // v10.14.0 V14-M8: close edit form if open (mutex).
+  __macroCancelEdit();
   const section = document.getElementById('macrosSection');
   const list = document.getElementById('macrosList');
   if (!section || !list) return;
@@ -4462,7 +4672,8 @@ function __macroShowAiReview(sugg){
   panel.className = 'gam-macro-ai-review';
   const head = document.createElement('div');
   head.className = 'gam-macro-ai-review-head';
-  head.textContent = '✨ AI proposed ' + sugg.length + ' ' + __macroKind + ' macros';
+  // v10.14.0 V14-M1 (HTML scaffold rewrite): drop the sparkle emoji.
+  head.textContent = 'AI proposed ' + sugg.length + ' ' + __macroKind + ' macros';
   panel.appendChild(head);
 
   const checkboxes = [];
@@ -4496,7 +4707,9 @@ function __macroShowAiReview(sugg){
   const cancelBtn = document.createElement('button');
   cancelBtn.type = 'button';
   cancelBtn.className = 'cancel';
-  cancelBtn.textContent = 'Cancel';
+  // v10.14.0 V14-M8: rename Cancel -> DISCARD ALL. Stronger language matches
+  // the action: clicking discards all 5 proposed suggestions, not just dismisses.
+  cancelBtn.textContent = 'Discard all';
   actionsRow.appendChild(saveBtn);
   actionsRow.appendChild(cancelBtn);
   panel.appendChild(actionsRow);
@@ -4557,6 +4770,15 @@ function __macroShowAiReview(sugg){
   if (saveBtn) saveBtn.addEventListener('click', function(){ withLoading(saveBtn, 'saving...', __macroSave); });
   const cancelBtn = document.getElementById('macroCancelBtn');
   if (cancelBtn) cancelBtn.addEventListener('click', __macroCancelEdit);
+  // v10.14.0 V14-M6: live char-counter input listeners.
+  const lblInput = document.getElementById('macroEditLabel');
+  if (lblInput) lblInput.addEventListener('input', function() {
+    __macroUpdateCounter('macroEditLabel', 'macroEditLabelCounter', 40, 50);
+  });
+  const bodyInput = document.getElementById('macroEditBody');
+  if (bodyInput) bodyInput.addEventListener('input', function() {
+    __macroUpdateCounter('macroEditBody', 'macroEditBodyCounter', 800, 1000);
+  });
 }
 loadMacros();
 

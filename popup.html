@@ -78,7 +78,11 @@
       </div>
       <div class="pop-stat-val" id="s-pending">&mdash;</div>
     </div>
-    <div class="pop-stat" data-drill="dr" data-state="danger" title="Death Row queue: scheduled bans pending execution. Click to list."
+    <!-- v10.14.0 V14-S3: DR tile -- removed data-state="danger" (was W1 mistake);
+         loadStats() now sets state via threshold (info default; warn when drReady>0).
+         Per SHIPMASTER §CONFLICT 6 ("keep purple for v10.13") cyan/info renders purple
+         until threshold-driven warn fires. -->
+    <div class="pop-stat" data-drill="dr" data-state="info" title="Death Row queue: scheduled bans pending execution. Click to list."
          role="button" tabindex="0" aria-label="Death Row: — click to list">
       <div class="pop-stat-head">
         <div class="pop-stat-label">Death Row</div>
@@ -86,7 +90,9 @@
       </div>
       <div class="pop-stat-val" id="s-dr">&mdash;</div>
     </div>
-    <div class="pop-stat" data-drill="banned" data-state="danger" title="Users in your roster with status=banned. Click to list."
+    <!-- v10.14.0 V14-S2: data-state attribute removed. loadStats() drives state
+         via threshold (banned >50/24h = high, etc.). -->
+    <div class="pop-stat" data-drill="banned" title="Users in your roster with status=banned. Click to list."
          role="button" tabindex="0" aria-label="Banned: — click to list">
       <div class="pop-stat-head">
         <div class="pop-stat-label">Banned</div>
@@ -118,8 +124,9 @@
       </div>
       <div class="pop-stat-val" id="s-notes">&mdash;</div>
     </div>
-    <!-- ASK-086 / WAVE-B-AUX A.3: AI budget visibility. v10.10.1 P5: data-drill="ai24" -->
-    <div class="pop-stat" data-drill="ai24" data-state="info" title="AI calls used today vs your daily cap (e.g. 47/500). Click for per-call log."
+    <!-- ASK-086 / WAVE-B-AUX A.3: AI budget visibility. v10.10.1 P5: data-drill="ai24"
+         v10.14.0 V14-S2: data-state set by JS (warn when calls/cap > 0.80). -->
+    <div class="pop-stat" data-drill="ai24" title="AI calls used today vs your daily cap (e.g. 47/500). Click for per-call log."
          role="button" tabindex="0" aria-label="AI today: — click for per-call log">
       <div class="pop-stat-head">
         <div class="pop-stat-label">AI today</div>
@@ -403,41 +410,55 @@
   <!-- v10.12 UIUX-01: <details> -> <div> permanent panel -->
   <div class="gam-card" id="card-macros" data-tab="tools">
     <div class="gam-card-header">
-      <span class="gam-card-title">&#x1F4DD; Team Macros</span>
+      <span class="gam-card-title">Team Macros</span>
       <span class="gam-card-badge" id="card-badge-macros" style="display:none"></span>
     </div>
     <div class="gam-card-body">
 
-  <!-- v9.6.0: Team Macros (shared canned messages) — visible to ALL mods,
-       any mod can add/edit/delete; sync'd across team via worker. -->
+  <!-- v10.14.0 V14-M1: HTML scaffold rewrite. No emoji, no duplicate label,
+       no inline style attrs. CSS in popup.css (gam-macro-* class set, plus
+       new gam-macro-edit-form rule for the slide animation). -->
   <div class="pop-token" id="macrosSection">
-    <label>&#x1F4DD; Team Macros — shared canned messages</label>
-    <div class="pop-token-hint">Custom ban messages + modmail responses, sync'd across all mods. Pick from your ban modal / modmail reply.</div>
-    <div class="pop-tools" style="margin-top:6px;display:flex;gap:4px">
-      <button class="pop-btn pop-btn-ghost gam-macro-tab gam-macro-tab-active" data-kind="ban_msg" style="flex:1">&#x1F528; Ban messages</button>
-      <button class="pop-btn pop-btn-ghost gam-macro-tab" data-kind="mm_reply" style="flex:1">&#x1F4EC; Modmail replies</button>
+    <div class="pop-token-hint">Shared canned ban messages and modmail replies. Pick from the ban modal or modmail reply.</div>
+    <div class="gam-macro-tabs">
+      <button class="gam-macro-tab gam-macro-tab-active" type="button" data-kind="ban_msg">Ban messages</button>
+      <button class="gam-macro-tab" type="button" data-kind="mm_reply">Modmail replies</button>
     </div>
-    <div id="macrosList" style="margin-top:8px;max-height:240px;overflow:auto;border:1px solid #2a2d33;border-radius:4px;background:#0e1115">
+    <div id="macrosList" class="gam-macro-list">
       <!-- v10.12 UIUX-20 §D: inline color -> token; UIUX-19: "Loading..." -> skeleton -->
-      <div class="gam-skel-wrap gam-skel-shimmer" style="padding:10px" aria-busy="true">
-        <div class="gam-skel-line gam-skel-shimmer" style="width:80%;margin:0 auto"></div>
-        <div class="gam-skel-line gam-skel-shimmer" style="width:60%;margin:0 auto"></div>
+      <div class="gam-skel-wrap gam-skel-shimmer" aria-busy="true">
+        <div class="gam-skel-line gam-skel-shimmer"></div>
+        <div class="gam-skel-line gam-skel-shimmer"></div>
       </div>
     </div>
-    <div class="pop-tools" style="margin-top:6px;display:flex;gap:4px">
-      <button id="macroAddBtn" class="pop-btn pop-btn-ghost" style="flex:1">&#x2795; Add custom</button>
-      <button id="macroAiSeedBtn" class="pop-btn pop-btn-ghost" style="flex:1" title="Generate 5 starter macros with AI (Llama). Uses your daily AI budget.">&#x2728; Generate with AI</button>
+    <div class="pop-tools">
+      <button id="macroAddBtn" class="pop-btn pop-btn-ghost" type="button">Add custom</button>
+      <button id="macroAiSeedBtn" class="pop-btn pop-btn-ghost" type="button" title="Generate 5 starter macros with AI (Llama). Uses your daily AI budget.">Generate with AI</button>
     </div>
-    <div id="macroEditWrap" style="display:none;margin-top:8px;padding:8px;background:#0e1115;border:1px solid #2a2d33;border-radius:4px">
+    <!-- v10.14.0 V14-M2: edit form slides via max-height transition (CSS-driven).
+         JS toggles .gam-macro-edit-form-open class instead of style.display. -->
+    <div id="macroEditWrap" class="gam-macro-edit-form" aria-hidden="true">
       <input type="hidden" id="macroEditId" value="">
-      <!-- v10.12 UIUX-20 §G P1: explicit <label for> pairs (were placeholder-only) -->
-      <label for="macroEditLabel" style="font-size:10px;color:var(--bb-ink-dim);text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:2px">Label</label>
-      <input id="macroEditLabel" placeholder="Label (max 80 chars)" maxlength="80" style="width:100%;padding:6px 8px;background:var(--bb-sunken);color:var(--bb-ink);border:1px solid var(--bb-line-hot);font:11px inherit;margin-bottom:6px">
-      <label for="macroEditBody" style="font-size:10px;color:var(--bb-ink-dim);text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:2px">Body</label>
-      <textarea id="macroEditBody" placeholder="Body of the macro..." maxlength="4000" rows="4" style="width:100%;padding:6px 8px;background:var(--bb-sunken);color:var(--bb-ink);border:1px solid var(--bb-line-hot);font:12px inherit;resize:vertical"></textarea>
-      <div class="pop-tools" style="margin-top:6px;display:flex;gap:4px">
-        <button id="macroSaveBtn" class="pop-btn pop-btn-ghost" style="flex:1">Save</button>
-        <button id="macroCancelBtn" class="pop-btn pop-btn-ghost" style="flex:1">Cancel</button>
+      <!-- v10.14.0 V14-M5: KIND radio toggle (BAN_MSG / MM_REPLY). Per-edit override
+           of the active tab's kind so a single macro can be moved between buckets. -->
+      <fieldset class="gam-macro-edit-kind">
+        <legend>Kind</legend>
+        <label><input type="radio" name="macroEditKind" value="ban_msg" checked> Ban</label>
+        <label><input type="radio" name="macroEditKind" value="mm_reply"> Modmail</label>
+      </fieldset>
+      <div class="gam-macro-edit-row">
+        <label for="macroEditLabel">Label</label>
+        <span class="gam-macro-edit-counter" id="macroEditLabelCounter" aria-live="polite">0</span>
+      </div>
+      <input id="macroEditLabel" type="text" placeholder="Label (max 50 chars)" maxlength="80">
+      <div class="gam-macro-edit-row">
+        <label for="macroEditBody">Body</label>
+        <span class="gam-macro-edit-counter" id="macroEditBodyCounter" aria-live="polite">0</span>
+      </div>
+      <textarea id="macroEditBody" placeholder="Body of the macro..." maxlength="4000" rows="4"></textarea>
+      <div class="pop-tools">
+        <button id="macroSaveBtn" class="pop-btn pop-btn-ghost" type="button">Save</button>
+        <button id="macroCancelBtn" class="pop-btn pop-btn-ghost" type="button">Cancel</button>
       </div>
     </div>
     <div id="macrosStatus" class="pop-token-status"></div>

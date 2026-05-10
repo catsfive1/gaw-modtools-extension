@@ -1405,6 +1405,10 @@ input:focus, textarea:focus, select:focus {
   border: 1px solid var(--bb-line) !important;
   background: var(--bb-panel) !important;
   border-radius: 0 !important;
+  /* v10.14.0 V14-M1: replaces inline style="margin-top:8px;max-height:240px;overflow:auto" */
+  margin-top: var(--bb-s3);
+  max-height: 240px;
+  overflow: auto;
 }
 .gam-macro-item {
   background: transparent !important;
@@ -1456,11 +1460,23 @@ input:focus, textarea:focus, select:focus {
   border: 1px solid var(--bb-line) !important;
   color: var(--bb-ink-dim) !important;
   font: 600 var(--bb-t-xs)/1 var(--bb-font) !important;
-  padding: 2px var(--bb-s2) !important;
+  /* v10.14.0 V14-M7: SVG icon trio. Square click target, icons sized to 14px.
+     Padding uniform; min-height matches click-target floor. */
+  padding: 4px !important;
   cursor: pointer !important;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   border-radius: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+}
+.gam-macro-item-action svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 .gam-macro-item-action:hover {
   border-color: var(--bb-amber) !important;
@@ -1476,6 +1492,93 @@ input:focus, textarea:focus, select:focus {
    devices always see the actions. WCAG 2.5.5 + 2.5.7 conformance. */
 @media (hover: none) {
   .gam-macro-item-actions { opacity: 1; transition: none; }
+}
+
+/* v10.14.0 V14-M2: Edit form slides via max-height transition. Closed = 0;
+   open = enough to show all fields. Overflow:hidden clips during the slide.
+   JS toggles .gam-macro-edit-form-open. PRM honors with shorter or no slide. */
+.gam-macro-edit-form {
+  display: block;
+  max-height: 0;
+  overflow: hidden;
+  margin-top: 0;
+  padding: 0 var(--bb-s3);
+  background: var(--bb-panel);
+  border: 1px solid transparent;
+  transition: max-height 200ms ease, padding 200ms ease, border-color 200ms ease, margin-top 200ms ease;
+}
+.gam-macro-edit-form.gam-macro-edit-form-open {
+  max-height: 800px;
+  margin-top: var(--bb-s3);
+  padding: var(--bb-s3);
+  border-color: var(--bb-line);
+}
+@media (prefers-reduced-motion: reduce) {
+  .gam-macro-edit-form { transition: none; }
+}
+.gam-macro-edit-form input[type="text"],
+.gam-macro-edit-form textarea {
+  width: 100%;
+  padding: var(--bb-s2) var(--bb-s3);
+  background: var(--bb-sunken);
+  color: var(--bb-ink);
+  border: 1px solid var(--bb-line-hot);
+  font: var(--bb-t-xs) var(--bb-font);
+  margin-bottom: var(--bb-s2);
+  border-radius: 0;
+}
+.gam-macro-edit-form textarea {
+  font-size: var(--bb-t-sm);
+  resize: vertical;
+}
+.gam-macro-edit-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+.gam-macro-edit-row label {
+  font-size: 10px;
+  color: var(--bb-ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+/* v10.14.0 V14-M6: char counters with warn/err color states. JS sets dataset
+   warn / err based on length thresholds. */
+.gam-macro-edit-counter {
+  font: var(--bb-t-xs) var(--bb-font);
+  color: var(--bb-ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.gam-macro-edit-counter[data-state="warn"] { color: var(--bb-warn) !important; }
+.gam-macro-edit-counter[data-state="err"]  { color: var(--bb-red) !important; }
+
+/* v10.14.0 V14-M5: KIND fieldset radio group inside edit form. */
+.gam-macro-edit-kind {
+  border: 1px solid var(--bb-line);
+  padding: var(--bb-s2) var(--bb-s3);
+  margin: 0 0 var(--bb-s3);
+  display: flex;
+  gap: var(--bb-s4);
+  align-items: center;
+}
+.gam-macro-edit-kind legend {
+  font-size: 10px;
+  color: var(--bb-ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0 var(--bb-s2);
+}
+.gam-macro-edit-kind label {
+  font: var(--bb-t-xs) var(--bb-font);
+  color: var(--bb-ink);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.gam-macro-edit-kind input[type="radio"] {
+  cursor: pointer;
 }
 
 /* Filter bar above macros list */
@@ -1494,14 +1597,34 @@ input:focus, textarea:focus, select:focus {
   font: var(--bb-t-xs) var(--bb-font);
   border-radius: 0;
 }
-.gam-macro-filter select {
-  padding: var(--bb-s2) var(--bb-s3);
-  background: var(--bb-sunken);
+/* v10.14.0 V14-M3: sort UI is 3 text-buttons (Name/Use/Date) with direction
+   indicator. Replaces the <select>. Active button has amber color + border;
+   inactive has dim. Direction caret pure-CSS via the .dir text. */
+.gam-macro-sort {
+  display: flex;
+  gap: var(--bb-s1);
+}
+.gam-macro-sort-btn {
+  background: transparent;
   color: var(--bb-ink-dim);
   border: 1px solid var(--bb-line);
-  font: var(--bb-t-xs) var(--bb-font);
+  font: 500 var(--bb-t-xs) var(--bb-font);
+  padding: var(--bb-s2) var(--bb-s3);
   cursor: pointer;
   border-radius: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  min-height: 32px;
+}
+.gam-macro-sort-btn:hover { color: var(--bb-ink); }
+.gam-macro-sort-btn[aria-pressed="true"] {
+  color: var(--bb-amber);
+  border-color: var(--bb-amber);
+}
+.gam-macro-sort-btn .dir {
+  margin-left: 4px;
+  font-size: 9px;
+  opacity: 0.85;
 }
 
 /* Inline delete-confirm row state with 4s countdown bar */
@@ -1558,19 +1681,22 @@ input:focus, textarea:focus, select:focus {
   color: var(--bb-ink-dim);
 }
 
-/* AI review panel: checkbox list with SAVE SELECTED (N) */
+/* AI review panel: checkbox list with SAVE SELECTED (N).
+   v10.14.0 V14-M4 (UIUX2-04 §B2.5): chrome amber -> purple. Purple connotes
+   human/AI distinction; amber is the brand. AI-generated suggestions get
+   purple framing so a glance distinguishes them from operator-authored macros. */
 .gam-macro-ai-review {
   margin-top: var(--bb-s2);
   padding: var(--bb-s3);
   background: var(--bb-sunken);
-  border: 1px solid var(--bb-amber-dim, var(--bb-line));
+  border: 1px solid var(--bb-purple);
   display: flex;
   flex-direction: column;
   gap: var(--bb-s2);
 }
 .gam-macro-ai-review-head {
   font: 600 var(--bb-t-xs) var(--bb-font);
-  color: var(--bb-amber);
+  color: var(--bb-purple);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -1584,7 +1710,7 @@ input:focus, textarea:focus, select:focus {
   cursor: pointer;
 }
 .gam-macro-ai-review-row:hover {
-  border-color: var(--bb-line-hot, var(--bb-amber-dim));
+  border-color: var(--bb-purple);
 }
 .gam-macro-ai-review-row input[type="checkbox"] {
   margin-top: 2px;
@@ -1592,7 +1718,7 @@ input:focus, textarea:focus, select:focus {
 }
 .gam-macro-ai-review-row .label {
   font: 600 var(--bb-t-xs) var(--bb-font);
-  color: var(--bb-amber);
+  color: var(--bb-purple);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -1609,8 +1735,8 @@ input:focus, textarea:focus, select:focus {
 }
 .gam-macro-ai-review-actions button {
   background: transparent;
-  border: 1px solid var(--bb-amber);
-  color: var(--bb-amber);
+  border: 1px solid var(--bb-purple);
+  color: var(--bb-purple);
   font: 600 var(--bb-t-xs) var(--bb-font);
   padding: var(--bb-s2) var(--bb-s3);
   cursor: pointer;
@@ -2352,10 +2478,10 @@ input[type="checkbox"]:checked::after {
 .gam-kpi-delta[data-dir="up"]   { color: var(--bb-green) !important; }
 .gam-kpi-delta[data-dir="down"] { color: var(--bb-red) !important; }
 .gam-kpi-delta[data-dir="flat"] { color: var(--bb-ink-faint) !important; }
-/* Same semantic for popup stat tile delta chips (P0-02 W1 wires these via JS) */
-.pop-stat-delta[data-dir="up"]   { color: var(--bb-green) !important; }
-.pop-stat-delta[data-dir="down"] { color: var(--bb-red) !important; }
-.pop-stat-delta[data-dir="flat"] { color: var(--bb-ink-faint) !important; }
+/* v10.14.0 V14-S4: dedup -- duplicate .pop-stat-delta[data-dir] block here
+   removed; canonical rules live at L2719-2722 with border-color tweaks for
+   flat/none. (Was: 3-line copy of the chip color rules, identical except
+   the canonical block also handles border-color on flat/none.) */
 
 /* KPI loading pulse */
 .gam-kpi-tile[data-loading="true"] .gam-kpi-val {
@@ -2368,6 +2494,16 @@ input[type="checkbox"]:checked::after {
 }
 @media (prefers-reduced-motion: reduce) {
   .gam-kpi-tile[data-loading="true"] .gam-kpi-val { animation: none !important; }
+}
+/* v10.14.0 V14-S6: stat-tile loading pulse, sister to .gam-kpi rule above.
+   loadStats() sets data-loading="true" on every .pop-stat at start, clears
+   on success or fail. Same kpi-pulse keyframes for consistency. */
+.pop-stats .pop-stat[data-loading="true"] .pop-stat-val {
+  animation: kpi-pulse 1.2s ease-in-out infinite;
+  color: var(--bb-ink-faint) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pop-stats .pop-stat[data-loading="true"] .pop-stat-val { animation: none !important; }
 }
 /* v10.13.2 W5: copyWithPulse() flash animation — green tint fades to transparent over 800ms */
 @keyframes gam-copy-flash {
@@ -2737,14 +2873,10 @@ input[type="checkbox"]:checked::after {
   width: 100%;
   margin-top: 4px;
 }
-.pop-stat-spark-bar {
-  flex: 1;
-  min-width: var(--bb-spark-bar-w);
-  background: var(--bb-line-hot);
-  transition: background 200ms;
-}
-.pop-stat-spark-bar.today { background: var(--bb-spark-today); }
-.pop-stat-spark-bar.zero  { background: var(--bb-line) !important; height: 2px !important; }
+/* v10.14.0 V14-S4: .pop-stat-spark-bar rules removed -- _injectStatSparkline
+   creates inline-styled <span> nodes via element.style.* (popup.js); no JS
+   path injects elements with class="pop-stat-spark-bar". 8 lines of dead
+   !important-laden CSS gone. */
 
 /* Drill toolbar row */
 .pop-drill-toolbar {
