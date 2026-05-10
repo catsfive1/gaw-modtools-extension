@@ -3364,9 +3364,11 @@ loadLead();
     } catch (_) {}
   }
   if (hasToken) {
-    // v10.13.3 W2: __applyTierGate will switch state to 'returning' on whoami
-    // success. Until then, leave the state-A pre-render visible — but the
-    // user's token is in storage, so __applyTierGate will fire shortly.
+    // v10.13.3 W2: fast-path State B render. Token is in storage so the
+    // user is at minimum a returning mod; __applyTierGate will refine
+    // username/tier/age into the banner shortly. Showing State B
+    // immediately avoids a flash-of-empty-tokens-card.
+    try { __tokSetState('returning', { username: '', tier: 'mod', verifiedAgo: 0, ageDays: -1, encrypted: true }); } catch(_){}
     return;
   }
   // No token → State A. Reset step-2 / success containers; path row is
