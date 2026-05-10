@@ -7437,17 +7437,79 @@
     return /Extension was reloaded|context invalidated|Receiving end does not exist|message port closed/i.test(m);
   }
 
-  function snack(msg, type='info'){
+  function snack(msg, type='info', opts){
     // v9.24.0: route EXT_CONTEXT_INVALIDATED noise into the one-time banner
     // instead of spamming a snack per orphaned RPC call.
     if (_gamIsExtOrphanedMsg(msg)){
       _gamShowExtOrphanedBanner();
       return;
     }
+    // v10.13.1 W3: optional action button + countdown bar. Backwards-compat:
+    // snack(msg) and snack(msg, type) work unchanged. opts = { actionLabel,
+    // onAction, actionDurationMs } extends the toast surface for undo flows
+    // (DR popover Cancel All) and any other "operation completed, click to
+    // reverse within N seconds" pattern. Auto-dismiss occurs when the
+    // countdown completes (no action fired); explicit click fires onAction
+    // and dismisses.
+    const o = opts || {};
+    const hasAction = !!(o.actionLabel && typeof o.onAction === 'function');
+    const hasCountdown = typeof o.actionDurationMs === 'number' && o.actionDurationMs > 0;
+    const durationMs = hasCountdown ? o.actionDurationMs : 2200;
     // v8.1 ux: announce via aria-live region (flag-gated inside __announce).
     try { __announce(type === 'error' ? 'error' : 'polite', msg); } catch(e){}
     const old=document.getElementById('gam-snack'); if(old) old.remove();
-    const s=el('div',{id:'gam-snack', cls:`gam-snack gam-snack-${type}`}, msg);
+    const s=el('div',{id:'gam-snack', cls:`gam-snack gam-snack-${type}`});
+    // v10.13.1 W3: snack is now a flex row so optional action btn sits beside the message.
+    s.style.display = 'flex';
+    s.style.alignItems = 'center';
+    s.style.gap = '8px';
+    // Message text node (so action button can sit next to it without HTML escaping)
+    const msgSpan = document.createElement('span');
+    msgSpan.textContent = String(msg);
+    msgSpan.style.cssText = 'flex:1;min-width:0';
+    s.appendChild(msgSpan);
+    // Optional action button (Bloomberg ghost: amber border/text, hover fills)
+    if (hasAction) {
+      const btn = document.createElement('button');
+      btn.className = 'gam-snack-action';
+      btn.type = 'button';
+      btn.textContent = String(o.actionLabel);
+      btn.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:2px 8px;cursor:pointer;font:700 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;text-transform:uppercase;transition:background 80ms,color 80ms;flex-shrink:0;pointer-events:auto';
+      btn.addEventListener('mouseenter', function(){ btn.style.background = '#ff9933'; btn.style.color = '#0a0a0b'; });
+      btn.addEventListener('mouseleave', function(){ btn.style.background = 'transparent'; btn.style.color = '#ff9933'; });
+      btn.addEventListener('click', function(ev){
+        ev.stopPropagation();
+        try { o.onAction(); } catch(_) {}
+        // dismiss immediately on action
+        s.classList.remove('gam-snack-show');
+        setTimeout(function(){ try { s.remove(); } catch(_) {} }, 200);
+        if (s._gamCountdownInterval) clearInterval(s._gamCountdownInterval);
+        if (s._gamDismissTimer) clearTimeout(s._gamDismissTimer);
+      });
+      s.appendChild(btn);
+      // Snack must accept clicks on the action button even though parent has pointer-events:none
+      s.style.pointerEvents = 'auto';
+    }
+    // Optional countdown bar at bottom (when actionDurationMs is set)
+    if (hasCountdown) {
+      const bar = document.createElement('div');
+      bar.className = 'gam-snack-countdown-bar';
+      bar.style.cssText = 'position:absolute;left:0;bottom:0;height:2px;background:#ff9933;width:100%;transition:width 100ms linear;border-radius:0 0 6px 6px';
+      s.appendChild(bar);
+      // Make snack relatively-positioned so the bar absolute-positions inside it
+      s.style.position = 'fixed'; // already fixed but ensure
+      s.style.paddingBottom = '8px';
+      const startTs = Date.now();
+      s._gamCountdownInterval = setInterval(function(){
+        const elapsed = Date.now() - startTs;
+        const pct = Math.max(0, 1 - (elapsed / durationMs));
+        bar.style.width = (pct * 100).toFixed(1) + '%';
+        if (elapsed >= durationMs) {
+          clearInterval(s._gamCountdownInterval);
+          s._gamCountdownInterval = null;
+        }
+      }, 100);
+    }
     // v6.0.1: detect overlap with centered status bar; if viewport layout
     // places them on a collision course, snack bumps up to sit above the bar.
     try {
@@ -7467,7 +7529,11 @@
     } catch(e){}
     document.body.appendChild(s);
     requestAnimationFrame(()=>s.classList.add('gam-snack-show'));
-    setTimeout(()=>{ s.classList.remove('gam-snack-show'); setTimeout(()=>s.remove(),300); }, 2200);
+    s._gamDismissTimer = setTimeout(()=>{
+      s.classList.remove('gam-snack-show');
+      setTimeout(()=>{ try { s.remove(); } catch(_){} },300);
+      if (s._gamCountdownInterval) { clearInterval(s._gamCountdownInterval); s._gamCountdownInterval = null; }
+    }, durationMs);
   }
   function showBackdrop(fn){
     const bd=el('div',{id:'gam-backdrop', onclick:fn||closeAllPanels});
@@ -17317,64 +17383,158 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (existing) { existing.remove(); return; }
     const pop = document.createElement('div');
     pop.id = 'gam-active-mods-popover';
-    pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:280px;max-width:360px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
+    pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:320px;max-width:420px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
     const r = anchor.getBoundingClientRect();
-    pop.style.left = Math.max(8, Math.min(window.innerWidth - 360, r.left)) + 'px';
+    pop.style.left = Math.max(8, Math.min(window.innerWidth - 420, r.left)) + 'px';
     pop.style.bottom = (window.innerHeight - r.top + 6) + 'px'; // v10.6.2 HOTFIX UIUX-03 P0.1: anchor above bar (was top:r.bottom+6 which placed it off-screen below)
     pop.style.top = '';
+
+    // v10.13.1 W3: inject CSS once for tier dots + segmented control + dividers.
+    if (!document.getElementById('gam-am-popover-css')) {
+      const ss = document.createElement('style');
+      ss.id = 'gam-am-popover-css';
+      ss.textContent = [
+        '#gam-active-mods-popover .gam-am-seg{display:inline-flex;border:1px solid #2a2825;border-radius:3px;overflow:hidden}',
+        '#gam-active-mods-popover .gam-am-seg button{background:transparent;border:none;border-right:1px solid #2a2825;color:#9b9892;padding:2px 8px;cursor:pointer;font:600 10px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.04em}',
+        '#gam-active-mods-popover .gam-am-seg button:last-child{border-right:none}',
+        '#gam-active-mods-popover .gam-am-seg button[aria-pressed="true"]{background:rgba(255,153,51,0.14);color:#ff9933}',
+        '#gam-active-mods-popover .gam-am-divider{display:flex;align-items:center;gap:8px;padding:4px 10px 2px;color:#5a5752;font:600 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.1em;text-transform:uppercase}',
+        '#gam-active-mods-popover .gam-am-divider::before,#gam-active-mods-popover .gam-am-divider::after{content:"";flex:1;height:1px;background:#2a2825}',
+        '#gam-active-mods-popover .gam-am-row{display:flex;align-items:center;gap:8px;padding:3px 10px;border-bottom:1px solid #1e1c1a}',
+        '#gam-active-mods-popover .gam-am-dot{width:6px;height:6px;border-radius:50%;flex:0 0 auto}',
+        '#gam-active-mods-popover .gam-am-dot--active{background:#3dd68c}',
+        '#gam-active-mods-popover .gam-am-dot--idle{background:#ffd84d}',
+        '#gam-active-mods-popover .gam-am-dot--stale{background:#5a5752}',
+        '#gam-active-mods-popover .gam-am-name{color:#66ccff;font-weight:600;flex:0 0 auto}',
+        '#gam-active-mods-popover .gam-am-page{color:#9b9892;font-size:10px;flex:1;text-align:left;text-decoration:none;max-width:40ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block}',
+        '#gam-active-mods-popover .gam-am-page:hover{color:#e8e6e1;text-decoration:underline}',
+        '#gam-active-mods-popover .gam-am-ago{color:#9b9892;font-variant-numeric:tabular-nums;flex:0 0 auto;font-size:10px}',
+      ].join('');
+      document.head.appendChild(ss);
+    }
+
     pop.innerHTML =
       '<div style="background:#0a0a0b;border-bottom:1px solid #2a2825;padding:6px 10px;display:flex;align-items:center;gap:8px">' +
-        '<span style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:10px">Active mods</span>' +
+        '<span id="gam-am-title" style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:10px">Active mods</span>' +
         '<span style="flex:1"></span>' +
-        '<button data-w="4"  style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:2px 6px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.04em">4H</button>' +
-        '<button data-w="8"  style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:2px 6px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.04em">8H</button>' +
-        '<button data-w="24" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:2px 6px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.04em">24H</button>' +
-        '<button data-close="1" style="background:transparent;border:none;color:#5a5752;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1">×</button>' +
+        '<div class="gam-am-seg" role="group" aria-label="Time window">' +
+          '<button data-w="4"  aria-pressed="false">4H</button>' +
+          '<button data-w="8"  aria-pressed="false">8H</button>' +
+          '<button data-w="24" aria-pressed="false">24H</button>' +
+        '</div>' +
+        '<button data-close="1" aria-label="Close popover" style="background:transparent;border:none;color:#5a5752;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1">×</button>' +
       '</div>' +
-      '<div id="gam-active-mods-body" style="padding:8px 10px;max-height:320px;overflow-y:auto">loading...</div>';
+      '<div id="gam-active-mods-body" style="padding:4px 0 8px;max-height:340px;overflow-y:auto">loading...</div>';
     document.body.appendChild(pop);
 
     function highlightWindow(h) {
       pop.querySelectorAll('button[data-w]').forEach(b => {
         const on = parseInt(b.getAttribute('data-w'), 10) === h;
-        b.style.color = on ? '#ff9933' : '#9b9892';
-        b.style.borderColor = on ? '#ff9933' : '#2a2825';
-        b.style.background = on ? 'rgba(255,153,51,0.10)' : 'transparent';
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
+    }
+    // v10.13.1 W3: time-ago "now" for <60s deltas, then minutes / hours.
+    function _formatAgo(ms) {
+      const s = Math.max(0, Math.floor(ms / 1000));
+      if (s < 60) return 'now';
+      const m = Math.floor(s / 60);
+      if (m < 60) return m + 'm';
+      const h = Math.floor(m / 60);
+      return h + 'h';
+    }
+    function _classifyTier(deltaMs) {
+      // active <30m, idle 30m-4h, stale >4h
+      if (deltaMs < 30 * 60_000) return 'active';
+      if (deltaMs < 4 * 3600_000) return 'idle';
+      return 'stale';
     }
     async function loadWindow(hours) {
       try { setSetting('activeModsWindow', hours); } catch(_){}
       highlightWindow(hours);
       const body = pop.querySelector('#gam-active-mods-body');
-      body.innerHTML = '<span style="color:#5a5752">querying...</span>';
+      body.innerHTML = '<div style="padding:8px 10px;color:#5a5752">querying...</div>';
       const cutoff = Date.now() - hours * 3600_000;
       const res = await rpcCall('presenceOnline', { since: cutoff });
       if (!res || !res.ok || !res.data) {
-        body.innerHTML = '<span style="color:#ff3b3b">probe failed</span>';
+        body.innerHTML = '<div style="padding:8px 10px;color:#ff3b3b">probe failed</div>';
         return;
       }
       const mods = Array.isArray(res.data.mods) ? res.data.mods : (Array.isArray(res.data) ? res.data : []);
+      // v10.13.1 W3: header gets total count (n)
+      const titleEl = pop.querySelector('#gam-am-title');
+      if (titleEl) titleEl.textContent = 'Active mods (' + mods.length + ')';
       if (mods.length === 0) {
-        body.innerHTML = '<span style="color:#5a5752">no mods seen in last ' + hours + 'h</span>';
+        body.innerHTML = '<div style="padding:8px 10px;color:#5a5752">no mods seen in last ' + hours + 'h</div>';
         return;
       }
-      const rows = mods.map(m => {
+      // v10.13.1 W3: enrich + sort by recency desc + tier-classify
+      const now = Date.now();
+      const enriched = mods.map(function(m) {
         const name = m.mod || m.username || m.mod_username || '?';
         const seen = m.last_seen_at || m.ts || m.at || 0;
-        const ago = seen ? Math.max(0, Math.floor((Date.now() - seen) / 60000)) : null;
-        const agoText = ago == null ? '?' : (ago < 60 ? ago + 'm' : Math.floor(ago/60) + 'h');
-        const page = (m.pagePath || m.currentPage || '').slice(0, 32);
-        return '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid #2a2825">' +
-          '<span style="color:#66ccff;font-weight:600;flex:0 0 auto">' + escapeHtml(name) + '</span>' +
-          '<span style="color:#5a5752;font-size:10px;flex:1;text-align:right">' + escapeHtml(page) + '</span>' +
-          '<span style="color:#9b9892;font-variant-numeric:tabular-nums;flex:0 0 auto">' + agoText + '</span>' +
-        '</div>';
-      });
-      body.innerHTML = rows.join('');
+        const delta = seen ? Math.max(0, now - seen) : Number.POSITIVE_INFINITY;
+        const page = (m.pagePath || m.currentPage || '');
+        return { name: name, seen: seen, delta: delta, page: page, tier: _classifyTier(delta) };
+      }).sort(function(a, b) { return a.delta - b.delta; });
+
+      // Group by tier
+      const groups = { active: [], idle: [], stale: [] };
+      enriched.forEach(function(e) { groups[e.tier].push(e); });
+
+      body.innerHTML = '';
+
+      function _addDivider(label) {
+        const d = document.createElement('div');
+        d.className = 'gam-am-divider';
+        d.textContent = label;
+        body.appendChild(d);
+      }
+      function _addRow(e) {
+        const row = document.createElement('div');
+        row.className = 'gam-am-row';
+        const dot = document.createElement('span');
+        dot.className = 'gam-am-dot gam-am-dot--' + e.tier;
+        dot.title = e.tier.toUpperCase() + ' (' + (e.tier === 'active' ? 'active <30m' : e.tier === 'idle' ? 'idle 30m-4h' : 'stale >4h') + ')';
+        const name = document.createElement('span');
+        name.className = 'gam-am-name';
+        name.textContent = e.name;
+        const pageWrap = document.createElement(e.page ? 'a' : 'span');
+        pageWrap.className = 'gam-am-page';
+        if (e.page) {
+          pageWrap.href = e.page;
+          pageWrap.target = '_blank';
+          pageWrap.rel = 'noopener';
+          pageWrap.title = e.page;
+        }
+        pageWrap.textContent = e.page || '(no page data)';
+        const ago = document.createElement('span');
+        ago.className = 'gam-am-ago';
+        ago.textContent = e.seen ? _formatAgo(e.delta) : '?';
+        row.appendChild(dot);
+        row.appendChild(name);
+        row.appendChild(pageWrap);
+        row.appendChild(ago);
+        body.appendChild(row);
+      }
+
+      if (groups.active.length) {
+        _addDivider('ACTIVE (' + groups.active.length + ')');
+        groups.active.forEach(_addRow);
+      }
+      if (groups.idle.length) {
+        _addDivider('IDLE (' + groups.idle.length + ')');
+        groups.idle.forEach(_addRow);
+      }
+      if (groups.stale.length) {
+        _addDivider('EARLIER');
+        groups.stale.forEach(_addRow);
+      }
     }
     pop.addEventListener('click', e => {
       const btn = e.target.closest('button');
       if (!btn) return;
+      // Allow page-link anchors to work normally
+      if (e.target.closest('a.gam-am-page')) return;
       e.stopPropagation();
       if (btn.dataset.close) { pop.remove(); return; }
       const w = parseInt(btn.dataset.w, 10);
@@ -17539,7 +17699,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-sus-dr-btn{background:transparent;border:1px solid #ffd84d;color:#ffd84d;padding:1px 6px;cursor:pointer;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;transition:background 80ms,color 80ms;white-space:nowrap}',
         '.gam-sus-dr-btn:hover{background:rgba(255,216,77,0.15)}',
         '.gam-sus-dr-btn.fired{border-color:#3dd68c;color:#3dd68c;cursor:default}',
-        '.gam-sus-tard-divider{display:flex;align-items:center;gap:8px;padding:6px 0 4px;color:#a855f7;font:600 9px ui-monospace,monospace;letter-spacing:0.1em;text-transform:uppercase}',
+        '.gam-sus-tard-divider{display:flex;align-items:center;gap:8px;padding:6px 10px 4px;color:#a855f7;font:600 9px ui-monospace,monospace;letter-spacing:0.1em;text-transform:uppercase}',
         '.gam-sus-tard-divider::before,.gam-sus-tard-divider::after{content:"";flex:1;height:1px;background:rgba(168,85,247,0.25)}',
         '.gam-sus-tard-row{border-left:2px solid rgba(168,85,247,0.4);padding-left:6px}',
         '.gam-sus-drill-inner{background:#0a0a0b;border:1px solid #2a2825;border-left:2px solid #ff9933;margin:4px 0 6px 16px;padding:6px 8px;font-size:10px}',
@@ -17758,8 +17918,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 
       const drBtn = document.createElement('button');
       drBtn.className = 'gam-sus-dr-btn';
-      drBtn.textContent = 'DR';
-      drBtn.title = 'Add to Death Row (72h)';
+      // v10.13.1 W3: "DR" -> "DR 72h" — discloses default duration up-front. Was a
+      // 4-pixel tooltip-only contract; now visible on the chip itself.
+      drBtn.textContent = 'DR 72h';
+      drBtn.title = 'Add to Death Row (72h default)';
       actStrip.appendChild(drBtn);
 
       // Check if already on DR; disable if so
@@ -17768,12 +17930,39 @@ Analyze this comment against the community rules. Then write a brief, profession
         if (alreadyOnDr) { drBtn.textContent = '\u{1F480} DR'; drBtn.disabled = true; drBtn.classList.add('fired'); }
       } catch(_) {}
 
-      // Overflow button (profile link)
-      const moreBtn = document.createElement('button');
-      moreBtn.textContent = '⋯';
-      moreBtn.title = 'Open profile';
-      moreBtn.style.cssText = 'background:transparent;border:1px solid #3d3a35;color:#9b9892;padding:1px 5px;cursor:pointer;font:600 10px ui-monospace,monospace';
-      actStrip.appendChild(moreBtn);
+      // v10.13.1 W3 P0-13: Unmark on collapsed strip — 2-click recovery from accidental
+      // SUS without forcing the operator to expand the drill panel first. Was buried
+      // in drill panel only; v1 audit (UIUX2-10) explicitly called this out.
+      const unmarkStripBtn = document.createElement('button');
+      unmarkStripBtn.className = 'gam-sus-unmark-strip-btn';
+      unmarkStripBtn.textContent = 'Unmark';
+      unmarkStripBtn.title = 'Clear SUS flag on ' + username;
+      unmarkStripBtn.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 5px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;white-space:nowrap';
+      unmarkStripBtn.addEventListener('click', async function(ev) {
+        ev.stopPropagation();
+        unmarkStripBtn.disabled = true; unmarkStripBtn.textContent = '...';
+        try {
+          await rpcCall('modSusClear', { username: username, client_op_id: __makeReqId() });
+          if (typeof _susState === 'object' && _susState && _susState.rows) {
+            _susState.rows.delete(String(username).toLowerCase());
+          }
+          try { _susApplyDecorations(true); } catch(_){}
+          // Remove the row from the popover
+          if (outerWrap && outerWrap.parentNode) outerWrap.parentNode.removeChild(outerWrap);
+          const remaining = pop.querySelectorAll('[data-sus-row]').length;
+          title.textContent = '\u{1F6A9} SUS — ' + remaining + ' FLAGGED';
+          try { snack('✓ ' + username + ' unmarked SUS', 'success'); } catch(_){}
+        } catch(err) {
+          unmarkStripBtn.disabled = false; unmarkStripBtn.textContent = 'Unmark';
+          try { snack('Unmark failed: ' + (err && err.message || err), 'error'); } catch(_){}
+        }
+      });
+      actStrip.appendChild(unmarkStripBtn);
+
+      // v10.13.1 W3: removed the [⋯] overflow "open profile" button — it was a
+      // deceptive single-link affordance (3-dot icons mean "more options," but
+      // this one only opened the profile, which is also reachable from the
+      // expanded drill panel via the Profile -> link). Net negative trust.
 
       rowWrap.appendChild(actStrip);
 
@@ -17806,8 +17995,10 @@ Analyze this comment against the community rules. Then write a brief, profession
           r.classList.remove('expanded');
           const d = r.querySelector('.gam-sus-drill');
           if (d) d.classList.remove('open');
-          const ch = r.querySelector('.gam-sus-chevron');
-          if (ch) ch.parentElement.closest('.gam-sus-row') && ch.style && (ch.style.transform = '');
+          // v10.13.1 W3 P0-11: removed manual `ch.style.transform = ''` — it conflicted
+          // with the CSS rule .gam-sus-row.expanded .gam-sus-chevron{transform:rotate(90deg)},
+          // pinning the inline style and preventing rotation on second expand. CSS rule
+          // alone now drives chevron orientation via the .expanded class on .gam-sus-row.
           r.querySelector('.gam-sus-row') && r.querySelector('.gam-sus-row').classList.remove('expanded');
         });
         if (!isOpen) {
@@ -17836,11 +18027,9 @@ Analyze this comment against the community rules. Then write a brief, profession
         }
       });
 
-      // More button: opens profile in new tab
-      moreBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        window.open('/u/' + encodeURIComponent(username), '_blank', 'noopener');
-      });
+      // v10.13.1 W3: moreBtn handler removed — button itself was deleted above
+      // (deceptive single-link affordance). Profile is reachable from the
+      // expanded drill panel via "Profile ->".
 
       return outerWrap;
     }
@@ -17878,7 +18067,60 @@ Analyze this comment against the community rules. Then write a brief, profession
         const drRuleBtn = document.createElement('button');
         drRuleBtn.style.cssText = 'background:transparent;border:1px solid #a855f7;color:#a855f7;padding:1px 5px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;white-space:nowrap';
         drRuleBtn.textContent = 'DR Rule';
-        drRuleBtn.title = 'Add as auto-DR rule';
+        drRuleBtn.title = 'Add as auto-DR rule (saves to autoTardRules)';
+        // v10.13.1 W3 P0-12: wire DR Rule click — try modAutoRuleAdd RPC first; on
+        // RPC-missing or failure, fall back to localStorage (autoTardRules setting,
+        // matching the tards-panel-add path at L13688). Buttons that "look clickable
+        // and don't do anything" are the highest trust-debt items in the popover.
+        drRuleBtn.addEventListener('click', function(ev) {
+          ev.stopPropagation();
+          const pat = String(s.pattern || s.label || '').trim();
+          if (!pat) { try { snack('No pattern to add', 'warn'); } catch(_){} return; }
+          drRuleBtn.disabled = true;
+          drRuleBtn.textContent = '...';
+          function _localFallback() {
+            try {
+              const existing = getSetting('autoTardRules', []) || [];
+              if (existing.some(function(r){ return r && r.pattern === pat; })) {
+                drRuleBtn.textContent = '✓ EXISTS';
+                drRuleBtn.style.borderColor = '#5a5752'; drRuleBtn.style.color = '#5a5752';
+                try { snack('Pattern already in autoTardRules: ' + pat, 'info'); } catch(_){}
+                return;
+              }
+              existing.push({ pattern: pat, reason: 'tard-suggest: ' + pat, enabled: true, added: new Date().toISOString() });
+              setSetting('autoTardRules', existing);
+              try { logAction({ type: 'auto-tard-rule', pattern: pat, source: 'sus-popover-tard-suggest' }); } catch(_){}
+              drRuleBtn.textContent = '✓ ADDED';
+              drRuleBtn.style.borderColor = '#3dd68c'; drRuleBtn.style.color = '#3dd68c';
+              try { snack('\u{1F9E8} Auto-Tard rule added: ' + pat, 'success'); } catch(_){}
+            } catch(err) {
+              drRuleBtn.disabled = false; drRuleBtn.textContent = 'DR Rule';
+              try { snack('Rule add failed: ' + (err && err.message || err), 'error'); } catch(_){}
+            }
+          }
+          try {
+            rpcCall('modAutoRuleAdd', { pattern: pat, reason: 'tard-suggest', enabled: true })
+              .then(function(r) {
+                if (r && r.ok) {
+                  drRuleBtn.textContent = '✓ ADDED';
+                  drRuleBtn.style.borderColor = '#3dd68c'; drRuleBtn.style.color = '#3dd68c';
+                  try { snack('\u{1F9E8} Auto-DR rule added: ' + pat, 'success'); } catch(_){}
+                  // Mirror to local for offline immediacy
+                  try {
+                    const existing = getSetting('autoTardRules', []) || [];
+                    if (!existing.some(function(rr){ return rr && rr.pattern === pat; })) {
+                      existing.push({ pattern: pat, reason: 'tard-suggest: ' + pat, enabled: true, added: new Date().toISOString() });
+                      setSetting('autoTardRules', existing);
+                    }
+                  } catch(_){}
+                } else {
+                  // RPC reachable but returned !ok (likely RPC not implemented) -> local fallback
+                  _localFallback();
+                }
+              })
+              .catch(function() { _localFallback(); });
+          } catch(_) { _localFallback(); }
+        });
         tardRow.appendChild(sevEl); tardRow.appendChild(patEl); tardRow.appendChild(drRuleBtn);
         body.appendChild(tardRow);
       });
@@ -17927,6 +18169,33 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     document.body.appendChild(pop);
 
+    // v10.13.1 W3: focus trap — Tab/Shift-Tab cycles within popover; ESC dismisses;
+    // restore focus to trigger element on dismiss. Was missing entirely; keyboard
+    // users could escape the popover into background DOM mid-interaction.
+    const _prevFocus = document.activeElement;
+    function _getFocusable() {
+      return Array.from(pop.querySelectorAll(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter(function(el) { return el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement; });
+    }
+    pop._trapHandler = function(ev) {
+      if (ev.key !== 'Tab') return;
+      const focusable = _getFocusable();
+      if (focusable.length === 0) { ev.preventDefault(); return; }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (ev.shiftKey) {
+        if (document.activeElement === first || !pop.contains(document.activeElement)) {
+          ev.preventDefault(); last.focus();
+        }
+      } else {
+        if (document.activeElement === last) { ev.preventDefault(); first.focus(); }
+      }
+    };
+    pop.addEventListener('keydown', pop._trapHandler);
+    // Initial focus on close button (first focusable, predictable starting point)
+    setTimeout(function() { try { closeBtn.focus(); } catch(_){} }, 0);
+
     // Close handlers
     closeBtn.addEventListener('click', function() { _closePop(); });
 
@@ -17934,6 +18203,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       pop.remove();
       document.removeEventListener('click', _outsideClick, true);
       document.removeEventListener('keydown', pop._escHandler);
+      // Restore focus to trigger (anchor) on dismiss
+      try { if (_prevFocus && _prevFocus.focus) _prevFocus.focus(); else if (anchor && anchor.focus) anchor.focus(); } catch(_){}
     }
     setTimeout(function() {
       _outsideClick = function(ev) {
@@ -18026,7 +18297,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       const ss = document.createElement('style');
       ss.id = 'gam-dr-popover-css';
       ss.textContent = [
-        '.gam-dr-band-hdr{display:flex;align-items:center;gap:6px;padding:4px 10px 3px;font-size:8px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;user-select:none}',
+        // v10.13.1 W3 (W1 deferred): 8px -> 9px to align with type-scale charter (4/8/9/10/11px tiers; 5/6/7/8 are off-grid for popover surfaces).
+        '.gam-dr-band-hdr{display:flex;align-items:center;gap:6px;padding:4px 10px 3px;font-size:9px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;user-select:none}',
         '.gam-dr-band-hdr::before,.gam-dr-band-hdr::after{content:"";flex:1;height:1px}',
         '.gam-dr-band-hdr.band-imminent{color:#ff3b3b;background:rgba(255,59,59,0.06)}',
         '.gam-dr-band-hdr.band-imminent::before,.gam-dr-band-hdr.band-imminent::after{background:rgba(255,59,59,0.25)}',
@@ -18056,6 +18328,10 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     // Countdown format helper
+    // v10.13.1 W3: MM:SS format extends to 90min (was 60min). Eliminates the
+    // jarring `1h 0m` -> `59:31` regression at the 60-minute boundary — the
+    // operator's eye lock breaks when the format flips while a row is the
+    // single object of attention. Now monotonic for the last 90 mins.
     function _drFormatCountdown(executeAt) {
       const ms = executeAt - Date.now();
       if (ms <= 0) return { text: 'FIRING', cls: 'urg-critical', band: 'imminent' };
@@ -18066,6 +18342,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (secs < 60) { return { text: '00:' + String(secs).padStart(2,'0'), cls: 'urg-critical', band: 'imminent' }; }
       if (mins < 10) { return { text: String(Math.floor(mins)).padStart(2,'0') + ':' + String(secs % 60).padStart(2,'0'), cls: 'urg-critical', band: 'imminent' }; }
       if (mins < 60) { return { text: String(mins).padStart(2,'0') + ':' + String(secs % 60).padStart(2,'0'), cls: 'urg-imminent', band: 'imminent' }; }
+      if (mins < 90) { return { text: String(mins).padStart(2,'0') + ':' + String(secs % 60).padStart(2,'0'), cls: 'urg-today', band: 'today' }; }
       if (hrs < 6) { return { text: hrs + 'h ' + (mins % 60) + 'm', cls: 'urg-today', band: 'today' }; }
       if (hrs < 24) { return { text: hrs + 'h ' + (mins % 60) + 'm', cls: 'urg-today', band: 'today' }; }
       return { text: days + 'd ' + (hrs % 24) + 'h', cls: 'urg-deferred', band: 'deferred' };
@@ -18090,7 +18367,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     const sortLabel = document.createElement('span');
     sortLabel.textContent = 'FIRES FIRST';
     const cancelAllBtn = document.createElement('button');
-    cancelAllBtn.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 6px;cursor:pointer;font:600 8px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;margin-left:auto;transition:background 80ms';
+    // v10.13.1 W3 (W1 deferred): 8px -> 9px (off-grid snap to type-scale charter).
+    cancelAllBtn.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;margin-left:auto;transition:background 80ms';
     cancelAllBtn.textContent = 'Cancel All';
     sortBar.appendChild(sortLabel); sortBar.appendChild(cancelAllBtn);
     pop.appendChild(sortBar);
@@ -18100,13 +18378,41 @@ Analyze this comment against the community rules. Then write a brief, profession
     body.style.cssText = 'padding:0;max-height:360px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3d3a35 transparent';
 
     // Live countdown timer infrastructure
-    // Map: username -> { cdEl, executeAt }
+    // v10.13.1 W3 P0-15: Map now also tracks current band so the tick handler
+    // can detect threshold crossings (e.g. TODAY -> IMMINENT when a row passes
+    // 60min remaining). When the band shifts, the tick handler triggers a
+    // full re-render via _renderDrBands so the row migrates to the correct
+    // band header AND its visual treatment (border-left color, badge tint)
+    // updates. Without this, a row stuck in TODAY ticks down to "00:59" in
+    // amber but never moves under the IMMINENT header — false-confidence on
+    // operator's "what's about to fire" scan.
+    // Map: username -> { cdEl, executeAt, band }
     const _cdMap = {};
+    let _bandRerenderQueued = false;
 
     function _updateCountdown(username, cdEl, executeAt) {
       const fmt = _drFormatCountdown(executeAt);
       cdEl.textContent = 'FIRES IN ' + fmt.text;
       cdEl.className = 'gam-dr-countdown ' + fmt.cls;
+      // Detect band crossing on this row
+      const entry = _cdMap[username];
+      if (entry && entry.band && entry.band !== fmt.band) {
+        entry.band = fmt.band;
+        // Coalesce simultaneous crossings into a single re-render this tick
+        if (!_bandRerenderQueued) {
+          _bandRerenderQueued = true;
+          // Defer to end of tick so all crossings register before re-render
+          setTimeout(function() {
+            _bandRerenderQueued = false;
+            const fresh = getDeathRow().filter(function(d) { return d && d.status === 'waiting'; })
+              .sort(function(a, b) { return (a.executeAt || 0) - (b.executeAt || 0); });
+            _renderDrBands(fresh);
+            title.textContent = '\u{1F480} DEATH ROW  ' + fresh.length + ' PENDING';
+          }, 0);
+        }
+      } else if (entry && !entry.band) {
+        entry.band = fmt.band;
+      }
     }
 
     // Build body with band headers
@@ -18156,7 +18462,8 @@ Analyze this comment against the community rules. Then write a brief, profession
         uLink.textContent = username;
         const cdEl = document.createElement('span');
         cdEl.className = 'gam-dr-countdown';
-        _cdMap[username] = { cdEl: cdEl, executeAt: executeAt };
+        // v10.13.1 W3 P0-15: track band for tick-time crossing detection
+        _cdMap[username] = { cdEl: cdEl, executeAt: executeAt, band: fmt.band };
         _updateCountdown(username, cdEl, executeAt);
         line1.appendChild(skullEl); line1.appendChild(uLink); line1.appendChild(cdEl);
         row.appendChild(line1);
@@ -18262,26 +18569,91 @@ Analyze this comment against the community rules. Then write a brief, profession
       });
     }, 1000);
 
-    // Cancel All handler
+    // Cancel All handler — 2-step confirm gate with 3s auto-revert (UIUX-11 §C.4 / P0-16).
+    // First click arms the gate (button shows "CONFIRM ▶ 3s" in pulsing amber);
+    // second click within 3s fires the cancellation. No click for 3s -> auto-revert
+    // back to "Cancel All" with no side effects. Mirrors the existing FIRE NOW
+    // 2-step pattern at L18211 so muscle memory is consistent across the popover.
+    var _cancelAllConfirmTimer = null;
     cancelAllBtn.addEventListener('click', function() {
-      const allRows = pop.querySelectorAll('[data-dr-row]');
-      allRows.forEach(function(row) {
-        const uname = row.getAttribute('data-dr-row');
-        if (!uname) return;
-        const entry = drList.find(function(d) { return d && d.username === uname; });
-        try {
-          withUndo(function() { removeFromDeathRow(uname); return Promise.resolve(); }, {
-            tier: 'B', label: 'DR cancel ' + uname,
-            inverse: function() { if (entry && entry.delayMs) addToDeathRow(uname, entry.delayMs, entry.reason || ''); return Promise.resolve(); }
-          });
-        } catch(_) {}
-        row.classList.add('removing');
+      if (!cancelAllBtn.classList.contains('confirming')) {
+        // Stage 1: arm
+        cancelAllBtn.classList.add('confirming');
+        cancelAllBtn.style.borderColor = '#ff6b35';
+        cancelAllBtn.style.color = '#ff6b35';
+        cancelAllBtn.style.animation = 'gam-dr-cd-pulse 0.6s ease-in-out infinite';
+        cancelAllBtn.textContent = 'Confirm ▶ 3s';
+        _cancelAllConfirmTimer = setTimeout(function() {
+          cancelAllBtn.classList.remove('confirming');
+          cancelAllBtn.style.borderColor = '#ff9933';
+          cancelAllBtn.style.color = '#ff9933';
+          cancelAllBtn.style.animation = '';
+          cancelAllBtn.textContent = 'Cancel All';
+        }, 3000);
+        return;
+      }
+      // Stage 2: confirmed — proceed
+      clearTimeout(_cancelAllConfirmTimer);
+      cancelAllBtn.classList.remove('confirming');
+      cancelAllBtn.style.borderColor = '#ff9933';
+      cancelAllBtn.style.color = '#ff9933';
+      cancelAllBtn.style.animation = '';
+      cancelAllBtn.textContent = 'Cancel All';
+
+      // v10.13.1 W3 P0-14: snapshot at CANCEL TIME, not popover-open time. The old
+      // implementation closed over `drList` (set when the popover opened) and used
+      // drList.find() to look up undo inverses — this would resurrect entries the
+      // operator had manually removed via per-row Cancel between popover-open and
+      // Cancel All. Now we read the live DR state and snapshot only entries still
+      // present, preventing zombie revivals on undo.
+      const liveDr = getDeathRow().filter(function(d) { return d && d.status === 'waiting'; });
+      const snapshot = liveDr.map(function(d) {
+        return { username: d.username, delayMs: d.delayMs, reason: d.reason || '', executeAt: d.executeAt };
       });
+      const cancelledNames = [];
+      snapshot.forEach(function(entry) {
+        try {
+          removeFromDeathRow(entry.username);
+          cancelledNames.push(entry.username);
+        } catch(_) {}
+      });
+      pop.querySelectorAll('[data-dr-row]').forEach(function(row) { row.classList.add('removing'); });
       setTimeout(function() {
         pop.querySelectorAll('.gam-dr-row.removing').forEach(function(r) { r.remove(); });
-        title.textContent = '\u{1F480} DEATH ROW  0 PENDING';
-        try { snack('✓ All Death Row entries cancelled', 'success'); } catch(_) {}
+        title.textContent = '\u{1F480} DEATH ROW  ' + (getDeathRow().filter(function(d) { return d && d.status === 'waiting'; }).length) + ' PENDING';
       }, 250);
+      // v10.13.1 W3 P0-17 / R-16: undo toast via extended snack — 10s countdown bar,
+      // amber ghost UNDO button. Click UNDO before timeout: re-add every cancelled
+      // entry from the snapshot. Auto-dismiss = no action.
+      const n = cancelledNames.length;
+      if (n === 0) {
+        try { snack('Nothing to cancel', 'info'); } catch(_){}
+        return;
+      }
+      try {
+        snack('✓ Cancelled ' + n + ' Death Row ' + (n === 1 ? 'entry' : 'entries'), 'success', {
+          actionLabel: 'UNDO',
+          actionDurationMs: 10000,
+          onAction: function() {
+            // Restore all cancelled entries from snapshot
+            let restored = 0;
+            snapshot.forEach(function(e) {
+              try {
+                if (e.delayMs) {
+                  addToDeathRow(e.username, e.delayMs, e.reason);
+                  restored++;
+                }
+              } catch(_) {}
+            });
+            try { snack('Restored ' + restored + ' Death Row ' + (restored === 1 ? 'entry' : 'entries'), 'info'); } catch(_){}
+            // Re-render popover body with fresh state
+            const fresh = getDeathRow().filter(function(d) { return d && d.status === 'waiting'; })
+              .sort(function(a, b) { return (a.executeAt || 0) - (b.executeAt || 0); });
+            _renderDrBands(fresh);
+            title.textContent = '\u{1F480} DEATH ROW  ' + fresh.length + ' PENDING';
+          }
+        });
+      } catch(_) {}
     });
 
     // Footer
@@ -18346,11 +18718,14 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-queue-row-title{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.gam-queue-row-age{color:#5a5752;font-size:9px;font-weight:400;white-space:nowrap}',
         '.gam-queue-row-line2{display:flex;align-items:center;gap:6px;margin-top:2px;font-size:9px;color:#5a5752}',
-        '.gam-queue-author{color:#66ccff;cursor:pointer;text-decoration:none}',
+        // v10.13.1 W3: author span gets max-width 120px + ellipsis. Long usernames
+        // were stealing horizontal space from the title; row would visually wrap.
+        '.gam-queue-author{color:#66ccff;cursor:pointer;text-decoration:none;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}',
         '.gam-queue-author:hover{text-decoration:underline}',
         '.gam-queue-rpt{color:#ff9933}',
         '.gam-queue-actions{margin-left:auto;display:flex;gap:4px}',
-        '.gam-queue-btn{background:transparent;border:1px solid currentColor;padding:1px 5px;cursor:pointer;font:700 8px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;transition:background 80ms;line-height:1.6}',
+        // v10.13.1 W3 (W1 deferred): 8px -> 9px (off-grid snap to type-scale charter).
+        '.gam-queue-btn{background:transparent;border:1px solid currentColor;padding:1px 5px;cursor:pointer;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;transition:background 80ms;line-height:1.6}',
         '.gam-queue-btn:disabled{opacity:0.4;cursor:default}',
         '.gam-queue-btn-appr{color:#44dd66}',
         '.gam-queue-btn-appr:hover:not(:disabled){background:rgba(68,221,102,0.12)}',
@@ -18529,10 +18904,17 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     // Fetch and render queue data
+    // v10.13.1 W3: Refresh button disabled during in-flight RPC. Operator can no
+    // longer fire 5 concurrent modGetQueueSnapshot calls by mashing Refresh.
     function _fetchAndRenderQueue() {
+      try { refreshBtn.disabled = true; refreshBtn.style.opacity = '0.5'; refreshBtn.style.cursor = 'default'; } catch(_){}
       body.innerHTML = '';
       body.appendChild(_buildSkeleton(3));
+      function _restoreRefresh() {
+        try { refreshBtn.disabled = false; refreshBtn.style.opacity = ''; refreshBtn.style.cursor = ''; } catch(_){}
+      }
       rpcCall('modGetQueueSnapshot', { limit: 10 }).then(function(res) {
+        _restoreRefresh();
         body.innerHTML = '';
 
         if (!res || !res.ok) {
@@ -18551,13 +18933,38 @@ Analyze this comment against the community rules. Then write a brief, profession
           if (depth === 0) {
             body.appendChild(gamMakeEmpty({ icon: 'queue-empty', headline: 'Queue is clear', desc: 'Nothing pending.' }));
           } else {
-            // Data gap: D1 queue not populated but firehose count says items exist
+            // Data gap: D1 queue not populated but firehose count says items exist.
+            // v10.13.1 W3 P0-18: link goes to /mod/queue (the moderator queue
+            // surface), not /queue (the user-facing queue) — the bookend dead-link
+            // bug from the popover redesign. Operator hitting /queue here would
+            // see an empty user-facing page and assume the entire queue was empty.
+            // Also adds an explicit Retry button so the operator doesn't have to
+            // close-and-reopen the popover to re-probe the worker.
             const gapWrap = document.createElement('div');
             gapWrap.style.cssText = 'padding:14px 12px;font-size:10px;color:#9b9892;text-align:center';
-            gapWrap.innerHTML =
-              '<div style="margin-bottom:8px;color:#ffd84d;font-weight:600;letter-spacing:0.06em">' + depthStr + ' items pending but row data unavailable.</div>' +
-              '<div style="margin-bottom:8px;color:#5a5752">Open /queue to review manually.</div>' +
-              '<a href="/queue" target="_blank" rel="noopener" style="color:#ff9933;text-decoration:none;border:1px solid #ff9933;padding:2px 10px;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase">Open /queue →</a>';
+            const gapHdr = document.createElement('div');
+            gapHdr.style.cssText = 'margin-bottom:8px;color:#ffd84d;font-weight:600;letter-spacing:0.06em';
+            gapHdr.textContent = depthStr + ' items pending but row data unavailable.';
+            gapWrap.appendChild(gapHdr);
+            const gapHint = document.createElement('div');
+            gapHint.style.cssText = 'margin-bottom:8px;color:#5a5752';
+            gapHint.textContent = 'Open /mod/queue to review manually, or retry the snapshot.';
+            gapWrap.appendChild(gapHint);
+            const gapBtnRow = document.createElement('div');
+            gapBtnRow.style.cssText = 'display:flex;gap:6px;justify-content:center';
+            const gapLink = document.createElement('a');
+            gapLink.href = '/mod/queue';
+            gapLink.target = '_blank';
+            gapLink.rel = 'noopener';
+            gapLink.style.cssText = 'color:#ff9933;text-decoration:none;border:1px solid #ff9933;padding:2px 10px;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
+            gapLink.textContent = 'Open /mod/queue →';
+            gapBtnRow.appendChild(gapLink);
+            const gapRetryBtn = document.createElement('button');
+            gapRetryBtn.style.cssText = 'background:transparent;border:1px solid #66ccff;color:#66ccff;padding:2px 10px;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer';
+            gapRetryBtn.textContent = 'Retry';
+            gapRetryBtn.addEventListener('click', function() { _fetchAndRenderQueue(); });
+            gapBtnRow.appendChild(gapRetryBtn);
+            gapWrap.appendChild(gapBtnRow);
             body.appendChild(gapWrap);
           }
           return;
@@ -18567,6 +18974,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           body.appendChild(_buildQueueRow(it));
         });
       }).catch(function(e) {
+        _restoreRefresh();
         body.innerHTML = '';
         body.appendChild(gamMakeError({ severity: 'hard', label: 'QUEUE', msg: String(e && e.message || e), hint: 'Check worker status.', retryFn: _fetchAndRenderQueue }));
         title.textContent = 'QUEUE — ERROR';
@@ -18635,11 +19043,21 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-sh2-header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 8px;border-bottom:1px solid #2a2f38}',
         '.gam-sh2-title{font-size:11px;font-weight:700;color:#e8eaed;letter-spacing:0.12em}',
         '.gam-sh2-pills{display:flex;gap:6px}',
-        '.gam-sh2-pill{display:flex;align-items:center;gap:4px;padding:2px 7px;border-radius:3px;border:1px solid #2a2f38;font-size:9px;letter-spacing:0.1em;font-weight:700}',
+        // v10.13.1 W3 P0-19/P0-20: pill min-width 68px so STANDBY/UNREACHABLE/PROBING
+        // labels do not push the layout around when status transitions land mid-frame.
+        // justify-content:center keeps the LED+label visually balanced regardless of
+        // current label length.
+        '.gam-sh2-pill{display:flex;align-items:center;justify-content:center;gap:4px;padding:2px 7px;border-radius:3px;border:1px solid #2a2f38;font-size:9px;letter-spacing:0.1em;font-weight:700;min-width:68px}',
         '.gam-sh2-led{width:7px;height:7px;border-radius:1px;flex-shrink:0}',
         '.gam-sh2-pill--ok .gam-sh2-led{background:#3dd68c}',
         '.gam-sh2-pill--warn .gam-sh2-led{background:#f0a040;animation:gam-sh2-blink 0.8s infinite}',
         '.gam-sh2-pill--err .gam-sh2-led{background:#f04040}',
+        // v10.13.1 W3 R-12: ARMED state — local/D1 mismatch warn pill (firehose
+        // counts disagree between extension state and worker D1). Same look as
+        // --warn but with a distinct label to disambiguate "probing" from
+        // "live but disagrees with backend."
+        '.gam-sh2-pill--armed .gam-sh2-led{background:#ffd84d;animation:gam-sh2-blink 0.6s infinite}',
+        '.gam-sh2-pill--armed{border-color:#ffd84d}',
         '.gam-sh2-kpi-row{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #2a2f38}',
         '.gam-sh2-tile{padding:10px 0 0;border-right:1px solid #2a2f38;text-align:center;position:relative}',
         '.gam-sh2-tile:last-child{border-right:none}',
@@ -18648,8 +19066,29 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-sh2-tile-lbl{font-size:9px;color:#5c6370;letter-spacing:0.1em;margin-top:4px;padding-bottom:10px}',
         '.gam-sh2-tile-bar{height:2px;width:100%;background:#3dd68c;transition:background 300ms}',
         '.gam-sh2-feed-header{display:flex;justify-content:space-between;padding:6px 12px 4px;font-size:9px;color:#5c6370;letter-spacing:0.12em;border-bottom:1px solid #2a2f38}',
+        // v10.13.1 W3 P0-20: WebKit scrollbar styling. `scrollbar-width:thin` is
+        // FF-only; Chrome (the only Chromium browser this extension supports per
+        // manifest) ignores it entirely. Adding ::-webkit-scrollbar pseudos keeps
+        // the feed scrollbar visually consistent with the rest of the popover
+        // chrome instead of falling back to the OS-default 17px scrollbar that
+        // breaks the Bloomberg aesthetic.
         '.gam-sh2-feed{list-style:none;margin:0;padding:0;max-height:200px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#4A9EFF #2a2f38}',
-        '.gam-sh2-feed-row{display:grid;grid-template-columns:58px 62px 1fr 64px;align-items:center;gap:0 6px;padding:4px 12px;border-bottom:1px solid #1e2228;animation:gam-sh2-fi 200ms ease-out both;animation-delay:calc(var(--i,0)*30ms)}',
+        '.gam-sh2-feed::-webkit-scrollbar{width:8px}',
+        '.gam-sh2-feed::-webkit-scrollbar-track{background:#1a1d22}',
+        '.gam-sh2-feed::-webkit-scrollbar-thumb{background:#3a3f48;border-radius:0}',
+        '.gam-sh2-feed::-webkit-scrollbar-thumb:hover{background:#4a4f58}',
+        '.gam-sh2-feed-row{display:grid;grid-template-columns:58px 62px 1fr 64px;align-items:center;gap:0 6px;padding:4px 12px;border-bottom:1px solid #1e2228;animation:gam-sh2-fi 200ms ease-out both;animation-delay:calc(var(--i,0)*30ms);transition:background 80ms}',
+        // v10.13.1 W3: feed row hover state — operator scanning the feed gets
+        // visual confirmation of pointer target before committing to a click.
+        '.gam-sh2-feed-row:hover{background:rgba(74,158,255,0.06)}',
+        // v10.13.1 W3 P0-21: data-loading attribute drives neutral-dim color on
+        // stub `--` placeholder values (no false-confidence green at boot). Once
+        // the modStats RPC resolves and tile is populated, the attribute is
+        // removed and the actual severity color (_setTile) takes over.
+        '.gam-sh2-tile[data-loading="1"] .gam-sh2-tile-val{color:#5c6370 !important}',
+        '.gam-sh2-tile[data-loading="1"] .gam-sh2-tile-bar{background:#3a3f48 !important}',
+        // v10.13.1 W3: empty-state row when recent_actions is [] post-RPC.
+        '.gam-sh2-feed-empty{padding:14px 12px;text-align:center;color:#5c6370;font-size:10px;letter-spacing:0.06em}',
         '@keyframes gam-sh2-fi{from{opacity:0}to{opacity:1}}',
         '.gam-sh2-feed-ts{color:#5c6370;font-size:10px}',
         '.gam-sh2-feed-type{font-size:9px;font-weight:700;letter-spacing:0.05em;text-align:center;padding:2px 4px;border-radius:2px;white-space:nowrap}',
@@ -18676,18 +19115,30 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     // Full target-height HTML (no layout shift -- tiles and feed region always present)
+    // v10.13.1 W3 P0-19: firehose pill renders with the CORRECT initial class on
+    // first paint — was `gam-sh2-pill--warn` for both states, then post-render
+    // _setFhTile would correct to --ok if active. Mods see a 0-1 frame amber
+    // flicker on every popover open. Now: inline class derived from fhActive
+    // matches the post-render state, so no flicker.
+    // v10.13.1 W3 P0-21: each KPI tile gets data-loading="1" until its data lands.
+    // CSS rule .gam-sh2-tile[data-loading="1"] forces neutral dim color so the
+    // `--` placeholder doesn't render green-by-default (false-confidence regression).
+    // _setTile clears the attribute when real data arrives.
+    // v10.13.1 W3: "LAST VERIFY" -> "VERIFY" — the tile is 95px wide, the
+    // longer label was truncating to "LAST VERIF…" on Chrome's font metrics.
+    const fhPillInitialCls = fhActive ? 'gam-sh2-pill--ok' : 'gam-sh2-pill--err';
     pop.innerHTML = '<div class="gam-sh2-header">' +
       '<span class="gam-sh2-title">SITE HEALTH</span>' +
       '<div class="gam-sh2-pills">' +
-        '<span class="gam-sh2-pill gam-sh2-pill--warn" id="gam-sh2-fh-pill"><span class="gam-sh2-led"></span><span class="gam-sh2-pill-label">' + (fhActive ? 'LIVE' : 'STANDBY') + '</span></span>' +
+        '<span class="gam-sh2-pill ' + fhPillInitialCls + '" id="gam-sh2-fh-pill"><span class="gam-sh2-led"></span><span class="gam-sh2-pill-label">' + (fhActive ? 'LIVE' : 'STANDBY') + '</span></span>' +
         '<span class="gam-sh2-pill gam-sh2-pill--warn" id="gam-sh2-worker-pill"><span class="gam-sh2-led"></span><span class="gam-sh2-pill-label">PROBING</span></span>' +
       '</div>' +
     '</div>' +
     '<div class="gam-sh2-kpi-row">' +
-      '<div class="gam-sh2-tile"><div class="gam-sh2-tile-val" id="gam-sh2-val-actions">—</div><div class="gam-sh2-tile-lbl">24H ACT</div><div class="gam-sh2-tile-bar" id="gam-sh2-bar-actions"></div></div>' +
-      '<div class="gam-sh2-tile"><div class="gam-sh2-tile-val" id="gam-sh2-val-queue">—</div><div class="gam-sh2-tile-lbl">QUEUE</div><div class="gam-sh2-tile-bar" id="gam-sh2-bar-queue"></div></div>' +
-      '<div class="gam-sh2-tile"><div class="gam-sh2-tile-val gam-sh2-tile-val--text" id="gam-sh2-val-fh">—</div><div class="gam-sh2-tile-lbl">FIREHOSE</div><div class="gam-sh2-tile-bar" id="gam-sh2-bar-fh"></div></div>' +
-      '<div class="gam-sh2-tile"><div class="gam-sh2-tile-val" id="gam-sh2-val-verify">—</div><div class="gam-sh2-tile-lbl">LAST VERIFY</div><div class="gam-sh2-tile-bar" id="gam-sh2-bar-verify"></div></div>' +
+      '<div class="gam-sh2-tile" data-loading="1"><div class="gam-sh2-tile-val" id="gam-sh2-val-actions">--</div><div class="gam-sh2-tile-lbl">24H ACT</div><div class="gam-sh2-tile-bar" id="gam-sh2-bar-actions"></div></div>' +
+      '<div class="gam-sh2-tile" data-loading="1"><div class="gam-sh2-tile-val" id="gam-sh2-val-queue">--</div><div class="gam-sh2-tile-lbl">QUEUE</div><div class="gam-sh2-tile-bar" id="gam-sh2-bar-queue"></div></div>' +
+      '<div class="gam-sh2-tile" data-loading="1"><div class="gam-sh2-tile-val gam-sh2-tile-val--text" id="gam-sh2-val-fh">--</div><div class="gam-sh2-tile-lbl">FIREHOSE</div><div class="gam-sh2-tile-bar" id="gam-sh2-bar-fh"></div></div>' +
+      '<div class="gam-sh2-tile" data-loading="1"><div class="gam-sh2-tile-val" id="gam-sh2-val-verify">--</div><div class="gam-sh2-tile-lbl">VERIFY</div><div class="gam-sh2-tile-bar" id="gam-sh2-bar-verify"></div></div>' +
     '</div>' +
     '<div class="gam-sh2-feed-header"><span>ACTIVITY FEED</span><span>LAST 10</span></div>' +
     '<ul class="gam-sh2-feed" id="gam-sh2-feed">' + shimmerRows + '</ul>' +
@@ -18702,21 +19153,38 @@ Analyze this comment against the community rules. Then write a brief, profession
     document.body.appendChild(pop);
 
     // KPI tile helpers
+    // v10.13.1 W3 P0-21: clears data-loading attribute on its containing tile so
+    // the neutral-dim color rule lifts and the severity-based green/amber/red
+    // takes over. Without this, even after data arrives the tile stays in dim
+    // gray because the attribute was sticky.
+    // v10.13.1 W3: 999+ cap on numeric values >= 1000. Three-digit cap matches
+    // tile width (95px); above that, digit packing crashes the layout (e.g.
+    // 1247 wraps to two lines, breaking the grid).
     function _setTile(id, value, warn, danger) {
-      var valEl = pop.querySelector('#gam-sh2-val-' + id);
+      var tileEl = pop.querySelector('#gam-sh2-val-' + id);
+      var valEl = tileEl;
       var barEl = pop.querySelector('#gam-sh2-bar-' + id);
       if (!valEl || !barEl) return;
+      var tileWrap = valEl.closest('.gam-sh2-tile');
       var n = typeof value === 'number' ? value : parseFloat(value);
       var col = (isNaN(n) || warn == null || n < warn) ? '#3dd68c' : n < danger ? '#f0a040' : '#f04040';
-      valEl.textContent = String(value);
+      // Apply 999+ cap if value is purely numeric and >= 1000
+      var displayVal = (typeof value === 'number' && value >= 1000) ? '999+' : String(value);
+      valEl.textContent = displayVal;
       valEl.style.color = col;
       barEl.style.background = col;
+      if (tileWrap) tileWrap.removeAttribute('data-loading');
     }
 
     function _setFhTile(active) {
       var valEl = pop.querySelector('#gam-sh2-val-fh');
       var barEl = pop.querySelector('#gam-sh2-bar-fh');
-      if (valEl) { valEl.textContent = active ? 'LIVE' : 'OFF'; valEl.style.color = active ? '#3dd68c' : '#5c6370'; }
+      if (valEl) {
+        valEl.textContent = active ? 'LIVE' : 'OFF';
+        valEl.style.color = active ? '#3dd68c' : '#5c6370';
+        var tileWrap = valEl.closest('.gam-sh2-tile');
+        if (tileWrap) tileWrap.removeAttribute('data-loading');
+      }
       if (barEl) { barEl.style.background = active ? '#3dd68c' : '#5a5752'; }
       var fhPill = pop.querySelector('#gam-sh2-fh-pill');
       if (fhPill) {
@@ -18724,6 +19192,20 @@ Analyze this comment against the community rules. Then write a brief, profession
         var lbl = fhPill.querySelector('.gam-sh2-pill-label');
         if (lbl) lbl.textContent = active ? 'LIVE' : 'STANDBY';
       }
+    }
+
+    // v10.13.1 W3 R-12: ARMED state — local firehose count and D1 worker count
+    // disagree. Common after a worker restart or if the extension fell behind on
+    // pushes. Surfaces as a yellow blinking pill with "ARMED" label so the
+    // operator knows the live counts on the bar/popover should be read with
+    // skepticism until reconciled.
+    function _setFhPillArmed(localCount, d1Count) {
+      var fhPill = pop.querySelector('#gam-sh2-fh-pill');
+      if (!fhPill) return;
+      fhPill.className = 'gam-sh2-pill gam-sh2-pill--armed';
+      var lbl = fhPill.querySelector('.gam-sh2-pill-label');
+      if (lbl) lbl.textContent = 'ARMED';
+      fhPill.title = 'Firehose ARMED: local count ' + localCount + ' vs D1 count ' + d1Count + ' — extension or worker is behind. Refresh to reconcile.';
     }
 
     // Render local fallbacks immediately
@@ -18743,6 +19225,16 @@ Analyze this comment against the community rules. Then write a brief, profession
       var feed = pop.querySelector('#gam-sh2-feed');
       if (!feed) return;
       feed.innerHTML = '';
+      // v10.13.1 W3: empty-state row when recent_actions is []. Pre-fix, an
+      // empty array left the shimmer in place forever which read as "still
+      // loading" — now operator gets an explicit "no recent activity" message.
+      if (!actions || actions.length === 0) {
+        var emptyLi = document.createElement('li');
+        emptyLi.className = 'gam-sh2-feed-empty';
+        emptyLi.textContent = 'No recent moderator activity in the last 24h.';
+        feed.appendChild(emptyLi);
+        return;
+      }
       actions.forEach(function(a, i) {
         var tc = _TYPE_COLORS[a.type] || { bg:'rgba(139,146,158,.12)', fg:'#8b929e', label:(a.type||'?').toUpperCase().slice(0,7) };
         var ts = a.ts ? new Date(a.ts).toLocaleTimeString('en-GB', {hour12:false}) : '—';
@@ -18792,6 +19284,25 @@ Analyze this comment against the community rules. Then write a brief, profession
         var mins = Math.round((Date.now() - d.last_verify_ts) / 60000);
         _setTile('verify', mins + 'm', 10, 30);
       }
+      // v10.13.1 W3 R-12: ARMED detection — compare local _firehoseState.postsQueued
+      // to D1 firehose_count from worker. >= 5-item drift OR >20% of larger value
+      // signals a meaningful mismatch. Only flag ARMED if the firehose is supposed
+      // to be active (otherwise STANDBY supersedes).
+      try {
+        if (d.firehose_active && d.firehose_d1_count != null && typeof _firehoseState === 'object' && _firehoseState) {
+          var local = _firehoseState.postsQueued || 0;
+          var d1 = d.firehose_d1_count;
+          var diff = Math.abs(local - d1);
+          var bigger = Math.max(local, d1, 1);
+          if (diff >= 5 || (diff / bigger) >= 0.2) {
+            _setFhPillArmed(local, d1);
+          }
+        }
+      } catch(_) {}
+      // v10.13.1 W3: feed empty-state — _renderFeed handles [] case explicitly,
+      // so always call it once on success (even with empty array) to clear the
+      // shimmer rows. Only skip if recent_actions is missing entirely (worker
+      // didn't return the field — keep shimmer as honest signal).
       if (Array.isArray(d.recent_actions)) {
         _renderFeed(d.recent_actions.slice(0, 10));
       }
@@ -19028,7 +19539,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (isLeadMod()) {
       const tierBadge = document.createElement('span');
       tierBadge.className = 'gam-bar-tier-badge';
-      tierBadge.style.cssText = 'color:#ff3b3b;background:rgba(255,59,59,0.18);font:700 8px ui-monospace,monospace;line-height:1;border-radius:2px;padding:0 2px;position:absolute;bottom:1px;right:1px;letter-spacing:0;pointer-events:none';
+      // v10.13.1 W3 (W1 deferred): 8px -> 9px (off-grid snap to type-scale charter).
+      tierBadge.style.cssText = 'color:#ff3b3b;background:rgba(255,59,59,0.18);font:700 9px ui-monospace,monospace;line-height:1;border-radius:2px;padding:0 2px;position:absolute;bottom:1px;right:1px;letter-spacing:0;pointer-events:none';
       tierBadge.textContent = 'L';
       tierBadge.title = 'Lead mod';
       tierBadge.setAttribute('aria-hidden', 'true'); // v10.12 H.10 (UIUX-20): purely decorative badge -- SR reads "Lead mod" from parent button title
