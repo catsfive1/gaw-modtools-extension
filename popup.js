@@ -2853,6 +2853,22 @@ loadLead();
     // leadOnlyTools. Visible on tokens tab AND lead tab, but the
     // lead-only-tools child only on lead tab.
     // v9.22.0: class-based hide for !important override.
+    // v10.11.2 HOTFIX: #leadSection (lead token input) is INSIDE #card-lead.
+    // v10.10.1 P1 added data-tab="lead" to #card-lead, which causes the generic
+    // setTab loop to add pop-tab-hidden (display:none) to the parent — defeating
+    // the special-case below that shows #leadSection on Tokens tab. Result:
+    // Lead Mod Token input was invisible from the Tokens tab — leads couldn't
+    // paste their token before saving the team token. Fix: also unhide
+    // #card-lead parent on tokens tab.
+    const cardLead = document.getElementById('card-lead');
+    if (cardLead) {
+      if (name === 'tokens' || name === 'lead') {
+        cardLead.classList.remove('pop-tab-hidden');
+        cardLead.style.display = '';
+      } else {
+        cardLead.classList.add('pop-tab-hidden');
+      }
+    }
     const leadSec = document.getElementById('leadSection');
     const leadTools = document.getElementById('leadOnlyTools');
     if (leadSec) {
@@ -3857,6 +3873,29 @@ function __exportDrillCsv() {
       if (!card) return;
       const key = card.getAttribute('data-drill');
       if (key) renderDrillDown(key);
+    });
+    // a11y: REDTEAM-3 made .pop-stat focusable (role=button, tabindex=0).
+    // Pair the click delegation with keyboard activation. Synthesize a click
+    // so any current/future click handler on .pop-stat fires for free.
+    stats.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const card = e.target.closest('.pop-stat[data-drill]');
+      if (!card) return;
+      if (e.key === ' ') e.preventDefault(); // stop page scroll on Space
+      card.click();
+    });
+  }
+  // a11y: same treatment for the lead KPI tiles (REDTEAM-3 also made these
+  // focusable). Click handler may not yet exist — keydown synthesizes a click
+  // so keyboard users stay at parity once one lands.
+  const kpiRow = document.getElementById('leadKpiRow');
+  if (kpiRow) {
+    kpiRow.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const tile = e.target.closest('.gam-kpi-tile[data-kpi]');
+      if (!tile) return;
+      if (e.key === ' ') e.preventDefault();
+      tile.click();
     });
   }
   const closeBtn = $('pop-drill-close');
