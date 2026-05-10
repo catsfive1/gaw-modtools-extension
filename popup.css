@@ -450,6 +450,9 @@ html, body {
   padding: 0 4px;
   border-radius: 4px;
   transition: color .12s, background .12s;
+  /* v10.13.2 W5: 32x32 min tap target (UIUX2-34 P0) */
+  min-width: 32px;
+  min-height: 32px;
 }
 .pop-drill-close:hover { color: #f04040; background: rgba(240,64,64,.08); }
 .pop-drill-body {
@@ -754,9 +757,10 @@ body {
   padding: 8px 4px !important;
   cursor: pointer;
   transition: color 100ms ease-out, border-color 100ms ease-out, background-color 100ms ease-out;
-  min-height: 0 !important;
 }
 .pop-tab:hover { color: var(--bb-ink) !important; background: rgba(255,153,51,0.05) !important; }
+/* v10.13.2 W5: tab press state (80ms linear) — UIUX2-31 micro-interactions */
+.pop-tab:active { background: rgba(255,153,51,0.12) !important; transition: background 80ms linear !important; }
 .pop-tab.pop-tab-active {
   color: var(--bb-amber) !important;
   border-bottom-color: var(--bb-amber) !important;
@@ -862,7 +866,7 @@ input:focus, textarea:focus, select:focus {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
-  min-height: 28px;
+  min-height: 32px; /* v10.13.2 W5: 28 -> 32 click-target compliance (UIUX2-34) */
   transition: background-color 100ms, border-color 100ms, color 100ms;
 }
 .pop-btn:hover, button:hover {
@@ -1507,7 +1511,6 @@ input[type="checkbox"]:checked::after {
   list-style: none;
   cursor: default;
   user-select: none;
-  min-height: 0 !important;
 }
 
 /* Remove default <details> triangle marker in all browsers. */
@@ -1597,7 +1600,6 @@ input[type="checkbox"]:checked::after {
   padding: 8px 12px 8px 14px !important;
   background: var(--bb-bg-deep, #0f1114) !important;
   border-bottom: 1px solid var(--bb-line-hot) !important;
-  min-height: 0 !important;
   user-select: none;
 }
 
@@ -1882,6 +1884,14 @@ input[type="checkbox"]:checked::after {
 @media (prefers-reduced-motion: reduce) {
   .gam-kpi-tile[data-loading="true"] .gam-kpi-val { animation: none !important; }
 }
+/* v10.13.2 W5: copyWithPulse() flash animation — green tint fades to transparent over 800ms */
+@keyframes gam-copy-flash {
+  0%   { background-color: rgba(61,214,140,0.22); }
+  100% { background-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gam-copy-flash { animation: none !important; }
+}
 
 /* Quick Actions bar container */
 #leadQuickActions {
@@ -1956,7 +1966,7 @@ input[type="checkbox"]:checked::after {
   padding: 1px 6px !important;
   cursor: pointer;
   font: inherit !important;
-  min-height: 0 !important;
+  /* v10.13.2 W5: removed min-height:0!important - was overriding 32px button base (UIUX2-34) */
 }
 #lapsedModsChip .chip-expand:hover { background: var(--bb-hover) !important; }
 
@@ -2186,7 +2196,7 @@ input[type="checkbox"]:checked::after {
   font: 600 10px/1.2 var(--bb-font) !important;
   cursor: pointer;
   padding: 0 !important;
-  min-height: 0 !important;
+  /* v10.13.2 W5: removed min-height:0!important - was overriding 32px button base (UIUX2-34) */
   text-decoration: underline;
   letter-spacing: 0.05em;
 }
@@ -2264,7 +2274,7 @@ input[type="checkbox"]:checked::after {
   background: var(--bb-sunken) !important;
   border: 1px solid var(--bb-line-hot) !important;
   color: var(--bb-ink) !important;
-  min-height: 24px !important;
+  min-height: 32px !important; /* v10.13.2 W5: 24 -> 32 click-target compliance (UIUX2-34) */
 }
 .pop-drill-sort {
   padding: 3px 6px !important;
@@ -2272,7 +2282,7 @@ input[type="checkbox"]:checked::after {
   background: var(--bb-sunken) !important;
   border: 1px solid var(--bb-line-hot) !important;
   color: var(--bb-ink) !important;
-  min-height: 24px !important;
+  min-height: 32px !important; /* v10.13.2 W5: 24 -> 32 click-target compliance (UIUX2-34) */
 }
 .pop-drill-export {
   font: 600 10px/1.2 var(--bb-font) !important;
@@ -2283,7 +2293,7 @@ input[type="checkbox"]:checked::after {
   cursor: pointer;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  min-height: 24px !important;
+  min-height: 32px !important; /* v10.13.2 W5: 24 -> 32 click-target compliance (UIUX2-34) */
   white-space: nowrap;
 }
 .pop-drill-export:hover { background: var(--bb-amber-bg) !important; }

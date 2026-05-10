@@ -1530,7 +1530,8 @@
         const r = await rpcCall('modBugReport', payload);
         if (r && r.ok && r.data && r.data.ok){
           const id = r.data.id != null ? r.data.id : '?';
-          snack(`\u{1F41B} Bug report submitted -- Commander will see it shortly. ID: ${id}`, 'success');
+          // v10.13.2 W5 (UIUX2-32): terse — operator only needs the ID for follow-up.
+          snack(`Bug report submitted - ID: ${id}`, 'success');
           closeAllPanels();
         } else {
           const msg = (r && r.data && r.data.error) || r.error || 'unknown error';
@@ -4386,7 +4387,7 @@
     'inbox-empty':   '<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12l3-7h12l3 7v7H3z"/><path d="M3 12h5l1 2h6l1-2h5"/></svg>',
     'users-empty':   '<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.2"/><path d="M15 20a4 4 0 0 1 6 0"/></svg>',
     'rules-empty':   '<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>',
-    'actions-empty': '<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v18M3 12h18"/></svg>',
+    // v10.13.2 W5 (UIUX2-28): 'actions-empty' icon retired (semantically thin '+' glyph)
     'modmail-empty': '<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>'
   };
   // renderEmptyState({icon, headline, description, ctaLabel, ctaAction})
@@ -4513,12 +4514,15 @@
       d.textContent = String(o.desc);
       wrap.appendChild(d);
     }
-    if (o.ctaLabel && typeof o.ctaAction === 'function') {
+    // v10.13.2 W5 (UIUX2-28): accept BOTH ctaAction (modtools-side legacy) and
+    // ctaFn (popup-side) for cross-file copy-paste back-compat. Empty-states API alignment.
+    const __ctaCb = o.ctaAction || o.ctaFn;
+    if (o.ctaLabel && typeof __ctaCb === 'function') {
       const btn = document.createElement('button');
       btn.className = 'gam-empty-cta';
       btn.type = 'button';
       btn.textContent = String(o.ctaLabel);
-      btn.addEventListener('click', function(e) { try { o.ctaAction(e); } catch(_){} });
+      btn.addEventListener('click', function(e) { try { __ctaCb(e); } catch(_){} });
       wrap.appendChild(btn);
     }
     return wrap;
@@ -6134,7 +6138,14 @@
     btn.setAttribute('data-gam-nba-action', action);
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      try { onClick(); } catch(err) { console.error('[v7] NBA action threw', err); snack('Action failed', 'error'); }
+      // v10.13.2 W5 (UIUX2-30): thread the action name into the failure snack so
+      // the operator knows which step blew up rather than seeing "Action failed".
+      try { onClick(); } catch(err) {
+        console.error('[v7] NBA action threw', err);
+        const _aName = (label || action || 'Action');
+        const _aMsg = (err && err.message) ? ': ' + err.message : '';
+        snack(_aName + ' failed' + _aMsg, 'error');
+      }
     });
     return btn;
   }
@@ -6167,11 +6178,13 @@
       return {
         APPROVE:    async () => { try { await apiApprove(thingId, thingType); snack('Approved', 'success'); logAction({type:'approve', id:thingId, source:'v7-nba'}); } catch(e){} close(); },
         // AF-34 (Rule 101): withUndo wraps apiRemove -- inverse is apiApprove (Tier B, 5s window)
-        REMOVE:     async () => { try { await withUndo(() => apiRemove(thingId, thingType), { tier: 'B', label: 'Removed ' + thingType, inverse: () => apiApprove(thingId, thingType) }); logAction({type:'remove', id:thingId, source:'v7-nba'}); } catch(e){ snack('Remove failed', 'error'); } close(); },
-        SPAM:       async () => { try { await withUndo(() => apiRemove(thingId, thingType), { tier: 'B', label: 'Removed (spam)', inverse: () => apiApprove(thingId, thingType) }); logAction({type:'remove-spam', id:thingId, source:'v7-nba'}); } catch(e){ snack('Remove failed', 'error'); } close(); },
+        // v10.13.2 W5 (UIUX2-30): include e.message + remediation hint so operator
+        // can act on the failure (network vs auth vs gone) rather than just "Remove failed".
+        REMOVE:     async () => { try { await withUndo(() => apiRemove(thingId, thingType), { tier: 'B', label: 'Removed ' + thingType, inverse: () => apiApprove(thingId, thingType) }); logAction({type:'remove', id:thingId, source:'v7-nba'}); } catch(e){ snack('Remove failed: ' + (e && e.message || 'unknown') + ' — retry, or check Diag tab', 'error'); } close(); },
+        SPAM:       async () => { try { await withUndo(() => apiRemove(thingId, thingType), { tier: 'B', label: 'Removed (spam)', inverse: () => apiApprove(thingId, thingType) }); logAction({type:'remove-spam', id:thingId, source:'v7-nba'}); } catch(e){ snack('Remove failed: ' + (e && e.message || 'unknown') + ' — retry, or check Diag tab', 'error'); } close(); },
         LOCK:       () => { close(); },
         // AF-34 (Rule 101): withUndo wraps apiSticky -- inverse is identical call (toggle endpoint)
-        STICKY:     async () => { try { await withUndo(() => apiSticky(thingId), { tier: 'B', label: 'Sticky toggled', inverse: () => apiSticky(thingId) }); } catch(e){ snack('Sticky failed', 'error'); } close(); },
+        STICKY:     async () => { try { await withUndo(() => apiSticky(thingId), { tier: 'B', label: 'Sticky toggled', inverse: () => apiSticky(thingId) }); } catch(e){ snack('Sticky failed: ' + (e && e.message || 'unknown'), 'error'); } close(); },
         ESCALATE:   () => { close(); },
         DO_NOTHING: () => { close(); }
       };
@@ -6481,18 +6494,38 @@
         const v = (ta.value || '').trim();
         if (!v) return;
         saveBtn.disabled = true; saveBtn.textContent = 'Saving\u2026';
+        // v10.13.2 W5 (UIUX2-30): inline gamMakeError instead of disruptive snack.
+        // Note panel is non-blocking; the operator should see context-local error
+        // chip with retry, not a global toast that vanishes in 2.2s.
+        const _clearNoteErr = () => {
+          const old = form.querySelector('.gam-error-state');
+          if (old) old.remove();
+        };
         try {
           const mergedNotes = (notes || []).concat([{ author: me(), ts: new Date().toISOString(), body: v }]);
           const r = await rpcCall('modProfilesWritePatch', { username: id, patch: { notes: mergedNotes } });
           if (r && r.ok) {
+            _clearNoteErr();
             snack('Note saved', 'success');
             IntelDrawer.refresh(4);
           } else {
-            snack('Note save failed', 'error');
+            _clearNoteErr();
+            const _err = (r && r.error) || 'no response';
+            form.appendChild(gamMakeError({
+              severity: 'soft', label: 'NOTE',
+              msg: 'Save failed: ' + _err,
+              hint: 'Worker may be offline \u2014 retry, or copy note text and try again.'
+            }));
             saveBtn.disabled = false; saveBtn.textContent = 'Save note';
           }
         } catch(err) {
           if (err && err.name === 'AbortError') return;
+          _clearNoteErr();
+          form.appendChild(gamMakeError({
+            severity: 'soft', label: 'NOTE',
+            msg: 'Save failed: ' + (err && err.message || 'unknown'),
+            hint: 'Network or auth issue \u2014 retry, or check Diag tab.'
+          }));
           saveBtn.disabled = false; saveBtn.textContent = 'Save note';
         }
       });
@@ -7135,6 +7168,52 @@
       .catch(()=>{ snack(fb,'warn'); console.log('[ModTools]',t); });
   }
 
+  // v10.13.2 W5 (UIUX2-31): copyWithPulse(btn, text)
+  // Three-layer clipboard fallback (DevTools copy() -> navigator.clipboard ->
+  // textarea + execCommand). On success: swaps button label to "COPIED" for
+  // 1200ms and applies gam-copy-flash keyframe (green tint fade over 800ms).
+  // Token/debug/AI copy buttons should route through this for consistent UX.
+  function copyWithPulse(btn, text) {
+    let copied = null;
+    try { if (typeof copy === 'function') { copy(text); copied = 'devtools'; } } catch(_){}
+    if (!copied) {
+      try {
+        if (navigator.clipboard && document.hasFocus()) {
+          navigator.clipboard.writeText(text);
+          copied = 'clipboard-api';
+        }
+      } catch(_){}
+    }
+    if (!copied) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = String(text);
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (ok) copied = 'execCommand';
+      } catch(_){}
+    }
+    if (btn && copied) {
+      try {
+        const orig = btn.textContent;
+        btn.textContent = 'COPIED';
+        btn.classList.add('gam-copy-flash');
+        btn.style.animation = 'gam-copy-flash 800ms ease-out';
+        setTimeout(() => {
+          try {
+            btn.textContent = orig;
+            btn.classList.remove('gam-copy-flash');
+            btn.style.animation = '';
+          } catch(_){}
+        }, 1200);
+      } catch(_){}
+    }
+    return copied;
+  }
+
   // V11 #5: Universal Undo Middleware (client-side pilot -- ban only)
   let _undoSlot = null;
   let _undoTimer = null;
@@ -7468,15 +7547,13 @@
     msgSpan.textContent = String(msg);
     msgSpan.style.cssText = 'flex:1;min-width:0';
     s.appendChild(msgSpan);
-    // Optional action button (Bloomberg ghost: amber border/text, hover fills)
+    // Optional action button (Bloomberg ghost: amber border/text at rest;
+    // amber background on hover via CSS rule in GAM_CSS - v10.13.2 W5).
     if (hasAction) {
       const btn = document.createElement('button');
       btn.className = 'gam-snack-action';
       btn.type = 'button';
       btn.textContent = String(o.actionLabel);
-      btn.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:2px 8px;cursor:pointer;font:700 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;text-transform:uppercase;transition:background 80ms,color 80ms;flex-shrink:0;pointer-events:auto';
-      btn.addEventListener('mouseenter', function(){ btn.style.background = '#ff9933'; btn.style.color = '#0a0a0b'; });
-      btn.addEventListener('mouseleave', function(){ btn.style.background = 'transparent'; btn.style.color = '#ff9933'; });
       btn.addEventListener('click', function(ev){
         ev.stopPropagation();
         try { o.onAction(); } catch(_) {}
@@ -8492,8 +8569,9 @@
 
     if (intelAiEngSel) intelAiEngSel.addEventListener('change', ()=>{ setSetting('aiEngine', intelAiEngSel.value); });
     if (intelAiCopy){
+      // v10.13.2 W5: copyWithPulse handles 3-layer fallback + COPIED button flash
       intelAiCopy.addEventListener('click', ()=>{
-        if (intelAiText.value){ navigator.clipboard.writeText(intelAiText.value).then(()=>snack('Copied to clipboard','success')).catch(()=>{}); }
+        if (intelAiText.value){ copyWithPulse(intelAiCopy, intelAiText.value); }
       });
     }
 
@@ -10151,7 +10229,8 @@ Analyze this comment against the community rules. Then write a brief, profession
             item.style.opacity = '0.4';
             item.style.textDecoration = 'line-through';
           } catch(e) {
-            snack('Remove failed', 'error');
+            // v10.13.2 W5 (UIUX2-30): include e.message + remediation hint
+            snack('Remove failed: ' + (e && e.message || 'unknown') + ' — retry, or check Diag tab', 'error');
             btn.disabled = false;
           }
           return;
@@ -10491,7 +10570,8 @@ Analyze this comment against the community rules. Then write a brief, profession
           item.style.opacity = '0.4';
           item.style.textDecoration = 'line-through';
         } catch(e) {
-          snack('Remove failed', 'error');
+          // v10.13.2 W5 (UIUX2-30): include e.message + remediation hint
+          snack('Remove failed: ' + (e && e.message || 'unknown') + ' — retry, or check Diag tab', 'error');
         }
       });
       rmMenu.appendChild(item2);
@@ -13531,12 +13611,14 @@ Analyze this comment against the community rules. Then write a brief, profession
       // an icon+headline+CTA card. CTA focuses the add-rule pattern input.
       // Flag-off -> early-return null, legacy text remains.
       try {
+        // v10.13.2 W5 (UIUX2-28): migrated from renderEmptyState to gamMakeEmpty.
+        // Shim accepts both ctaFn/ctaAction so the closure fn keeps working unchanged.
         const __drEmpty = rulesEl.querySelector('.gam-t-dr-empty');
-        if (__drEmpty && typeof renderEmptyState === 'function'){
-          const __uxEmpty = renderEmptyState({
+        if (__drEmpty && typeof gamMakeEmpty === 'function'){
+          const __uxEmpty = gamMakeEmpty({
             icon: 'rules-empty',
             headline: 'No automod rules yet',
-            description: 'Add your first rule to auto-flag usernames that match a pattern.',
+            desc: 'Add your first rule to auto-flag usernames that match a pattern.',
             ctaLabel: 'Add rule',
             ctaAction: function(){ try { const inp = rulesEl.querySelector('#gam-dr-add-pat'); if (inp) inp.focus(); } catch(e){} }
           });
@@ -13688,12 +13770,13 @@ Analyze this comment against the community rules. Then write a brief, profession
 
       // v8.1 ux empty-state: swap plain empty div for icon+CTA card when flag on.
       try {
+        // v10.13.2 W5 (UIUX2-28): migrated from renderEmptyState to gamMakeEmpty.
         const __tardsEmpty = tardsEl.querySelector('.gam-t-dr-empty');
-        if (__tardsEmpty && typeof renderEmptyState === 'function'){
-          const __uxEmpty = renderEmptyState({
+        if (__tardsEmpty && typeof gamMakeEmpty === 'function'){
+          const __uxEmpty = gamMakeEmpty({
             icon: 'rules-empty',
             headline: 'No tard rules',
-            description: 'Add a pattern to auto-flag comments from suspect accounts.',
+            desc: 'Add a pattern to auto-flag comments from suspect accounts.',
             ctaLabel: 'Add rule',
             ctaAction: function(){ try { const inp = tardsEl.querySelector('#gam-tards-add-pat'); if (inp) inp.focus(); } catch(e){} }
           });
@@ -14158,11 +14241,11 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     if(filtered.length===0){
-      // v8.1 ux empty-state: flag-on shows icon+headline card; flag-off v8.0 text.
-      const __uxEmpty = (typeof renderEmptyState === 'function') ? renderEmptyState({
+      // v10.13.2 W5 (UIUX2-28): migrated to gamMakeEmpty (always-on empty-state).
+      const __uxEmpty = (typeof gamMakeEmpty === 'function') ? gamMakeEmpty({
         icon: 'users-empty',
         headline: 'No users match this filter',
-        description: 'Try clearing the search box or broadening the pattern.'
+        desc: 'Try clearing the search box or broadening the pattern.'
       }) : null;
       if (__uxEmpty){
         while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
@@ -15647,8 +15730,9 @@ Analyze this comment against the community rules. Then write a brief, profession
         clearAllBtn.style.cssText = 'padding:6px 12px;cursor:pointer;color:#ff9933;font-weight:600;letter-spacing:0.04em';
         clearAllBtn.addEventListener('click', async () => {
           menu.remove();
-          if (!window.confirm('LEAD ACTION\n\nThis will wipe the ENTIRE mod chat history server-side, for everyone. Cannot be undone.\n\nProceed?')) return;
-          if (!window.confirm('Are you ABSOLUTELY sure? This deletes all team chat messages permanently.')) return;
+          // v10.13.2 W5 (UIUX2-32): single confirm. Two-step ceremony was friction
+          // for an operation that's already gated by lead-only visibility.
+          if (!window.confirm('Wipe all team chat? This cannot be undone.')) return;
           const r = await rpcCall('modMessageClearAll', {});
           if (r && r.ok && r.data && r.data.ok) {
             snack(`🧹 Chat cleared (${r.data.deleted || '?'} messages)`, 'success');
@@ -18311,14 +18395,21 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-dr-row.band-today{border-left-color:#ffd84d}',
         '.gam-dr-row.band-deferred{border-left-color:#2a2825}',
         '.gam-dr-countdown{font-weight:700;letter-spacing:0.04em;white-space:nowrap;font-variant-numeric:tabular-nums;transition:color 300ms;font-size:11px}',
-        '.gam-dr-countdown.urg-critical{color:#ff3b3b;animation:gam-dr-cd-pulse 1s ease-in-out infinite}',
+        // v10.13.2 W5 (UIUX2-31): keep red color for critical/confirming state, but
+        // gate the gam-dr-cd-pulse animation behind PRM no-preference. Color alone
+        // signals urgency under PRM-reduce.
+        '.gam-dr-countdown.urg-critical{color:#ff3b3b}',
         '.gam-dr-countdown.urg-imminent{color:#ff6b35}',
         '.gam-dr-countdown.urg-today{color:#ffd84d}',
         '.gam-dr-countdown.urg-deferred{color:#5a5752}',
-        '@keyframes gam-dr-cd-pulse{0%,100%{opacity:1}50%{opacity:.4}}',
+        '@media (prefers-reduced-motion: no-preference){',
+        '  @keyframes gam-dr-cd-pulse{0%,100%{opacity:1}50%{opacity:.4}}',
+        '  .gam-dr-countdown.urg-critical{animation:gam-dr-cd-pulse 1s ease-in-out infinite}',
+        '  .gam-dr-btn-fire.confirming{animation:gam-dr-cd-pulse 0.6s ease-in-out infinite}',
+        '}',
         '.gam-dr-btn-fire{background:transparent;border:1px solid #ff3b3b;color:#ff3b3b;padding:1px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.05em;text-transform:uppercase;transition:background 80ms,color 80ms,border-color 80ms;white-space:nowrap}',
         '.gam-dr-btn-fire:hover{background:rgba(255,59,59,0.12)}',
-        '.gam-dr-btn-fire.confirming{border-color:#ff6b35;color:#ff6b35;animation:gam-dr-cd-pulse 0.6s ease-in-out infinite}',
+        '.gam-dr-btn-fire.confirming{border-color:#ff6b35;color:#ff6b35}',
         '.gam-dr-btn-cancel{background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.05em;text-transform:uppercase;transition:background 80ms;white-space:nowrap}',
         '.gam-dr-btn-cancel:hover{background:rgba(255,153,51,0.12)}',
         '@keyframes gam-dr-row-out{0%{opacity:1;max-height:80px;padding-top:5px;padding-bottom:5px}100%{opacity:0;max-height:0;padding-top:0;padding-bottom:0}}',
@@ -19094,7 +19185,11 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-sh2-feed-type{font-size:9px;font-weight:700;letter-spacing:0.05em;text-align:center;padding:2px 4px;border-radius:2px;white-space:nowrap}',
         '.gam-sh2-feed-target{color:#8b929e;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.gam-sh2-feed-exec{color:#5c6370;font-size:10px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-        '.gam-sh2-feed-shimmer{height:28px;padding:4px 12px;background:linear-gradient(90deg,#1e2228 25%,#2a2f38 50%,#1e2228 75%);background-size:200% 100%;animation:gam-sh2-shimmer 1.2s infinite linear;animation-delay:calc(var(--i,0)*80ms);border-bottom:1px solid #1e2228}',
+        // v10.13.2 W5 (UIUX2-31): static shimmer base; animation gated behind PRM no-preference below.
+        '.gam-sh2-feed-shimmer{height:28px;padding:4px 12px;background:#1e2228;border-bottom:1px solid #1e2228}',
+        '@media (prefers-reduced-motion: no-preference){',
+        '  .gam-sh2-feed-shimmer{background:linear-gradient(90deg,#1e2228 25%,#2a2f38 50%,#1e2228 75%);background-size:200% 100%;animation:gam-sh2-shimmer 1.2s infinite linear;animation-delay:calc(var(--i,0)*80ms)}',
+        '}',
         '.gam-sh2-footer{display:flex;justify-content:space-between;padding:6px 12px;font-size:9px;color:#5c6370;border-top:1px solid #2a2f38}',
       ].join('');
       document.head.appendChild(ss);
@@ -20414,12 +20509,12 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (auditRes.status === 'fulfilled' && auditRes.value && auditRes.value.ok){
       const rows = (auditRes.value.data && auditRes.value.data.rows) || auditRes.value.rows || [];
       if (!rows.length){
-        // v8.1 ux empty-state: flag-on uses icon+CTA card; flag-off keeps v8.0 text.
+        // v10.13.2 W5 (UIUX2-28): migrated to gamMakeEmpty.
+        // 'actions-empty' icon retired (semantically thin '+' glyph) — no icon used here.
         {
-          const __uxEmpty = (typeof renderEmptyState === 'function') ? renderEmptyState({
-            icon: 'actions-empty',
+          const __uxEmpty = (typeof gamMakeEmpty === 'function') ? gamMakeEmpty({
             headline: 'No mod actions in the past hour.',
-            description: 'Quiet on the moderation front right now.'
+            desc: 'Quiet on the moderation front right now.'
           }) : null;
           body.appendChild(__uxEmpty || el('div', { cls:'gam-c5-empty' }, 'No mod actions in the past hour.'));
         }
@@ -20445,12 +20540,12 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (presRes.status === 'fulfilled' && presRes.value && presRes.value.ok){
       const mods = (presRes.value.data && presRes.value.data.mods) || presRes.value.mods || [];
       if (!mods.length){
-        // v8.1 ux empty-state: flag-on uses icon+headline card; flag-off keeps v8.0 text.
+        // v10.13.2 W5 (UIUX2-28): migrated to gamMakeEmpty.
         {
-          const __uxEmpty = (typeof renderEmptyState === 'function') ? renderEmptyState({
+          const __uxEmpty = (typeof gamMakeEmpty === 'function') ? gamMakeEmpty({
             icon: 'users-empty',
             headline: 'No other mods online',
-            description: "You're solo -- flags will fire through to your queue."
+            desc: "You're solo -- flags will fire through to your queue."
           }) : null;
           body.appendChild(__uxEmpty || el('div', { cls:'gam-c5-empty' }, 'No other mods online right now.'));
         }
@@ -20803,6 +20898,12 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-drawer-section button { font:inherit; }
 .gam-skeleton { height:12px; background:linear-gradient(90deg,${C.BG2},${C.BORDER2},${C.BG2}); background-size:200% 100%; animation:gam-shimmer 1.2s infinite; border-radius:3px; margin:4px 0; }
 @keyframes gam-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+/* v10.13.2 W5 (UIUX2-31): copyWithPulse() success flash — green tint fades to transparent over 800ms */
+@keyframes gam-copy-flash { 0%{background-color:rgba(61,214,140,0.22)} 100%{background-color:transparent} }
+@media (prefers-reduced-motion: reduce) { .gam-copy-flash { animation:none !important; } }
+/* v10.13.2 W5: snack action button (W3 ext) — Bloomberg ghost at rest, amber fill on hover */
+.gam-snack-action { background:transparent; border:1px solid #ff9933; color:#ff9933; padding:2px 8px; cursor:pointer; font:700 9px ui-monospace,'JetBrains Mono',monospace; letter-spacing:0.06em; text-transform:uppercase; transition:background 80ms,color 80ms; flex-shrink:0; pointer-events:auto; }
+.gam-snack-action:hover { background:#ff9933; color:#0a0a0b; }
 .gam-muted { color:${C.TEXT3}; font-style:italic; font-size:11px; }
 .gam-nba-gen { background:${C.ACCENT}; color:#fff; border:none; border-radius:4px; padding:5px 12px; cursor:pointer; font-size:11px; font-weight:600; transition:opacity .15s; }
 .gam-nba-gen:hover { opacity:.9; }
@@ -20923,7 +21024,9 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-bar-btn{background:none;border:none;color:${C.TEXT2};padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;font-family:inherit;transition:background .15s,color .15s}
 .gam-bar-btn:hover{background:${C.BG2};color:${C.TEXT}}
 /* v5.2.1: icon-only bar buttons - fixed square hit target + no label width */
-.gam-bar-icon{background:none;border:none;color:${C.TEXT2};width:22px;height:22px;border-radius:11px;cursor:pointer;font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;transition:background .1s,color .1s,transform .1s;padding:0}
+.gam-bar-icon{background:none;border:none;color:${C.TEXT2};width:22px;height:22px;border-radius:11px;cursor:pointer;font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;transition:background .1s,color .1s,transform .1s;padding:0;position:relative}
+/* v10.13.2 W5 (UIUX2-34 P0): 32px tap zone over 22px visual via ::after extension */
+.gam-bar-icon::after{content:'';position:absolute;inset:-5px;pointer-events:auto}
 .gam-bar-icon:hover{background:rgba(255,255,255,.08);color:${C.TEXT};transform:scale(1.12)}
 .gam-bar-icon:active{transform:scale(.94)}
 /* v9.6.0 UX iter 2: visible keyboard-focus state. Pre-fix tabbing through
@@ -21121,7 +21224,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-unverified{font-size:9px;color:${C.WARN};font-weight:700;letter-spacing:.3px}
 .gam-t-actions{display:flex;gap:3px;position:relative;justify-content:flex-end;align-items:center}
 .gam-t-done{font-size:10px;color:${C.TEXT3};text-transform:uppercase;letter-spacing:.5px;align-self:center}
-.gam-t-act{width:22px;height:22px;border:1px solid ${C.BORDER};border-radius:3px;background:transparent;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:background .1s,border-color .1s,transform .1s;color:${C.TEXT2};flex-shrink:0}
+.gam-t-act{width:22px;height:22px;border:1px solid ${C.BORDER};border-radius:3px;background:transparent;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:background .1s,border-color .1s,transform .1s;color:${C.TEXT2};flex-shrink:0;position:relative}
+/* v10.13.2 W5 (UIUX2-34 P0): 34px tap zone within 34px row via ::after extension */
+.gam-t-act::after{content:'';position:absolute;inset:-6px;pointer-events:auto}
 .gam-t-act:hover{color:${C.TEXT};border-color:${C.BORDER2};transform:scale(1.08)}
 .gam-t-act:active{transform:scale(.96)}
 .gam-t-stat-val{font-size:20px}
@@ -21178,8 +21283,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-preflight-table td{padding:6px 10px;color:${C.TEXT};font-family:inherit;word-break:break-word;border-bottom:1px solid ${C.BORDER}}
 .gam-preflight-arm{margin:8px 0 12px;padding:8px 12px;background:rgba(240,64,64,.12);border:1px solid rgba(240,64,64,.25);border-radius:4px;color:${C.RED};font-size:11px;font-weight:600;letter-spacing:.3px;position:relative;overflow:hidden}
 /* v5.1.9 UI Loop 3: visible arm progress bar under destructive button */
-.gam-preflight-arm::after{content:'';position:absolute;left:0;bottom:0;height:2px;background:${C.RED};animation:gam-arm-fill var(--arm-seconds, 3s) linear forwards}
-@keyframes gam-arm-fill{from{width:0}to{width:100%}}
+/* v10.13.2 W5 (UIUX2-31 P0): gate the arm-fill animation behind PRM no-preference.
+   Under prefers-reduced-motion:reduce the bar is suppressed entirely so the
+   arm gate still works (button remains disabled for armSeconds via JS) but
+   no animated bar runs. Pre-fix the bar froze at 0% under PRM, breaking
+   visual feedback that the gate was actively counting. */
+@media (prefers-reduced-motion: no-preference) {
+  .gam-preflight-arm::after{content:'';position:absolute;left:0;bottom:0;height:2px;background:${C.RED};animation:gam-arm-fill var(--arm-seconds, 3s) linear forwards}
+  @keyframes gam-arm-fill{from{width:0}to{width:100%}}
+}
 /* Row status transitions */
 .gam-t-row{transition:background .2s, border-color .2s, opacity .2s}
 .gam-preflight-actions{display:flex;gap:8px;justify-content:flex-end}
@@ -21218,7 +21330,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-tip-controls{display:flex;gap:4px;margin:-4px -4px 8px -4px;padding:4px;border-bottom:1px solid ${C.BORDER};align-items:center}
 .gam-tip-ctrl-btn{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT2};cursor:pointer;padding:3px 8px;font:10px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:all .15s}
 .gam-tip-ctrl-btn:hover{border-color:${C.ACCENT};color:${C.TEXT}}
-.gam-tip-ctrl-x{margin-left:auto;width:22px;height:22px;padding:0;font-size:14px;line-height:1;border-radius:50%}
+/* v10.13.2 W5 (UIUX2-34 P0): 32px min tap target on tooltip close X */
+.gam-tip-ctrl-x{margin-left:auto;min-width:32px;min-height:32px;padding:0;font-size:14px;line-height:1;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
 .gam-tip-ctrl-dr{border-color:${C.RED};color:${C.RED}}
 .gam-tip-ctrl-dr:hover{background:rgba(240,64,64,.12);border-color:${C.RED};color:${C.RED}}
 
@@ -21296,7 +21409,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-ctx-menu{position:fixed;z-index:10000005;width:220px;background:#181b20;border:1px solid #3a3f48;border-radius:4px;padding:4px 0;box-shadow:0 8px 32px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.04);font:11px/1 'JetBrains Mono','SF Mono',Consolas,monospace;color:#e8eaed;user-select:none}
 .gam-ctx-head{padding:6px 12px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5c6370;border-bottom:1px solid #2a2f38;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gam-ctx-sep{height:1px;background:#2a2f38;margin:3px 0}
-.gam-ctx-item{display:flex;align-items:center;height:28px;padding:0 12px;color:#e8eaed;cursor:pointer;transition:background-color 80ms linear}
+/* v10.13.2 W5 (UIUX2-34 P0): bumped 28 -> 32 for tap target compliance */
+.gam-ctx-item{display:flex;align-items:center;min-height:32px;padding:0 12px;color:#e8eaed;cursor:pointer;transition:background-color 80ms linear}
 .gam-ctx-item:hover{background:rgba(255,255,255,.06)}
 .gam-ctx-item--danger{color:#f04040}
 .gam-ctx-item--danger:hover{background:rgba(240,64,64,.12)}
@@ -22527,12 +22641,16 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 /* ---- v10.3: Brigade chip (Patch 6) ---- */
 #gam-brig-chip { font:600 9px ui-monospace,monospace; color:#ffa500; background:#1a0d00; border:1px solid #ffa500; padding:1px 5px; cursor:pointer; display:none; }
 
-/* v10.8.0 M4 (UIUX-04 B.3): AI loading ghost-card shimmer animation */
-.gam-ai-skeleton::after {
-  content:'';
-  position:absolute; inset:0;
-  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%);
-  animation: gam-shimmer 1.5s infinite;
+/* v10.8.0 M4 (UIUX-04 B.3): AI loading ghost-card shimmer animation
+   v10.13.2 W5 (UIUX2-31): gated behind PRM no-preference; under PRM-reduce
+   the skeleton card shows but no shimmer sweep runs. */
+@media (prefers-reduced-motion: no-preference) {
+  .gam-ai-skeleton::after {
+    content:'';
+    position:absolute; inset:0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%);
+    animation: gam-shimmer 1.5s infinite;
+  }
 }
 @keyframes gam-shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
 
@@ -24285,12 +24403,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     const mods = r.data.mods;
     if (!mods.length){
       const __hudBody = presenceHudEl.querySelector('.gam-hud-body');
-      // v8.1 ux empty-state: flag-on swaps HUD empty text for icon+headline card.
-      // Flag-off path retains v8.0 innerHTML byte-for-byte.
-      const __uxEmpty = (typeof renderEmptyState === 'function') ? renderEmptyState({
+      // v10.13.2 W5 (UIUX2-28): migrated to gamMakeEmpty (always-on empty-state).
+      const __uxEmpty = (typeof gamMakeEmpty === 'function') ? gamMakeEmpty({
         icon: 'users-empty',
         headline: 'Presence channel quiet',
-        description: 'No other mods have this page open right now.'
+        desc: 'No other mods have this page open right now.'
       }) : null;
       if (__uxEmpty){
         while (__hudBody.firstChild) __hudBody.removeChild(__hudBody.firstChild);

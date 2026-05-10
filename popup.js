@@ -270,6 +270,58 @@ function gamEmptyState(opts) {
 // =============================================================================
 
 // =============================================================================
+// v10.13.2 W5 — copyWithPulse(btn, text)
+// Three-layer clipboard fallback: DevTools copy() -> navigator.clipboard ->
+// textarea + execCommand('copy'). On success, swaps button label to "COPIED"
+// for 1200ms and applies gam-copy-flash keyframe (green tint fade over 800ms).
+// All token/debug/AI copy buttons should route through this utility (UIUX2-31).
+// =============================================================================
+function copyWithPulse(btn, text) {
+  var copied = null;
+  // Layer 1: DevTools-only copy() helper (rare in popup but cheap to attempt)
+  try { if (typeof copy === 'function') { copy(text); copied = 'devtools'; } } catch(_){}
+  // Layer 2: navigator.clipboard.writeText (requires document.hasFocus)
+  if (!copied) {
+    try {
+      if (navigator.clipboard && document.hasFocus()) {
+        navigator.clipboard.writeText(text);
+        copied = 'clipboard-api';
+      }
+    } catch(_){}
+  }
+  // Layer 3: legacy textarea + execCommand fallback (works without focus)
+  if (!copied) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = String(text);
+      ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) copied = 'execCommand';
+    } catch(_){}
+  }
+  // Pulse the button regardless of which layer succeeded; bail-out is silent.
+  if (btn && copied) {
+    try {
+      var origLabel = btn.textContent;
+      btn.textContent = 'COPIED';
+      btn.classList.add('gam-copy-flash');
+      btn.style.animation = 'gam-copy-flash 800ms ease-out';
+      setTimeout(function() {
+        try {
+          btn.textContent = origLabel;
+          btn.classList.remove('gam-copy-flash');
+          btn.style.animation = '';
+        } catch(_){}
+      }, 1200);
+    } catch(_){}
+  }
+  return copied;
+}
+
+// =============================================================================
 // v10.12 PATCH 5b — State factory functions (D.3.11 UIUX-19 §C.1)
 // gamMakeSkel / gamMakeEmpty / gamMakeError / gamMakeStale
 // These are the canonical state helpers for popup context.
@@ -335,12 +387,15 @@ function gamMakeEmpty(opts) {
     d.textContent = String(o.desc);
     card.appendChild(d);
   }
-  if (o.ctaLabel && typeof o.ctaFn === 'function') {
+  // v10.13.2 W5: accept BOTH ctaFn (popup-side legacy) and ctaAction (modtools-side)
+  // for cross-file copy-paste back-compat. UIUX2-28 empty-states API alignment.
+  const __ctaCb = o.ctaFn || o.ctaAction;
+  if (o.ctaLabel && typeof __ctaCb === 'function') {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'gam-empty-cta';
     btn.textContent = String(o.ctaLabel);
-    btn.addEventListener('click', function(e) { try { o.ctaFn(e); } catch(_) {} });
+    btn.addEventListener('click', function(e) { try { __ctaCb(e); } catch(_) {} });
     card.appendChild(btn);
   }
   return card;
@@ -914,14 +969,15 @@ async function loadStats() {
     $('ver').textContent = 'v' + ver;
   } catch (err) {
     console.error('[Popup] Failed to load stats:', err);
-    // v10.12 D.3.17: surface error state on stat tile area
+    // v10.12 D.3.17 / v10.13.2 W5 (UIUX2-30): surface error state on stat tile area;
+    // hint guides operator to the Diag tab where underlying error context lives.
     const statsGrid = document.querySelector('.pop-stats');
     if (statsGrid && !statsGrid.querySelector('.gam-error-state')) {
       const errEl = gamMakeError({
         severity: 'hard',
         label: 'STATS',
-        msg: 'Failed to load stats',
-        hint: 'Worker unreachable — check CF dashboard.',
+        msg: 'Failed to load stats: ' + (err && err.message || 'unknown'),
+        hint: 'Open the Diag tab to inspect the underlying error, or retry — usually a transient worker hiccup.',
         retryFn: loadStats
       });
       errEl.style.cssText = 'grid-column:1/-1;padding:8px 12px';
@@ -2094,16 +2150,8 @@ function __makeCopyBtn(label, payload, parentBtn) {
   b.className = 'pop-btn pop-btn-ghost';
   b.style.cssText = 'font-size:10px;padding:2px 6px;margin-right:4px';
   b.textContent = label;
-  b.addEventListener('click', async function () {
-    try {
-      await navigator.clipboard.writeText(payload);
-      const orig = b.textContent;
-      b.textContent = '✓ copied';
-      setTimeout(function () { b.textContent = orig; }, 1500);
-    } catch (e) {
-      b.textContent = 'copy failed';
-    }
-  });
+  // v10.13.2 W5: route through copyWithPulse (3-layer fallback + COPIED flash)
+  b.addEventListener('click', function () { copyWithPulse(b, payload); });
   return b;
 }
 
@@ -3863,7 +3911,7 @@ async function loadMacros(){
   try {
     const r = await popupRpc('macrosList', { kind: __macroKind });
     if (!r || !r.ok || !r.data || !Array.isArray(r.data.macros)){
-      list.replaceChildren(gamMakeError({ severity: 'hard', label: 'MACROS', msg: (r && r.error) || 'no response', retryFn: loadMacros }));
+      list.replaceChildren(gamMakeError({ severity: 'hard', label: 'MACROS', msg: (r && r.error) || 'no response', hint: 'Worker may be offline or RPC contract changed — retry, or open Diag tab for context.', retryFn: loadMacros }));
       return;
     }
     // D.3.13: wire count badge
@@ -6428,13 +6476,8 @@ async function renderDiagTab() {
       try {
         // v10.12.1 PC.3: deep-mask diag error entries before clipboard export
         var out = JSON.stringify(_maskSecretsDeep(diagRpcEntries), null, 2);
-        // E.3.1 diag export — copy to clipboard using three-layer fallback
-        (function __diagCopy(text) {
-          try { if (typeof copy === 'function') { copy(text); } } catch(_) {}
-          try { if (navigator.clipboard) navigator.clipboard.writeText(text).catch(function(){}); } catch(_) {}
-        })(out);
-        diagExportBtn.textContent = 'Copied!';
-        setTimeout(function() { diagExportBtn.textContent = 'Copy errors to clipboard'; }, 2000);
+        // v10.13.2 W5: copyWithPulse handles 3-layer fallback + COPIED flash uniformly
+        copyWithPulse(diagExportBtn, out);
       } catch(_) {}
     };
   }
