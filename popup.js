@@ -6240,10 +6240,25 @@ async function renderDiagTab() {
   }
 
   // --- Section 3: RPC error log ---
+  // v10.12.4 HOTFIX: gam_diag_log moved to IndexedDB in v10.12.3 PA.3 migration.
+  // Direct chrome.storage.local read returns empty since entries are in IDB now.
+  // Route through diagReadRecent RPC. Fall back to legacy storage.local read for
+  // pre-migration backwards-compat (returns empty post-migration; harmless).
   var diagRpcEntries = [];
   try {
-    var diagData = await chrome.storage.local.get('gam_diag_log');
-    var diagLog = (diagData.gam_diag_log) || [];
+    var diagLog = [];
+    try {
+      var rpcResp = await popupRpc('diagReadRecent', { limit: 500 });
+      if (rpcResp && rpcResp.ok && rpcResp.data) {
+        diagLog = Array.isArray(rpcResp.data.entries) ? rpcResp.data.entries
+                : Array.isArray(rpcResp.data) ? rpcResp.data
+                : [];
+      }
+    } catch (eRpc) {}
+    if (diagLog.length === 0) {
+      var diagData = await chrome.storage.local.get('gam_diag_log');
+      diagLog = (diagData && diagData.gam_diag_log) || [];
+    }
     var errorCats = ['unhandledrejection', 'uncaught-error', 'rpc-error', 'net-error'];
     diagRpcEntries = diagLog.filter(function(e) {
       return errorCats.some(function(c) { return e && e.cat && e.cat.indexOf(c) !== -1; });
