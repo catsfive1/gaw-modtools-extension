@@ -181,7 +181,7 @@ function _cardWizardComplete() {
   if (badge && !badge.querySelector('.gam-card-rerun')) {
     const btn = document.createElement('button');
     btn.className = 'pop-btn pop-btn-ghost gam-card-rerun';
-    btn.style.cssText = 'font-size:9px;padding:1px 6px;min-height:0;height:18px;line-height:1';
+    btn.style.cssText = 'font-size:9px;padding:1px 6px;line-height:1';
     btn.textContent = 'Re-run setup';
     btn.addEventListener('click', function(e) {
       e.stopPropagation();
@@ -362,31 +362,40 @@ function gamEmptyState(opts) {
 // for 1200ms and applies gam-copy-flash keyframe (green tint fade over 800ms).
 // All token/debug/AI copy buttons should route through this utility (UIUX2-31).
 // =============================================================================
-function copyWithPulse(btn, text) {
+async function copyWithPulse(btn, text) {
   var copied = null;
   // Layer 1: DevTools-only copy() helper (rare in popup but cheap to attempt)
   try { if (typeof copy === 'function') { copy(text); copied = 'devtools'; } } catch(_){}
   // Layer 2: navigator.clipboard.writeText (requires document.hasFocus)
+  // v10.14.1 CC4: await the Promise so a rejected write (focus lost mid-call)
+  // falls through to Layer 3 instead of being silently swallowed.
   if (!copied) {
     try {
       if (navigator.clipboard && document.hasFocus()) {
-        navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(text);
         copied = 'clipboard-api';
       }
     } catch(_){}
   }
   // Layer 3: legacy textarea + execCommand fallback (works without focus)
+  // v10.14.1 CC3: textarea cleanup in finally so a thrown execCommand never
+  // leaks the off-screen textarea into the DOM.
   if (!copied) {
+    var __ta = null;
     try {
-      var ta = document.createElement('textarea');
-      ta.value = String(text);
-      ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
-      document.body.appendChild(ta);
-      ta.focus(); ta.select();
+      __ta = document.createElement('textarea');
+      __ta.value = String(text);
+      __ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+      document.body.appendChild(__ta);
+      __ta.focus(); __ta.select();
       var ok = document.execCommand('copy');
-      document.body.removeChild(ta);
       if (ok) copied = 'execCommand';
-    } catch(_){}
+    } catch(_){
+    } finally {
+      if (__ta && __ta.parentNode) {
+        try { __ta.parentNode.removeChild(__ta); } catch(_){}
+      }
+    }
   }
   // Pulse the button regardless of which layer succeeded; bail-out is silent.
   // v10.13.5 P0-E (RALPH AUDIT COPY-CLIPBOARD F7): double-click within 1200ms
@@ -2530,8 +2539,8 @@ async function __dmAllUnrotated(panel, tokens) {
           const ir = await __popupPost('/admin/mod/rotation-invite', { mod_username: r.username });
           const id = await ir.json();
           if (id.ok && id.code) {
-            await navigator.clipboard.writeText('https://greatawakening.win/?mt_invite=' + id.code);
-            copyBtn.textContent = 'Copied!';
+            // v10.14.1 CC1: route via copyWithPulse for 3-layer fallback + COPIED flash
+            copyWithPulse(copyBtn, 'https://greatawakening.win/?mt_invite=' + id.code);
           } else {
             copyBtn.textContent = 'Error';
           }
@@ -5564,7 +5573,8 @@ async function maintDiagStatus() {
     exportBtn.className = 'pop-btn pop-btn-ghost';
     exportBtn.textContent = 'Export';
     exportBtn.style.cssText = 'font-size:10px;padding:2px 8px;margin-left:6px';
-    exportBtn.addEventListener('click', () => withLoading(exportBtn, 'copying...', maintDiagExport));
+    // v10.14.1 CC2: thread btn so maintDiagExport can pulse via copyWithPulse
+    exportBtn.addEventListener('click', () => withLoading(exportBtn, 'copying...', () => maintDiagExport(exportBtn)));
     const purgeBtn = document.createElement('button');
     purgeBtn.className = 'pop-btn pop-btn-ghost';
     purgeBtn.textContent = 'Purge 50%';
@@ -5579,7 +5589,9 @@ async function maintDiagStatus() {
   }
 }
 
-async function maintDiagExport() {
+// v10.14.1 CC2: optional btn parameter — when threaded from the wired Export
+// button, route through copyWithPulse for 3-layer fallback + COPIED flash.
+async function maintDiagExport(btn) {
   try {
     const r = await chrome.storage.local.get(MAINT_DIAG_KEY);
     const log = r[MAINT_DIAG_KEY] || [];
@@ -5593,7 +5605,11 @@ async function maintDiagExport() {
       count: redacted.length,
       entries: redacted
     }, null, 2);
-    await navigator.clipboard.writeText(json);
+    if (btn && typeof copyWithPulse === 'function') {
+      copyWithPulse(btn, json);
+    } else {
+      await navigator.clipboard.writeText(json);
+    }
     __maintLog('diagExport', 'ok', { count: redacted.length });
     __maintSetStatus('maintDiagStatus', '✓ ' + redacted.length + ' entries copied to clipboard (redacted).', 'ok');
   } catch (e) {
@@ -6058,8 +6074,9 @@ async function maintRosterStaleness() {
               const ri = await popupRpc('adminIssueInvite', { username: m.mod_username });
               if (ri && ri.ok && ri.data && ri.data.code) {
                 const url = 'https://greatawakening.win/?mt_invite=' + encodeURIComponent(ri.data.code);
-                try { await navigator.clipboard.writeText(url); } catch (_) {}
-                btn.textContent = '✓ link copied';
+                // v10.14.1 CC1: route via copyWithPulse for 3-layer fallback + COPIED flash
+                btn.disabled = false;
+                copyWithPulse(btn, url);
               } else {
                 btn.textContent = 'failed';
               }
@@ -6197,7 +6214,7 @@ __maintWire('maintReset', maintResetDefaults, 'resetting...');
     + 'margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);'
     + 'clip-path:inset(50%);white-space:nowrap';
   toggle.setAttribute('role', 'switch');
-  toggle.addEventListener('focus', function () { track.style.outline = '2px solid #4A9EFF'; track.style.outlineOffset = '2px'; });
+  toggle.addEventListener('focus', function () { track.style.outline = '2px solid var(--bb-blue)'; track.style.outlineOffset = '2px'; });
   toggle.addEventListener('blur',  function () { track.style.outline = ''; track.style.outlineOffset = ''; });
 
   function applySafeModeVisual(on) {
@@ -6908,7 +6925,8 @@ async function __loadLeadKpi() {
         const r = await popupRpc('adminInviteCreate', { mod: target });
         const url = r && r.ok && r.data && (r.data.url || r.data.invite_url);
         if (url) {
-          try { await navigator.clipboard.writeText(url); } catch (_) {}
+          // v10.14.1 CC1: route via copyWithPulse for 3-layer fallback + COPIED flash
+          copyWithPulse(qaInvite, url);
           __showToast('Invite for ' + target + ' copied to clipboard', 'ok');
         } else {
           __showToast('Invite failed: ' + ((r && r.error) || 'unknown'), 'err');
@@ -7000,7 +7018,7 @@ async function __loadLapsedMods() {
       const pingBtn = document.createElement('button');
       pingBtn.textContent = 'Ping';
       pingBtn.className = 'pop-btn pop-btn-ghost';
-      pingBtn.style.cssText = 'font-size:9px;padding:1px 5px;min-height:0';
+      pingBtn.style.cssText = 'font-size:9px;padding:1px 5px';
       pingBtn.addEventListener('click', function() {
         __showToast('Open ModChat to ping u/' + (m.mod_username || '?'), 'ok');
       });

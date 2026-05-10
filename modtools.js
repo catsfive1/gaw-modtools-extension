@@ -392,9 +392,8 @@
     INK_DIM: '#9b9892',    // popup secondary (--bb-ink-dim)
     // === Brand / Signal ===
     AMBER:   '#ff9933',    // PRIMARY BRAND -- Bloomberg amber (--bb-amber). NEW in v10.10.1.
-    AMBER_WARM: '#f0a040', // warn-adjacent amber (--bb-amber-warm)
-    AMBER_COOL: '#E8A317', // halo/pulse amber (--bb-amber-cool)
-    WARN:    '#f0a040',    // canonical warn color (was C.WARN, alias of AMBER_WARM)
+    AMBER_COOL: '#E8A317', // halo/pulse amber (--bb-amber-cool). Wired in v10.14.1 TK3.
+    WARN:    '#f0a040',    // canonical warn color (--bb-amber-warm). Wired in v10.14.1 TK3.
     RED:     '#f04040',    // content-script red (was C.RED)
     RED_BRIGHT: '#ff3b3b', // popup red (--bb-red)
     GREEN:   '#3dd68c',    // content-script green (was C.GREEN)
@@ -415,8 +414,7 @@
     BLACK:   '#000000',
     TRANSPARENT: 'transparent',
     // === Alpha fills (pre-computed for cssText -- var() cannot be used in injected DOM) ===
-    AMBER_BG:  'rgba(255,153,51,0.10)',
-    AMBER_GLOW:'rgba(255,153,51,0.25)',
+    /* v10.14.1: AMBER_BG/AMBER_GLOW removed (zero callsites since W1 schema-only add) */
     RED_BG:    'rgba(255,59,59,0.10)',
     RED_GLOW:  'rgba(255,59,59,0.35)',
     GREEN_BG:  'rgba(68,221,102,0.10)',
@@ -6455,7 +6453,7 @@
         }
         const label = String(cad.cadence_label || '');
         const color = label === 'BURSTING' ? '#ff3b3b'
-                    : label === 'HEAVY'    ? '#ff9933'
+                    : label === 'HEAVY'    ? C.AMBER
                     : label === 'NEW'      ? '#a78bfa'
                     : '#9b9892';
         const cpd = (typeof cad.comments_per_day_avg === 'number') ? cad.comments_per_day_avg.toFixed(1) : '?';
@@ -7153,7 +7151,7 @@
     // v5.8.4 security fix (BUG-3): escape ${username}. GAW usernames are
     // typically alphanumeric + _ but defense-in-depth: a banned user with
     // a crafted synthesized username would otherwise XSS the mod's session.
-    wrap.innerHTML = `<span>\u{1F518} ${escapeHtml(username)} banned</span><button style="background:#E8A317;color:#3a2500;border:none;border-radius:3px;padding:4px 10px;cursor:pointer;font-weight:600">Undo</button>`;
+    wrap.innerHTML = `<span>\u{1F518} ${escapeHtml(username)} banned</span><button style="background:var(--bb-amber-cool);color:#3a2500;border:none;border-radius:3px;padding:4px 10px;cursor:pointer;font-weight:600">Undo</button>`;
     document.body.appendChild(wrap);
     let dismissed = false;
     const cleanup = ()=>{ if (!dismissed){ dismissed = true; wrap.remove(); }};
@@ -7235,28 +7233,37 @@
   // textarea + execCommand). On success: swaps button label to "COPIED" for
   // 1200ms and applies gam-copy-flash keyframe (green tint fade over 800ms).
   // Token/debug/AI copy buttons should route through this for consistent UX.
-  function copyWithPulse(btn, text) {
+  async function copyWithPulse(btn, text) {
     let copied = null;
     try { if (typeof copy === 'function') { copy(text); copied = 'devtools'; } } catch(_){}
     if (!copied) {
+      // v10.14.1 CC4: await the Promise so a rejected write (focus lost mid-call)
+      // falls through to Layer 3 instead of being silently swallowed.
       try {
         if (navigator.clipboard && document.hasFocus()) {
-          navigator.clipboard.writeText(text);
+          await navigator.clipboard.writeText(text);
           copied = 'clipboard-api';
         }
       } catch(_){}
     }
     if (!copied) {
+      // v10.14.1 CC3: textarea cleanup in finally so a thrown execCommand never
+      // leaks the off-screen textarea into the DOM.
+      let __ta = null;
       try {
-        const ta = document.createElement('textarea');
-        ta.value = String(text);
-        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
-        document.body.appendChild(ta);
-        ta.focus(); ta.select();
+        __ta = document.createElement('textarea');
+        __ta.value = String(text);
+        __ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+        document.body.appendChild(__ta);
+        __ta.focus(); __ta.select();
         const ok = document.execCommand('copy');
-        document.body.removeChild(ta);
         if (ok) copied = 'execCommand';
-      } catch(_){}
+      } catch(_){
+      } finally {
+        if (__ta && __ta.parentNode) {
+          try { __ta.parentNode.removeChild(__ta); } catch(_){}
+        }
+      }
     }
     // v10.13.5 P0-E (RALPH AUDIT COPY-CLIPBOARD F7): double-click within 1200ms
     // permanently corrupted the label. See popup.js:392-406 for the same fix --
@@ -7508,14 +7515,14 @@
         );
         stuck.forEach(b => { try { b.remove(); } catch(_){} });
         if (stuck.length) {
-          console.info('%c[modtools v9.3.16] preflight orphan sweep: removed ' + stuck.length + ' stale wrap(s) over live modal', 'color:#f0a040;font-weight:700');
+          console.info('%c[modtools v9.3.16] preflight orphan sweep: removed ' + stuck.length + ' stale wrap(s) over live modal', 'color:var(--bb-amber-warm);font-weight:700');
         }
         return;
       }
       backdrops.forEach(b => {
         try { b.remove(); } catch(_){}
       });
-      console.info('%c[modtools v9.3.1] orphan-backdrop sweep: removed ' + backdrops.length + ' stuck backdrop(s)', 'color:#f0a040;font-weight:700');
+      console.info('%c[modtools v9.3.1] orphan-backdrop sweep: removed ' + backdrops.length + ' stuck backdrop(s)', 'color:var(--bb-amber-warm);font-weight:700');
     } catch(_){}
   }
   // Kick the sweep on init + every 30s (visibility-gated).
@@ -7567,12 +7574,12 @@
       if (document.getElementById('gam-ext-orphaned-banner')) return;
       const b = document.createElement('div');
       b.id = 'gam-ext-orphaned-banner';
-      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999999;background:#2a1d10;border-bottom:1px solid #ff9933;color:#ffd84d;font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:8px 14px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 2px 8px rgba(0,0,0,0.6)';
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999999;background:#2a1d10;border-bottom:1px solid var(--bb-amber);color:#ffd84d;font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:8px 14px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 2px 8px rgba(0,0,0,0.6)';
       b.innerHTML =
         '<span style="font-size:14px">↻</span>' +
         '<span><b>ModTools updated.</b> The extension was reloaded — refresh this page to reconnect.</span>' +
         '<span style="flex:1"></span>' +
-        '<button id="gam-ext-orphaned-reload" style="background:#ff9933;border:none;color:#0a0a0b;padding:4px 12px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Reload page</button>' +
+        '<button id="gam-ext-orphaned-reload" style="background:var(--bb-amber);border:none;color:#0a0a0b;padding:4px 12px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Reload page</button>' +
         '<button id="gam-ext-orphaned-dismiss" style="background:transparent;border:1px solid #5a5752;color:#9b9892;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Dismiss</button>';
       document.body.appendChild(b);
       const reload = b.querySelector('#gam-ext-orphaned-reload');
@@ -7645,7 +7652,7 @@
     if (hasCountdown) {
       const bar = document.createElement('div');
       bar.className = 'gam-snack-countdown-bar';
-      bar.style.cssText = 'position:absolute;left:0;bottom:0;height:2px;background:#ff9933;width:100%;transition:width 100ms linear;border-radius:0 0 6px 6px';
+      bar.style.cssText = 'position:absolute;left:0;bottom:0;height:2px;background:var(--bb-amber);width:100%;transition:width 100ms linear;border-radius:0 0 6px 6px';
       s.appendChild(bar);
       // Make snack relatively-positioned so the bar absolute-positions inside it
       s.style.position = 'fixed'; // already fixed but ensure
@@ -7776,6 +7783,10 @@
     };
     document.addEventListener('keydown', escHandler, true);
     p._gamEscHandler = escHandler;
+    // v10.14.1 F1 (RALPH FOCUS-TRAPS R6): install focus trap on the modal so
+    // Tab/Shift-Tab cycle inside; covers Help/Settings/Mod Log/Bug-Report
+    // modals which previously leaked Tab into the page DOM.
+    try { if (typeof installFocusTrap === 'function') installFocusTrap(p); } catch(e){}
     return p;
   }
   function strip(html){
@@ -8481,7 +8492,7 @@
           if (d.author) {
             const openConsole = document.createElement('button');
             openConsole.className = 'gam-btn';
-            openConsole.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:2px 8px;cursor:pointer;font:600 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;text-transform:uppercase';
+            openConsole.style.cssText = 'background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:2px 8px;cursor:pointer;font:600 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;text-transform:uppercase';
             openConsole.textContent = '\u{1F6E1} Open console';
             openConsole.addEventListener('click', function(ev){
               ev.stopPropagation();
@@ -9310,7 +9321,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           const replies = ar.data.replies;
           pv.innerHTML = '';
           const head = document.createElement('div');
-          head.style.cssText = 'color:#ff9933;letter-spacing:.08em;text-transform:uppercase;font-size:10px;font-weight:600';
+          head.style.cssText = 'color:var(--bb-amber);letter-spacing:.08em;text-transform:uppercase;font-size:10px;font-weight:600';
           head.textContent = '✨ AI drafted ' + replies.length + ' candidate replies for u/' + targetUser;
           pv.appendChild(head);
           const cards = document.createElement('div');
@@ -9326,7 +9337,7 @@ Analyze this comment against the community rules. Then write a brief, profession
             body.textContent = rp.body;
             const useBtn = document.createElement('button');
             useBtn.textContent = 'Use this';
-            useBtn.style.cssText = 'margin-top:4px;background:transparent;border:1px solid #ff9933;color:#ff9933;padding:3px 8px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase';
+            useBtn.style.cssText = 'margin-top:4px;background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:3px 8px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase';
             useBtn.addEventListener('click', () => {
               if (msgIn) msgIn.value = (evidenceLink ? urlPrefix : '') + rp.body;
               // v9.23.0 - stash chosen tone for ai_used tracking on send (UAT-3)
@@ -10297,7 +10308,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           }
           pv.innerHTML = '';
           const head = document.createElement('div');
-          head.style.cssText = 'color:#ff9933;letter-spacing:.08em;text-transform:uppercase;font-size:10px;font-weight:600';
+          head.style.cssText = 'color:var(--bb-amber);letter-spacing:.08em;text-transform:uppercase;font-size:10px;font-weight:600';
           head.textContent = '✨ ' + ar.data.replies.length + ' AI reply candidates for u/' + username;
           pv.appendChild(head);
           const cards = document.createElement('div');
@@ -10313,7 +10324,7 @@ Analyze this comment against the community rules. Then write a brief, profession
             bodyEl.textContent = rp.body;
             const useBtn = document.createElement('button');
             useBtn.textContent = 'Use this';
-            useBtn.style.cssText = 'margin-top:4px;background:transparent;border:1px solid #ff9933;color:#ff9933;padding:3px 8px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase';
+            useBtn.style.cssText = 'margin-top:4px;background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:3px 8px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase';
             useBtn.addEventListener('click', () => {
               if (body) body.value = rp.body;
               // ASK-038: stash tone so modmailTrackResponse gets ai_used+ai_tone on send
@@ -11213,8 +11224,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     } else {
       hnSusRows.forEach(function(srow) {
         const hnCnt = srow.comment_count_24h || 0;
-        const hnGutter = hnCnt > 15 ? '#f04040' : hnCnt > 8 ? '#ff9933' : '#a78bfa';
-        const hnCntColor = hnCnt > 8 ? '#f04040' : '#ff9933';
+        const hnGutter = hnCnt > 15 ? '#f04040' : hnCnt > 8 ? C.AMBER : '#a78bfa';
+        const hnCntColor = hnCnt > 8 ? '#f04040' : C.AMBER;
         const hnR = el('div', { cls: 'gam-hn-row', style: 'border-left-color:' + hnGutter });
         const hnOpenBtn = el('button', { cls: 'gam-hn-act' }, 'Open');
         hnOpenBtn.addEventListener('click', function() {
@@ -12250,7 +12261,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       a.setAttribute('data-gam-sus-decorated', '1');
       const isHot = (row.comment_count_24h || 0) > 8;
-      a.style.color = isHot ? '#f04040' : '#f0a040';
+      a.style.color = isHot ? '#f04040' : C.WARN;
       a.style.fontWeight = isHot ? '700' : '600';
       const reason = row.reason || '(no reason)';
       const extra = isHot ? ' — ' + row.comment_count_24h + '/24h ⚠️' : '';
@@ -13314,7 +13325,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       a.setAttribute('data-gam-sus-decorated', '1');
       var isHot = (row.comment_count_24h || 0) > 8;
-      a.style.color = isHot ? '#f04040' : '#f0a040';
+      a.style.color = isHot ? '#f04040' : C.WARN;
       a.style.fontWeight = isHot ? '700' : '600';
       var reason = row.reason || '(no reason)';
       var extra = isHot ? ' — ' + row.comment_count_24h + '/24h ⚠️' : '';
@@ -13863,7 +13874,7 @@ Analyze this comment against the community rules. Then write a brief, profession
             head.appendChild(dot);
           }
           if (state === 'fetch'){
-            dot.innerHTML = '<span style="color:#f0a040">●</span> fetching…';
+            dot.innerHTML = '<span style="color:var(--bb-amber-warm)">●</span> fetching…';
           } else if (state === 'idle' || state == null){
             dot.innerHTML = '<span style="color:#3dd68c">●</span> live (60s)';
           } else if (state === 'paused'){
@@ -15974,9 +15985,9 @@ Analyze this comment against the community rules. Then write a brief, profession
       const wrap = document.createElement('div');
       wrap.style.cssText = 'position:fixed;inset:0;z-index:99999996;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;font:12px/1.4 ui-monospace,JetBrains Mono,monospace';
       const box = document.createElement('div');
-      box.style.cssText = 'background:#131316;border:1px solid #ff9933;color:#e8e6e1;padding:14px 16px;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px';
+      box.style.cssText = 'background:#131316;border:1px solid var(--bb-amber);color:#e8e6e1;padding:14px 16px;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px';
       box.innerHTML =
-        '<div style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:11px">' + escapeHtml(o.title || 'New macro') + '</div>' +
+        '<div style="color:var(--bb-amber);font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:11px">' + escapeHtml(o.title || 'New macro') + '</div>' +
         '<div style="color:#9b9892;font-size:10.5px">' + escapeHtml(o.subtitle || 'Synced to all mods. Label appears in the dropdown; body becomes the message.') + '</div>' +
         '<label style="font-size:10px;color:#9b9892;text-transform:uppercase;letter-spacing:0.06em">Label (max 80 chars)</label>' +
         '<input id="_gam_macro_label" type="text" maxlength="80" style="background:#050507;border:1px solid #3d3a35;color:#e8e6e1;padding:6px 8px;font:12px ui-monospace,monospace;letter-spacing:0.02em" value="' + escapeHtml(o.defaultLabel || '') + '">' +
@@ -15985,7 +15996,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         '<div id="_gam_macro_err" style="color:#ff3b3b;font-size:10.5px;display:none"></div>' +
         '<div style="display:flex;gap:8px;margin-top:4px">' +
           '<button id="_gam_macro_cancel" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;flex:0 0 auto">Cancel (Esc)</button>' +
-          '<button id="_gam_macro_save" style="background:#ff9933;border:1px solid #ff9933;color:#0a0a0b;padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;flex:1">Save & sync to team</button>' +
+          '<button id="_gam_macro_save" style="background:var(--bb-amber);border:1px solid var(--bb-amber);color:#0a0a0b;padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;flex:1">Save & sync to team</button>' +
         '</div>';
       wrap.appendChild(box);
       document.body.appendChild(wrap);
@@ -16104,7 +16115,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         const clearAllBtn = document.createElement('div');
         clearAllBtn.className = 'gam-ctx-item';
         clearAllBtn.textContent = '🧹 Clear ENTIRE chat (lead only)';
-        clearAllBtn.style.cssText = 'padding:6px 12px;cursor:pointer;color:#ff9933;font-weight:600;letter-spacing:0.04em';
+        clearAllBtn.style.cssText = 'padding:6px 12px;cursor:pointer;color:var(--bb-amber);font-weight:600;letter-spacing:0.04em';
         clearAllBtn.addEventListener('click', async () => {
           menu.remove();
           // v10.13.2 W5 (UIUX2-32): single confirm. Two-step ceremony was friction
@@ -16353,7 +16364,7 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-mc-at-item{padding:5px 10px;cursor:pointer;color:${C.TEXT}}
 .gam-mc-at-item.gam-mc-at-active,.gam-mc-at-item:hover{background:rgba(74,158,255,.18);color:${C.ACCENT}}
 .gam-mc-head{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid ${C.BORDER};background:${C.BG2};min-height:44px;box-sizing:border-box}
-.gam-mc-title{font-weight:700;font-size:14px;color:${C.ACCENT};letter-spacing:.2px}
+.gam-mc-title{font-weight:700;font-size:14px;color:${C.AMBER};letter-spacing:.2px}
 .gam-mc-close{background:none;border:none;color:${C.TEXT3};font-size:20px;cursor:pointer;padding:2px 8px;line-height:1;border-radius:4px;transition:color .1s,background .1s}
 .gam-mc-close:hover{color:${C.TEXT};background:rgba(255,255,255,.06)}
 .gam-mc-body{flex:1;display:flex;overflow:hidden;min-height:0}
@@ -16921,8 +16932,8 @@ Analyze this comment against the community rules. Then write a brief, profession
         // anchored (no fight with the global snack queue).
         try { if (__dockUndoToast) __dockUndoToast.remove(); clearTimeout(__dockUndoTimer); } catch(_){}
         __dockUndoToast = document.createElement('div');
-        __dockUndoToast.style.cssText = 'position:absolute;top:4px;right:4px;z-index:5;background:#1a0f00;border:1px solid #ff9933;color:#ff9933;padding:4px 10px;font:600 10px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;display:flex;gap:8px;align-items:center';
-        __dockUndoToast.innerHTML = '<span>Dock &rarr; ' + (next === 'left' ? 'LEFT' : 'RIGHT') + '</span><button type="button" style="background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 6px;font:600 9px ui-monospace,JetBrains Mono,monospace;cursor:pointer;letter-spacing:0.06em">UNDO</button>';
+        __dockUndoToast.style.cssText = 'position:absolute;top:4px;right:4px;z-index:5;background:#1a0f00;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:4px 10px;font:600 10px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;display:flex;gap:8px;align-items:center';
+        __dockUndoToast.innerHTML = '<span>Dock &rarr; ' + (next === 'left' ? 'LEFT' : 'RIGHT') + '</span><button type="button" style="background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:1px 6px;font:600 9px ui-monospace,JetBrains Mono,monospace;cursor:pointer;letter-spacing:0.06em">UNDO</button>';
         const undoBtn = __dockUndoToast.querySelector('button');
         if (undoBtn) undoBtn.addEventListener('click', () => {
           panel.setAttribute('data-dock', cur);
@@ -17289,6 +17300,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (existing) { existing.remove(); return; }
     const panel = document.createElement('div');
     panel.id = 'gam-modmail-panel';
+    // v10.14.1 PRM4: class enables PRM-gated transition; inline keeps geometry.
+    panel.className = 'gam-mm-slide-panel';
     // V11 #3: 3-column modmail panel
     const mmIs3Col = window.innerWidth >= 1400; // v10.6.2 HOTFIX UIUX-04 B.6: raised from 1280 to 1400 — 1366px laptops now get 2-col (680px) instead of 3-col (920px) which curtained the feed
     panel.style.cssText =
@@ -17299,11 +17312,11 @@ Analyze this comment against the community rules. Then write a brief, profession
       'color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;' +
       'display:flex;flex-direction:column;' +
       'box-shadow:-8px 0 30px rgba(0,0,0,0.55);' +
-      'transform:translateX(100%);transition:transform 0.2s ease-out';
+      'transform:translateX(100%)';
     panel.innerHTML =
       // HEADER -- unchanged
       '<div style="background:#0a0a0b;border-bottom:1px solid #3d3a35;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0">' +
-        '<span style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:12px">\u{1F4E5} Modmail</span>' +
+        '<span style="color:var(--bb-amber);font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:12px">\u{1F4E5} Modmail</span>' +
         '<span style="color:#5a5752;font-size:10px">— full panel</span>' +
         '<span style="flex:1"></span>' +
         '<button data-refresh="1" title="Refresh" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:3px 8px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Refresh</button>' +
@@ -17356,7 +17369,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       // v9.24.0 (Commander 2026-05-08): refresh = ALSO run the firehose
       // backfill so the inbox is always fresh, not stale-D1.
       if (forceFirehose) {
-        list.innerHTML = '<div style="padding:14px;color:#ff9933;font-size:10px">⏳ Running firehose backfill from /modmail (≈5s)…</div>';
+        list.innerHTML = '<div style="padding:14px;color:var(--bb-amber);font-size:10px">⏳ Running firehose backfill from /modmail (≈5s)…</div>';
         try {
           if (typeof window.__GAM_BACKFILL_MODMAIL === 'function') {
             await window.__GAM_BACKFILL_MODMAIL({ maxPages: 5 });
@@ -17375,7 +17388,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       // v9.24.0 - auto-firehose on empty (Commander 2026-05-08): if 0 threads
       // on initial open, automatically run the crawl to populate D1.
       if (currentThreads.length === 0 && !forceFirehose) {
-        list.innerHTML = '<div style="padding:14px;color:#ff9933;font-size:10px">⏳ No threads cached — auto-firing firehose from /modmail (≈5s)…</div>';
+        list.innerHTML = '<div style="padding:14px;color:var(--bb-amber);font-size:10px">⏳ No threads cached — auto-firing firehose from /modmail (≈5s)…</div>';
         try {
           if (typeof window.__GAM_BACKFILL_MODMAIL === 'function') {
             await window.__GAM_BACKFILL_MODMAIL({ maxPages: 5 });
@@ -17399,7 +17412,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           list.querySelectorAll('[data-thread-id]').forEach(r => { r.dataset.selected = ''; r.style.background = ''; r.style.borderLeft = ''; r.style.paddingLeft = ''; });
           row.dataset.selected = '1';
           row.style.background = 'rgba(255,153,51,0.10)';
-          row.style.borderLeft = '3px solid #ff9933';
+          row.style.borderLeft = '3px solid var(--bb-amber)';
           row.style.paddingLeft = '9px';
           renderDetail(t);
         });
@@ -17427,16 +17440,16 @@ Analyze this comment against the community rules. Then write a brief, profession
     async function renderDetail(t) {
       detail.innerHTML =
         '<div style="margin-bottom:14px">' +
-          '<div style="color:#ff9933;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px">Thread</div>' +
+          '<div style="color:var(--bb-amber);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px">Thread</div>' +
           '<div style="color:#e8e6e1;font-size:13px;font-weight:600;margin-bottom:6px">' + escapeHtml(t.subject || '(no subject)') + '</div>' +
           '<div style="color:#9b9892;font-size:11px">From: <span style="color:#66ccff">u/' + escapeHtml(t.first_user) + '</span> · ' + (t.message_count || 1) + ' messages · status: ' + escapeHtml(t.status || 'new') + '</div>' +
         '</div>' +
         '<div style="margin-bottom:14px">' +
-          '<div style="color:#ff9933;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px">Most recent message</div>' +
+          '<div style="color:var(--bb-amber);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px">Most recent message</div>' +
           '<div style="background:#0a0a0b;border:1px solid #2a2825;padding:10px;color:#e8e6e1;font-size:11px;line-height:1.5;white-space:pre-wrap">' + escapeHtml(t.last_body || '(empty)') + '</div>' +
         '</div>' +
         '<div style="display:flex;gap:8px;margin-top:12px">' +
-          '<button data-open="' + escapeHtml(t.thread_id) + '" style="background:transparent;border:1px solid #ff9933;color:#ff9933;padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Open thread on GAW</button>' +
+          '<button data-open="' + escapeHtml(t.thread_id) + '" style="background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Open thread on GAW</button>' +
         '</div>';
 
       // V11 #3: populate intel strip
@@ -17485,7 +17498,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           } catch (_) {}
         }
       } else {
-        aiHost.innerHTML = '<div style="margin-bottom:6px"><button data-ai-fire="1" style="background:transparent;border:1px solid #ff9933;color:#ff9933;padding:5px 12px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">✨ Generate 4 AI replies</button></div>';
+        aiHost.innerHTML = '<div style="margin-bottom:6px"><button data-ai-fire="1" style="background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:5px 12px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">✨ Generate 4 AI replies</button></div>';
         aiHost.querySelector('[data-ai-fire]').addEventListener('click', async (e) => {
           e.stopPropagation();
           // v10.13.4 W4 (P0-22 / R-14): 4-ghost shimmer grid replaces plain
@@ -17518,7 +17531,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     function renderAICards(host, replies, t, fresh) {
-      const head = '<div style="color:#ff9933;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:6px">' +
+      const head = '<div style="color:var(--bb-amber);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:6px">' +
         (fresh ? '✨ Generated' : '✓ Pre-fetched') + ' AI reply candidates</div>';
       const cards = replies.map(rp => {
         const c = tonecolor(rp.tone); // v10.8.0 M6: use centralized palette
@@ -17624,13 +17637,13 @@ Analyze this comment against the community rules. Then write a brief, profession
     pop.style.bottom = (window.innerHeight - r.top + 6) + 'px';
     pop.innerHTML =
       '<div style="background:#0a0a0b;border-bottom:1px solid #2a2825;padding:8px 12px;display:flex;align-items:center;gap:8px;flex-shrink:0">' +
-        '<span style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:11px">\u{1F4E5} Modmail</span>' +
+        '<span style="color:var(--bb-amber);font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:11px">\u{1F4E5} Modmail</span>' +
         '<span style="color:#5a5752;font-size:10px">(separate from team chat)</span>' +
         '<span style="flex:1"></span>' +
         // v9.24.0 (Commander 2026-05-08): REFRESH button. Forces re-run of
         // /modmail/recent + auto-fires the firehose crawl so the inbox is
         // never stuck on stale cached data.
-        '<button data-refresh="1" title="Refresh + run firehose backfill" style="background:transparent;border:1px solid #ff9933;color:#ff9933;padding:2px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">↻ REFRESH</button>' +
+        '<button data-refresh="1" title="Refresh + run firehose backfill" style="background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:2px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">↻ REFRESH</button>' +
         '<button data-expand="1" title="Expand to full panel" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:2px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">↗ EXPAND</button>' +
         '<button data-close="1" style="background:transparent;border:none;color:#5a5752;padding:2px 6px;cursor:pointer;font-size:16px;line-height:1">×</button>' +
       '</div>' +
@@ -17691,7 +17704,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     async function _loadModmailList(forceFirehose){
       try {
         if (forceFirehose) {
-          body.innerHTML = '<div style="padding:12px;color:#ff9933">⏳ Running firehose backfill from /modmail (≈3 pages, ~5s)…</div>';
+          body.innerHTML = '<div style="padding:12px;color:var(--bb-amber)">⏳ Running firehose backfill from /modmail (≈3 pages, ~5s)…</div>';
           try {
             if (typeof window.__GAM_BACKFILL_MODMAIL === 'function') {
               await window.__GAM_BACKFILL_MODMAIL({ maxPages: 3 });
@@ -17714,7 +17727,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       // crawl-modmail-history backfill and re-render. Mods don't need
       // to manually visit /modmail anymore.
       if (threads.length === 0 && !forceFirehose) {
-        body.innerHTML = '<div style="padding:12px;color:#ff9933">⏳ No threads cached yet — auto-firing firehose from /modmail (≈5s)…</div>';
+        body.innerHTML = '<div style="padding:12px;color:var(--bb-amber)">⏳ No threads cached yet — auto-firing firehose from /modmail (≈5s)…</div>';
         try {
           if (typeof window.__GAM_BACKFILL_MODMAIL === 'function') {
             await window.__GAM_BACKFILL_MODMAIL({ maxPages: 3 });
@@ -17756,7 +17769,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         actions.style.cssText = 'display:flex;gap:6px;margin-top:4px';
         const aiBtn = document.createElement('button');
         aiBtn.textContent = '✨ AI reply candidates';
-        aiBtn.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:3px 8px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase';
+        aiBtn.style.cssText = 'background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:3px 8px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase';
         const openBtn = document.createElement('button');
         openBtn.textContent = 'Open thread';
         openBtn.style.cssText = 'background:transparent;border:1px solid #2a2825;color:#9b9892;padding:3px 8px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase';
@@ -17892,6 +17905,10 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (existing) { existing.remove(); return; }
     const pop = document.createElement('div');
     pop.id = 'gam-active-mods-popover';
+    // v10.14.1 F2 (RALPH FOCUS-TRAPS R7): aria for screen-reader popover semantics
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-modal', 'true');
+    pop.setAttribute('aria-label', 'Active mods');
     pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:320px;max-width:420px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
     const r = anchor.getBoundingClientRect();
     pop.style.left = Math.max(8, Math.min(window.innerWidth - 420, r.left)) + 'px';
@@ -17906,7 +17923,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         '#gam-active-mods-popover .gam-am-seg{display:inline-flex;border:1px solid #2a2825;border-radius:3px;overflow:hidden}',
         '#gam-active-mods-popover .gam-am-seg button{background:transparent;border:none;border-right:1px solid #2a2825;color:#9b9892;padding:2px 8px;cursor:pointer;font:600 10px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.04em}',
         '#gam-active-mods-popover .gam-am-seg button:last-child{border-right:none}',
-        '#gam-active-mods-popover .gam-am-seg button[aria-pressed="true"]{background:rgba(255,153,51,0.14);color:#ff9933}',
+        '#gam-active-mods-popover .gam-am-seg button[aria-pressed="true"]{background:rgba(255,153,51,0.14);color:var(--bb-amber)}',
         '#gam-active-mods-popover .gam-am-divider{display:flex;align-items:center;gap:8px;padding:4px 10px 2px;color:#5a5752;font:600 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.1em;text-transform:uppercase}',
         '#gam-active-mods-popover .gam-am-divider::before,#gam-active-mods-popover .gam-am-divider::after{content:"";flex:1;height:1px;background:#2a2825}',
         '#gam-active-mods-popover .gam-am-row{display:flex;align-items:center;gap:8px;padding:3px 10px;border-bottom:1px solid #1e1c1a}',
@@ -17924,7 +17941,7 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     pop.innerHTML =
       '<div style="background:#0a0a0b;border-bottom:1px solid #2a2825;padding:6px 10px;display:flex;align-items:center;gap:8px">' +
-        '<span id="gam-am-title" style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:10px">Active mods</span>' +
+        '<span id="gam-am-title" style="color:var(--bb-amber);font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:10px">Active mods</span>' +
         '<span style="flex:1"></span>' +
         '<div class="gam-am-seg" role="group" aria-label="Time window">' +
           '<button data-w="4"  aria-pressed="false">4H</button>' +
@@ -18077,6 +18094,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     var pop = document.createElement('div');
     pop.id = POP_ID;
+    // v10.14.1 F2 (RALPH FOCUS-TRAPS R7): aria semantics
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-modal', 'true');
+    pop.setAttribute('aria-label', 'Auto unsticky activity');
     pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:520px;max-width:640px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
     var r = anchor.getBoundingClientRect();
     pop.style.left = Math.max(8, Math.min(window.innerWidth - 640, r.left)) + 'px';
@@ -18195,6 +18216,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     const pop = document.createElement('div');
     pop.id = POP_ID;
+    // v10.14.1 F2 (RALPH FOCUS-TRAPS R7): aria semantics
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-modal', 'true');
+    pop.setAttribute('aria-label', 'SUS users');
     pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:380px;max-width:500px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
     const r = anchor.getBoundingClientRect();
     pop.style.left = Math.max(8, Math.min(window.innerWidth - 500, r.left)) + 'px';
@@ -18222,14 +18247,14 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-sus-drill{max-height:0;overflow:hidden;transition:max-height 160ms cubic-bezier(0.4,0,0.2,1),opacity 120ms ease;opacity:0}',
         '.gam-sus-drill.open{max-height:300px;opacity:1;overflow-y:auto}',
         '.gam-sus-chevron{transition:transform 160ms cubic-bezier(0.4,0,0.2,1);display:inline-block;color:#5a5752;font-size:9px;user-select:none;cursor:pointer;padding:0 4px}',
-        '.gam-sus-row.expanded .gam-sus-chevron{transform:rotate(90deg);color:#ff9933}',
+        '.gam-sus-row.expanded .gam-sus-chevron{transform:rotate(90deg);color:var(--bb-amber)}',
         '.gam-sus-dr-btn{background:transparent;border:1px solid #ffd84d;color:#ffd84d;padding:1px 6px;cursor:pointer;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;transition:background 80ms,color 80ms;white-space:nowrap}',
         '.gam-sus-dr-btn:hover{background:rgba(255,216,77,0.15)}',
         '.gam-sus-dr-btn.fired{border-color:#3dd68c;color:#3dd68c;cursor:default}',
         '.gam-sus-tard-divider{display:flex;align-items:center;gap:8px;padding:6px 10px 4px;color:#a855f7;font:600 9px ui-monospace,monospace;letter-spacing:0.1em;text-transform:uppercase}',
         '.gam-sus-tard-divider::before,.gam-sus-tard-divider::after{content:"";flex:1;height:1px;background:rgba(168,85,247,0.25)}',
         '.gam-sus-tard-row{border-left:2px solid rgba(168,85,247,0.4);padding-left:6px}',
-        '.gam-sus-drill-inner{background:#0a0a0b;border:1px solid #2a2825;border-left:2px solid #ff9933;margin:4px 0 6px 16px;padding:6px 8px;font-size:10px}',
+        '.gam-sus-drill-inner{background:#0a0a0b;border:1px solid #2a2825;border-left:2px solid var(--bb-amber);margin:4px 0 6px 16px;padding:6px 8px;font-size:10px}',
         '.gam-sus-drill-section-hdr{color:#5a5752;font-size:9px;letter-spacing:0.08em;text-transform:uppercase;margin:4px 0 2px}',
         '.gam-sus-drill-post{color:#9b9892;font-size:9px;padding:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.gam-sus-note-input{width:100%;box-sizing:border-box;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:10px ui-monospace,monospace;padding:4px 6px;resize:vertical;min-height:40px;margin-top:4px}',
@@ -18283,13 +18308,13 @@ Analyze this comment against the community rules. Then write a brief, profession
         html += '<div class="gam-sus-drill-actions">' +
           '<button class="gam-sus-dr-btn" data-delay="72" style="border-color:#ffd84d;color:#ffd84d">DR 72h</button>' +
           '<button class="gam-sus-dr-btn" data-delay="24" style="border-color:#ffd84d;color:#ffd84d">DR 24h</button>' +
-          '<button class="gam-sus-unmark-btn" style="background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 5px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase">Unmark</button>' +
+          '<button class="gam-sus-unmark-btn" style="background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:1px 5px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase">Unmark</button>' +
           '<button class="gam-sus-ban-btn" style="background:transparent;border:1px solid #ff3b3b;color:#ff3b3b;padding:1px 5px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase">Ban</button>' +
           '<button class="gam-sus-note-toggle" style="background:transparent;border:1px solid #9b9892;color:#9b9892;padding:1px 5px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase">Note ↓</button>' +
         '</div>' +
         '<div class="gam-sus-note-area" style="display:none">' +
           '<textarea class="gam-sus-note-input" placeholder="Add mod note…"></textarea>' +
-          '<button class="gam-sus-note-save" style="background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;margin-top:3px">Save note</button>' +
+          '<button class="gam-sus-note-save" style="background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:1px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;margin-top:3px">Save note</button>' +
         '</div>';
         inner.innerHTML = html;
 
@@ -18480,7 +18505,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       unmarkStripBtn.className = 'gam-sus-unmark-strip-btn';
       unmarkStripBtn.textContent = 'Unmark';
       unmarkStripBtn.title = 'Clear SUS flag on ' + username;
-      unmarkStripBtn.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 5px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;white-space:nowrap';
+      unmarkStripBtn.style.cssText = 'background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:1px 5px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;white-space:nowrap';
       unmarkStripBtn.addEventListener('click', async function(ev) {
         ev.stopPropagation();
         unmarkStripBtn.disabled = true; unmarkStripBtn.textContent = '...';
@@ -18727,42 +18752,14 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     document.body.appendChild(pop);
 
-    // v10.13.1 W3: focus trap — Tab/Shift-Tab cycles within popover; ESC dismisses;
-    // restore focus to trigger element on dismiss. Was missing entirely; keyboard
-    // users could escape the popover into background DOM mid-interaction.
-    const _prevFocus = document.activeElement;
-    function _getFocusable() {
-      return Array.from(pop.querySelectorAll(
-        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      )).filter(function(el) { return el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement; });
-    }
-    pop._trapHandler = function(ev) {
-      if (ev.key !== 'Tab') return;
-      const focusable = _getFocusable();
-      if (focusable.length === 0) { ev.preventDefault(); return; }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (ev.shiftKey) {
-        if (document.activeElement === first || !pop.contains(document.activeElement)) {
-          ev.preventDefault(); last.focus();
-        }
-      } else {
-        if (document.activeElement === last) { ev.preventDefault(); first.focus(); }
-      }
-    };
-    pop.addEventListener('keydown', pop._trapHandler);
-    // Initial focus on close button (first focusable, predictable starting point)
-    setTimeout(function() { try { closeBtn.focus(); } catch(_){} }, 0);
-
     // Close handlers
     closeBtn.addEventListener('click', function() { _closePop(); });
 
     function _closePop() {
       pop.remove();
       document.removeEventListener('click', _outsideClick, true);
-      document.removeEventListener('keydown', pop._escHandler);
-      // Restore focus to trigger (anchor) on dismiss
-      try { if (_prevFocus && _prevFocus.focus) _prevFocus.focus(); else if (anchor && anchor.focus) anchor.focus(); } catch(_){}
+      // _installPopoverTrap-installed cleanup runs automatically via pop._gamPopTrapCleanup
+      try { if (typeof pop._gamPopTrapCleanup === 'function') pop._gamPopTrapCleanup(); } catch(_){}
     }
     setTimeout(function() {
       _outsideClick = function(ev) {
@@ -18771,8 +18768,11 @@ Analyze this comment against the community rules. Then write a brief, profession
       document.addEventListener('click', _outsideClick, true);
     }, 0);
     var _outsideClick;
-    pop._escHandler = function(ev) { if (ev.key === 'Escape') { _closePop(); } };
-    document.addEventListener('keydown', pop._escHandler);
+    // v10.14.1 F8 (RALPH FOCUS-TRAPS R3): unified focus trap helper. Was an
+    // inline copy of the W3 implementation pre-v10.13.5; now consumes the
+    // shared _installPopoverTrap (same behavior: Tab cycle + ESC dismiss +
+    // focus restore on close). Eliminates the last duplicate trap impl.
+    _installPopoverTrap(pop, _closePop);
   }
 
   // v10.8.0 M5 (UIUX-04 B.4): Draft auto-save indicator — tiny "Saved" pill fade-in/out
@@ -18844,6 +18844,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     const pop = document.createElement('div');
     pop.id = POP_ID;
+    // v10.14.1 F2 (RALPH FOCUS-TRAPS R7): aria semantics
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-modal', 'true');
+    pop.setAttribute('aria-label', 'Death Row queue');
     pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:380px;max-width:500px;padding:0;box-shadow:0 8px 32px rgba(0,0,0,0.85)';
     const r = anchor.getBoundingClientRect();
     pop.style.left = Math.max(8, Math.min(window.innerWidth - 500, r.left)) + 'px';
@@ -18884,7 +18888,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-dr-btn-fire{background:transparent;border:1px solid #ff3b3b;color:#ff3b3b;padding:1px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.05em;text-transform:uppercase;transition:background 80ms,color 80ms,border-color 80ms;white-space:nowrap}',
         '.gam-dr-btn-fire:hover{background:rgba(255,59,59,0.12)}',
         '.gam-dr-btn-fire.confirming{border-color:#ff6b35;color:#ff6b35}',
-        '.gam-dr-btn-cancel{background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.05em;text-transform:uppercase;transition:background 80ms;white-space:nowrap}',
+        '.gam-dr-btn-cancel{background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:1px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.05em;text-transform:uppercase;transition:background 80ms;white-space:nowrap}',
         '.gam-dr-btn-cancel:hover{background:rgba(255,153,51,0.12)}',
         '@keyframes gam-dr-row-out{0%{opacity:1;max-height:80px;padding-top:5px;padding-bottom:5px}100%{opacity:0;max-height:0;padding-top:0;padding-bottom:0}}',
         '.gam-dr-row.removing{animation:gam-dr-row-out 220ms ease-in forwards;overflow:hidden;pointer-events:none}',
@@ -18933,7 +18937,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     sortLabel.textContent = 'FIRES FIRST';
     const cancelAllBtn = document.createElement('button');
     // v10.13.1 W3 (W1 deferred): 8px -> 9px (off-grid snap to type-scale charter).
-    cancelAllBtn.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;margin-left:auto;transition:background 80ms';
+    cancelAllBtn.style.cssText = 'background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:1px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;margin-left:auto;transition:background 80ms';
     cancelAllBtn.textContent = 'Cancel All';
     sortBar.appendChild(sortLabel); sortBar.appendChild(cancelAllBtn);
     pop.appendChild(sortBar);
@@ -19150,8 +19154,8 @@ Analyze this comment against the community rules. Then write a brief, profession
         cancelAllBtn.textContent = 'Confirm ▶ 3s';
         _cancelAllConfirmTimer = setTimeout(function() {
           cancelAllBtn.classList.remove('confirming');
-          cancelAllBtn.style.borderColor = '#ff9933';
-          cancelAllBtn.style.color = '#ff9933';
+          cancelAllBtn.style.borderColor = C.AMBER;
+          cancelAllBtn.style.color = C.AMBER;
           cancelAllBtn.style.animation = '';
           cancelAllBtn.textContent = 'Cancel All';
         }, 3000);
@@ -19160,8 +19164,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       // Stage 2: confirmed — proceed
       clearTimeout(_cancelAllConfirmTimer);
       cancelAllBtn.classList.remove('confirming');
-      cancelAllBtn.style.borderColor = '#ff9933';
-      cancelAllBtn.style.color = '#ff9933';
+      cancelAllBtn.style.borderColor = C.AMBER;
+      cancelAllBtn.style.color = C.AMBER;
       cancelAllBtn.style.animation = '';
       cancelAllBtn.textContent = 'Cancel All';
 
@@ -19273,6 +19277,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     const pop = document.createElement('div');
     pop.id = POP_ID;
+    // v10.14.1 F2 (RALPH FOCUS-TRAPS R7): aria semantics
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-modal', 'true');
+    pop.setAttribute('aria-label', 'Mod queue');
     pop.style.cssText = 'position:fixed;z-index:99999996;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:11px/1.4 ui-monospace,JetBrains Mono,monospace;min-width:380px;max-width:480px;padding:0;box-shadow:0 8px 24px rgba(0,0,0,0.7)';
     const r = anchor.getBoundingClientRect();
     pop.style.left = Math.max(8, Math.min(window.innerWidth - 480, r.left)) + 'px';
@@ -19295,7 +19303,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         // were stealing horizontal space from the title; row would visually wrap.
         '.gam-queue-author{color:#66ccff;cursor:pointer;text-decoration:none;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}',
         '.gam-queue-author:hover{text-decoration:underline}',
-        '.gam-queue-rpt{color:#ff9933}',
+        '.gam-queue-rpt{color:var(--bb-amber)}',
         '.gam-queue-actions{margin-left:auto;display:flex;gap:4px}',
         // v10.13.1 W3 (W1 deferred): 8px -> 9px (off-grid snap to type-scale charter).
         '.gam-queue-btn{background:transparent;border:1px solid currentColor;padding:1px 5px;cursor:pointer;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;transition:background 80ms;line-height:1.6}',
@@ -19529,7 +19537,7 @@ Analyze this comment against the community rules. Then write a brief, profession
             gapLink.href = '/mod/queue';
             gapLink.target = '_blank';
             gapLink.rel = 'noopener';
-            gapLink.style.cssText = 'color:#ff9933;text-decoration:none;border:1px solid #ff9933;padding:2px 10px;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
+            gapLink.style.cssText = 'color:var(--bb-amber);text-decoration:none;border:1px solid var(--bb-amber);padding:2px 10px;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
             gapLink.textContent = 'Open /mod/queue →';
             gapBtnRow.appendChild(gapLink);
             const gapRetryBtn = document.createElement('button');
@@ -19628,13 +19636,18 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-sh2-pill{display:flex;align-items:center;justify-content:center;gap:4px;padding:2px 7px;border-radius:3px;border:1px solid #2a2f38;font-size:9px;letter-spacing:0.1em;font-weight:700;min-width:68px}',
         '.gam-sh2-led{width:7px;height:7px;border-radius:1px;flex-shrink:0}',
         '.gam-sh2-pill--ok .gam-sh2-led{background:#3dd68c}',
-        '.gam-sh2-pill--warn .gam-sh2-led{background:#f0a040;animation:gam-sh2-blink 0.8s infinite}',
+        // v10.14.1 PRM1 (RALPH PRM F-2): blink animation gated on
+        // prefers-reduced-motion: no-preference; reduce-motion users get a
+        // solid LED instead of a 0.8s loop.
+        '.gam-sh2-pill--warn .gam-sh2-led{background:var(--bb-amber-warm)}',
+        '@media (prefers-reduced-motion: no-preference){.gam-sh2-pill--warn .gam-sh2-led{animation:gam-sh2-blink 0.8s infinite}}',
         '.gam-sh2-pill--err .gam-sh2-led{background:#f04040}',
         // v10.13.1 W3 R-12: ARMED state — local/D1 mismatch warn pill (firehose
         // counts disagree between extension state and worker D1). Same look as
         // --warn but with a distinct label to disambiguate "probing" from
         // "live but disagrees with backend."
-        '.gam-sh2-pill--armed .gam-sh2-led{background:#ffd84d;animation:gam-sh2-blink 0.6s infinite}',
+        '.gam-sh2-pill--armed .gam-sh2-led{background:#ffd84d}',
+        '@media (prefers-reduced-motion: no-preference){.gam-sh2-pill--armed .gam-sh2-led{animation:gam-sh2-blink 0.6s infinite}}',
         '.gam-sh2-pill--armed{border-color:#ffd84d}',
         '.gam-sh2-kpi-row{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #2a2f38}',
         '.gam-sh2-tile{padding:10px 0 0;border-right:1px solid #2a2f38;text-align:center;position:relative}',
@@ -19684,6 +19697,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     const pop = document.createElement('div');
     pop.id = SH_POP_ID;
+    // v10.14.1 F2 (RALPH FOCUS-TRAPS R7): aria semantics
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-modal', 'true');
+    pop.setAttribute('aria-label', 'Site health');
 
     // Position (existing logic + viewport clamp UIUX-12 §B)
     const r = anchor.getBoundingClientRect();
@@ -19749,7 +19766,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (!valEl || !barEl) return;
       var tileWrap = valEl.closest('.gam-sh2-tile');
       var n = typeof value === 'number' ? value : parseFloat(value);
-      var col = (isNaN(n) || warn == null || n < warn) ? '#3dd68c' : n < danger ? '#f0a040' : '#f04040';
+      var col = (isNaN(n) || warn == null || n < warn) ? '#3dd68c' : n < danger ? C.WARN : '#f04040';
       // Apply 999+ cap if value is purely numeric and >= 1000
       var displayVal = (typeof value === 'number' && value >= 1000) ? '999+' : String(value);
       valEl.textContent = displayVal;
@@ -19800,7 +19817,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       ban:      { bg:'rgba(240,64,64,.18)',   fg:'#f04040', label:'BAN'     },
       deathrow: { bg:'rgba(167,139,250,.15)', fg:'#a78bfa', label:'DR ADD'  },
       approve:  { bg:'rgba(61,214,140,.15)',  fg:'#3dd68c', label:'APPROVE' },
-      remove:   { bg:'rgba(240,160,64,.15)',  fg:'#f0a040', label:'REMOVE'  },
+      remove:   { bg:'rgba(240,160,64,.15)',  fg:C.WARN, label:'REMOVE'  },
     };
 
     function _renderFeed(actions) {
@@ -20120,6 +20137,9 @@ Analyze this comment against the community rules. Then write a brief, profession
       cls:'gam-bar-brand gam-bar-icon-brand',
       title:`GAW ModTools ${VERSION} \u2014 click for site health \u2014 amber color = Bloomberg Terminal theme (not a warning)`,
       'aria-label':`GAW ModTools ${VERSION} \u2014 site health`, // v10.8.0 M11
+      // v10.14.1 F3 (RALPH FOCUS-TRAPS R8): site-health popover affordance
+      'aria-haspopup': 'dialog',
+      'aria-expanded': 'false',
       style: 'position:relative'
     }, '\u{1F6E1}');
     // v10.8.0 M8 (UIUX-06 P2): tier badge \u2014 'L' for lead, no badge for regular mod
@@ -20137,6 +20157,10 @@ Analyze this comment against the community rules. Then write a brief, profession
       try { _showSiteHealthPopover(brandBtn); } catch(err){
         try { snack('Site health probe failed: ' + (err && err.message || err), 'error'); } catch(_){}
       }
+      // v10.14.1 F3: sync aria-expanded post-DOM-mutation
+      requestAnimationFrame(()=>{
+        try { brandBtn.setAttribute('aria-expanded', document.getElementById('gam-sh2-pop') ? 'true' : 'false'); } catch(_){}
+      });
     });
     // v9.6.0: GEAR moved to far-right of bar per Commander 2026-05-07.
     const gearBtn = el('button',{ cls:'gam-bar-icon', onclick:openSettings, title:'Settings', 'aria-label':'Settings' }, '\u2699\uFE0F'); // v10.8.0 M11
@@ -20155,7 +20179,12 @@ Analyze this comment against the community rules. Then write a brief, profession
       id: 'gam-bar-ticker',
       title: 'Live updates \u2014 click to act',
       'aria-label': 'Live updates \u2014 click to act', // v10.8.0 M11
-      'aria-live': 'polite'
+      'aria-live': 'polite',
+      // v10.14.1 F3 (RALPH FOCUS-TRAPS R8): announce that this trigger opens
+      // a dialog (sus / dr / queue / auto popover); aria-expanded is toggled
+      // on open/close in the click handler below.
+      'aria-haspopup': 'dialog',
+      'aria-expanded': 'false'
     }, 'site quiet');
     tickerEl.style.cssText = 'min-width:160px;text-align:left;padding-left:8px;font-variant-numeric:tabular-nums;letter-spacing:.04em;text-transform:uppercase;';
     let __tickerStates = [];
@@ -20212,22 +20241,42 @@ Analyze this comment against the community rules. Then write a brief, profession
     tickerEl.addEventListener('mouseenter', () => { __tickerPaused = true; });
     tickerEl.addEventListener('mouseleave', () => { __tickerPaused = false; });
     // v10.7.1 TP.4: inline popovers replace navigation — mod sees data without leaving page
+    // v10.14.1 F3: helper toggles aria-expanded based on whether the relevant
+    // popover element is in the DOM after the show* call (popovers self-close
+    // on second click). Run async via rAF to read post-mount state.
+    function _syncTickerExpanded() {
+      try {
+        const open = !!(document.getElementById('gam-sus-popover') ||
+                        document.getElementById('gam-dr-popover') ||
+                        document.getElementById('gam-queue-popover') ||
+                        document.getElementById('gam-auto-unsticky-popover'));
+        tickerEl.setAttribute('aria-expanded', open ? 'true' : 'false');
+      } catch(_){}
+    }
     tickerEl.addEventListener('click', (e)=>{
       e.stopPropagation();
       const cur = __tickerStates[__tickerIdx];
       if (!cur) return;
       if (cur.kind === 'modmail') { try { ModChat.openPanel(); } catch(e){ _logError('modchat', ERR_SEV.HIGH, e, { op: 'ticker-openPanel' }); } return; } // v10.11 C2: Cat C
-      if (cur.kind === 'sus') { try { _showSusPopover(tickerEl); } catch(err) { console.warn('[TP.1]', err); } return; }
-      if (cur.kind === 'dr') { try { _showDrPopover(tickerEl); } catch(err) { console.warn('[TP.2]', err); } return; }
-      if (cur.kind === 'queue') { try { _showQueuePopover(tickerEl); } catch(err) { console.warn('[TP.3]', err); } return; }
+      if (cur.kind === 'sus') { try { _showSusPopover(tickerEl); } catch(err) { console.warn('[TP.1]', err); } requestAnimationFrame(_syncTickerExpanded); return; }
+      if (cur.kind === 'dr') { try { _showDrPopover(tickerEl); } catch(err) { console.warn('[TP.2]', err); } requestAnimationFrame(_syncTickerExpanded); return; }
+      if (cur.kind === 'queue') { try { _showQueuePopover(tickerEl); } catch(err) { console.warn('[TP.3]', err); } requestAnimationFrame(_syncTickerExpanded); return; }
       // v10.9.0 M3 (ASK-052): open Mod Console OP DELETES tab on click
       if (cur.kind === 'opdel') { try { openModConsole(null, null, 'opdel'); } catch(err) { console.warn('[TP.4]', err); } return; }
       // v10.10.0 M4: open auto-unsticky recent popover on AUTO Q click
-      if (cur.kind === 'auto') { try { _showAutoUnstickyPopover(tickerEl); } catch(err) { console.warn('[TP.5]', err); } return; }
+      if (cur.kind === 'auto') { try { _showAutoUnstickyPopover(tickerEl); } catch(err) { console.warn('[TP.5]', err); } requestAnimationFrame(_syncTickerExpanded); return; }
       // quiet / unknown kind — no-op (no nav)
     });
     setInterval(__updateTicker, 30_000);
-    setInterval(()=>{ if (__tickerPaused) return; __tickerIdx = (__tickerIdx + 1) % Math.max(1, __tickerStates.length); __updateTicker(); }, 4000); // v10.8.0 M1: gated on !__tickerPaused
+    // v10.14.1 PRM5 (RALPH PRM Q1): ticker rotation honors prefers-reduced-motion
+    // ("don't move my data" semantics — moving ticker text is motion users may have
+    // requested to suppress). Initial render happens via __updateTicker; rotation
+    // skipped when PRM is set, so the user sees a stable single state.
+    setInterval(()=>{
+      if (__tickerPaused) return;
+      try { if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return; } catch(_){}
+      __tickerIdx = (__tickerIdx + 1) % Math.max(1, __tickerStates.length); __updateTicker();
+    }, 4000); // v10.8.0 M1: gated on !__tickerPaused
     // AF-26 (Rule 77): scheduleIdle for non-critical boot task
     scheduleIdle(__updateTicker, 800);
 
@@ -20316,13 +20365,20 @@ Analyze this comment against the community rules. Then write a brief, profession
       cls: 'gam-bar-icon',
       id: 'gam-bar-people',
       title: 'Active mods on GAW (click for window)',
-      'aria-label': 'Active mods on GAW (click for window)' // v10.8.0 M11
+      'aria-label': 'Active mods on GAW (click for window)', // v10.8.0 M11
+      // v10.14.1 F3 (RALPH FOCUS-TRAPS R8): announce popover affordance
+      'aria-haspopup': 'dialog',
+      'aria-expanded': 'false'
     }, '\u{1F465}');
     peopleBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       try { _showActiveModsPopover(peopleBtn); } catch(err) {
         try { snack('People probe failed: ' + (err && err.message || err), 'error'); } catch(_){}
       }
+      // v10.14.1 F3: sync aria-expanded post-DOM-mutation
+      requestAnimationFrame(()=>{
+        try { peopleBtn.setAttribute('aria-expanded', document.getElementById('gam-active-mods-popover') ? 'true' : 'false'); } catch(_){}
+      });
     });
     // v9.8.0 STATUS BAR REORDER per Commander 2026-05-08:
     //   [icons LEFT, ordered by importance] [flex spacer] [chat] [TICKER far right]
@@ -20424,7 +20480,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           const newAuthors = Array.isArray(cluster.new_authors) ? cluster.new_authors : [];
           const count = newAuthors.length;
           const lvl = cluster.alert_level; // 'low' | 'medium' | 'high'
-          const borderColor = lvl === 'high' ? '#ff3b3b' : (lvl === 'medium' ? '#ff9933' : '#ffd84d');
+          const borderColor = lvl === 'high' ? '#ff3b3b' : (lvl === 'medium' ? C.AMBER : '#ffd84d');
           const chip = document.createElement('div');
           chip.id = 'gam-brigade-chip';
           // v10.12 H.10 (UIUX-20): gate brigade pulse animation on prefers-reduced-motion
@@ -20461,7 +20517,7 @@ Analyze this comment against the community rules. Then write a brief, profession
               uEl.textContent = u;
               const susBtn = document.createElement('button');
               susBtn.textContent = 'SUS';
-              susBtn.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 5px;cursor:pointer;font:700 9px ui-monospace,monospace';
+              susBtn.style.cssText = 'background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:1px 5px;cursor:pointer;font:700 9px ui-monospace,monospace';
               susBtn.addEventListener('click', function() {
                 rpcCall('modSusMark', { username: u, reason: 'brigade-cluster', client_op_id: __makeReqId() }).then(function() { // v10.11 C5 (REDTEAM-2): idempotency key
                   susBtn.textContent = 'MARKED';
@@ -20520,7 +20576,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         acc.innerHTML = '';
         const hdr = document.createElement('div');
         hdr.className = 'gam-sacc-header';
-        hdr.innerHTML = 'PIN REQUESTS (' + count + ' pending) <button id="gam-sacc-close" style="background:none;border:none;color:#ff9933;cursor:pointer;font-size:13px;">×</button>';
+        hdr.innerHTML = 'PIN REQUESTS (' + count + ' pending) <button id="gam-sacc-close" style="background:none;border:none;color:var(--bb-amber);cursor:pointer;font-size:13px;">×</button>';
         acc.appendChild(hdr);
         document.getElementById('gam-sacc-close') && document.getElementById('gam-sacc-close').addEventListener('click', function() { acc.style.display = 'none'; });
 
@@ -20603,7 +20659,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     (function() {
       const tardAcc = document.createElement('div');
       tardAcc.id = 'gam-tard-accordion';
-      tardAcc.style.cssText = 'display:none;position:fixed;bottom:46px;z-index:9999981;min-width:360px;max-width:480px;max-height:320px;overflow-y:auto;background:#0a0a0b;border:1px solid #ff9933;font:11px/1.4 ui-monospace,"JetBrains Mono",monospace;padding:8px;';
+      tardAcc.style.cssText = 'display:none;position:fixed;bottom:46px;z-index:9999981;min-width:360px;max-width:480px;max-height:320px;overflow-y:auto;background:#0a0a0b;border:1px solid var(--bb-amber);font:11px/1.4 ui-monospace,"JetBrains Mono",monospace;padding:8px;';
       document.body.appendChild(tardAcc);
 
       // Escape closes both accordions
@@ -21149,7 +21205,7 @@ Analyze this comment against the community rules. Then write a brief, profession
    stacked across stats / actions / form fields. */
 .gam-modal-header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid ${C.BORDER};background:linear-gradient(180deg,${C.BG2} 0%,${C.BG} 100%)}
 .gam-modal-title{font-weight:700;font-size:13px;letter-spacing:.1px;flex:1}
-.gam-modal-close{background:none;border:none;color:${C.TEXT3};font-size:18px;cursor:pointer;padding:2px 6px;line-height:1;transition:color .1s,background .1s;border-radius:4px}
+.gam-modal-close{background:none;border:none;color:${C.TEXT3};font-size:18px;cursor:pointer;padding:2px 6px;line-height:1;transition:color .1s,background .1s;border-radius:4px;min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center} /* v10.14.1 CT5: 22x22 -> 32x32 to match .pop-drill-close */
 .gam-modal-close:hover{color:${C.TEXT};background:rgba(255,255,255,.06)}
 .gam-modal-body{padding:12px 14px;overflow-y:auto;flex:1}
 .gam-modal-pin{background:none;border:none;color:${C.TEXT3};font-size:14px;cursor:pointer;padding:0 6px;line-height:1;margin-right:4px;transition:color .15s}
@@ -21402,8 +21458,8 @@ Analyze this comment against the community rules. Then write a brief, profession
 @keyframes gam-copy-flash { 0%{background-color:rgba(61,214,140,0.22)} 100%{background-color:transparent} }
 @media (prefers-reduced-motion: reduce) { .gam-copy-flash { animation:none !important; } }
 /* v10.13.2 W5: snack action button (W3 ext) — Bloomberg ghost at rest, amber fill on hover */
-.gam-snack-action { background:transparent; border:1px solid #ff9933; color:#ff9933; padding:2px 8px; cursor:pointer; font:700 9px ui-monospace,'JetBrains Mono',monospace; letter-spacing:0.06em; text-transform:uppercase; transition:background 80ms,color 80ms; flex-shrink:0; pointer-events:auto; }
-.gam-snack-action:hover { background:#ff9933; color:#0a0a0b; }
+.gam-snack-action { background:transparent; border:1px solid var(--bb-amber); color:var(--bb-amber); padding:2px 8px; cursor:pointer; font:700 9px ui-monospace,'JetBrains Mono',monospace; letter-spacing:0.06em; text-transform:uppercase; transition:background 80ms,color 80ms; flex-shrink:0; pointer-events:auto; }
+.gam-snack-action:hover { background:var(--bb-amber); color:#0a0a0b; }
 .gam-muted { color:${C.TEXT3}; font-style:italic; font-size:11px; }
 .gam-nba-gen { background:${C.ACCENT}; color:#fff; border:none; border-radius:4px; padding:5px 12px; cursor:pointer; font-size:11px; font-weight:600; transition:opacity .15s; }
 .gam-nba-gen:hover { opacity:.9; }
@@ -21479,7 +21535,7 @@ Analyze this comment against the community rules. Then write a brief, profession
    above it without crowding the screen edge. Subtle but improves readability
    when the site-health popover or modmail popover renders above the bar. */
 #gam-status-bar{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);height:28px;background:rgba(12,14,18,.95);backdrop-filter:blur(16px) saturate(1.4);border:1px solid ${C.BORDER2};border-radius:14px;z-index:9999980;display:inline-flex;align-items:center;padding:0 10px;gap:6px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT2};box-shadow:0 2px 12px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.03)}
-.gam-bar-brand{font-weight:800;color:${C.ACCENT};letter-spacing:.1px;font-size:13px}
+.gam-bar-brand{font-weight:800;color:${C.AMBER};letter-spacing:.1px;font-size:13px}
 /* v9.6.0: shield is now an interactive button (site-health popover) -- match
    .gam-bar-icon dimensions and lock the color so the harmonized-theme
    override doesn't tint it orange (was: data-gam-harmonized rule at the
@@ -21489,7 +21545,7 @@ Analyze this comment against the community rules. Then write a brief, profession
    class -- W5 only added ::after to .gam-bar-icon, leaving the leftmost
    shield at 22x22 with no hit-zone extension. Merge ::after into a shared
    selector so the brand chip gets the same vertical hit zone post-P0-C. */
-.gam-bar-icon-brand{background:none;border:none;width:22px;height:22px;border-radius:11px;cursor:pointer;font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;transition:background .1s,color .1s,transform .1s;padding:0 6px;color:${C.ACCENT} !important;position:relative}
+.gam-bar-icon-brand{background:none;border:none;width:22px;height:22px;border-radius:11px;cursor:pointer;font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;transition:background .1s,color .1s,transform .1s;padding:0 6px;color:${C.AMBER} !important;position:relative}
 .gam-bar-icon-brand::after{content:"";position:absolute;inset:-10px 0}
 .gam-bar-icon-brand:hover{background:rgba(74,158,255,.18);transform:scale(1.12)}
 .gam-bar-icon-brand:active{transform:scale(.94)}
@@ -21563,7 +21619,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-c5-row{display:grid;grid-template-columns:44px 110px 1fr auto;align-items:center;gap:8px;padding:3px 0;font-size:11px}
 .gam-c5-row.gam-c5-presence{grid-template-columns:120px 1fr 44px;color:${C.TEXT2}}
 .gam-c5-time{color:${C.TEXT3};font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:10px;text-align:right}
-.gam-c5-mod{color:${C.ACCENT};font-weight:600}
+.gam-c5-mod{color:${C.AMBER};font-weight:600}
 .gam-c5-act{color:${C.TEXT};font-size:10px;text-transform:uppercase;letter-spacing:.3px}
 .gam-c5-subj{color:${C.TEXT2};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}
 .gam-c5-page{color:${C.TEXT2};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:10px}
@@ -21590,7 +21646,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 #gam-triage{font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};padding:16px;max-width:1100px}
 /* ── Loop-6: final cohesion ── */
 .gam-t-header{display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid ${C.BORDER};flex-wrap:wrap}
-.gam-t-brand{font-weight:800;font-size:14px;color:${C.ACCENT};letter-spacing:-.1px}
+.gam-t-brand{font-weight:800;font-size:14px;color:${C.AMBER};letter-spacing:-.1px}
 .gam-t-header-hint{font-size:10px;color:${C.TEXT3};letter-spacing:.1px}
 /* v5.2.7: two-column layout - list left, stats sidebar right */
 .gam-t-layout{display:flex;gap:18px;align-items:flex-start}
@@ -21904,7 +21960,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 
 /* v5.1.9 EXP Loop 2: Mini-HQ strip on GAW home pages */
 .gam-home-strip{display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:10px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:6px;flex-wrap:wrap;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}
-.gam-home-label{font-weight:700;color:${C.ACCENT};letter-spacing:.3px;font-size:13px;margin-right:6px}
+.gam-home-label{font-weight:700;color:${C.AMBER};letter-spacing:.3px;font-size:13px;margin-right:6px}
 .gam-home-pill{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;background:${C.BG3};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT}!important;text-decoration:none!important;transition:border-color .15s,background .15s;font-size:11px}
 .gam-home-pill b{color:${C.ACCENT};font-weight:700}
 .gam-home-pill:hover{border-color:${C.ACCENT};background:${C.BG}}
@@ -22058,6 +22114,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 @keyframes gam-ee-rain{0%{transform:translateY(-20px);opacity:0}10%{opacity:.8}90%{opacity:.8}100%{transform:translateY(100vh);opacity:0}}
 @keyframes gam-ee-gold{0%,100%{box-shadow:none}50%{box-shadow:0 0 0 2px gold,0 0 16px 4px rgba(255,215,0,.4)}}
 #gam-ee-overlay{position:fixed;inset:0;z-index:99999999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.88);backdrop-filter:blur(6px);animation:gam-ee-fade 4s ease forwards;pointer-events:none;font-family:Georgia,serif}
+/* v10.14.1 PRM2 (RALPH PRM F-3): ban-success flash class-based; only animates
+   for users who haven't requested reduced motion. Reduce-motion users get the
+   red overlay for the same duration without the scale/fade. */
+.gam-ee-flash{position:fixed;inset:0;z-index:99999998;background:rgba(240,64,64,.22);pointer-events:none}
+@media (prefers-reduced-motion: no-preference){.gam-ee-flash{animation:gam-ee-fade .8s ease forwards}}
+/* v10.14.1 PRM4 (RALPH PRM F-5): inline-style transitions for the modmail
+   slide panel + similar slide-in surfaces moved to PRM-gated CSS classes.
+   Reduce-motion users get instant placement; everyone else gets the slide. */
+@media (prefers-reduced-motion: no-preference){
+  .gam-mm-slide-panel{transition:transform 0.2s ease-out}
+}
 #gam-ee-overlay .gam-ee-line1{font-size:clamp(22px,4vw,48px);font-weight:700;color:gold;letter-spacing:.05em;text-shadow:0 0 30px rgba(255,215,0,.7);text-align:center;padding:0 24px}
 #gam-ee-overlay .gam-ee-line2{font-size:clamp(14px,2vw,22px);color:rgba(255,215,0,.6);margin-top:16px;letter-spacing:.25em;text-transform:uppercase}
 #gam-ee-overlay .gam-ee-q{font-size:clamp(60px,10vw,120px);color:rgba(255,215,0,.12);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);user-select:none}
@@ -22340,6 +22407,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   color: var(--bb-ink-dim) !important;
   font: var(--bb-t-sm)/1 var(--bb-font) !important;
   padding: var(--bb-s4) var(--bb-s5) !important;
+  /* v10.14.1 CT3: 29 -> 32px; pre-existing min-height:32 in 21146 was being
+     overridden by !important at 22359 ruleset; re-assert here. */
+  min-height: 32px !important;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   cursor: pointer;
@@ -22886,7 +22956,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 }
 .gam-mc-link-preview.gam-show { opacity: 1; }
 .gam-mc-link-preview-title {
-  color: #ff9933; font-weight: 600;
+  color: var(--bb-amber); font-weight: 600;
   letter-spacing: 0.04em; margin-bottom: 3px;
   word-break: break-word;
 }
@@ -23126,9 +23196,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-sr-snippet { font:11px ui-monospace,monospace; color:#8b929e; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .gam-sr-title { font:11px/1.3 ui-monospace,monospace; color:#e8eaed; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 /* ---- v10.3: Sticky chip (Patch 3) ---- */
-#gam-sticky-chip { font:600 9px ui-monospace,monospace; color:#ff9933; background:#1a1000; border:1px solid #ff9933; padding:1px 5px; cursor:pointer; display:none; }
-#gam-sticky-accordion { position:fixed; bottom:36px; z-index:9999980; min-width:320px; max-width:480px; max-height:300px; overflow-y:auto; background:#0a0c0f; border:1px solid #ff9933; font:11px ui-monospace,monospace; padding:0; display:none; }
-#gam-sticky-accordion .gam-sacc-header { display:flex; justify-content:space-between; align-items:center; padding:5px 8px; border-bottom:1px solid #2a1800; color:#ff9933; font-size:10px; font-weight:700; letter-spacing:0.08em; }
+#gam-sticky-chip { font:600 9px ui-monospace,monospace; color:var(--bb-amber); background:#1a1000; border:1px solid var(--bb-amber); padding:1px 5px; cursor:pointer; display:none; }
+#gam-sticky-accordion { position:fixed; bottom:36px; z-index:9999980; min-width:320px; max-width:480px; max-height:300px; overflow-y:auto; background:#0a0c0f; border:1px solid var(--bb-amber); font:11px ui-monospace,monospace; padding:0; display:none; }
+#gam-sticky-accordion .gam-sacc-header { display:flex; justify-content:space-between; align-items:center; padding:5px 8px; border-bottom:1px solid #2a1800; color:var(--bb-amber); font-size:10px; font-weight:700; letter-spacing:0.08em; }
 #gam-sticky-accordion .gam-sacc-row { display:flex; align-items:center; gap:6px; padding:5px 8px; border-bottom:1px solid #111; }
 #gam-sticky-accordion .gam-sacc-conf { font-size:9px; font-weight:700; padding:1px 4px; border-radius:2px; text-transform:uppercase; flex-shrink:0; }
 #gam-sticky-accordion .gam-sacc-conf-high { background:#2a0000; color:#ff6b6b; border:1px solid #7a1010; }
@@ -23138,18 +23208,25 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 #gam-sticky-accordion .gam-sacc-footer { padding:5px 8px; border-top:1px solid #2a1800; display:flex; gap:6px; }
 /* ---- v10.3: Tard accordion (Patch 4) ---- */
 #gam-tard-accordion { border-radius:0; box-shadow:0 4px 20px rgba(0,0,0,.7); }
-#gam-tard-accordion .gam-tard-header { display:flex; justify-content:space-between; align-items:center; padding:5px 8px; border-bottom:1px solid #2a1800; color:#ff9933; font-size:10px; font-weight:700; letter-spacing:0.06em; }
+#gam-tard-accordion .gam-tard-header { display:flex; justify-content:space-between; align-items:center; padding:5px 8px; border-bottom:1px solid #2a1800; color:var(--bb-amber); font-size:10px; font-weight:700; letter-spacing:0.06em; }
 #gam-tard-accordion .gam-tard-row { display:flex; align-items:flex-start; gap:6px; padding:5px 8px; border-bottom:1px solid #1a1a1a; }
 #gam-tard-accordion .gam-tard-footer { position:sticky; bottom:0; background:#0a0a0b; border-top:1px solid #2a2825; padding:6px 8px; margin-top:0; display:flex; gap:6px; align-items:center; }
 #gam-tard-accordion .gam-tard-add-btn { flex:1; background:transparent; border:1px solid #2eaa44; color:#44dd66; padding:4px 10px; cursor:pointer; font:600 10px ui-monospace,monospace; letter-spacing:0.04em; text-transform:uppercase; }
 #gam-tard-accordion .gam-tard-add-btn:disabled { opacity:0.4; cursor:default; }
 #gam-tard-accordion .gam-tard-sev { font-weight:700; font-size:9px; letter-spacing:0.04em; text-transform:uppercase; flex-shrink:0; padding:1px 4px; }
-#gam-tard-accordion .gam-tard-pattern { color:#ff9933; font-weight:700; font-size:10px; }
+#gam-tard-accordion .gam-tard-pattern { color:var(--bb-amber); font-weight:700; font-size:10px; }
 #gam-tard-accordion .gam-tard-label { color:#9b9892; font-size:10px; }
 #gam-tard-accordion .gam-tard-row--exists { opacity:0.45; }
 /* ---- v10.3: Thread Watch (Patch 5) ---- */
 #gam-thread-watch-btn { margin-left:8px; background:#0e1820; border:1px solid #2a4060; color:#5b8db8; padding:2px 8px; cursor:pointer; font:11px ui-monospace,monospace; }
-#gam-thread-watch-btn.gam-thread-watch-btn--flagged { background:#2a0800; border-color:#ff9933; color:#ff9933; animation:gam-pulse 1.2s infinite; }
+/* v10.14.1 PRM3 (RALPH PRM F-4): gam-pulse was referenced but never defined.
+   Define as a soft amber breathe (1.2s) and PRM-gate so reduce-motion users
+   get a static flagged state. */
+@keyframes gam-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,153,51,0); } 50% { box-shadow: 0 0 0 3px rgba(255,153,51,.35); } }
+#gam-thread-watch-btn.gam-thread-watch-btn--flagged { background:#2a0800; border-color:var(--bb-amber); color:var(--bb-amber); }
+@media (prefers-reduced-motion: no-preference) {
+  #gam-thread-watch-btn.gam-thread-watch-btn--flagged { animation:gam-pulse 1.2s infinite; }
+}
 .gam-thread-stats { display:flex; gap:12px; font-size:11px; color:var(--gam-text2,#8b929e); padding:6px 0 10px; flex-wrap:wrap; }
 .gam-thread-intel .gam-badge--warn { background:#c0392b; color:#fff; padding:4px 8px; font-size:11px; font-weight:700; margin-bottom:8px; display:block; }
 .gam-suspect-row { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--gam-border,#1e2a3a); flex-wrap:wrap; }
@@ -23317,7 +23394,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-empty-headline { color: #9b9892; font-weight: 600; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
 .gam-empty-desc { color: #5a5752; font-size: 9px; }
 .gam-empty-cta {
-  background: transparent; border: 1px solid #ff9933; color: #ff9933;
+  background: transparent; border: 1px solid var(--bb-amber); color: var(--bb-amber);
   padding: 2px 8px; cursor: pointer; font: 600 9px ui-monospace, monospace;
   letter-spacing: 0.04em; text-transform: uppercase; margin-top: 4px;
 }
@@ -23331,7 +23408,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   text-transform: uppercase; border-radius: 2px; margin-bottom: 4px;
 }
 .gam-error-chip.hard { background: rgba(255,59,59,0.18); color: #ff3b3b; }
-.gam-error-chip.soft { background: rgba(240,160,64,0.15); color: #f0a040; }
+.gam-error-chip.soft { background: rgba(240,160,64,0.15); color: var(--bb-amber-warm); }
 .gam-error-msg { color: #c8c5c0; font-size: 10px; margin: 2px 0; }
 .gam-error-hint { color: #5a5752; font-size: 9px; }
 .gam-error-retry {
@@ -24229,8 +24306,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       // Build banner. Self-contained CSS so it survives before init() builds GAM_CSS.
       const wrap = document.createElement('div');
       wrap.id = 'gam-brave-banner';
-      wrap.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483645;background:#1a0f00;border-bottom:2px solid #ff9933;color:#ff9933;font:600 12px/1.4 ui-monospace,JetBrains Mono,Consolas,monospace;padding:10px 16px;box-shadow:0 2px 12px rgba(0,0,0,0.6);letter-spacing:0.04em';
-      wrap.innerHTML = '<div style="max-width:920px;margin:0 auto;display:flex;align-items:flex-start;gap:12px"><div style="flex:0 0 auto;font-size:18px;line-height:1">&#x1F981;</div><div style="flex:1 1 auto;color:#ffe0b3;font-weight:400;letter-spacing:0.02em"><strong style="color:#ff9933;font-weight:700">Brave detected.</strong> Brave Shields strip <code style="background:#000;padding:1px 4px;color:#ffd84d">?mt_invite=</code> from URLs silently. If your lead sent you an invite link, the code may already be lost from this URL. <strong style="color:#fff">Open the GAW ModTools extension popup &rarr; pick &ldquo;I have an invite LINK&rdquo; &rarr; paste the FULL URL.</strong> The popup paste path bypasses Shields. <a href="#" id="gam-brave-banner-help" style="color:#66ccff;text-decoration:underline">More info</a></div><button id="gam-brave-banner-dismiss" type="button" style="flex:0 0 auto;background:transparent;border:1px solid #ff9933;color:#ff9933;padding:4px 10px;font:600 11px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;cursor:pointer;text-transform:uppercase">Got it</button></div>';
+      wrap.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483645;background:#1a0f00;border-bottom:2px solid var(--bb-amber);color:var(--bb-amber);font:600 12px/1.4 ui-monospace,JetBrains Mono,Consolas,monospace;padding:10px 16px;box-shadow:0 2px 12px rgba(0,0,0,0.6);letter-spacing:0.04em';
+      wrap.innerHTML = '<div style="max-width:920px;margin:0 auto;display:flex;align-items:flex-start;gap:12px"><div style="flex:0 0 auto;font-size:18px;line-height:1">&#x1F981;</div><div style="flex:1 1 auto;color:#ffe0b3;font-weight:400;letter-spacing:0.02em"><strong style="color:var(--bb-amber);font-weight:700">Brave detected.</strong> Brave Shields strip <code style="background:#000;padding:1px 4px;color:#ffd84d">?mt_invite=</code> from URLs silently. If your lead sent you an invite link, the code may already be lost from this URL. <strong style="color:#fff">Open the GAW ModTools extension popup &rarr; pick &ldquo;I have an invite LINK&rdquo; &rarr; paste the FULL URL.</strong> The popup paste path bypasses Shields. <a href="#" id="gam-brave-banner-help" style="color:#66ccff;text-decoration:underline">More info</a></div><button id="gam-brave-banner-dismiss" type="button" style="flex:0 0 auto;background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:4px 10px;font:600 11px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;cursor:pointer;text-transform:uppercase">Got it</button></div>';
       // Push page content down so the banner doesn't overlap GAW's own header.
       const prevPad = document.body && document.body.style.paddingTop;
       try { if (document.body) document.body.style.paddingTop = '64px'; } catch(_){}
@@ -24689,7 +24766,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
   const TITLE_STYLE = {
     mvp:    { bg:'#2ECC71', fg:'#062', label:'MVP' },
-    top10:  { bg:'#E8A317', fg:'#3a2500', label:'TOP 10' },
+    top10:  { bg:C.AMBER_COOL, fg:'#3a2500', label:'TOP 10' },
     sauce:  { bg:'#4A9EFF', fg:'#001a33', label:'SAUCED' },
     custom: { bg:'#a78bfa', fg:'#1a0d33', label:'' }
   };
@@ -24761,7 +24838,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       mark.className = 'gam-sus-mark';
       mark.textContent = '\u2717'; // ballot X
       mark.title = 'Flagged by ModTools (watchlist / prior ban / cloud flag)';
-      mark.style.cssText = 'display:inline-block;color:#E8A317;font-weight:700;font-size:0.9em;margin-right:3px;line-height:1';
+      mark.style.cssText = 'display:inline-block;color:var(--bb-amber-cool);font-weight:700;font-size:0.9em;margin-right:3px;line-height:1';
       a.parentNode && a.insertBefore(mark, a);
     }
   }
@@ -24787,7 +24864,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // Severity vocabulary mapping (codebase writes watch/danger/critical;
   // spec also named red/yellow — accept both for forward-compat):
   //   critical, red       -> 'red'    #E04040
-  //   danger,  yellow     -> 'yellow' #E8A317
+  //   danger,  yellow     -> 'yellow' var(--bb-amber-cool)
   //   watch               -> 'watch'  #666
   //   anything else/null  -> 'none'   (no dot)
   function _gamFlagDotSeverity(flagsForUser){
@@ -24814,7 +24891,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         border-radius: 50%; margin-right: 4px; vertical-align: middle;
       }
       a[data-gam-flag="red"]::before    { background: #E04040; }
-      a[data-gam-flag="yellow"]::before { background: #E8A317; }
+      a[data-gam-flag="yellow"]::before { background: var(--bb-amber-cool); }
       a[data-gam-flag="watch"]::before  { background: #666; }
     `;
     (document.head || document.documentElement).appendChild(st);
@@ -24949,7 +25026,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       const path = String(m.pagePath||'/');
       const ageMs = Date.now() - Date.parse(m.lastPing || 0);
       const ageMin = Math.max(0, Math.round(ageMs/60000));
-      const dot = ageMin < 2 ? '#2ECC71' : ageMin < 10 ? '#E8A317' : '#888';
+      const dot = ageMin < 2 ? '#2ECC71' : ageMin < 10 ? C.AMBER_COOL : '#888';
       const pathShort = path.length > 28 ? path.slice(0,26)+'\u2026' : path;
       // href whitelist: only internal site paths; block javascript:/data:/protocol-relative
       const hrefSafe = /^\/[A-Za-z0-9/_\-?&=%.#]{0,500}$/.test(path) ? path : '/';
@@ -25694,8 +25771,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       _painBuf = (_painBuf + e.key.toUpperCase()).slice(-4);
       if (_painBuf === 'PAIN'){
         _painBuf = '';
+        // v10.14.1 PRM2: class-based flash; CSS gates animation on PRM
         const flash = document.createElement('div');
-        flash.style.cssText = 'position:fixed;inset:0;z-index:99999998;background:rgba(240,64,64,.22);pointer-events:none;animation:gam-ee-fade .8s ease forwards';
+        flash.className = 'gam-ee-flash';
         document.body.appendChild(flash);
         setTimeout(()=>flash.remove(), 900);
         snack('\u{1F534} PAIN.', 'error');
@@ -26772,7 +26850,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       const ageMin = Math.max(1, Math.round((Date.now() - (entry.modified_at || Date.now())) / 60000));
       const chip = document.createElement('div');
       chip.className = 'gam-macro-draft-chip';
-      chip.style.cssText = 'position:absolute;top:0;right:0;background:#1a1a2e;border:1px solid #ff9933;color:#ff9933;font:600 9px ui-monospace,monospace;letter-spacing:.07em;text-transform:uppercase;padding:2px 7px;display:flex;gap:6px;align-items:center;z-index:10;opacity:1;transition:opacity 0.3s';
+      chip.style.cssText = 'position:absolute;top:0;right:0;background:#1a1a2e;border:1px solid var(--bb-amber);color:var(--bb-amber);font:600 9px ui-monospace,monospace;letter-spacing:.07em;text-transform:uppercase;padding:2px 7px;display:flex;gap:6px;align-items:center;z-index:10;opacity:1;transition:opacity 0.3s';
       if (field.style.position !== 'relative' && field.style.position !== 'absolute') field.style.position = 'relative';
       const chipLabel = document.createElement('span');
       chipLabel.textContent = 'draft restored ' + ageMin + 'm ago';
@@ -27774,7 +27852,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     const watchBtn = el('button', { cls: 'gam-btn-small' }, 'Watch');
     watchBtn.addEventListener('click', function() { _onWatchUser(s.username, 'Thread Watch: ' + postId); });
 
-    const susBtn = el('button', { cls: 'gam-btn-small', style: 'color:#ff9933;border-color:#7a4000;' }, 'SUS');
+    const susBtn = el('button', { cls: 'gam-btn-small', style: 'color:var(--bb-amber);border-color:#7a4000;' }, 'SUS');
     susBtn.addEventListener('click', function() { _onMarkSus(s.username); });
 
     actions.append(banRemoveBtn, watchBtn, susBtn);

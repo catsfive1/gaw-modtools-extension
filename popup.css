@@ -38,7 +38,7 @@ html, body {
 .pop-brand {
   font-weight: 700;
   font-size: 12px;
-  color: #4A9EFF;
+  color: var(--bb-blue);
   letter-spacing: 0.1px;
 }
 .pop-ver {
@@ -122,8 +122,8 @@ html, body {
   border-color: #3a3f48;
 }
 .pop-btn-primary {
-  background: #4A9EFF;
-  border-color: #4A9EFF;
+  background: var(--bb-blue);
+  border-color: var(--bb-blue);
   color: #fff;
   font-size: 12px;
   padding: 8px 12px;
@@ -194,7 +194,7 @@ html, body {
   letter-spacing: 0.1px;
 }
 .pop-btn-ghost:hover {
-  border-color: #4A9EFF;
+  border-color: var(--bb-blue);
   color: #e8eaed;
   background: rgba(74,158,255,.06);
 }
@@ -248,7 +248,7 @@ html, body {
   transition: border-color .12s;
   min-width: 0;
 }
-.pop-token input:focus { border-color: #4A9EFF; }
+.pop-token input:focus { border-color: var(--bb-blue); }
 .pop-token button { flex-shrink: 0; }
 .pop-token-status {
   grid-column: 1 / -1;
@@ -592,7 +592,7 @@ html, body {
   font-size: 13px;
   font-weight: 700;
   margin-bottom: 6px;
-  color: #4A9EFF;
+  color: var(--bb-blue);
 }
 .gam-pop-modal-label {
   display: block;
@@ -640,7 +640,7 @@ html, body {
   font-size: 12px;
 }
 .gam-pop-modal-btn-ok {
-  background: #4A9EFF;
+  background: var(--bb-blue);
   color: #fff;
   border: 0;
   border-radius: 4px;
@@ -668,7 +668,7 @@ html, body {
   font-family: 'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;
   font-size: 10px;
   word-break: break-all;
-  color: #4A9EFF;
+  color: var(--bb-blue);
   margin-bottom: 4px;
   padding: 4px;
   background: #181b20;
@@ -688,7 +688,7 @@ html, body {
    footer (meta + CSV export). Width matches the 520px popup. */
 .pop-stat[data-drill] { cursor: pointer; }
 .pop-stat[data-drill]:hover {
-  border-color: #4A9EFF;
+  border-color: var(--bb-blue);
   background: #1c2028;
 }
 .pop-stat[data-drill]:active {
@@ -716,7 +716,7 @@ html, body {
 .pop-drill-title {
   font-size: 12px;
   font-weight: 700;
-  color: #4A9EFF;
+  color: var(--bb-blue);
   letter-spacing: 0.2px;
 }
 .pop-drill-close {
@@ -777,7 +777,7 @@ html, body {
   min-width: 0;
 }
 .pop-drill-row .col-user a {
-  color: #4A9EFF;
+  color: var(--bb-blue);
   text-decoration: none;
 }
 .pop-drill-row .col-user a:hover { text-decoration: underline; }
@@ -809,7 +809,7 @@ html, body {
   color: #8b929e;
 }
 .pop-drill-pill.banned { background: rgba(240,64,64,.16); color: #f06060; }
-.pop-drill-pill.pending { background: rgba(74,158,255,.14); color: #4A9EFF; }
+.pop-drill-pill.pending { background: rgba(74,158,255,.14); color: var(--bb-blue); }
 .pop-drill-pill.dr { background: rgba(167,139,250,.16); color: #a78bfa; }
 .pop-drill-pill.ready { background: rgba(240,64,64,.20); color: #f06060; }
 .pop-drill-pill.note { background: rgba(240,160,64,.14); color: var(--bb-warn); }
@@ -960,16 +960,16 @@ html, body {
   /* W2-W4 incrementally migrate the relevant call sites onto these. */
   --bb-blue:        #4A9EFF;  /* form / interactive chrome -- aligns with C.BLUE */
   --bb-warn-status: #f59e0b;  /* status-bar 'connectivity yellow' tier (W2 auth banner) */
-  --bb-teal:        #14b8a6;  /* sibling to --bb-cyan; W2/W3 pop accents */
+  /* v10.14.1: --bb-teal removed (zero callsites since W1 schema-only add) */
   --bb-r: 0;
   --bb-s1: 2px; --bb-s2: 4px; --bb-s3: 6px; --bb-s4: 8px;
   --bb-s5: 12px; --bb-s6: 16px; --bb-s7: 24px;
   --bb-font: ui-monospace, "JetBrains Mono", "IBM Plex Mono", "Cascadia Code", "Consolas", "Menlo", monospace;
   --bb-t-xs: 10px; --bb-t-sm: 11px; --bb-t-base: 12px;
   --bb-t-md: 13px; --bb-t-lg: 15px; --bb-t-xl: 18px; --bb-t-xxl: 22px;
-  /* v10.13.0 W1: stat-tile typographic scale, schema-only. */
+  /* v10.13.0 W1: stat-tile typographic scale. --bb-t-stat-md wired to .pop-stat-val v10.13.5 P1-01. */
   --bb-t-stat-md: 20px; /* 7-tile dense layout */
-  --bb-t-stat-lg: 28px; /* hero / single-tile */
+  /* v10.14.1: --bb-t-stat-lg removed (zero callsites; hero tile pattern not adopted) */
   /* v10.5: GAM Motion Grammar — 5 canonical duration/easing classes */
   --gam-dur-micro:      80ms;
   --gam-dur-appear:     160ms;
@@ -2296,7 +2296,8 @@ input[type="checkbox"]:checked::after {
 .gam-crawl-pill {
   font: 600 10px/1.2 var(--bb-font) !important;
   min-width: 36px !important;
-  min-height: 28px !important;
+  /* v10.14.1 CT2: 28 -> 32px to satisfy 32px click-target charter */
+  min-height: 32px !important;
   text-align: center !important;
   padding: 3px 6px !important;
   letter-spacing: 0.04em !important;
@@ -2361,7 +2362,8 @@ input[type="checkbox"]:checked::after {
   flex: 1 !important;
   text-align: left !important;
   padding: 4px 8px !important; /* v10.13.0 W1: 5px -> 4px snap-to-grid (UIUX2-27) */
-  min-height: 28px !important;
+  /* v10.14.1 CT2: 28 -> 32px to satisfy click-target charter */
+  min-height: 32px !important;
   background: transparent !important;
   border: none !important;
   color: var(--bb-ink) !important;
@@ -2373,6 +2375,16 @@ input[type="checkbox"]:checked::after {
 .pop-maint-action-row .pop-btn:focus-visible {
   outline: 1px solid var(--bb-amber) !important;
   outline-offset: -1px !important;
+}
+
+/* v10.14.1 CT4 (RALPH CLICK-TARGETS P-9): Safe-Mode toggle visible 32x16 with
+   ::after extension to meet 32x32 hit-zone charter. Track keeps its narrow
+   visual but ::after pseudo doubles the vertical click area. */
+#safeModeToggleTrack::after {
+  content: "";
+  position: absolute;
+  inset: -8px 0;
+  /* No background -- pure hit zone */
 }
 
 /* Inline status — right side of the row */

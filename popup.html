@@ -279,8 +279,10 @@
               title="Disables firehose, AI, animations, presence ping, auto-DR. Keeps: token entry, ban hammer, modmail send, mod log, settings.">
           &#x26A0; Safe Mode
         </span>
-        <label class="gam-toggle" id="safeModeToggleLabel" style="display:flex;align-items:center;gap:4px;cursor:pointer">
+        <label class="gam-toggle" id="safeModeToggleLabel" style="display:flex;align-items:center;gap:4px;cursor:pointer;min-height:32px;position:relative">
           <input type="checkbox" id="safeModeToggle" style="display:none">
+          <!-- v10.14.1 CT4: track stays 32x16 visually; ::after on track extends -->
+          <!-- the click target vertically to 32px so toggle meets a11y charter. -->
           <span id="safeModeToggleTrack" class="gam-toggle-track"
                 style="display:inline-block;width:32px;height:16px;background:var(--bb-line);position:relative;transition:background .2s">
             <span id="safeModeToggleThumb"
@@ -683,7 +685,7 @@
           LAPSED&nbsp;<strong id="lapsedModsCount"></strong>&nbsp;mods &gt;21d
         </span>
         <button id="lapsedPingAllBtn" class="pop-btn pop-btn-ghost"
-                style="font-size:10px;padding:2px 6px;min-height:0">Ping all</button>
+                style="font-size:10px;padding:2px 6px">Ping all</button>
         <button id="lapsedExpandBtn" class="chip-expand"
                 aria-expanded="false" aria-controls="lapsedModsPanel">Expand</button>
         <label for="lapsedThresholdInput" style="font-size:10px;color:var(--bb-ink-faint)">Threshold:</label>
