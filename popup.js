@@ -936,14 +936,24 @@ async function saveTokensSecurely(tokens) {
 
     // Keep durable local copy in sync so content-script boot paths that still
     // read chrome.storage.local can hydrate immediately after refresh/restart.
+    // v10.11 T1 (REDTEAM-1): tokens are encrypted in local storage by the background SW.
+    // The popup delegates persistence to the SW (setTokens RPC above). The local write
+    // here is a belt-and-suspenders fallback for boot paths -- SW will re-encrypt on
+    // next migration check. We therefore write via the background's authValidateToken
+    // RPC path when possible. For the direct-local-write fallback below, omit plaintext
+    // tokens so we don't write them in clear; the SW's migration will encrypt on boot.
     try {
       const current = await chrome.storage.local.get('gam_settings');
       const s = { ...(current.gam_settings || {}) };
-      if (hasWorker) s.workerModToken = t.workerModToken || '';
+      // NOTE: do NOT write workerModToken/leadModToken in plaintext here.
+      // The SW handles encrypted persistence via authValidateToken/authValidateLeadToken RPCs.
+      // This block only updates non-token settings (isLeadMod flag, etc.) for the local copy.
       if (hasLead) {
-        s.leadModToken = t.leadModToken || '';
         s.isLeadMod = !!(t.leadModToken || '');
+        // Remove stale plaintext if present (migration may not have run yet)
+        if (t.leadModToken && s.leadModToken) delete s.leadModToken;
       }
+      if (hasWorker && s.workerModToken && !t.workerModToken) delete s.workerModToken; // clearing token
       await chrome.storage.local.set({ gam_settings: s });
     } catch (e) {}
 
@@ -2769,11 +2779,12 @@ loadLead();
       try {
         const sr = await popupRpc('setTokens', { workerModToken: input });
         // Note: setTokens RPC may not exist; fall back to saveTokensSecurely
+        // v10.11 T1 (REDTEAM-1): do NOT write plaintext token to chrome.storage.local here.
+        // If the RPC fails, use authValidateToken which handles encryption in the SW.
         if (!sr || !sr.ok) {
-          // Fallback: write directly to chrome.storage.local
-          const cur = await chrome.storage.local.get('gam_settings');
-          const merged = { ...(cur.gam_settings || {}), workerModToken: input };
-          await chrome.storage.local.set({ gam_settings: merged });
+          // Fallback: use authValidateToken RPC which validates AND persists encrypted.
+          // Direct chrome.storage.local writes of plaintext tokens are no longer safe.
+          try { await popupRpc('authValidateToken', { token: input }); } catch (_) {}
         }
         const who = await popupRpc('modWhoami');
         if (who && who.ok && who.data && who.data.username) {
@@ -5621,16 +5632,57 @@ async function renderDiagTab() {
     });
     var pct = total / MAINT_QUOTA_BYTES * 100;
     var tokenData = await chrome.storage.local.get('gam_settings');
-    var ts2 = tokenData && tokenData.gam_settings && tokenData.gam_settings.tokenIssuedAt;
-    var tokenAge = ts2 ? Math.floor((Date.now() - ts2) / 86400000) + 'd' : 'unknown';
-    stoEl.textContent = [
-      'Storage: ' + __fmtBytes(total) + ' (' + pct.toFixed(1) + '% of 5MB)',
-      'Token age: ' + tokenAge,
-    ].join('\n');
-    stoEl.className = pct > 80 ? 'pop-token-status err' : pct > 60 ? 'pop-token-status warn' : 'pop-token-status ok';
+    var ts2s = tokenData && tokenData.gam_settings;
+    // v10.11 T3 (REDTEAM-1): use new issued_at / expires_at metadata fields.
+    var nowMsD = Date.now();
+    var workerIssued = ts2s && ts2s.workerModToken_issued_at;
+    var workerExpires = ts2s && ts2s.workerModToken_expires_at;
+    var workerAgeLine = workerIssued
+      ? ('Team token age: ' + Math.floor((nowMsD - workerIssued) / 86400000) + 'd' +
+         (workerExpires ? (' / expires in ' + Math.max(0, Math.floor((workerExpires - nowMsD) / 86400000)) + 'd') : ''))
+      : 'Team token age: unknown';
+    var leadIssued = ts2s && ts2s.leadModToken_issued_at;
+    var leadExpires = ts2s && ts2s.leadModToken_expires_at;
+    var leadAgeLine = leadIssued
+      ? ('Lead token age: ' + Math.floor((nowMsD - leadIssued) / 86400000) + 'd' +
+         (leadExpires ? (' / expires in ' + Math.max(0, Math.floor((leadExpires - nowMsD) / 86400000)) + 'd') : ''))
+      : '';
+    var stoLines = ['Storage: ' + __fmtBytes(total) + ' (' + pct.toFixed(1) + '% of 5MB)', workerAgeLine];
+    if (leadAgeLine) stoLines.push(leadAgeLine);
+    // Amber chip if either token expires within 7 days
+    var workerDaysLeft = workerExpires ? Math.floor((workerExpires - nowMsD) / 86400000) : 999;
+    var leadDaysLeft = leadExpires ? Math.floor((leadExpires - nowMsD) / 86400000) : 999;
+    var minDaysLeft = Math.min(workerDaysLeft, leadDaysLeft);
+    stoEl.textContent = stoLines.join('\n');
+    stoEl.className = (pct > 80 || minDaysLeft <= 3) ? 'pop-token-status err' : (pct > 60 || minDaysLeft <= 7) ? 'pop-token-status warn' : 'pop-token-status ok';
   } catch(e) {
     stoEl.textContent = 'storage read failed: ' + (e && e.message || e);
     stoEl.className = 'pop-token-status err';
+  }
+
+  // --- Section 5: Crypto health (v10.11 T4 REDTEAM-1) ---
+  var cryptEl = $('diagCryptEl');
+  if (cryptEl) {
+    try {
+      var cryptResp = await chrome.runtime.sendMessage({ type: 'cryptHealth' });
+      var ch = cryptResp && cryptResp.data;
+      if (ch) {
+        cryptEl.textContent = [
+          'Crypto key present: ' + (ch.cryptKeyPresent ? 'yes' : 'NO (IDB unavailable?)'),
+          'IDB available: ' + (ch.idbAvailable ? 'yes' : 'NO'),
+          'Encrypted tokens: ' + ch.encryptedTokensFound,
+          'Plaintext tokens: ' + ch.plaintextTokensFound + (ch.plaintextTokensFound > 0 ? ' (migration pending)' : ''),
+          'Last migration: ' + (ch.lastMigrationTs ? new Date(ch.lastMigrationTs).toLocaleString() : 'never')
+        ].join('\n');
+        cryptEl.className = (!ch.cryptKeyPresent || !ch.idbAvailable) ? 'pop-token-status err' : ch.plaintextTokensFound > 0 ? 'pop-token-status warn' : 'pop-token-status ok';
+      } else {
+        cryptEl.textContent = 'crypt health unavailable';
+        cryptEl.className = 'pop-token-status warn';
+      }
+    } catch(e) {
+      cryptEl.textContent = 'crypt health error: ' + (e && e.message || e);
+      cryptEl.className = 'pop-token-status err';
+    }
   }
 }
 

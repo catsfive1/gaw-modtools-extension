@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GAW ModTools",
-  "version": "10.10.1",
+  "version": "10.11.0",
   "description": "Moderator toolkit for greatawakening.win: Mod Console, shared flags, audit log, Death Row queue, mod-to-mod chat, and self-heal Maintenance routines.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAramwewDgo9ovmIDjYX/McKKmQAg7RaI5lkRlNGngoim7+F2IhOfGuu55l1o/1elP3pKf4LRIl86NG98RG2jc78nCNJAtIDQdkpW/EmWAat5gwn7HV2s6Qq3R7lgsGV7rCzrvrln474CljoQ42Tugqn1E2pAdXl0r0Gk12BKAB/Sa9sabWKoMVHC0tyz3c2dDXyhdosqftC1CXGysEqCXMTl70835rO+SSp0wi3wURr4YAFWrMX0b0DO8vEUyQ+oAZ2M3jj7W4wCzMITA7ZLeXzHKAe57JQjptbAxOsLiD2vEFVJ64NfvjlDGKamOVvEw+8v0HS9de1s1tDkkQt131QIDAQAB",
   "icons": {
@@ -45,7 +45,8 @@
     "service_worker": "background.js"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; base-uri 'self';"
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'self'; connect-src 'self' https://gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev https://greatawakening.win https://*.greatawakening.win; img-src 'self' data: https://greatawakening.win https://*.greatawakening.win; style-src 'self' 'unsafe-inline'; font-src 'self';"
   },
+  "_csp_notes": "v10.11 REDTEAM-3: object-src tightened to none; connect-src pinned to worker+GAW only; img-src allows GAW avatars/thumbnails + data: URIs; font-src self for JetBrains Mono webfont. style-src keeps unsafe-inline pending TS-2 (v10.12 effort to refactor 38+ inline cssText sites before that can be removed).",
   "minimum_chrome_version": "116"
 }

@@ -31,7 +31,7 @@
   }
   window.__GAM_MT_LOADED = true;
 
-  const VERSION = 'v10.10.1';
+  const VERSION = 'v10.11.0';
 
   // v10.6.1 HOTFIX: FEATURE_FLAGS must be declared BEFORE any synchronous IIFE
   // that references it. The earliest reference is __v80ParkUI at line ~3398
@@ -183,7 +183,7 @@
     try {
       const r = await rpcCall('gamInstallType', {});
       _gamInstallType = (r && r.ok && r.data && r.data.installType) || 'unknown';
-    } catch(_) { _gamInstallType = 'unknown'; }
+    } catch(e) { _logError('rpc', ERR_SEV.LOW, e, { op: 'getInstallType' }); _gamInstallType = 'unknown'; } // v10.11 C2: Cat B
     return _gamInstallType;
   }
 
@@ -272,6 +272,69 @@
       }
     } catch (_){}
   }
+
+  // ============================================================================
+  // v10.11 C4 (REDTEAM-2): Error taxonomy — ERR_SEV levels + _logError helper.
+  //
+  // ERR_SEV levels (use the lowest that accurately describes impact):
+  //   CRITICAL  user-blocking action lost; should never happen in normal flow
+  //   HIGH      user-visible degradation; mod notices something didn't work
+  //   MED       background failure; recoverable, not visible to mod
+  //   LOW       benign noise in polling / heartbeat / best-effort paths
+  //   INFO      purely observability; not an error at all
+  //
+  // When to use _logError vs intentional silent catch:
+  //   _logError  -- any catch where we want observability in _diagLog / console
+  //   silent     -- DOM ops that are provably no-ops if the element doesn't exist
+  //                 (e.g. el.remove() when el may not be in the tree)
+  //                 Mark these: // intentional: DOM may not contain el; benign no-op
+  //
+  // Subsystem naming: lowercase, dash-separated, max 15 chars.
+  //   Examples: 'storage', 'rpc', 'ui-ban', 'ui-dr', 'ui-sus',
+  //             'poll-hb', 'poll-mm', 'auth-modal', 'modchat', 'snack'
+  //
+  // Production behaviour: _logError always logs; never throws.
+  //   CRITICAL/HIGH -> console.warn + _diagLog('error')
+  //   MED           -> console.warn + _diagLog('warn')
+  //   LOW/INFO      -> _diagLog('info') only (no console noise)
+  // ============================================================================
+
+  // v10.11 C1 (REDTEAM-2): severity taxonomy constants.
+  const ERR_SEV = Object.freeze({
+    CRITICAL: 'critical',
+    HIGH:     'high',
+    MED:      'med',
+    LOW:      'low',
+    INFO:     'info'
+  });
+
+  // v10.11 C1 (REDTEAM-2): central structured error logger.
+  // Use instead of bare catch(_). Routes through _diagLog for storage + relay.
+  // NEVER throws -- its own internal catch swallows silently.
+  function _logError(subsystem, severity, errOrMsg, ctx) {
+    try {
+      const err = (errOrMsg instanceof Error) ? errOrMsg : new Error(String(errOrMsg));
+      const message = err.message || String(errOrMsg);
+      const stack = err.stack ? err.stack.slice(0, 800) : null;
+      const enriched = Object.assign({
+        severity: severity,
+        err_name: err.name || 'Error',
+        err_msg: message,
+        err_stack: stack
+      }, ctx || {});
+      if (severity === ERR_SEV.CRITICAL || severity === ERR_SEV.HIGH) {
+        console.warn('[gam:' + subsystem + ']', message, enriched);
+      } else if (severity === ERR_SEV.MED) {
+        console.warn('[gam:' + subsystem + ']', message);
+      }
+      if (typeof _diagLog === 'function') {
+        _diagLog(subsystem,
+          (severity === ERR_SEV.CRITICAL || severity === ERR_SEV.HIGH) ? 'error' : 'warn',
+          enriched);
+      }
+    } catch(_e) { /* logger must never throw */ }
+  }
+
   // v10.10.1 P2 (DESIGN-03): expand const C to 35-key mirror of popup.css tokens; brand=AMBER, form=BLUE separated explicitly
   // All existing keys are preserved at their original values for call-site compat.
   // New keys added: AMBER (brand primary), BG/BG2/BG3 reconciled, ink variants, alpha fills.
@@ -598,10 +661,10 @@
               const stuck = document.querySelectorAll('.post[data-gam-age-hidden="1"]');
               if (stuck.length > 0) {
                 stuck.forEach(p=>{ p.style.display=''; p.removeAttribute('data-gam-age-hidden'); });
-                try { _diagLog('profile-defense', `swept ${stuck.length} stuck-hidden posts on ${location.pathname}`); } catch(_){}
+                try { _diagLog('profile-defense', `swept ${stuck.length} stuck-hidden posts on ${location.pathname}`); } catch(_){} // intentional: _diagLog defensive wrap; benign no-op
               }
             }, 500);
-          } catch(e){ try { console.warn('[ModTools v9.5.1] profile-defense sweep failed', e); } catch(_){} }
+          } catch(e){ _logError('poll-mm', ERR_SEV.LOW, e, { op: 'profile-defense-sweep' }); } // v10.11 C2: Cat D
         }, 350);
       }
 
@@ -627,8 +690,8 @@
     function _safeHandleNav(){
       try { _handleNav(); }
       catch(e) {
-        try { _diagLog('spa-nav', '_handleNav threw on nav', { err: String(e && e.message || e) }); } catch(_){}
-        try { closeAllPanels(); } catch(_){}
+        _logError('spa-nav', ERR_SEV.HIGH, e, { op: '_handleNav' }); // v10.11 C2: Cat B
+        try { closeAllPanels(); } catch(_){} // intentional: DOM cleanup; benign no-op if already closed
       }
     }
     history.pushState=function(...a){ _origPush(...a); setTimeout(_safeHandleNav,150); };
@@ -799,7 +862,7 @@
         };
         rpcCall('modmailTrackResponse', _mmTrackArgs).catch(function(e) {
           // On failure (including SW death), enqueue for later replay
-          try { _enqueueRpc('modmailTrackResponse', _mmTrackArgs); } catch(_){}
+          try { _enqueueRpc('modmailTrackResponse', _mmTrackArgs); } catch(e){ _logError('rpc', ERR_SEV.MED, e, { op: 'enqueue-modmailTrackResponse' }); } // v10.11 C2: Cat B
         });
         // AF-28 (Rule 83): invalidate modmail draft cache on send success.
         // Stale draft for this thread should not appear next time the popover opens.
@@ -1733,13 +1796,13 @@
     try {
       const r = await chrome.runtime.sendMessage({ type:'rpc', name:'authBackupGet', args:{ key } });
       return (r && r.ok && r.data) ? r.data.value : null;
-    } catch (_) { return null; }
+    } catch (e) { _logError('auth-backup', ERR_SEV.MED, e, { op: 'authBackupGet', key: key }); return null; } // v10.11 C2: Cat B
   }
   async function _authBackupPut(key, value) {
     try {
       const r = await chrome.runtime.sendMessage({ type:'rpc', name:'authBackupPut', args:{ key, value } });
       return !!(r && r.ok);
-    } catch (_) { return false; }
+    } catch (e) { _logError('auth-backup', ERR_SEV.MED, e, { op: 'authBackupPut', key: key }); return false; } // v10.11 C2: Cat B
   }
 
   async function preloadSecrets(){
@@ -1975,9 +2038,9 @@
         _teamFeaturesLastPoll = Date.now();
       } else if (r && !r.ok) {
         // v10.5.1 INVARIANT: warn on explicit failure (network hole or bad token) -- not on swallowed exception
-        try { console.warn('[ModTools v10.5.1] pollTeamFeatures: RPC returned not-ok', r && r.error); } catch(_){}
+        _logError('rpc', ERR_SEV.MED, 'pollTeamFeatures not-ok', { rpc_error: r && r.error }); // v10.11 C2: Cat B
       }
-    } catch (e) { /* swallow -- retry next tick */ }
+    } catch (e) { _logError('poll-hb', ERR_SEV.LOW, e, { op: 'pollTeamFeatures' }); } // v10.11 C2: Cat D
   }
   // Kick once after boot, then every 5 minutes. Always-on (cheap).
   // AF-26 (Rule 77): scheduleIdle for non-critical boot task
@@ -2022,8 +2085,8 @@
       const v = await safeGet('gam_fallback_mode', '0');
       FallbackMode = (v === '1' || v === true || v === 1);
       // Also clear any legacy localStorage copy if present
-      try { if (localStorage.getItem('gam_fallback_mode') !== null) localStorage.removeItem('gam_fallback_mode'); } catch(_){}
-    } catch(e){}
+      try { if (localStorage.getItem('gam_fallback_mode') !== null) localStorage.removeItem('gam_fallback_mode'); } catch(_){} // intentional: localStorage may be blocked in some contexts; benign no-op
+    } catch(e){ _logError('storage', ERR_SEV.LOW, e, { op: 'loadFallback' }); } // v10.11 C2: Cat B
   })();
   function setFallbackMode(on){
     FallbackMode = !!on;
@@ -7470,8 +7533,8 @@
       _cloudProfilesCache = null;
       _cloudProfilesFetchedAt = 0;
     } catch(e){
-      console.error('[pattern-sync] push EXCEPTION:', e);
-      try { snack('\u26A0 Auto-DR rule sync exception: ' + String(e).slice(0, 80), 'warn'); } catch(_){}
+      _logError('rpc', ERR_SEV.HIGH, e, { op: 'auto-dr-rule-sync' }); // v10.11 C2: Cat B
+      try { snack('\u26A0 Auto-DR rule sync exception: ' + String(e).slice(0, 80), 'warn'); } catch(_){} // intentional: snack defensive wrap; benign no-op
     }
   }
 
@@ -9174,9 +9237,9 @@ Analyze this comment against the community rules. Then write a brief, profession
         }
         _banAuditId = (pf && pf.audit_id) || null;
       } catch(pfErr) {
-        // Preflight failure is non-fatal \u2014 log and proceed so a worker outage
+        // Preflight failure is non-fatal -- log and proceed so a worker outage
         // doesn't block the mod from banning. The audit chain will have a gap.
-        try { console.warn('[modtools] ban-preflight failed (non-fatal):', pfErr && pfErr.message || pfErr); } catch(_){}
+        _logError('ui-ban', ERR_SEV.MED, pfErr, { op: 'ban-preflight' }); // v10.11 C2: Cat B
       }
 
       // V11 #5: wrap apiBan with undo middleware (Tier A, 20s window)
@@ -9872,7 +9935,7 @@ Analyze this comment against the community rules. Then write a brief, profession
             }
             _quickPermaBanAuditId = (pf && pf.audit_id) || null;
           } catch(pfErr) {
-            try { console.warn('[modtools] quick-perma ban-preflight failed (non-fatal):', pfErr && pfErr.message || pfErr); } catch(_){}
+            _logError('ui-ban', ERR_SEV.MED, pfErr, { op: 'quick-perma-ban-preflight' }); // v10.11 C2: Cat B
           }
           statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Sending ban...</div>`;
           const r = await withUndo(
@@ -9989,7 +10052,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           if (!confirm(`Arm DR Sniper on ${username}?\nThey will be banned 125h after their NEXT comment.`)) return;
           btn.disabled = true;
           const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
-          const r = await rpcCall('modSniperArm', { username, mod: me, banDelayHours: 125 });
+          const r = await rpcCall('modSniperArm', { username, mod: me, banDelayHours: 125, client_op_id: __makeReqId() }); // v10.11 C5 (REDTEAM-2): idempotency key
           if (r.ok){
             logAction({ type:'sniper-arm', user:username, delay:'125h after 1st comment', source:'mod-console-quick' });
             statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-green">\u{1F3AF} Sniper armed \u2014 trap ready</div>`;
@@ -10605,7 +10668,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     const ctxM = (ctxA.getAttribute('href') || '').match(/\/u\/([^\/\?#]+)/);
     if (!ctxM) {
       // Edge: href contains /u/ but doesn't match the user pattern (e.g. /u/community:foo)
-      try { console.warn('[ModTools v10.5.1] ctx-menu: /u/ link with non-user href', ctxA.href); } catch(_){}
+      try { console.warn('[ModTools v10.5.1] ctx-menu: /u/ link with non-user href', ctxA.href); } catch(_){} // intentional: console.warn defensive wrap; benign no-op
       return;
     }
     const ctxU = decodeURIComponent(ctxM[1]);
@@ -11387,13 +11450,13 @@ Analyze this comment against the community rules. Then write a brief, profession
         if (_susState.rows.has(lk)) {
           // Clear path
           if (!confirm(`Clear SUS flag on ${username}?`)) return;
-          const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modSusClear', args:{ username } });
+          const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modSusClear', args:{ username, client_op_id: __makeReqId() } }); // v10.11 C5 (REDTEAM-2): idempotency key
           if (r && r.ok){ _susState.rows.delete(lk); snack(`✓ SUS cleared on ${username}`, 'success'); _susApplyDecorations(true); unpinTooltip(); }
           else { snack(`Clear failed (HTTP ${r && r.status || '?'})`, 'error'); }
         } else {
           // Mark path — prompt for reason
           const reason = prompt(`Reason for marking ${username} SUS? (optional)`, '') || '';
-          const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modSusMark', args:{ username, reason } });
+          const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modSusMark', args:{ username, reason, client_op_id: __makeReqId() } }); // v10.11 C5 (REDTEAM-2): idempotency key
           if (r && r.ok){
             _susState.rows.set(lk, (r.data && r.data.row) || { username, reason, marked_by: '(you)', comment_count_24h: 0 });
             snack(`\u{1F6A9} ${username} marked SUS`, 'success');
@@ -12251,23 +12314,23 @@ Analyze this comment against the community rules. Then write a brief, profession
               stats.messagesIngested++;
             }
             stats.threadsIngested++;
-          } catch (_) { stats.errors++; }
+          } catch (e) { stats.errors++; _logError('poll-mm', ERR_SEV.LOW, e, { op: 'crawl-parse-thread', page }); } // v10.11 C2: Cat D
         }
         // Sync to worker
         if (allThreads.length || allMessages.length) {
-          try { await syncCapturedToWorker(allThreads, allMessages); } catch (_) { stats.errors++; }
+          try { await syncCapturedToWorker(allThreads, allMessages); } catch (e) { stats.errors++; _logError('rpc', ERR_SEV.MED, e, { op: 'syncCapturedToWorker', page }); } // v10.11 C2: Cat B
         }
         stats.pagesCrawled++;
         if (typeof opts.onProgress === 'function') {
-          try { opts.onProgress({ ...stats, page }); } catch (_) {}
+          try { opts.onProgress({ ...stats, page }); } catch (_) {} // intentional: progress callback; benign no-op if caller threw
         }
-      } catch (e) { stats.errors++; }
+      } catch (e) { stats.errors++; _logError('poll-mm', ERR_SEV.MED, e, { op: 'crawl-page', page }); } // v10.11 C2: Cat D
       // Throttle before next page
       if (page < maxPages) await new Promise(r => setTimeout(r, throttleMs));
     }
     return stats;
   }
-  try { window.__GAM_BACKFILL_MODMAIL = crawlModmailHistory; } catch (_) {}
+  try { window.__GAM_BACKFILL_MODMAIL = crawlModmailHistory; } catch (_) {} // intentional: window property assignment; benign no-op in restricted context
 
   // Background poller — fire on modmail pages or periodically from the status bar.
   const INBOX_INTEL_POLL_MS_DEFAULT = 15 * 60 * 1000;
@@ -17247,7 +17310,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           unmarkBtn.disabled = true;
           unmarkBtn.textContent = '...';
           try {
-            await rpcCall('modSusClear', { username });
+            await rpcCall('modSusClear', { username, client_op_id: __makeReqId() }); // v10.11 C5 (REDTEAM-2): idempotency key
             if (typeof _susState === 'object' && _susState && _susState.rows) {
               _susState.rows.delete(String(username).toLowerCase());
             }
@@ -17932,7 +17995,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     sirenClearBtn.addEventListener('click', (e)=>{
       e.stopPropagation();
       const lastTotal = parseInt(sirenBtn.getAttribute('data-current-total') || '0', 10) || 0;
-      try { setSetting('siren.dismissedAtTotal', lastTotal); } catch(_){}
+      try { setSetting('siren.dismissedAtTotal', lastTotal); } catch(e){ _logError('storage', ERR_SEV.LOW, e, { op: 'siren-dismiss', val: lastTotal }); } // v10.11 C2: Cat B
       sirenBtn.style.display = 'none';
       sirenClearBtn.style.display = 'none';
     });
@@ -18097,7 +18160,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       e.stopPropagation();
       const cur = __tickerStates[__tickerIdx];
       if (!cur) return;
-      if (cur.kind === 'modmail') { try { ModChat.openPanel(); } catch(_){} return; }
+      if (cur.kind === 'modmail') { try { ModChat.openPanel(); } catch(e){ _logError('modchat', ERR_SEV.HIGH, e, { op: 'ticker-openPanel' }); } return; } // v10.11 C2: Cat C
       if (cur.kind === 'sus') { try { _showSusPopover(tickerEl); } catch(err) { console.warn('[TP.1]', err); } return; }
       if (cur.kind === 'dr') { try { _showDrPopover(tickerEl); } catch(err) { console.warn('[TP.2]', err); } return; }
       if (cur.kind === 'queue') { try { _showQueuePopover(tickerEl); } catch(err) { console.warn('[TP.3]', err); } return; }
@@ -18162,8 +18225,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       // AF-30 (Rule 90): skip ambient prefetch in low-resource mode
       if (!_ambientPrefetchStarted && !_LOW_RESOURCE_MODE) {
         _ambientPrefetchStarted = true;
-        setTimeout(function() { try { _ambientModmailPrefetch(); } catch(_){} }, 500);
-        setInterval(function() { try { _ambientModmailPrefetch(); } catch(_){} }, 10 * 60 * 1000);
+        setTimeout(function() { try { _ambientModmailPrefetch(); } catch(e){ _logError('poll-mm', ERR_SEV.LOW, e, { op: 'ambientPrefetch-initial' }); } }, 500); // v10.11 C2: Cat D
+        setInterval(function() { try { _ambientModmailPrefetch(); } catch(e){ _logError('poll-mm', ERR_SEV.LOW, e, { op: 'ambientPrefetch-interval' }); } }, 10 * 60 * 1000); // v10.11 C2: Cat D
       }
       try { _showModmailPopover(inboxBtn); } catch(err) {
         try { snack('Modmail popover failed: ' + (err && err.message || err), 'error'); } catch(_){}
@@ -18342,7 +18405,7 @@ Analyze this comment against the community rules. Then write a brief, profession
               susBtn.textContent = 'SUS';
               susBtn.style.cssText = 'background:transparent;border:1px solid #ff9933;color:#ff9933;padding:1px 5px;cursor:pointer;font:700 9px ui-monospace,monospace';
               susBtn.addEventListener('click', function() {
-                rpcCall('modSusMark', { username: u, reason: 'brigade-cluster' }).then(function() {
+                rpcCall('modSusMark', { username: u, reason: 'brigade-cluster', client_op_id: __makeReqId() }).then(function() { // v10.11 C5 (REDTEAM-2): idempotency key
                   susBtn.textContent = 'MARKED';
                   susBtn.disabled = true;
                 }).catch(function(){});
@@ -18362,7 +18425,7 @@ Analyze this comment against the community rules. Then write a brief, profession
             markBtn.textContent = 'Marking...';
             markBtn.disabled = true;
             Promise.all(newAuthors.map(function(u) {
-              return rpcCall('modSusMark', { username: u, reason: 'brigade-cluster' }).catch(function(){});
+              return rpcCall('modSusMark', { username: u, reason: 'brigade-cluster', client_op_id: __makeReqId() }).catch(function(){}); // v10.11 C5 (REDTEAM-2): idempotency key
             })).then(function() {
               markBtn.textContent = 'All marked SUS';
               snack('Marked ' + newAuthors.length + ' brigade accounts SUS', 'warn');
@@ -21490,13 +21553,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
             lastTokenPromptAt_iso: (st && st.lastTokenPromptAt) ? new Date(st.lastTokenPromptAt).toISOString() : null,
             tokenOnboardedOnce: !!(st && st.tokenOnboardedOnce)
           });
-        } catch(_){}
+        } catch(_){} // intentional: _diagLog defensive wrap; benign no-op
 
         if (st && typeof st.workerModToken === 'string' && st.workerModToken.length > 8) {
           console.log('[modtools] modal suppressed: chrome.storage.local has token, hydrating cache');
           try { _diagLog('auth-modal', 'BAIL: chrome.storage.local has token (len=' + st.workerModToken.length + '), hydrating cache'); } catch(_){}
-          try { _secretsCache['workerModToken'] = st.workerModToken; } catch(_){}
-          if (st.leadModToken) try { _secretsCache['leadModToken'] = st.leadModToken; } catch(_){}
+          try { _secretsCache['workerModToken'] = st.workerModToken; } catch(e){ _logError('auth-modal', ERR_SEV.HIGH, e, { op: 'hydrate-workerModToken' }); } // v10.11 C2: Cat B
+          if (st.leadModToken) try { _secretsCache['leadModToken'] = st.leadModToken; } catch(e){ _logError('auth-modal', ERR_SEV.HIGH, e, { op: 'hydrate-leadModToken' }); } // v10.11 C2: Cat B
           return;
         }
 
@@ -21713,7 +21776,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       const q = (r[MSG_QUEUE_KEY] || []).slice(-(MSG_QUEUE_MAX - 1));
       q.push({ id: Date.now() + '-' + Math.random().toString(36).slice(2), ts: Date.now(), type: 'rpc', name: name, args: args || {} });
       await chrome.storage.local.set({ [MSG_QUEUE_KEY]: q });
-    } catch(_){}
+    } catch(e){ _logError('storage', ERR_SEV.MED, e, { op: 'enqueueRpc', name: name }); } // v10.11 C2: Cat B
   }
 
   async function _replayMsgQueue() {
@@ -21723,9 +21786,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       if (!q || !q.length) return;
       await chrome.storage.local.remove(MSG_QUEUE_KEY); // optimistic clear
       for (const item of q) {
-        try { await rpcCall(item.name, item.args); } catch(_){}
+        try { await rpcCall(item.name, item.args); } catch(e){ _logError('rpc', ERR_SEV.MED, e, { op: 'replayMsgQueue', name: item.name }); } // v10.11 C2: Cat B
       }
-    } catch(_){}
+    } catch(e){ _logError('storage', ERR_SEV.MED, e, { op: 'replayMsgQueue' }); } // v10.11 C2: Cat B
   }
 
   // AF-14 (Rule 41): RPC call-level debug logging, toggleable via msg_log_enabled setting.
@@ -21738,7 +21801,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       const log = (r[_RPC_LOG_KEY] || []).slice(-(_RPC_LOG_MAX - 1));
       log.push(entry);
       await chrome.storage.local.set({ [_RPC_LOG_KEY]: log });
-    } catch(_){}
+    } catch(e){ _logError('storage', ERR_SEV.LOW, e, { op: 'appendRpcLog' }); } // v10.11 C2: Cat B
   }
 
   async function rpcCall(name, args){
@@ -22942,7 +23005,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         try {
           const v = await chrome.runtime.sendMessage({ type:'verifyUpdateFlag', flag: flag });
           verified = !!(v && v.ok);
-        } catch (_) {}
+        } catch (e) { _logError('rpc', ERR_SEV.MED, e, { op: 'verifyUpdateFlag' }); } // v10.11 C2: Cat B
         if (!verified) {
           try { console.warn('[ModTools v9.3.15 SECURITY] gam_update_available flag failed SW verification — refusing to render banner'); } catch (_) {}
           // Defensive cleanup of suspicious flag write.
@@ -23065,19 +23128,19 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
             ts: new Date().toISOString(),
             url: location.href
           });
-          try { _diagLog('sticky', `auto-unsticky toggled post ${id} age=${ageH.toFixed(1)}h up=${upvotes}`); } catch(_){}
+          try { _diagLog('sticky', `auto-unsticky toggled post ${id} age=${ageH.toFixed(1)}h up=${upvotes}`); } catch(_){} // intentional: _diagLog defensive wrap; benign no-op
           // One per tick to avoid bursts.
           return;
         }
       } catch (e) {
-        try { _diagLog('sticky', 'auto-unsticky toggle failed: ' + (e && e.message || e)); } catch(_){}
+        _logError('sticky', ERR_SEV.MED, e, { op: 'auto-unsticky-toggle', id }); // v10.11 C2: Cat B
       }
     }
   }
   // v9.12.0 - kick the tick every 4 min when on home / community / feed.
-  setInterval(() => { try { autoUnstickyTick(); } catch(e){} }, 4 * 60 * 1000);
+  setInterval(() => { try { autoUnstickyTick(); } catch(e){ _logError('sticky', ERR_SEV.LOW, e, { op: 'autoUnstickyTick-interval' }); } }, 4 * 60 * 1000); // v10.11 C2: Cat D
   // Initial run on load (small delay to let DOM settle)
-  setTimeout(() => { try { autoUnstickyTick(); } catch(e){} }, 8000);
+  setTimeout(() => { try { autoUnstickyTick(); } catch(e){ _logError('sticky', ERR_SEV.LOW, e, { op: 'autoUnstickyTick-initial' }); } }, 8000); // v10.11 C2: Cat D
 
   // QUICK STICKY KEYS (v8.4.0) -- FOXY-style hover-and-press.
   // Hover any post and press:
@@ -23535,17 +23598,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         counters[featureName] = entry;
         await chrome.storage.local.set({ [_ERR_COUNTER_KEY]: counters });
       }
-    } catch(_) {}
+    } catch(e) { _logError('storage', ERR_SEV.MED, e, { op: 'incrementErrorCounter', feature: featureName }); } // v10.11 C2: Cat B
   }
 
   function _onFeatureAutoDisabled(featureName, count) {
-    try { _diagLog('auto_disable', 'Feature auto-disabled: ' + featureName, { count: count, ts: Date.now() }); } catch(_) {}
+    try { _diagLog('auto_disable', 'Feature auto-disabled: ' + featureName, { count: count, ts: Date.now() }); } catch(_) {} // intentional: _diagLog defensive wrap; benign no-op
     _renderDisabledChip(featureName);
     // Dispatch event so popup can refresh its feature list
     try {
       document.dispatchEvent(new CustomEvent('gam-feature-auto-disabled', { detail: { feature: featureName } }));
-    } catch(_) {}
-    try { snack('⚠ Feature "' + featureName + '" auto-disabled (3 errors in 5 min) -- re-enable from popup', 'error'); } catch(_) {}
+    } catch(e) { _logError('ui-ban', ERR_SEV.LOW, e, { op: 'dispatchEvent-feature-auto-disabled' }); } // v10.11 C2: Cat B
+    try { snack('⚠ Feature "' + featureName + '" auto-disabled (3 errors in 5 min) -- re-enable from popup', 'error'); } catch(_) {} // intentional: snack defensive wrap; benign no-op
   }
 
   function _renderDisabledChip(featureName) {
@@ -23560,7 +23623,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       chip.title = 'Feature "' + featureName + '" auto-disabled due to repeated errors. Re-enable from popup Tools tab.';
       chip.textContent = '⚠ ' + featureName + ' disabled';
       bar.appendChild(chip);
-    } catch(_) {}
+    } catch(e) { _logError('ui-ban', ERR_SEV.LOW, e, { op: 'renderDisabledChip', feature: featureName }); } // v10.11 C2: Cat B
   }
 
   async function _clearErrorCounter(featureName) {
@@ -23982,7 +24045,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
               var ok = !!(r && (r.ok || (r.status >= 200 && r.status < 300)));
               var status = (r && (r.status || (ok ? 200 : 0))) || 0;
               if (ok) {
-                try { logAction({ type: 'auto_unsticky', target: act.target_thing_id, meta: act.target_meta || null, queue_id: act.id }); } catch(_){}
+                try { logAction({ type: 'auto_unsticky', target: act.target_thing_id, meta: act.target_meta || null, queue_id: act.id }); } catch(e){ _logError('storage', ERR_SEV.LOW, e, { op: 'logAction-auto_unsticky' }); } // v10.11 C2: Cat B
               }
               sendResponse({ ok: ok, status: status, error: ok ? null : ((r && r.error) || 'unsticky_failed') });
               return;

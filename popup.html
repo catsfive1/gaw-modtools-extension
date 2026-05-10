@@ -19,6 +19,23 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
+  <!-- M5 REDTEAM-3: skip link for keyboard/AT users. Visible on focus only. -->
+  <style>
+    .pop-skip-link {
+      position: absolute;
+      top: -100%;
+      left: 0;
+      background: #1a1d23;
+      color: #4A9EFF;
+      padding: 6px 12px;
+      font-size: 11px;
+      z-index: 9999;
+      border: 1px solid #4A9EFF;
+      text-decoration: none;
+    }
+    .pop-skip-link:focus { top: 0; }
+  </style>
+  <a href="#main-content" class="pop-skip-link">Skip to content</a>
   <div class="pop-header">
     <span class="pop-brand">&#x1F6E1; ModTools</span>
     <span class="pop-ver" id="ver">v10.6.0</span>
@@ -30,48 +47,59 @@
     <span id="maintWarningChip" class="pop-maint-chip" style="display:none" title="Maintenance attention needed"></span>
   </div>
 
+  <!-- M5 REDTEAM-3: main landmark wraps all interactive content for AT navigation -->
+  <main id="main-content">
   <!-- v9.15.0 - tabbed nav (Commander #30: eliminate vertical scrollbars
        unless absolutely necessary). 4 tabs map sections to focused screens.
        Each tab toggles the [data-tab="X"] sections via popup.js wireTabNav. -->
   <nav class="pop-tabnav" role="tablist" aria-label="ModTools navigation">
-    <button class="pop-tab pop-tab-active" data-tab="stats" role="tab" aria-selected="true">Stats</button>
-    <button class="pop-tab" data-tab="tokens" role="tab" aria-selected="false">Tokens</button>
-    <button class="pop-tab" data-tab="tools" role="tab" aria-selected="false">Tools</button>
-    <button class="pop-tab" data-tab="lead" role="tab" aria-selected="false">Lead</button>
+    <button id="tab-btn-stats" class="pop-tab pop-tab-active" data-tab="stats" role="tab" aria-selected="true" aria-controls="tab-panel-stats">Stats</button>
+    <button id="tab-btn-tokens" class="pop-tab" data-tab="tokens" role="tab" aria-selected="false" aria-controls="tab-panel-tokens">Tokens</button>
+    <button id="tab-btn-tools" class="pop-tab" data-tab="tools" role="tab" aria-selected="false" aria-controls="tab-panel-tools">Tools</button>
+    <button id="tab-btn-lead" class="pop-tab" data-tab="lead" role="tab" aria-selected="false" aria-controls="tab-panel-lead">Lead</button>
     <!-- E.3.1 (Rule 94): Diagnostics tab — 5th nav tab -->
-    <button class="pop-tab" data-tab="diag" role="tab" aria-selected="false">Diag</button>
+    <button id="tab-btn-diag" class="pop-tab" data-tab="diag" role="tab" aria-selected="false" aria-controls="tab-panel-diag">Diag</button>
   </nav>
 
+  <!-- M4.3 REDTEAM-3: stats tab panel wrapper (role="tabpanel") -->
+  <div id="tab-panel-stats" role="tabpanel" aria-labelledby="tab-btn-stats">
   <!-- v9.4.5: stat cards are clickable. data-drill key routes to renderDrillDown(key)
        in popup.js. Tooltip text in title= attribute (browser-native hover). -->
   <div class="pop-stats">
-    <div class="pop-stat" data-drill="pending" title="Users awaiting first-decision triage. Click to list.">
+    <div class="pop-stat" data-drill="pending" title="Users awaiting first-decision triage. Click to list."
+         role="button" tabindex="0" aria-label="Pending users — click to list">
       <div class="pop-stat-val" id="s-pending">&mdash;</div>
       <div class="pop-stat-label">Pending</div>
     </div>
-    <div class="pop-stat" data-drill="dr" title="Death Row queue: scheduled bans pending execution. Click to list.">
+    <div class="pop-stat" data-drill="dr" title="Death Row queue: scheduled bans pending execution. Click to list."
+         role="button" tabindex="0" aria-label="Death Row queue — click to list">
       <div class="pop-stat-val" id="s-dr" style="color:#a78bfa">&mdash;</div>
       <div class="pop-stat-label">Death Row</div>
     </div>
-    <div class="pop-stat" data-drill="banned" title="Users in your roster with status=banned. Click to list.">
+    <div class="pop-stat" data-drill="banned" title="Users in your roster with status=banned. Click to list."
+         role="button" tabindex="0" aria-label="Banned users — click to list">
       <div class="pop-stat-val" id="s-banned" style="color:#f04040">&mdash;</div>
       <div class="pop-stat-label">Banned</div>
     </div>
-    <div class="pop-stat" data-drill="bans24" title="Mod actions tagged 'ban' in the last 24h (your local log). Click for detail.">
+    <div class="pop-stat" data-drill="bans24" title="Mod actions tagged 'ban' in the last 24h (your local log). Click for detail."
+         role="button" tabindex="0" aria-label="Bans in the last 24 hours — click for detail">
       <div class="pop-stat-val" id="s-today" style="color:#4A9EFF">&mdash;</div>
       <div class="pop-stat-label">Bans / 24h</div>
     </div>
-    <div class="pop-stat" data-drill="msgs24" title="Messages and replies sent in the last 24h. Click for detail.">
+    <div class="pop-stat" data-drill="msgs24" title="Messages and replies sent in the last 24h. Click for detail."
+         role="button" tabindex="0" aria-label="Messages in the last 24 hours — click for detail">
       <div class="pop-stat-val" id="s-msgs" style="color:#3dd68c">&mdash;</div>
       <div class="pop-stat-label">Msgs / 24h</div>
     </div>
-    <div class="pop-stat" data-drill="notes24" title="Mod notes written in the last 24h. Click for detail.">
+    <div class="pop-stat" data-drill="notes24" title="Mod notes written in the last 24h. Click for detail."
+         role="button" tabindex="0" aria-label="Notes written in the last 24 hours — click for detail">
       <div class="pop-stat-val" id="s-notes" style="color:#f0a040">&mdash;</div>
       <div class="pop-stat-label">Notes / 24h</div>
     </div>
     <!-- ASK-086 / WAVE-B-AUX A.3: AI budget visibility. Value populated by loadStats() via /mod/stats. -->
     <!-- v10.10.1 P5 (DESIGN-09): AI tile needed data-drill for parity with other 7 tiles -->
-    <div class="pop-stat" data-drill="ai24" title="AI calls used today vs your daily cap (e.g. 47/500). Click for per-call log. Populated from worker /mod/stats.">
+    <div class="pop-stat" data-drill="ai24" title="AI calls used today vs your daily cap (e.g. 47/500). Click for per-call log. Populated from worker /mod/stats."
+         role="button" tabindex="0" aria-label="AI calls today vs cap — click for per-call log">
       <div class="pop-stat-val" id="s-ai-today" style="color:#c084fc">&mdash;</div>
       <div class="pop-stat-label">AI today</div>
     </div>
@@ -127,6 +155,8 @@
     </a>
   </div>
 
+  </div><!-- /#tab-panel-stats (M4.3 REDTEAM-3) -->
+
   <!-- v10.3: Force re-hydrate REMOVED (per Cat-1 audit). The button was a
        no-op since v9.2.1 because chrome.storage.onChanged listeners in
        both the content script AND the service worker auto-mirror token
@@ -136,6 +166,8 @@
        fires in the right context, re-validates against the worker, and
        auto-reloads on success. ELIMINATE-THE-MEATBAG: the auto-sync
        runs automatically; no button needed. -->
+  <!-- M4.3 REDTEAM-3: tools tab panel wrapper -->
+  <div id="tab-panel-tools" role="tabpanel" aria-labelledby="tab-btn-tools">
   <!-- v10.x: Collapsible card — Tools (Diagnostics + Data harvest) -->
   <details class="gam-card" id="card-tools" data-tab="tools" open>
     <summary class="gam-card-head">
@@ -322,8 +354,8 @@
     </div>
     <div id="macroEditWrap" style="display:none;margin-top:8px;padding:8px;background:#0e1115;border:1px solid #2a2d33;border-radius:4px">
       <input type="hidden" id="macroEditId" value="">
-      <input id="macroEditLabel" placeholder="Label (max 80 chars)" maxlength="80" style="width:100%;padding:6px 8px;background:#161a20;color:#dcdcdc;border:1px solid #2a2d33;border-radius:3px;font:11px inherit;margin-bottom:6px">
-      <textarea id="macroEditBody" placeholder="Body of the macro..." maxlength="4000" rows="4" style="width:100%;padding:6px 8px;background:#161a20;color:#dcdcdc;border:1px solid #2a2d33;border-radius:3px;font:12px inherit;resize:vertical"></textarea>
+      <input id="macroEditLabel" placeholder="Label (max 80 chars)" maxlength="80" aria-label="Macro label (max 80 chars)" style="width:100%;padding:6px 8px;background:#161a20;color:#dcdcdc;border:1px solid #2a2d33;border-radius:3px;font:11px inherit;margin-bottom:6px">
+      <textarea id="macroEditBody" placeholder="Body of the macro..." maxlength="4000" rows="4" aria-label="Macro body text (max 4000 chars)" style="width:100%;padding:6px 8px;background:#161a20;color:#dcdcdc;border:1px solid #2a2d33;border-radius:3px;font:12px inherit;resize:vertical"></textarea>
       <div class="pop-tools" style="margin-top:6px;display:flex;gap:4px">
         <button id="macroSaveBtn" class="pop-btn pop-btn-ghost" style="flex:1">Save</button>
         <button id="macroCancelBtn" class="pop-btn pop-btn-ghost" style="flex:1">Cancel</button>
@@ -333,7 +365,10 @@
   </div>
     </div><!-- /.gam-card-body macros -->
   </details><!-- /#card-macros -->
+  </div><!-- /#tab-panel-tools (M4.3 REDTEAM-3) -->
 
+  <!-- M4.3 REDTEAM-3: tokens tab panel wrapper -->
+  <div id="tab-panel-tokens" role="tabpanel" aria-labelledby="tab-btn-tokens">
   <!-- v10.x: Collapsible card — Tokens (team token + lead token + wizard + claim invite) -->
   <!-- v10.10.1 P1 (DESIGN-01): added data-tab="tokens" -- card was invisible to tab system -->
   <details class="gam-card" id="card-tokens" data-tab="tokens" open>
@@ -398,6 +433,8 @@
     </div>
   </div>
 
+  <!-- M4.3 REDTEAM-3: lead tab panel wrapper -->
+  <div id="tab-panel-lead" role="tabpanel" aria-labelledby="tab-btn-lead">
   <!-- v10.x: Collapsible card — Lead (token + KPI + tools) -->
   <!-- v10.10.1 P1 (DESIGN-01): added data-tab="lead" -- card was invisible to tab system -->
   <details class="gam-card" id="card-lead" data-tab="lead" open>
@@ -562,25 +599,29 @@
   <div id="leadKpiRow" style="display:none;grid-template-columns:repeat(4,1fr);gap:2px;margin:8px 0;border:1px solid #2a2d33"><!-- v10.6.2 HOTFIX UIUX-01: removed duplicate display:grid that defeated display:none -->
     <div class="gam-kpi-tile" id="kpi-active" data-kpi="active"
          style="background:#11131a;padding:8px 6px;text-align:center;cursor:pointer;border-right:1px solid #2a2d33"
-         title="Active mods now (presence ping in last 5m). Click for list.">
+         title="Active mods now (presence ping in last 5m). Click for list."
+         role="button" tabindex="0" aria-label="Active mods now — click for list">
       <div style="font:600 9px/1.2 ui-monospace,monospace;color:#888;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">ACTIVE NOW</div>
       <div id="kpi-active-val" style="font:700 22px/1 ui-monospace,monospace;color:#f0a040">&mdash;</div>
     </div>
     <div class="gam-kpi-tile" id="kpi-clearrate" data-kpi="clearrate"
          style="background:#11131a;padding:8px 6px;text-align:center;cursor:pointer;border-right:1px solid #2a2d33"
-         title="Queue clear-rate 24h. Stub until /metrics/queue-pressure endpoint lands.">
+         title="Queue clear-rate 24h. Stub until /metrics/queue-pressure endpoint lands."
+         role="button" tabindex="0" aria-label="Queue clear rate 24h — click for detail">
       <div style="font:600 9px/1.2 ui-monospace,monospace;color:#888;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">CLR-RATE</div>
       <div id="kpi-clearrate-val" style="font:700 22px/1 ui-monospace,monospace;color:#f0a040">&mdash;</div>
     </div>
     <div class="gam-kpi-tile" id="kpi-mmp50" data-kpi="mmp50"
          style="background:#11131a;padding:8px 6px;text-align:center;cursor:pointer;border-right:1px solid #2a2d33"
-         title="Modmail p50 response latency. Stub until /metrics/modmail-sla endpoint lands.">
+         title="Modmail p50 response latency. Stub until /metrics/modmail-sla endpoint lands."
+         role="button" tabindex="0" aria-label="Modmail p50 response latency — click for detail">
       <div style="font:600 9px/1.2 ui-monospace,monospace;color:#888;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">MM p50</div>
       <div id="kpi-mmp50-val" style="font:700 22px/1 ui-monospace,monospace;color:#f0a040">&mdash;</div>
     </div>
     <div class="gam-kpi-tile" id="kpi-incidents" data-kpi="incidents"
          style="background:#11131a;padding:8px 6px;text-align:center;cursor:pointer"
-         title="Open incidents. Coming v11.3 (mod_incidents table).">
+         title="Open incidents. Coming v11.3 (mod_incidents table)."
+         role="button" tabindex="0" aria-label="Open incidents — click for detail">
       <div style="font:600 9px/1.2 ui-monospace,monospace;color:#888;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">INCIDENTS</div>
       <div id="kpi-incidents-val" style="font:700 22px/1 ui-monospace,monospace;color:#f0a040">0</div>
     </div>
@@ -616,6 +657,7 @@
 
     </div><!-- /.gam-card-body lead -->
   </details><!-- /#card-lead -->
+  </div><!-- /#tab-panel-lead (M4.3 REDTEAM-3) -->
 
   <!-- v7.2 Platform Hardening: Claim invite button. When platformHardening is
        on, URL-detected invite codes are staged into chrome.storage.session by
@@ -637,9 +679,12 @@
   </div>
     </div><!-- /.gam-card-body tokens -->
   </details><!-- /#card-tokens -->
+  </div><!-- /#tab-panel-tokens (M4.3 REDTEAM-3) -->
 
   <!-- E.3.1 (Rule 94): Diagnostics tab section — data-tab="diag", hidden by default via wireTabNav -->
-  <div data-tab="diag" class="pop-tab-hidden" id="diagTabSection">
+  <!-- M4.3 REDTEAM-3: role="tabpanel" + aria-labelledby added -->
+  <div data-tab="diag" class="pop-tab-hidden" id="diagTabSection"
+       role="tabpanel" aria-labelledby="tab-btn-diag">
     <details class="gam-card" id="card-diag" open>
       <summary class="gam-card-head">
         <span class="gam-card-chevron" aria-hidden="true"></span>
@@ -669,7 +714,10 @@
     </details>
   </div>
 
-  <div class="pop-footer">
+  </main><!-- /#main-content (M5 REDTEAM-3) -->
+
+  <!-- M5 REDTEAM-3: role="contentinfo" marks this as the page footer landmark -->
+  <div class="pop-footer" role="contentinfo">
     <button id="exportBtn" class="pop-link">Export log</button>
     <span class="pop-sep">&middot;</span>
     <!-- E.2.2 (Rule 100): importBtn — between exportBtn and clearBtn per SHIPMASTER Section J -->

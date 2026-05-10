@@ -53,6 +53,9 @@ const HEALTH_PERIOD_MIN = 5;
 // v10.10.0 S4: auto-action poll alarm constants.
 const AUTO_POLL_ALARM = 'gam_auto_action_poll';
 const AUTO_POLL_PERIOD_MIN = 1; // 1 minute -- worker cron runs every 5 min so 1-min poll is responsive without overload
+// v10.11 T2 (REDTEAM-1): inactivity lock alarm -- fires every 5 min and checks elapsed idle time.
+const INACTIVITY_LOCK_ALARM = 'gam_inactivity_lock';
+const INACTIVITY_LOCK_PERIOD_MIN = 5;
 // Storage / log shape constants kept in sync with popup.js + modtools.js.
 const MAINT_DIAG_KEY = 'gam_diag_log';
 const MAINT_DIAG_MAX = 500;
@@ -88,6 +91,232 @@ const ALLOWED_ENDPOINTS = [
 ];
 
 let secretCache = { workerModToken: '', leadModToken: '' };
+
+// =============================================================================
+// v10.11 T1 (REDTEAM-1): AES-GCM-256 device-key encryption for durable token storage.
+// Tokens in chrome.storage.local are encrypted at rest. The CryptoKey lives in
+// IndexedDB (gam_crypt_db / keys / device-v1) with extractable:false so it can
+// never be exfiltrated even by an attacker who can read extension IDB.
+// Secret flow: IDB CryptoKey -> AES-GCM encrypt -> base64 ciphertext + IV
+// stored in gam_settings.workerModToken_encrypted / leadModToken_encrypted.
+// Plaintext fields are removed after successful migration.
+// =============================================================================
+
+// -- IDB helpers (thin wrapper, no external deps) --
+
+function _idbOpen() {
+  return new Promise(function(resolve, reject) {
+    try {
+      var req = indexedDB.open('gam_crypt_db', 1);
+      req.onupgradeneeded = function(e) {
+        try { e.target.result.createObjectStore('keys'); } catch (_) {}
+      };
+      req.onsuccess = function(e) { resolve(e.target.result); };
+      req.onerror = function(e) { reject(new Error('IDB open error: ' + (e.target && e.target.error && e.target.error.message || 'unknown'))); };
+    } catch (e) { reject(e); }
+  });
+}
+
+function _idbGet(db, store, key) {
+  return new Promise(function(resolve, reject) {
+    try {
+      var tx = db.transaction(store, 'readonly');
+      var req = tx.objectStore(store).get(key);
+      req.onsuccess = function(e) { resolve(e.target.result); };
+      req.onerror = function(e) { reject(new Error('IDB get error: ' + (e.target && e.target.error && e.target.error.message || 'unknown'))); };
+    } catch (e) { reject(e); }
+  });
+}
+
+function _idbPut(db, store, key, value) {
+  return new Promise(function(resolve, reject) {
+    try {
+      var tx = db.transaction(store, 'readwrite');
+      var req = tx.objectStore(store).put(value, key);
+      req.onsuccess = function() { resolve(); };
+      req.onerror = function(e) { reject(new Error('IDB put error: ' + (e.target && e.target.error && e.target.error.message || 'unknown'))); };
+    } catch (e) { reject(e); }
+  });
+}
+
+// Module-scope device key cache (lasts the SW lifecycle; re-loaded from IDB on boot)
+let _deviceKey = null;
+// Track IDB availability for _cryptHealth
+let _idbAvailable = null;
+
+// -- _cryptInit: get-or-create device key persisted in IDB --
+async function _cryptInit() {
+  if (_deviceKey) return _deviceKey;
+  try {
+    var db = await _idbOpen();
+    _idbAvailable = true;
+    var stored = await _idbGet(db, 'keys', 'device-v1');
+    if (stored && stored instanceof CryptoKey) {
+      _deviceKey = stored;
+      return _deviceKey;
+    }
+    // Generate new non-extractable AES-GCM-256 key
+    var key = await crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 256 },
+      false,          // extractable: false -- key cannot be exported, ever
+      ['encrypt', 'decrypt']
+    );
+    await _idbPut(db, 'keys', 'device-v1', key);
+    _deviceKey = key;
+    return _deviceKey;
+  } catch (e) {
+    _idbAvailable = false;
+    _deviceKey = null;
+    throw new Error('_cryptInit failed: ' + (e && e.message || String(e)));
+  }
+}
+
+// -- _cryptEncrypt: encrypt plaintext string, return {ct, iv, alg} --
+async function _cryptEncrypt(plaintext) {
+  var key = await _cryptInit();
+  var iv = crypto.getRandomValues(new Uint8Array(12));
+  var enc = new TextEncoder();
+  var ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(plaintext));
+  // Base64-encode both iv and ciphertext for JSON storage
+  var ivB64 = btoa(String.fromCharCode.apply(null, iv));
+  var ctArr = new Uint8Array(ct);
+  var ctB64 = btoa(String.fromCharCode.apply(null, ctArr));
+  return { ct: ctB64, iv: ivB64, alg: 'AES-GCM-256-v1' };
+}
+
+// -- _cryptDecrypt: decrypt {ct, iv, alg} blob, return plaintext string --
+async function _cryptDecrypt(blob) {
+  if (!blob || !blob.ct || !blob.iv || !blob.alg) throw new Error('invalid encrypted blob shape');
+  var key = await _cryptInit();
+  var ivArr = new Uint8Array(atob(blob.iv).split('').map(function(c) { return c.charCodeAt(0); }));
+  var ctArr = new Uint8Array(atob(blob.ct).split('').map(function(c) { return c.charCodeAt(0); }));
+  var plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ivArr }, key, ctArr);
+  return new TextDecoder().decode(plain);
+}
+
+// -- _cryptIsEncrypted: true if value has the encrypted blob shape --
+function _cryptIsEncrypted(value) {
+  return !!(value && typeof value === 'object' && typeof value.ct === 'string' && typeof value.iv === 'string' && value.alg === 'AES-GCM-256-v1');
+}
+
+// -- _cryptMigrateSettings: encrypts any plaintext token fields in gam_settings --
+// Safe to call multiple times; skips if already encrypted or already migrated.
+async function _cryptMigrateSettings() {
+  try {
+    // Check migration flag
+    var flagR = await chrome.storage.local.get('gam_crypt_migrated_v1');
+    if (flagR && flagR.gam_crypt_migrated_v1) return; // already migrated
+
+    var r = await chrome.storage.local.get('gam_settings');
+    var s = (r && r.gam_settings) || {};
+    var changed = false;
+    var patch = Object.assign({}, s);
+
+    // Migrate workerModToken
+    if (typeof s.workerModToken === 'string' && s.workerModToken.length > 0 && !_cryptIsEncrypted(s.workerModToken_encrypted)) {
+      try {
+        patch.workerModToken_encrypted = await _cryptEncrypt(s.workerModToken);
+        delete patch.workerModToken;
+        changed = true;
+      } catch (e) {
+        try { console.warn('[ModTools v10.11 CRYPT] workerModToken encrypt failed:', e.message); } catch (_) {}
+      }
+    }
+
+    // Migrate leadModToken
+    if (typeof s.leadModToken === 'string' && s.leadModToken.length > 0 && !_cryptIsEncrypted(s.leadModToken_encrypted)) {
+      try {
+        patch.leadModToken_encrypted = await _cryptEncrypt(s.leadModToken);
+        delete patch.leadModToken;
+        changed = true;
+      } catch (e) {
+        try { console.warn('[ModTools v10.11 CRYPT] leadModToken encrypt failed:', e.message); } catch (_) {}
+      }
+    }
+
+    if (changed) {
+      await chrome.storage.local.set({ gam_settings: patch });
+      try { console.log('[ModTools v10.11 CRYPT] token migration complete'); } catch (_) {}
+    }
+
+    // Set migration flag regardless so we don't re-scan on every boot
+    await chrome.storage.local.set({ gam_crypt_migrated_v1: Date.now() });
+  } catch (e) {
+    try { console.warn('[ModTools v10.11 CRYPT] migration error:', e.message); } catch (_) {}
+  }
+}
+
+// -- _cryptHealth: diagnostic probe for popup Diag tab --
+async function _cryptHealth() {
+  try {
+    var cryptKeyPresent = !!_deviceKey;
+    // Probe IDB if not already known
+    if (_idbAvailable === null) {
+      try { await _idbOpen(); _idbAvailable = true; } catch (_) { _idbAvailable = false; }
+    }
+    var r = await chrome.storage.local.get('gam_settings');
+    var s = (r && r.gam_settings) || {};
+    var encryptedTokensFound = (_cryptIsEncrypted(s.workerModToken_encrypted) ? 1 : 0) + (_cryptIsEncrypted(s.leadModToken_encrypted) ? 1 : 0);
+    var plaintextTokensFound = ((typeof s.workerModToken === 'string' && s.workerModToken.length > 0) ? 1 : 0) + ((typeof s.leadModToken === 'string' && s.leadModToken.length > 0) ? 1 : 0);
+    var migR = await chrome.storage.local.get('gam_crypt_migrated_v1');
+    return {
+      cryptKeyPresent: cryptKeyPresent,
+      idbAvailable: !!_idbAvailable,
+      encryptedTokensFound: encryptedTokensFound,
+      plaintextTokensFound: plaintextTokensFound,
+      lastMigrationTs: (migR && migR.gam_crypt_migrated_v1) || null
+    };
+  } catch (e) {
+    return { cryptKeyPresent: false, idbAvailable: false, encryptedTokensFound: 0, plaintextTokensFound: 0, lastMigrationTs: null, error: String(e && e.message || e) };
+  }
+}
+
+// =============================================================================
+// v10.11 T2 (REDTEAM-1): Inactivity timeout + forced re-auth.
+// Opt-in via gam_settings.lock_after_minutes (0 = disabled, default).
+// Every onMessage call bumps gam_last_activity_ts in chrome.storage.session.
+// The INACTIVITY_LOCK_ALARM (every 5 min) checks elapsed time and zeroes
+// secretCache + session storage if the threshold is exceeded.
+// =============================================================================
+
+async function _inactivityBumpActivity() {
+  try {
+    if (chrome.storage && chrome.storage.session) {
+      await chrome.storage.session.set({ gam_last_activity_ts: Date.now() });
+    }
+  } catch (_) {}
+}
+
+async function _inactivityLockCheck() {
+  try {
+    var r = await chrome.storage.local.get('gam_settings');
+    var s = (r && r.gam_settings) || {};
+    var lockAfterMinutes = parseInt(s.lock_after_minutes, 10) || 0;
+    if (lockAfterMinutes <= 0) return; // feature disabled
+
+    var actR = await chrome.storage.session.get('gam_last_activity_ts');
+    var lastTs = (actR && actR.gam_last_activity_ts) || 0;
+    var idleMs = Date.now() - lastTs;
+    var thresholdMs = lockAfterMinutes * 60 * 1000;
+
+    if (lastTs > 0 && idleMs > thresholdMs) {
+      // Lock: zero secretCache and session storage.
+      secretCache = { workerModToken: '', leadModToken: '' };
+      try {
+        if (chrome.storage && chrome.storage.session) {
+          await chrome.storage.session.remove('gam_settings');
+          await chrome.storage.session.remove('gam_last_activity_ts');
+        }
+      } catch (_) {}
+      // Broadcast "locked" state to all popup/content pages.
+      try {
+        chrome.runtime.sendMessage({ type: 'gamLocked', reason: 'inactivity' }).catch(function() {});
+      } catch (_) {}
+      try { console.warn('[ModTools v10.11 T2] inactivity lock triggered after', Math.round(idleMs / 60000), 'min idle'); } catch (_) {}
+      try { await _maintAppendDiag('inactivity.lock', 'locked', { idleMinutes: Math.round(idleMs / 60000), thresholdMinutes: lockAfterMinutes }); } catch (_) {}
+    }
+  } catch (_) {}
+}
 
 // v7.2 CHUNK 14: allow content scripts to read/write chrome.storage.session
 // so invite codes staged from a GAW page (content script) can be consumed
@@ -125,14 +354,41 @@ async function loadSecrets() {
     }
     // Fallback to durable local settings if session storage is empty (e.g.
     // service-worker restart or browser restart before popup re-sync).
+    // v10.11 T1 (REDTEAM-1): decrypt encrypted token blobs from local storage.
     if ((!s.workerModToken && !s.leadModToken) && chrome.storage && chrome.storage.local) {
       try {
         const localOut = await chrome.storage.local.get('gam_settings');
         const ls = (localOut && localOut.gam_settings) || {};
-        s = {
-          workerModToken: ls.workerModToken || '',
-          leadModToken: ls.leadModToken || ''
-        };
+
+        // Attempt decrypt for each token; fall through to plaintext if decrypt fails.
+        let workerPlain = '';
+        let leadPlain = '';
+
+        if (_cryptIsEncrypted(ls.workerModToken_encrypted)) {
+          try {
+            workerPlain = await _cryptDecrypt(ls.workerModToken_encrypted);
+          } catch (e) {
+            // Decrypt failure: key rotated or data corrupted -- zero this token, force re-auth.
+            try { console.warn('[ModTools v10.11 CRYPT] workerModToken decrypt failed, clearing:', e.message); } catch (_) {}
+            workerPlain = '';
+          }
+        } else if (typeof ls.workerModToken === 'string') {
+          // Plaintext still present (pre-migration boot) -- use as-is; migration will encrypt it shortly.
+          workerPlain = ls.workerModToken;
+        }
+
+        if (_cryptIsEncrypted(ls.leadModToken_encrypted)) {
+          try {
+            leadPlain = await _cryptDecrypt(ls.leadModToken_encrypted);
+          } catch (e) {
+            try { console.warn('[ModTools v10.11 CRYPT] leadModToken decrypt failed, clearing:', e.message); } catch (_) {}
+            leadPlain = '';
+          }
+        } else if (typeof ls.leadModToken === 'string') {
+          leadPlain = ls.leadModToken;
+        }
+
+        s = { workerModToken: workerPlain, leadModToken: leadPlain };
       } catch (e) {}
     }
     secretCache = {
@@ -329,12 +585,17 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     chrome.alarms.create(HEALTH_ALARM, { periodInMinutes: HEALTH_PERIOD_MIN });
     // v10.10.0 S1: auto-action poll alarm creation.
     chrome.alarms.create(AUTO_POLL_ALARM, { periodInMinutes: AUTO_POLL_PERIOD_MIN });
+    // v10.11 T2 (REDTEAM-1): inactivity lock alarm.
+    chrome.alarms.create(INACTIVITY_LOCK_ALARM, { periodInMinutes: INACTIVITY_LOCK_PERIOD_MIN });
   } catch (e) { console.warn('[ModTools] alarm create failed', e); }
   // v8.6.9: AWAIT __ensureSessionAccess so subsequent storage calls don't
   // fire before the session-area access level is set. Pre-fix race: the
   // setAccessLevel call was async-fired but not awaited; consumers that
   // hit chrome.storage.session immediately after install could fail.
   try { await __ensureSessionAccess(); } catch (e) {}
+  // v10.11 T1 (REDTEAM-1): init crypto key + migrate any plaintext tokens on install/update.
+  try { await _cryptInit(); } catch (e) { try { console.warn('[ModTools v10.11 CRYPT] _cryptInit onInstalled:', e.message); } catch (_) {} }
+  try { await _cryptMigrateSettings(); } catch (e) { try { console.warn('[ModTools v10.11 CRYPT] migrate onInstalled:', e.message); } catch (_) {} }
   try { await loadSecrets(); } catch (e) {}
 });
 
@@ -382,10 +643,18 @@ chrome.runtime.onStartup?.addListener(async () => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get AUTO_POLL_ALARM:', chrome.runtime.lastError.message); return; }
       if (!a) chrome.alarms.create(AUTO_POLL_ALARM, { periodInMinutes: AUTO_POLL_PERIOD_MIN });
     });
+    // v10.11 T2 (REDTEAM-1): inactivity lock alarm resurrection.
+    chrome.alarms.get(INACTIVITY_LOCK_ALARM, (a) => {
+      if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get INACTIVITY_LOCK_ALARM:', chrome.runtime.lastError.message); return; }
+      if (!a) chrome.alarms.create(INACTIVITY_LOCK_ALARM, { periodInMinutes: INACTIVITY_LOCK_PERIOD_MIN });
+    });
   } catch (e) {}
   // v8.6.9: AWAIT both bootstrap calls so the SW is fully ready before
   // any incoming RPC handler fires.
   try { await __ensureSessionAccess(); } catch (e) {}
+  // v10.11 T1 (REDTEAM-1): init crypto key + run migration on every SW boot.
+  try { await _cryptInit(); } catch (e) { try { console.warn('[ModTools v10.11 CRYPT] _cryptInit onStartup:', e.message); } catch (_) {} }
+  try { await _cryptMigrateSettings(); } catch (e) { try { console.warn('[ModTools v10.11 CRYPT] migrate onStartup:', e.message); } catch (_) {} }
   try { await loadSecrets(); } catch (e) {}
   // AF-08 (Rule 24): verify settings checksum on startup.
   try { await _maintSettingsChecksumVerify(); } catch (e) {}
@@ -680,6 +949,33 @@ async function _maintTokenAgeCheck() {
       }
     }
     await _maintAppendDiag('alarm.tokenAge', 'ok', { ageDays });
+    // v10.11 T3 (REDTEAM-1): check token expiry metadata and emit rotation reminder.
+    try {
+      var nowMs = Date.now();
+      var expiryFields = [
+        { key: 'workerModToken_expires_at', label: 'team token' },
+        { key: 'leadModToken_expires_at', label: 'lead token' }
+      ];
+      for (var ei = 0; ei < expiryFields.length; ei++) {
+        var ef = expiryFields[ei];
+        var expiresAt = s[ef.key];
+        if (!expiresAt) continue;
+        var daysRemaining = Math.floor((expiresAt - nowMs) / 86400000);
+        if (daysRemaining <= 3) {
+          await _maintSetWarning({
+            reason: ef.label + ' expires in ' + daysRemaining + ' day' + (daysRemaining === 1 ? '' : 's'),
+            detail: 'rotate via popup token panel immediately',
+            severity: 'danger'
+          });
+        } else if (daysRemaining <= 7) {
+          await _maintSetWarning({
+            reason: ef.label + ' expires in ' + daysRemaining + ' days',
+            detail: 'rotate via popup token panel soon',
+            severity: 'warn'
+          });
+        }
+      }
+    } catch (_) {}
     // AF-08 (Rule 24): write fresh settings checksum daily (piggybacking the 24h alarm).
     try { await _maintSettingsChecksumWrite(); } catch (_) {}
   } catch (e) {
@@ -1336,6 +1632,8 @@ async function _autoActionReportFailure(id, status, errMsg) {
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   // AF-05 (Rule 14): health heartbeat -- check vault + storage every 5 min.
   if (alarm.name === HEALTH_ALARM) { await _healthCheck(); return; }
+  // v10.11 T2 (REDTEAM-1): inactivity lock check.
+  if (alarm.name === INACTIVITY_LOCK_ALARM) { await _inactivityLockCheck(); return; }
   // v10.10.0 S1: auto-action poll dispatch.
   if (alarm.name === AUTO_POLL_ALARM) { await _autoActionPoll(); return; }
   if (alarm.name === BUG_POLL_ALARM) { await _bugPollAndBadge(); return; }
@@ -1427,6 +1725,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (chrome.runtime.lastError) { return; }
   // v5.8.1 security: same-extension sender guard (HIGH-4)
   if (sender.id !== chrome.runtime.id) return;
+
+  // v10.11 T2 (REDTEAM-1): bump inactivity timestamp on every message from popup/content.
+  _inactivityBumpActivity().catch(function() {});
 
   if (msg && msg.type === 'ping') {
     sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
@@ -1611,11 +1912,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!secretCache.workerModToken && !secretCache.leadModToken) {
         try { await loadSecrets(); } catch (e) {}
       }
+      // v10.11 T3 (REDTEAM-1): surface token age/expiry metadata.
+      var r3 = {};
+      try {
+        var tsR = await chrome.storage.local.get('gam_settings');
+        var tsS = (tsR && tsR.gam_settings) || {};
+        var nowMs = Date.now();
+        r3.workerTokenIssuedAt = tsS.workerModToken_issued_at || null;
+        r3.workerTokenExpiresAt = tsS.workerModToken_expires_at || null;
+        r3.workerTokenAgeDays = tsS.workerModToken_issued_at ? Math.floor((nowMs - tsS.workerModToken_issued_at) / 86400000) : null;
+        r3.workerTokenDaysRemaining = tsS.workerModToken_expires_at ? Math.floor((tsS.workerModToken_expires_at - nowMs) / 86400000) : null;
+        r3.leadTokenIssuedAt = tsS.leadModToken_issued_at || null;
+        r3.leadTokenExpiresAt = tsS.leadModToken_expires_at || null;
+        r3.leadTokenAgeDays = tsS.leadModToken_issued_at ? Math.floor((nowMs - tsS.leadModToken_issued_at) / 86400000) : null;
+        r3.leadTokenDaysRemaining = tsS.leadModToken_expires_at ? Math.floor((tsS.leadModToken_expires_at - nowMs) / 86400000) : null;
+      } catch (_) {}
       sendResponse({
         ok: true,
         hasTeamToken: !!secretCache.workerModToken,
-        hasLeadToken: !!secretCache.leadModToken
+        hasLeadToken: !!secretCache.leadModToken,
+        ...r3
       });
+    })();
+    return true;
+  }
+
+  // v10.11 T4 (REDTEAM-1): cryptHealth RPC -- popup Diag tab calls this to surface crypt status.
+  if (msg && msg.type === 'cryptHealth') {
+    (async () => {
+      try {
+        var health = await _cryptHealth();
+        // Wire into _maintAppendDiag so it appears in the diagnostic log.
+        try { await _maintAppendDiag('crypt.health', 'ok', health); } catch (_) {}
+        sendResponse({ ok: true, data: health });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e && e.message || e) });
+      }
     })();
     return true;
   }
@@ -1688,23 +2020,41 @@ function _classifyCaller(sender) {
 // already flipped to the new hash; the old token is dead.
 // AF-04 Rule 10: retry loop now routed through withBackoff (true exponential
 // backoff with jitter: 100ms base, 800ms cap, 3 attempts).
+// v10.11 T1 (REDTEAM-1): persists encrypted blob, not plaintext.
 async function _persistRotatedToken(newTokenPlaintext) {
   // Update in-memory SW vault immediately so this SW lifecycle still works.
   secretCache.workerModToken = newTokenPlaintext;
+
+  // Pre-encrypt once outside the retry loop; IV is random-per-call so this is fine.
+  var encBlob = null;
+  try { encBlob = await _cryptEncrypt(newTokenPlaintext); } catch (_) {}
 
   var saved = false;
   var lastError = null;
   try {
     await withBackoff(async function(attempt) {
       var cur = await chrome.storage.local.get('gam_settings');
-      var merged = Object.assign({}, (cur && cur.gam_settings) || {}, { workerModToken: newTokenPlaintext });
+      var merged = Object.assign({}, (cur && cur.gam_settings) || {});
+      delete merged.workerModToken; // remove any residual plaintext
+      if (encBlob) {
+        merged.workerModToken_encrypted = encBlob;
+      } else {
+        // IDB unavailable -- fall back to plaintext (best-effort)
+        merged.workerModToken = newTokenPlaintext;
+      }
       await chrome.storage.local.set({ gam_settings: merged });
-      // Read back to confirm -- chrome.storage.local is generally reliable but
-      // can fail silently under disk quota or extension update races.
+      // Read back to confirm.
       var verify = await chrome.storage.local.get('gam_settings');
-      var verifiedToken = verify && verify.gam_settings && verify.gam_settings.workerModToken;
-      if (verifiedToken !== newTokenPlaintext) {
-        throw new Error('verify mismatch on attempt ' + attempt);
+      var vs = (verify && verify.gam_settings) || {};
+      // Verify via encrypted field if we wrote one, else via plaintext field.
+      if (encBlob) {
+        if (!vs.workerModToken_encrypted || vs.workerModToken_encrypted.ct !== encBlob.ct) {
+          throw new Error('encrypted verify mismatch on attempt ' + attempt);
+        }
+      } else {
+        if (vs.workerModToken !== newTokenPlaintext) {
+          throw new Error('verify mismatch on attempt ' + attempt);
+        }
       }
     }, { base: 100, cap: 800, maxAttempts: 3 });
     saved = true;
@@ -1842,6 +2192,8 @@ const RPC_HANDLERS = {
           return { ok: false, status: r.status, error: 'malformed worker version response' };
         }
         // Token validated -- promote it into secretCache and persist.
+        // v10.11 T1 (REDTEAM-1): encrypt before writing to chrome.storage.local.
+        // v10.11 T3 (REDTEAM-1): record issued_at timestamp.
         secretCache.workerModToken = candidate;
         try {
           if (chrome.storage && chrome.storage.session) {
@@ -1849,8 +2201,17 @@ const RPC_HANDLERS = {
           }
           if (chrome.storage && chrome.storage.local) {
             const cur = await chrome.storage.local.get('gam_settings');
-            const merged = { ...((cur && cur.gam_settings) || {}), workerModToken: candidate };
-            await chrome.storage.local.set({ gam_settings: merged });
+            const base = { ...((cur && cur.gam_settings) || {}) };
+            delete base.workerModToken; // remove plaintext field
+            try {
+              base.workerModToken_encrypted = await _cryptEncrypt(candidate);
+            } catch (_) {
+              base.workerModToken = candidate; // IDB unavailable: fall back to plaintext
+            }
+            const nowMs = Date.now();
+            base.workerModToken_issued_at = nowMs;
+            base.workerModToken_expires_at = nowMs + (30 * 24 * 60 * 60 * 1000); // 30-day default
+            await chrome.storage.local.set({ gam_settings: base });
           }
         } catch (e) {}
         return { ok: true, status: r.status, data: { version: parsed.version } };
@@ -2303,6 +2664,8 @@ const RPC_HANDLERS = {
         if (r.status === 403) return { ok: false, status: 403, error: 'not a lead-mod token' };
         if (!r.ok) return { ok: false, status: r.status, error: 'worker error (HTTP ' + r.status + ')' };
         // Valid -- store it.
+        // v10.11 T1 (REDTEAM-1): encrypt before writing to chrome.storage.local.
+        // v10.11 T3 (REDTEAM-1): record issued_at timestamp.
         secretCache.leadModToken = candidate;
         try {
           if (chrome.storage && chrome.storage.session) {
@@ -2310,8 +2673,17 @@ const RPC_HANDLERS = {
           }
           if (chrome.storage && chrome.storage.local) {
             const cur = await chrome.storage.local.get('gam_settings');
-            const merged = { ...((cur && cur.gam_settings) || {}), leadModToken: candidate, isLeadMod: true };
-            await chrome.storage.local.set({ gam_settings: merged });
+            const base = { ...((cur && cur.gam_settings) || {}), isLeadMod: true };
+            delete base.leadModToken; // remove plaintext field
+            try {
+              base.leadModToken_encrypted = await _cryptEncrypt(candidate);
+            } catch (_) {
+              base.leadModToken = candidate; // IDB unavailable: fall back to plaintext
+            }
+            const nowMs = Date.now();
+            base.leadModToken_issued_at = nowMs;
+            base.leadModToken_expires_at = nowMs + (30 * 24 * 60 * 60 * 1000); // 30-day default
+            await chrome.storage.local.set({ gam_settings: base });
           }
         } catch (e) {}
         return { ok: true, status: r.status, data: { verified: true } };
