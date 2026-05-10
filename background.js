@@ -328,12 +328,31 @@ async function _inactivityLockCheck() {
 // from the popup. setAccessLevel is session-lifetime; calling it on install
 // AND startup keeps it armed across SW evictions. No-op on older Chrome
 // builds (wrapped try/catch).
+//
+// v10.12.1 PA.5 NOTE: TRUSTED_AND_UNTRUSTED_CONTEXTS is kept intentionally.
+// Switching to TRUSTED_CONTEXTS would break 25+ content-script chrome.storage.session
+// reads/writes in modtools.js (gam_macro_drafts, gam_modmail_drafts, gam_tard_suggestions,
+// K_SETTINGS hydration, etc.). Those must be migrated to named RPC handlers first.
+// See cross-file dependency in PERF-A-BG report. Infrastructure for the restricted
+// path is ready below and should be activated once modtools.js is rerouted.
 async function __ensureSessionAccess(){
   try {
     if (chrome.storage && chrome.storage.session && typeof chrome.storage.session.setAccessLevel === 'function'){
       await chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
     }
   } catch (e) { /* older Chrome: access-level API absent; content script will fail gracefully */ }
+}
+
+// v10.12.1 PA.5: restrict session storage to trusted (background) contexts only.
+// DEFERRED — activate after modtools.js content-script session reads are RPC-routed.
+// Uncomment the body below and remove the __ensureSessionAccess TRUSTED_AND_UNTRUSTED
+// call to enable. Both onInstalled and onStartup call this so it survives SW eviction.
+async function _ensureSessionAccessRestricted(){
+  try {
+    if (chrome.storage && chrome.storage.session && chrome.storage.session.setAccessLevel) {
+      await chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+    }
+  } catch (_) {}
 }
 
 // v10.7.3: module-scope SemVer comparison for update-flag staleness checks.
@@ -434,6 +453,168 @@ async function loadSecrets() {
   } catch (e) { /* service-worker may have been evicted; cache stays empty */ }
 }
 
+// v10.12.1 PA.2: gate RPC on init-ready to fix cold-boot 401 race
+// _initOnce() returns a promise that resolves after _cryptInit + loadSecrets
+// complete. Idempotent: second call returns the cached promise immediately.
+let _initReady = null;
+function _initOnce() {
+  if (!_initReady) {
+    _initReady = (async () => {
+      try { await _cryptInit(); } catch (_) {}
+      try { await loadSecrets(); } catch (_) {}
+    })();
+  }
+  return _initReady;
+}
+
+// v10.12.1 PA.4: gam_settings write coalescer — debounce non-critical writes to
+// avoid read-modify-write amplification on rapid successive setting changes.
+let _settingsWriteBuffer = null;
+let _settingsWriteTimer = null;
+const SETTINGS_WRITE_DEBOUNCE_MS = 300;
+
+async function _settingsCoalescedSet(patch) {
+  if (!_settingsWriteBuffer) {
+    try {
+      var cur = await chrome.storage.local.get('gam_settings');
+      _settingsWriteBuffer = (cur && cur.gam_settings) || {};
+    } catch (_) { _settingsWriteBuffer = {}; }
+  }
+  Object.assign(_settingsWriteBuffer, patch);
+  if (_settingsWriteTimer) { clearTimeout(_settingsWriteTimer); }
+  _settingsWriteTimer = setTimeout(async function() {
+    var toWrite = _settingsWriteBuffer;
+    _settingsWriteBuffer = null;
+    _settingsWriteTimer = null;
+    try { await chrome.storage.local.set({ gam_settings: toWrite }); } catch (e) {
+      try { console.warn('[ModTools PA.4] settings-coalesce write failed:', e && e.message || e); } catch (_) {}
+    }
+  }, SETTINGS_WRITE_DEBOUNCE_MS);
+}
+
+// Force-flush on critical writes (token rotation, auth flow)
+async function _settingsCoalescedFlush() {
+  if (_settingsWriteTimer) {
+    clearTimeout(_settingsWriteTimer);
+    _settingsWriteTimer = null;
+    if (_settingsWriteBuffer) {
+      var toWrite = _settingsWriteBuffer;
+      _settingsWriteBuffer = null;
+      try { await chrome.storage.local.set({ gam_settings: toWrite }); } catch (e) {
+        try { console.warn('[ModTools PA.4] settings-coalesce flush failed:', e && e.message || e); } catch (_) {}
+      }
+    }
+  }
+}
+
+// v10.12.1 PA.3: gam_diag_log -> IndexedDB to eliminate JSON-stringify storm
+// on chrome.storage.local. Falls back to the old path if IDB unavailable.
+const DIAG_DB_NAME = 'gam_diag_db';
+const DIAG_STORE = 'entries';
+
+function _diagDbOpen() {
+  return new Promise(function(resolve, reject) {
+    try {
+      var req = indexedDB.open(DIAG_DB_NAME, 1);
+      req.onupgradeneeded = function(e) {
+        var db = e.target.result;
+        if (!db.objectStoreNames.contains(DIAG_STORE)) {
+          var store = db.createObjectStore(DIAG_STORE, { keyPath: 'id', autoIncrement: true });
+          store.createIndex('ts', 'ts');
+        }
+      };
+      req.onsuccess = function(e) { resolve(e.target.result); };
+      req.onerror = function(e) { reject(e.target.error); };
+    } catch (e) { reject(e); }
+  });
+}
+
+async function _diagAppend(entry) {
+  try {
+    var db = await _diagDbOpen();
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(DIAG_STORE, 'readwrite');
+      tx.objectStore(DIAG_STORE).add(entry);
+      tx.oncomplete = function() { resolve(); };
+      tx.onerror = function(e) { reject(e.target.error); };
+    });
+  } catch (_) {
+    // IDB unavailable: fall back to chrome.storage.local (keep ring buffer cap at 500)
+    try {
+      chrome.storage.local.get('gam_diag_log').then(function(r) {
+        var log = (r.gam_diag_log || []).slice(-499);
+        log.push(entry);
+        chrome.storage.local.set({ gam_diag_log: log }).catch(function() {});
+      }).catch(function() {});
+    } catch (_2) {}
+  }
+}
+
+async function _diagPrune(maxAgeDays, capCount) {
+  if (maxAgeDays === undefined) { maxAgeDays = 7; }
+  if (capCount === undefined) { capCount = 1000; }
+  try {
+    var db = await _diagDbOpen();
+    var cutoff = Date.now() - maxAgeDays * 86400000;
+    return new Promise(function(resolve) {
+      var tx = db.transaction(DIAG_STORE, 'readwrite');
+      var idx = tx.objectStore(DIAG_STORE).index('ts');
+      var range = IDBKeyRange.upperBound(cutoff);
+      idx.openCursor(range).onsuccess = function(e) {
+        var cursor = e.target.result;
+        if (cursor) { cursor.delete(); cursor.continue(); }
+      };
+      tx.oncomplete = function() { resolve(); };
+    });
+  } catch (_) {}
+}
+
+async function _diagReadRecent(limit) {
+  if (limit === undefined) { limit = 500; }
+  try {
+    var db = await _diagDbOpen();
+    return new Promise(function(resolve) {
+      var out = [];
+      var tx = db.transaction(DIAG_STORE, 'readonly');
+      var idx = tx.objectStore(DIAG_STORE).index('ts');
+      idx.openCursor(null, 'prev').onsuccess = function(e) {
+        var cursor = e.target.result;
+        if (cursor && out.length < limit) { out.push(cursor.value); cursor.continue(); }
+        else { resolve(out); }
+      };
+      tx.onerror = function() { resolve(out); };
+    });
+  } catch (_) {
+    // IDB unavailable: read from legacy storage.local path
+    try {
+      var r = await chrome.storage.local.get('gam_diag_log');
+      return (r.gam_diag_log || []).slice(-limit);
+    } catch (_2) { return []; }
+  }
+}
+
+// One-shot migration: copy existing gam_diag_log entries from storage.local into IDB
+async function _diagMigrateFromStorage() {
+  try {
+    var flagR = await chrome.storage.local.get('gam_diag_migrated_v1');
+    if (flagR && flagR.gam_diag_migrated_v1) { return; } // already done
+    var r = await chrome.storage.local.get('gam_diag_log');
+    var entries = (r && r.gam_diag_log) || [];
+    if (entries.length > 0) {
+      var db = await _diagDbOpen();
+      await new Promise(function(resolve) {
+        var tx = db.transaction(DIAG_STORE, 'readwrite');
+        var store = tx.objectStore(DIAG_STORE);
+        entries.forEach(function(e) { try { store.add(e); } catch (_) {} });
+        tx.oncomplete = function() { resolve(); };
+        tx.onerror = function() { resolve(); };
+      });
+    }
+    await chrome.storage.local.remove('gam_diag_log');
+    await chrome.storage.local.set({ gam_diag_migrated_v1: Date.now() });
+  } catch (_) {}
+}
+
 // AF-03 Rule 7: global error handlers for unhandled promise rejections and errors.
 // Writes to chrome.storage.local gam_diag_log (same shape as _maintAppendDiag)
 // so failures are visible in the debug snapshot across SW evictions.
@@ -442,13 +623,10 @@ self.addEventListener('unhandledrejection', (event) => {
   const msg = (reason && reason.message) ? reason.message : String(reason);
   const stack = (reason && reason.stack) ? reason.stack : null;
   console.warn('[ModTools-SW] Unhandled rejection:', msg, stack);
+  // v10.12.1 PA.3: write to IDB diag store instead of storage.local
   try {
     const entry = { ts: Date.now(), iso: new Date().toISOString(), cat: 'unhandledrejection', msg, stack, v: 'v10.5.1' };
-    chrome.storage.local.get('gam_diag_log').then(function(r) {
-      const log = (r.gam_diag_log || []).slice(-499);
-      log.push(entry);
-      chrome.storage.local.set({ gam_diag_log: log }).catch(function() {});
-    }).catch(function() {});
+    _diagAppend(entry).catch(function() {});
   } catch (_) {}
 });
 
@@ -456,13 +634,10 @@ self.addEventListener('error', (event) => {
   const msg = (event.message) ? event.message : String(event);
   const stack = (event.error && event.error.stack) ? event.error.stack : null;
   console.warn('[ModTools-SW] Uncaught error:', msg, stack);
+  // v10.12.1 PA.3: write to IDB diag store instead of storage.local
   try {
     const entry = { ts: Date.now(), iso: new Date().toISOString(), cat: 'uncaught-error', msg, stack, v: 'v10.5.1' };
-    chrome.storage.local.get('gam_diag_log').then(function(r) {
-      const log = (r.gam_diag_log || []).slice(-499);
-      log.push(entry);
-      chrome.storage.local.set({ gam_diag_log: log }).catch(function() {});
-    }).catch(function() {});
+    _diagAppend(entry).catch(function() {});
   } catch (_) {}
 });
 
@@ -584,20 +759,21 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   }
 
   // (Re)create the recurring update-check alarm on install/update
+  // v10.12.1 PA.1: jitter to prevent thundering herd across 15-mod fleet
   try {
-    chrome.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
-    chrome.alarms.create(BUG_POLL_ALARM, { periodInMinutes: BUG_POLL_PERIOD_MIN });
+    chrome.alarms.create(ALARM_NAME, { delayInMinutes: ALARM_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: ALARM_PERIOD_MIN });
+    chrome.alarms.create(BUG_POLL_ALARM, { delayInMinutes: BUG_POLL_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: BUG_POLL_PERIOD_MIN });
     // v9.5.0 maintenance alarms.
-    chrome.alarms.create(MAINT_QUOTA_ALARM, { periodInMinutes: MAINT_QUOTA_PERIOD_MIN });
-    chrome.alarms.create(MAINT_TOKEN_AGE_ALARM, { periodInMinutes: MAINT_TOKEN_AGE_PERIOD_MIN });
-    chrome.alarms.create(MAINT_DIAG_ROTATE_ALARM, { periodInMinutes: MAINT_DIAG_ROTATE_PERIOD_MIN });
-    chrome.alarms.create(MAINT_INTEL_EVICT_ALARM, { periodInMinutes: MAINT_INTEL_EVICT_PERIOD_MIN });
-    chrome.alarms.create(MAINT_WEEKLY_ALARM, { periodInMinutes: MAINT_WEEKLY_PERIOD_MIN });
-    chrome.alarms.create(HEALTH_ALARM, { periodInMinutes: HEALTH_PERIOD_MIN });
+    chrome.alarms.create(MAINT_QUOTA_ALARM, { delayInMinutes: MAINT_QUOTA_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: MAINT_QUOTA_PERIOD_MIN });
+    chrome.alarms.create(MAINT_TOKEN_AGE_ALARM, { delayInMinutes: MAINT_TOKEN_AGE_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: MAINT_TOKEN_AGE_PERIOD_MIN });
+    chrome.alarms.create(MAINT_DIAG_ROTATE_ALARM, { delayInMinutes: MAINT_DIAG_ROTATE_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: MAINT_DIAG_ROTATE_PERIOD_MIN });
+    chrome.alarms.create(MAINT_INTEL_EVICT_ALARM, { delayInMinutes: MAINT_INTEL_EVICT_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: MAINT_INTEL_EVICT_PERIOD_MIN });
+    chrome.alarms.create(MAINT_WEEKLY_ALARM, { delayInMinutes: MAINT_WEEKLY_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: MAINT_WEEKLY_PERIOD_MIN });
+    chrome.alarms.create(HEALTH_ALARM, { delayInMinutes: HEALTH_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: HEALTH_PERIOD_MIN });
     // v10.10.0 S1: auto-action poll alarm creation.
-    chrome.alarms.create(AUTO_POLL_ALARM, { periodInMinutes: AUTO_POLL_PERIOD_MIN });
+    chrome.alarms.create(AUTO_POLL_ALARM, { delayInMinutes: AUTO_POLL_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: AUTO_POLL_PERIOD_MIN });
     // v10.11 T2 (REDTEAM-1): inactivity lock alarm.
-    chrome.alarms.create(INACTIVITY_LOCK_ALARM, { periodInMinutes: INACTIVITY_LOCK_PERIOD_MIN });
+    chrome.alarms.create(INACTIVITY_LOCK_ALARM, { delayInMinutes: INACTIVITY_LOCK_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: INACTIVITY_LOCK_PERIOD_MIN });
   } catch (e) { console.warn('[ModTools] alarm create failed', e); }
   // v8.6.9: AWAIT __ensureSessionAccess so subsequent storage calls don't
   // fire before the session-area access level is set. Pre-fix race: the
@@ -608,6 +784,8 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   try { await _cryptInit(); } catch (e) { try { console.warn('[ModTools v10.11 CRYPT] _cryptInit onInstalled:', e.message); } catch (_) {} }
   try { await _cryptMigrateSettings(); } catch (e) { try { console.warn('[ModTools v10.11 CRYPT] migrate onInstalled:', e.message); } catch (_) {} }
   try { await loadSecrets(); } catch (e) {}
+  // v10.12.1 PA.3: one-shot migration of gam_diag_log from storage.local to IDB
+  try { await _diagMigrateFromStorage(); } catch (e) {}
 });
 
 // Also ensure the alarm is alive on service-worker wake-up
@@ -617,47 +795,48 @@ chrome.runtime.onStartup?.addListener(async () => {
     // AF-04 Rule 12: every chrome.alarms.get callback checks lastError before use.
     chrome.alarms.get(ALARM_NAME, (a) => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get ALARM_NAME:', chrome.runtime.lastError.message); return; }
-      if (!a) chrome.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
+      // v10.12.1 PA.1: jitter to prevent thundering herd across 15-mod fleet
+      if (!a) chrome.alarms.create(ALARM_NAME, { delayInMinutes: ALARM_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: ALARM_PERIOD_MIN });
     });
     chrome.alarms.get(BUG_POLL_ALARM, (a) => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get BUG_POLL_ALARM:', chrome.runtime.lastError.message); return; }
-      if (!a) chrome.alarms.create(BUG_POLL_ALARM, { periodInMinutes: BUG_POLL_PERIOD_MIN });
+      if (!a) chrome.alarms.create(BUG_POLL_ALARM, { delayInMinutes: BUG_POLL_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: BUG_POLL_PERIOD_MIN });
     });
     // v9.5.0 maintenance alarms — ensure alive on SW wake.
     chrome.alarms.get(MAINT_QUOTA_ALARM, (a) => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get MAINT_QUOTA_ALARM:', chrome.runtime.lastError.message); return; }
-      if (!a) chrome.alarms.create(MAINT_QUOTA_ALARM, { periodInMinutes: MAINT_QUOTA_PERIOD_MIN });
+      if (!a) chrome.alarms.create(MAINT_QUOTA_ALARM, { delayInMinutes: MAINT_QUOTA_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: MAINT_QUOTA_PERIOD_MIN });
     });
     chrome.alarms.get(MAINT_TOKEN_AGE_ALARM, (a) => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get MAINT_TOKEN_AGE_ALARM:', chrome.runtime.lastError.message); return; }
-      if (!a) chrome.alarms.create(MAINT_TOKEN_AGE_ALARM, { periodInMinutes: MAINT_TOKEN_AGE_PERIOD_MIN });
+      if (!a) chrome.alarms.create(MAINT_TOKEN_AGE_ALARM, { delayInMinutes: MAINT_TOKEN_AGE_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: MAINT_TOKEN_AGE_PERIOD_MIN });
     });
     chrome.alarms.get(MAINT_DIAG_ROTATE_ALARM, (a) => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get MAINT_DIAG_ROTATE_ALARM:', chrome.runtime.lastError.message); return; }
-      if (!a) chrome.alarms.create(MAINT_DIAG_ROTATE_ALARM, { periodInMinutes: MAINT_DIAG_ROTATE_PERIOD_MIN });
+      if (!a) chrome.alarms.create(MAINT_DIAG_ROTATE_ALARM, { delayInMinutes: MAINT_DIAG_ROTATE_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: MAINT_DIAG_ROTATE_PERIOD_MIN });
     });
     chrome.alarms.get(MAINT_INTEL_EVICT_ALARM, (a) => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get MAINT_INTEL_EVICT_ALARM:', chrome.runtime.lastError.message); return; }
-      if (!a) chrome.alarms.create(MAINT_INTEL_EVICT_ALARM, { periodInMinutes: MAINT_INTEL_EVICT_PERIOD_MIN });
+      if (!a) chrome.alarms.create(MAINT_INTEL_EVICT_ALARM, { delayInMinutes: MAINT_INTEL_EVICT_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: MAINT_INTEL_EVICT_PERIOD_MIN });
     });
     chrome.alarms.get(MAINT_WEEKLY_ALARM, (a) => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get MAINT_WEEKLY_ALARM:', chrome.runtime.lastError.message); return; }
-      if (!a) chrome.alarms.create(MAINT_WEEKLY_ALARM, { periodInMinutes: MAINT_WEEKLY_PERIOD_MIN });
+      if (!a) chrome.alarms.create(MAINT_WEEKLY_ALARM, { delayInMinutes: MAINT_WEEKLY_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: MAINT_WEEKLY_PERIOD_MIN });
     });
     // AF-05 (Rule 14): health heartbeat resurrection on SW wake.
     chrome.alarms.get(HEALTH_ALARM, (a) => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get HEALTH_ALARM:', chrome.runtime.lastError.message); return; }
-      if (!a) chrome.alarms.create(HEALTH_ALARM, { periodInMinutes: HEALTH_PERIOD_MIN });
+      if (!a) chrome.alarms.create(HEALTH_ALARM, { delayInMinutes: HEALTH_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: HEALTH_PERIOD_MIN });
     });
     // v10.10.0 S1: auto-action poll alarm resurrection on SW wake.
     chrome.alarms.get(AUTO_POLL_ALARM, (a) => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get AUTO_POLL_ALARM:', chrome.runtime.lastError.message); return; }
-      if (!a) chrome.alarms.create(AUTO_POLL_ALARM, { periodInMinutes: AUTO_POLL_PERIOD_MIN });
+      if (!a) chrome.alarms.create(AUTO_POLL_ALARM, { delayInMinutes: AUTO_POLL_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: AUTO_POLL_PERIOD_MIN });
     });
     // v10.11 T2 (REDTEAM-1): inactivity lock alarm resurrection.
     chrome.alarms.get(INACTIVITY_LOCK_ALARM, (a) => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get INACTIVITY_LOCK_ALARM:', chrome.runtime.lastError.message); return; }
-      if (!a) chrome.alarms.create(INACTIVITY_LOCK_ALARM, { periodInMinutes: INACTIVITY_LOCK_PERIOD_MIN });
+      if (!a) chrome.alarms.create(INACTIVITY_LOCK_ALARM, { delayInMinutes: INACTIVITY_LOCK_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: INACTIVITY_LOCK_PERIOD_MIN });
     });
   } catch (e) {}
   // v8.6.9: AWAIT both bootstrap calls so the SW is fully ready before
@@ -667,6 +846,8 @@ chrome.runtime.onStartup?.addListener(async () => {
   try { await _cryptInit(); } catch (e) { try { console.warn('[ModTools v10.11 CRYPT] _cryptInit onStartup:', e.message); } catch (_) {} }
   try { await _cryptMigrateSettings(); } catch (e) { try { console.warn('[ModTools v10.11 CRYPT] migrate onStartup:', e.message); } catch (_) {} }
   try { await loadSecrets(); } catch (e) {}
+  // v10.12.1 PA.3: one-shot migration of gam_diag_log from storage.local to IDB
+  try { await _diagMigrateFromStorage(); } catch (e) {}
   // AF-08 (Rule 24): verify settings checksum on startup.
   try { await _maintSettingsChecksumVerify(); } catch (e) {}
 });
@@ -812,10 +993,9 @@ async function _bugPollAndBadge() {
 // update banner) so they don't misfire each other.
 
 async function _maintAppendDiag(routine, result, extra) {
+  // v10.12.1 PA.3: write to IDB diag store instead of storage.local
   try {
-    const r = await chrome.storage.local.get(MAINT_DIAG_KEY);
-    const log = (r[MAINT_DIAG_KEY] || []).slice(-(MAINT_DIAG_MAX - 1));
-    log.push({
+    const entry = {
       ts: Date.now(),
       iso: new Date().toISOString(),
       cat: 'maint',
@@ -823,8 +1003,8 @@ async function _maintAppendDiag(routine, result, extra) {
       extra: { result, ...(extra || null) },
       stack: null,
       v: chrome.runtime.getManifest().version
-    });
-    await chrome.storage.local.set({ [MAINT_DIAG_KEY]: log });
+    };
+    await _diagAppend(entry);
   } catch (e) { /* fire-and-forget */ }
 }
 
@@ -856,17 +1036,12 @@ async function _maintQuotaPurge() {
   var evicted = 0;
   var log = [];
 
-  // Purge gam_diag_log: drop oldest 50%
+  // Purge gam_diag_log: drop oldest 50% via IDB prune (v10.12.1 PA.3)
   try {
-    var r1 = await chrome.storage.local.get(MAINT_DIAG_KEY);
-    var entries1 = r1[MAINT_DIAG_KEY] || [];
-    if (entries1.length > 0) {
-      var dropCount1 = Math.floor(entries1.length / 2);
-      var kept1 = entries1.slice(dropCount1);
-      await chrome.storage.local.set({ [MAINT_DIAG_KEY]: kept1 });
-      evicted += dropCount1;
-      log.push('diag_log: dropped ' + dropCount1 + ', kept ' + kept1.length);
-    }
+    // Prune entries older than 3 days when quota is critical (aggressive vs normal 7d)
+    await _diagPrune(3, 500);
+    evicted += 1; // approximate; IDB doesn't return deleted count synchronously
+    log.push('diag_log: IDB prune complete (3d cutoff)');
   } catch (e) {
     log.push('diag_log purge failed: ' + String(e && e.message || e));
   }
@@ -995,17 +1170,10 @@ async function _maintTokenAgeCheck() {
 }
 
 async function _maintDiagRotate() {
+  // v10.12.1 PA.3: use IDB-backed _diagPrune instead of storage.local array trim
   try {
-    const r = await chrome.storage.local.get(MAINT_DIAG_KEY);
-    const log = r[MAINT_DIAG_KEY] || [];
-    if (log.length <= MAINT_DIAG_MAX) {
-      await _maintAppendDiag('alarm.diagRotate', 'noop', { count: log.length });
-      return;
-    }
-    const trimmed = log.slice(-MAINT_DIAG_MAX);
-    await chrome.storage.local.set({ [MAINT_DIAG_KEY]: trimmed });
-    await _maintAppendDiag('alarm.diagRotate', 'ok',
-      { dropped: log.length - MAINT_DIAG_MAX, kept: MAINT_DIAG_MAX });
+    await _diagPrune(7, 1000);
+    await _maintAppendDiag('alarm.diagRotate', 'ok', { pruned: true });
   } catch (e) {
     try { console.warn('[maint] diagRotate failed', e); } catch (_) {}
   }
@@ -3680,6 +3848,22 @@ const RPC_HANDLERS = {
       }
       return { ok: true };
     }
+  },
+
+  // v10.12.1 PA.3: diagReadRecent RPC — popup/bug-report payload reader fetches
+  // recent diag entries from IDB. Replaces direct storage.local reads in modtools.js.
+  diagReadRecent: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    schema: { limit: { type: 'number' } },
+    async handler(args) {
+      try {
+        var limit = Math.min(1000, Math.max(1, (args && args.limit) ? parseInt(args.limit, 10) || 500 : 500));
+        var entries = await _diagReadRecent(limit);
+        return { ok: true, data: entries };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    }
   }
 };
 
@@ -3792,6 +3976,8 @@ function _rpcRateCheck(name) {
 }
 
 async function _dispatchRpc(name, args, sender) {
+  // v10.12.1 PA.2: gate RPC on init-ready to fix cold-boot 401 race
+  await _initOnce();
   // AF-13 (Rule 39): per-name rate check before any handler runs.
   if (!_rpcRateCheck(String(name || ''))) {
     return { ok: false, status: 429, error: 'rate limited (' + String(name) + ')' };

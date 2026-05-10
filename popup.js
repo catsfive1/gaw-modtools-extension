@@ -65,7 +65,19 @@ function showPopupBanner(msg, severity) {
   b.id = 'gam-popup-banner';
   b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9998;background:' + c.bg + ';border-bottom:1px solid ' + c.border + ';color:' + c.text + ';font:600 11px ui-monospace,monospace;padding:6px 12px;text-align:center;cursor:pointer;';
   b.textContent = msg;
-  b.addEventListener('click', function() { try { b.remove(); } catch (_) {} });
+  // a11y: keyboard-dismissible (auto-removes after 5s anyway, but Enter/Space
+  // gives keyboard users a way to clear it manually). role="alert" prompts AT
+  // to announce the message on insertion.
+  b.setAttribute('role', 'alert');
+  b.setAttribute('tabindex', '0');
+  b.setAttribute('aria-label', msg + ' (press Enter to dismiss)');
+  var dismiss = function () { try { b.remove(); } catch (_) {} };
+  b.addEventListener('click', dismiss);
+  b.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Escape') return;
+    if (e.key === ' ') e.preventDefault();
+    dismiss();
+  });
   document.body.prepend(b);
   setTimeout(function() { try { if (b.parentNode) b.remove(); } catch (_) {} }, 5000);
 }
@@ -416,9 +428,17 @@ function gamMakeStale(label, refreshFn) {
     }
   });
 
-  // Esc key close
+  // Esc key close + focus trap (Tab cycles inside the drawer).
   drill.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') { closeBtn.click(); }
+    if (e.key === 'Escape') { closeBtn.click(); return; }
+    if (e.key === 'Tab') {
+      const focusable = drill.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last  = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
   });
 
   function updateDrillCount() {
@@ -787,6 +807,54 @@ async function loadStats() {
 
 // v5.2.0 H2: keep secrets out of every export + debug path.
 const SECRET_KEYS = ['workerModToken', 'leadModToken'];
+
+// v10.12.1 PC.1: deep-recursive masker for clipboard/bug-report exports.
+// Walks nested objects/arrays and masks ANY field whose KEY name suggests a
+// secret OR whose VALUE matches token shape patterns. Idempotent — safe to
+// run on already-masked output. Depth-bounded to prevent infinite recursion.
+const _SECRET_KEY_PATTERNS = /token|csrf|auth|secret|key|password|cookie|session|bearer|nonce/i;
+const _TOKEN_VALUE_RE = /^(mt_[a-z0-9_-]{16,}|sk-[A-Za-z0-9]{20,}|[A-Za-z0-9_-]{32,})$/;
+
+function _maskSecretsDeep(value, depth) {
+  if (depth === undefined) depth = 0;
+  if (depth > 8) return '[**too-deep**]';
+  if (value === null || value === undefined) return value;
+  var t = typeof value;
+  if (t === 'string') {
+    // Mask if value looks like a token (32+ chars matching token pattern)
+    if (value.length >= 32 && _TOKEN_VALUE_RE.test(value)) {
+      return '***masked(len=' + value.length + ')***';
+    }
+    return value;
+  }
+  if (t !== 'object') return value;
+  if (Array.isArray(value)) {
+    return value.map(function(v) { return _maskSecretsDeep(v, depth + 1); });
+  }
+  var out = {};
+  var entries = Object.entries(value);
+  for (var i = 0; i < entries.length; i++) {
+    var k = entries[i][0];
+    var v = entries[i][1];
+    if (_SECRET_KEY_PATTERNS.test(k)) {
+      // Mask by key match
+      if (typeof v === 'string') {
+        out[k] = '***masked(len=' + v.length + ')***';
+      } else if (v && typeof v === 'object' && !Array.isArray(v)) {
+        // Encrypted-shape blob like {ct, iv, alg} — keep shape but mask ct
+        var copy = Object.assign({}, v);
+        if (typeof v.ct === 'string') copy.ct = '***masked-ct(len=' + v.ct.length + ')***';
+        out[k] = copy;
+      } else {
+        out[k] = '***masked***';
+      }
+    } else {
+      out[k] = _maskSecretsDeep(v, depth + 1);
+    }
+  }
+  return out;
+}
+
 function scrubExport(data) {
   const out = { ...(data || {}) };
   if (out.gam_settings && typeof out.gam_settings === 'object') {
@@ -796,7 +864,8 @@ function scrubExport(data) {
   }
   // Drop sniff log entirely from exports (may contain auth + moderation payloads)
   delete out.gam_sniff_log;
-  return out;
+  // v10.12.1 PC.1: deep-mask remaining fields to catch CSRF/nested tokens
+  return _maskSecretsDeep(out);
 }
 
 $('exportBtn').addEventListener('click', async () => {
@@ -976,7 +1045,9 @@ $('debugBtn').addEventListener('click', async () => {
           if (r && r.ok) nonce = r.nonce;
         } catch (_) { /* SW unavailable; handler will reject */ }
         const resp = await chrome.tabs.sendMessage(tabs[0].id, { type: 'getDebugSnapshot', nonce: nonce });
-        if (resp && resp.ok) snapshot = resp.snapshot;
+        // v10.12.1 PC.3: deep-mask content-script snapshot before export —
+        // prevents CSRF tokens embedded in ctx fields leaking to disk/bug-report
+        if (resp && resp.ok) snapshot = _maskSecretsDeep(resp.snapshot);
       } catch (e) { /* no content script on this tab */ }
     }
     if (!snapshot){
@@ -1068,8 +1139,15 @@ function __popupAskText(opts) {
       backdrop.className = 'gam-pop-modal-backdrop';
       const panel = document.createElement('div');
       panel.className = 'gam-pop-modal-panel';
+      // a11y: dialog semantics so AT recognizes this as a modal context.
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      const titleId = 'gam-modal-title-' + Date.now();
+      panel.setAttribute('aria-labelledby', titleId);
+      const previousFocus = document.activeElement;
       const title = document.createElement('div');
       title.className = 'gam-pop-modal-title';
+      title.id = titleId;
       title.textContent = String(o.title || 'Input required');
       const label = document.createElement('label');
       label.className = 'gam-pop-modal-label';
@@ -1107,11 +1185,22 @@ function __popupAskText(opts) {
         done = true;
         try { document.removeEventListener('keydown', onKey, true); } catch (e) {}
         try { backdrop.remove(); } catch (e) {}
+        // a11y: restore focus to the element that opened the modal.
+        try { previousFocus && previousFocus.focus && previousFocus.focus(); } catch (e) {}
         resolve(val);
       }
       function onKey(e) {
         if (e.key === 'Escape') { e.stopPropagation(); finish(null); }
         else if (e.key === 'Enter') { e.stopPropagation(); submit(); }
+        else if (e.key === 'Tab') {
+          // a11y: focus trap — keep Tab inside the modal panel.
+          const focusable = panel.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+          if (focusable.length === 0) return;
+          const first = focusable[0];
+          const last  = focusable[focusable.length - 1];
+          if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
       }
       function submit() {
         const val = String(input.value || '').trim();
@@ -1142,8 +1231,15 @@ function __popupConfirm(opts) {
       backdrop.className = 'gam-pop-modal-backdrop';
       const panel = document.createElement('div');
       panel.className = 'gam-pop-modal-panel';
+      // a11y: dialog semantics so AT recognizes this as a modal context.
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      const titleId = 'gam-modal-title-' + Date.now();
+      panel.setAttribute('aria-labelledby', titleId);
+      const previousFocus = document.activeElement;
       const title = document.createElement('div');
       title.className = 'gam-pop-modal-title';
+      title.id = titleId;
       title.textContent = String(o.title || 'Confirm');
       const body = document.createElement('div');
       body.className = 'gam-pop-modal-body';
@@ -1170,11 +1266,22 @@ function __popupConfirm(opts) {
         done = true;
         try { document.removeEventListener('keydown', onKey, true); } catch (e) {}
         try { backdrop.remove(); } catch (e) {}
+        // a11y: restore focus to the element that opened the modal.
+        try { previousFocus && previousFocus.focus && previousFocus.focus(); } catch (e) {}
         resolve(v);
       }
       function onKey(e) {
         if (e.key === 'Escape') { e.stopPropagation(); finish(false); }
         else if (e.key === 'Enter') { e.stopPropagation(); finish(true); }
+        else if (e.key === 'Tab') {
+          // a11y: focus trap — keep Tab inside the modal panel.
+          const focusable = panel.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+          if (focusable.length === 0) return;
+          const first = focusable[0];
+          const last  = focusable[focusable.length - 1];
+          if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
       }
       cancelBtn.addEventListener('click', function () { finish(false); });
       okBtn.addEventListener('click', function () { finish(true); });
@@ -2446,9 +2553,10 @@ async function __noteWhoami(username) {
       const backdrop = document.createElement('div');
       backdrop.className = 'gam-pop-modal-backdrop';
       backdrop.style.zIndex = '2147483647';
+      const _idTitleId = 'gam-modal-title-' + Date.now();
       backdrop.innerHTML =
-        '<div class="gam-pop-modal-panel" style="max-width:420px;border-color:#a78bfa">' +
-          '<div class="gam-pop-modal-title" style="color:#a78bfa">⚠ Identity changed</div>' +
+        '<div class="gam-pop-modal-panel" role="dialog" aria-modal="true" aria-labelledby="' + _idTitleId + '" style="max-width:420px;border-color:#a78bfa">' +
+          '<div class="gam-pop-modal-title" id="' + _idTitleId + '" style="color:#a78bfa">⚠ Identity changed</div>' +
           '<div class="gam-pop-modal-body">' +
             'This Chrome profile previously authenticated as <strong style="color:#ffd84d">' + escapeHtml(prev) + '</strong>.\n\n' +
             'You are now authenticated as <strong style="color:#3dd68c">' + escapeHtml(username) + '</strong>.\n\n' +
@@ -2459,11 +2567,30 @@ async function __noteWhoami(username) {
             '<button class="gam-pop-modal-btn-ok" style="background:#a78bfa">OK, got it</button>' +
           '</div>' +
         '</div>';
+      const _idPanel = backdrop.querySelector('.gam-pop-modal-panel');
+      const _idPrevFocus = document.activeElement;
       document.body.appendChild(backdrop);
-      const dismiss = () => { try { backdrop.remove(); } catch(_){} };
       const okBtn = backdrop.querySelector('.gam-pop-modal-btn-ok');
+      const _idOnKey = (e) => {
+        if (e.key === 'Escape') { e.stopPropagation(); dismiss(); }
+        else if (e.key === 'Tab' && _idPanel) {
+          const focusable = _idPanel.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+          if (focusable.length === 0) return;
+          const first = focusable[0];
+          const last  = focusable[focusable.length - 1];
+          if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+      };
+      const dismiss = () => {
+        try { document.removeEventListener('keydown', _idOnKey, true); } catch(_){}
+        try { backdrop.remove(); } catch(_){}
+        try { _idPrevFocus && _idPrevFocus.focus && _idPrevFocus.focus(); } catch(_){}
+      };
       if (okBtn) okBtn.addEventListener('click', dismiss);
       backdrop.addEventListener('click', (e) => { if (e.target === backdrop) dismiss(); });
+      document.addEventListener('keydown', _idOnKey, true);
+      try { okBtn && okBtn.focus(); } catch(_){}
     } else if (!prev) {
       // First time we resolve a username — record without warning.
       try { await chrome.storage.local.set({ gam_last_whoami_username: username }); } catch(_){}
@@ -3295,6 +3422,15 @@ function __renderBugRow(panel, row, refresh) {
   wrap.style.borderBottom = '1px solid #2b303a';
   wrap.style.padding = '6px 4px';
   wrap.style.cursor = 'pointer';
+  // a11y: this is a disclosure widget — make it keyboard-activatable.
+  wrap.setAttribute('role', 'button');
+  wrap.setAttribute('tabindex', '0');
+  wrap.setAttribute('aria-expanded', 'false');
+  wrap.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    if (e.key === ' ') e.preventDefault();
+    wrap.click();
+  });
 
   const head = document.createElement('div');
   head.style.display = 'flex';
@@ -3480,6 +3616,7 @@ function __renderBugRow(panel, row, refresh) {
 
   wrap.addEventListener('click', function () {
     detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+    wrap.setAttribute('aria-expanded', detail.style.display === 'none' ? 'false' : 'true');
   });
 
   panel.appendChild(wrap);
@@ -4577,19 +4714,10 @@ async function maintDiagExport() {
   try {
     const r = await chrome.storage.local.get(MAINT_DIAG_KEY);
     const log = r[MAINT_DIAG_KEY] || [];
-    // Redact: drop any "extra" keys named "token", "secret", "auth".
-    const redacted = log.map(e => {
-      const out = { ts: e.ts, iso: e.iso, cat: e.cat, msg: e.msg, v: e.v };
-      if (e.extra && typeof e.extra === 'object') {
-        const ex = {};
-        for (const [k, v] of Object.entries(e.extra)) {
-          if (/token|secret|auth/i.test(k)) ex[k] = '[REDACTED]';
-          else ex[k] = v;
-        }
-        out.extra = ex;
-      }
-      return out;
-    });
+    // v10.12.1 PC.3: replace shallow key-name redactor with deep-recursive masker.
+    // Catches CSRF tokens and nested secret values in ctx/extra fields, not just
+    // top-level "token|secret|auth" key names.
+    const redacted = log.map(e => _maskSecretsDeep(e));
     const json = JSON.stringify({
       exportedAt: new Date().toISOString(),
       version: chrome.runtime.getManifest().version,
@@ -4862,7 +4990,9 @@ async function maintFullReport() {
   await step('auditVerify', maintAuditVerify, 'maintAuditVerifyStatus');
   await step('migrationDebt', maintMigrationDebt, 'maintMigrationDebtStatus');
   report.elapsedMs = Date.now() - t0;
-  const json = JSON.stringify(report, null, 2);
+  // v10.12.1 PC.3: deep-mask health report before clipboard — routine status
+  // strings may contain token excerpts from token-probe output.
+  const json = JSON.stringify(_maskSecretsDeep(report), null, 2);
   try { await navigator.clipboard.writeText(json); } catch (_) {}
   // v9.6.0: render an HTML report alongside the JSON. Commander asked for
   // human-readable summary instead of opaque JSON dumps. Heuristic top-issues
@@ -5190,6 +5320,16 @@ __maintWire('maintReset', maintResetDefaults, 'resetting...');
   var thumb  = $('safeModeToggleThumb');
   var label  = $('safeModeToggleLabel2');
   if (!toggle || !track) return;
+  // a11y: the checkbox ships as display:none which removes it from the
+  // accessibility tree and tab order. Replace with the visually-hidden
+  // pattern so it remains focusable + Space-toggleable. Mirror focus to
+  // the visible track so keyboard users see where they are.
+  toggle.style.cssText = 'position:absolute;width:1px;height:1px;'
+    + 'margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);'
+    + 'clip-path:inset(50%);white-space:nowrap';
+  toggle.setAttribute('role', 'switch');
+  toggle.addEventListener('focus', function () { track.style.outline = '2px solid #4A9EFF'; track.style.outlineOffset = '2px'; });
+  toggle.addEventListener('blur',  function () { track.style.outline = ''; track.style.outlineOffset = ''; });
 
   function applySafeModeVisual(on) {
     if (on) {
@@ -5205,6 +5345,7 @@ __maintWire('maintReset', maintResetDefaults, 'resetting...');
       label.style.color = '#5c6370';
       label.textContent = 'OFF';
     }
+    toggle.setAttribute('aria-checked', on ? 'true' : 'false');
   }
 
   // Load current safe_mode state on popup open
@@ -5501,8 +5642,18 @@ async function __maintLoadWarning() {
         chip.style.display = '';
         chip.textContent = '⚠ maint';
         chip.title = w.reason + ' (since ' + (w.firstSeenAt || w.at || 'recent') + ')';
-        chip.addEventListener('click', () => {
+        // a11y: chip is a <span>, not a button — make it keyboard-activatable.
+        chip.setAttribute('role', 'button');
+        chip.setAttribute('tabindex', '0');
+        chip.setAttribute('aria-label', 'Maintenance warning: ' + w.reason + '. Activate to scroll to detail.');
+        const scrollToBanner = () => {
           if (banner) banner.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        };
+        chip.addEventListener('click', scrollToBanner, { once: true });
+        chip.addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          if (e.key === ' ') e.preventDefault();
+          chip.click();
         }, { once: true });
       }
       if (banner) {
@@ -5599,6 +5750,15 @@ function __maintRenderReports(reports) {
   for (const r of reports) {
     const row = document.createElement('div');
     row.style.cssText = 'border-bottom:1px solid #2a2d36;padding:4px 0;cursor:pointer';
+    // a11y: disclosure widget — make it keyboard-activatable.
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    row.setAttribute('aria-expanded', 'false');
+    row.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.key === ' ') e.preventDefault();
+      row.click();
+    });
     const head = document.createElement('div');
     const sev = r.severity || 'info';
     const sevColor = sev === 'critical' ? '#ff5555'
@@ -5629,6 +5789,7 @@ function __maintRenderReports(reports) {
     row.appendChild(detail);
     row.addEventListener('click', () => {
       detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+      row.setAttribute('aria-expanded', detail.style.display === 'none' ? 'false' : 'true');
     });
     panel.appendChild(row);
   }
@@ -5829,11 +5990,42 @@ async function __loadLeadKpi() {
 
     const qaInvite = $('qaInviteBtn');
     if (qaInvite) qaInvite.addEventListener('click', async function() {
+      // v10.12.1 — fix three regressions vs. the deep-dive #inviteBtn flow
+      // (popup.js ~1761):
+      //   1. RPC param name was `username:` — backend `adminInviteCreate` reads
+      //      `args.mod` (background.js ~2246). Wrong-named param landed as
+      //      `{ mod: undefined }` at the worker.
+      //   2. Response field was `r.data.invite_url` — worker returns `data.url`.
+      //      Even when the call succeeded, the success branch never matched, so
+      //      every click dropped to the "Invite failed: unknown" toast.
+      //   3. Target mod defaulted to the LEAD'S OWN username — meaningless,
+      //      since invites are issued FOR a target mod. Now prompts (matches
+      //      the deep-dive flow). Operator's complaint 2026-05-10: "I am
+      //      currently unable to send the other mods tokens! Where did this
+      //      functionality go?"
       withLoading(qaInvite, 'generating...', async function() {
-        const r = await popupRpc('adminInviteCreate', { username: _gamWhoamiUsername || 'lead' });
-        if (r && r.ok && r.data && r.data.invite_url) {
-          try { await navigator.clipboard.writeText(r.data.invite_url); } catch (_) {}
-          __showToast('Invite link copied to clipboard', 'ok');
+        let target;
+        if (await __hardeningOnPopup()) {
+          target = await __popupAskText({
+            title: 'Invite target',
+            label: 'GAW username this invite is for',
+            placeholder: 'username',
+            max: 24,
+            validate: function (v) {
+              if (!v) return 'Required.';
+              return /^[A-Za-z0-9_-]{3,24}$/.test(v) ? '' : 'Username 3-24 chars.';
+            }
+          });
+          if (target == null) return;
+        } else {
+          target = prompt('GAW username this invite is for:', '') || '';
+          if (!target) return;
+        }
+        const r = await popupRpc('adminInviteCreate', { mod: target });
+        const url = r && r.ok && r.data && (r.data.url || r.data.invite_url);
+        if (url) {
+          try { await navigator.clipboard.writeText(url); } catch (_) {}
+          __showToast('Invite for ' + target + ' copied to clipboard', 'ok');
         } else {
           __showToast('Invite failed: ' + ((r && r.error) || 'unknown'), 'err');
         }
@@ -6089,7 +6281,8 @@ async function renderDiagTab() {
   if (diagExportBtn) {
     diagExportBtn.onclick = function() {
       try {
-        var out = JSON.stringify(diagRpcEntries, null, 2);
+        // v10.12.1 PC.3: deep-mask diag error entries before clipboard export
+        var out = JSON.stringify(_maskSecretsDeep(diagRpcEntries), null, 2);
         // E.3.1 diag export — copy to clipboard using three-layer fallback
         (function __diagCopy(text) {
           try { if (typeof copy === 'function') { copy(text); } } catch(_) {}

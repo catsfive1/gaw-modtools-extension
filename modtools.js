@@ -86,7 +86,10 @@
       }
     };
     try {
-      const keys = ['gam_diag_log','gam_sw_boots','gam_error_counters','gam_maint_warning','gam_settings','gam_show_whats_new','gam_welcomed','gam_fallback_mode','gam_rpc_log'];
+      // v10.12.3 PA.3 coupling: gam_diag_log moved to IDB (background.js IDB store).
+      // Direct storage.local read returns empty; route through diagReadRecent RPC.
+      // Other keys still live in storage.local — read them as before.
+      const keys = ['gam_sw_boots','gam_error_counters','gam_maint_warning','gam_settings','gam_show_whats_new','gam_welcomed','gam_fallback_mode','gam_rpc_log'];
       const r = await chrome.storage.local.get(keys);
       // Mask token values in gam_settings -- never put tokens on clipboard
       if (r && r.gam_settings) {
@@ -96,11 +99,28 @@
             s[k] = '***masked(len=' + s[k].length + ')***';
           }
         });
+        // Also mask the encrypted blobs (preserve shape, mask ciphertext)
+        ['workerModToken_encrypted','leadModToken_encrypted'].forEach(k => {
+          if (s[k] && typeof s[k] === 'object' && typeof s[k].ct === 'string') {
+            s[k] = { ...s[k], ct: '***masked-ct(len=' + s[k].ct.length + ')***' };
+          }
+        });
         r.gam_settings = s;
       }
-      // Trim diag log to last 50 entries to keep clipboard sane
-      if (r && Array.isArray(r.gam_diag_log)) {
-        r.gam_diag_log = r.gam_diag_log.slice(-50);
+      // Fetch diag log via RPC (IDB-backed since v10.12.3 PA.3)
+      try {
+        const diagResp = await chrome.runtime.sendMessage({ type: 'rpc', name: 'diagReadRecent', args: { limit: 50 } });
+        if (diagResp && diagResp.ok && Array.isArray(diagResp.data && diagResp.data.entries)) {
+          r.gam_diag_log = diagResp.data.entries;
+        } else if (diagResp && diagResp.ok && Array.isArray(diagResp.data)) {
+          r.gam_diag_log = diagResp.data;
+        } else {
+          r.gam_diag_log = [];
+          r.gam_diag_log_note = 'diagReadRecent RPC returned no entries (SW may be cold or IDB empty)';
+        }
+      } catch (eDiag) {
+        r.gam_diag_log = [];
+        r.gam_diag_log_error = String(eDiag && eDiag.message || eDiag);
       }
       // Trim sw_boots to last 20
       if (r && Array.isArray(r.gam_sw_boots)) {
@@ -2273,11 +2293,14 @@
     if (regexCache.has(src)) return regexCache.get(src);
     let re = null;
     try {
-      // Prefer the v7.1.2 `compilePattern` if it exists in the closure; else
-      // fall back to a plain RegExp. Defer-lookup via typeof keeps this class
-      // definition order-independent.
+      // v10.12.2 — ALWAYS route through compilePattern (red-team #3). The
+      // prior `else new RegExp(src)` fallback was a latent ReDoS hole — it
+      // would have bypassed _isRedosSafe entirely. compilePattern is a
+      // function declaration in the same IIFE; hoisting guarantees it
+      // resolves at call time, so the fallback was dead code AND a footgun.
+      // Now: if compilePattern isn't available for any reason, fail closed.
       if (typeof compilePattern === 'function') re = compilePattern(src);
-      else re = new RegExp(src);
+      else { console.warn('[modtools v10.12.2] compilePattern unavailable — rejecting unguarded RegExp'); re = null; }
     } catch(e){ re = null; }
     regexCache.set(src, re);
     return re;
@@ -2729,36 +2752,75 @@
     const k = __drKey(u);
     if (k) __drExecuting.delete(k);
   }
-  // v8.3.3: cross-tab Death Row mutex. First tab to claim wins; others
-  // skip. 5-min TTL covers the entire DR fire+verify+audit cycle. Uses
-  // chrome.storage.local since extension storage writes are serialized
-  // at the browser level (no real race except optimistic-CAS verify).
+  // v8.3.3 + v10.12.2: cross-tab Death Row mutex. First tab to claim wins;
+  // others skip.
+  //
+  // v10.12.2 (red-team #5): primary path is now navigator.locks (Web Locks
+  // API). This eliminates the 5-min stale-lock window when a holder tab
+  // crashes — Web Locks auto-release when the holding context dies (tab
+  // close, page navigation, hard crash, SW eviction). The chrome.storage.
+  // local TTL path remains as a fallback for environments without
+  // navigator.locks (very old Chromium, exotic execution contexts).
+  //
+  // The acquireDrLock(username) → boolean / releaseDrLock(username)
+  // shape is preserved so existing call sites (modtools.js:7830, :13578)
+  // need no changes.
   const DR_LOCK_TTL_MS = 5 * 60 * 1000;
+  const _drLockReleasers = new Map();  // username → fn that resolves the held-promise to release the Web Lock
   async function acquireDrLock(username){
     const k = __drKey(username);
-    if (!k || !chrome?.storage?.local) return true; // fail-open
+    if (!k) return true; // fail-open: no key → no contention possible
+    // v10.12.2 — navigator.locks primary path. ifAvailable=true means we
+    // get { lock: null } if someone else holds it instead of queueing.
+    if (typeof navigator !== 'undefined' && navigator.locks && typeof navigator.locks.request === 'function') {
+      try {
+        return await new Promise((acquireResolve) => {
+          let releaseFn;
+          const heldPromise = new Promise(r => { releaseFn = r; });
+          navigator.locks.request('gam-dr-' + k, { ifAvailable: true }, (lock) => {
+            if (lock) {
+              _drLockReleasers.set(k, releaseFn);
+              acquireResolve(true);
+              return heldPromise;  // hold the lock until releaseDrLock fires OR context dies
+            } else {
+              acquireResolve(false);
+              return null;
+            }
+          }).catch(() => { try { acquireResolve(false); } catch(_){} });
+        });
+      } catch(e){ console.warn('[DR cross-tab lock] navigator.locks threw:', e); /* fall through to legacy */ }
+    }
+    // Fallback: chrome.storage.local TTL mutex (pre-v10.12.2 behavior).
+    if (!chrome?.storage?.local) return true; // fail-open
     const storeKey = `gam_dr_lock_${k}`;
     try {
       const r = await chrome.storage.local.get(storeKey);
       const now = Date.now();
       const existing = r[storeKey];
       if (existing && existing.expiresAt > now) {
-        console.info('[DR cross-tab lock] held for', k, 'until', new Date(existing.expiresAt).toISOString());
+        console.info('[DR cross-tab lock] (legacy) held for', k, 'until', new Date(existing.expiresAt).toISOString());
         return false;
       }
       const myStamp = now + Math.random();
       await chrome.storage.local.set({ [storeKey]: { acquiredAt: myStamp, expiresAt: now + DR_LOCK_TTL_MS } });
-      // CAS verify: re-read and confirm we own it. If another tab raced
-      // and won, our acquiredAt won't match.
       const r2 = await chrome.storage.local.get(storeKey);
       if (r2[storeKey] && r2[storeKey].acquiredAt === myStamp) return true;
-      console.info('[DR cross-tab lock] CAS lost for', k);
+      console.info('[DR cross-tab lock] (legacy) CAS lost for', k);
       return false;
-    } catch(e){ console.warn('[DR cross-tab lock] error:', e); return true; /* fail-open */ }
+    } catch(e){ console.warn('[DR cross-tab lock] (legacy) error:', e); return true; /* fail-open */ }
   }
   async function releaseDrLock(username){
     const k = __drKey(username);
-    if (!k || !chrome?.storage?.local) return;
+    if (!k) return;
+    // v10.12.2 — release the Web Lock if we acquired one.
+    if (_drLockReleasers.has(k)) {
+      const releaseFn = _drLockReleasers.get(k);
+      _drLockReleasers.delete(k);
+      try { releaseFn(); } catch(_){}
+      return;
+    }
+    // Fallback: clear chrome.storage.local entry.
+    if (!chrome?.storage?.local) return;
     try { await chrome.storage.local.remove(`gam_dr_lock_${k}`); } catch(e){}
   }
 
@@ -7024,14 +7086,30 @@
     const l = trySelect('permalinkLink', i);
     return l ? l.href : window.location.href;
   }
+  // v10.12.1 PB.5: Intl.RelativeTimeFormat replaces manual string formatting.
+  // Singleton RTF instance; falls back to legacy strings if Intl unavailable.
+  var _rtf = (typeof Intl !== 'undefined' && Intl.RelativeTimeFormat)
+    ? new Intl.RelativeTimeFormat('en', { numeric: 'auto', style: 'narrow' })
+    : null;
   function timeAgo(s){
     const d=Date.now()-new Date(s).getTime();
     if(isNaN(d)||d<0) return 'just now';
-    const m=Math.floor(d/60000);
-    if(m<60) return m+'m ago';
-    const h=Math.floor(m/60);
-    if(h<24) return h+'h ago';
-    return Math.floor(h/24)+'d ago';
+    const secs = Math.floor(d / 1000);
+    if (!_rtf){
+      // Legacy fallback if Intl.RelativeTimeFormat unavailable
+      const m=Math.floor(d/60000);
+      if(m<60) return m+'m ago';
+      const h=Math.floor(m/60);
+      if(h<24) return h+'h ago';
+      return Math.floor(h/24)+'d ago';
+    }
+    if (secs < 60)   return _rtf.format(-secs, 'second');
+    if (secs < 3600) return _rtf.format(-Math.round(secs / 60), 'minute');
+    if (secs < 86400) return _rtf.format(-Math.round(secs / 3600), 'hour');
+    if (secs < 604800) return _rtf.format(-Math.round(secs / 86400), 'day');
+    if (secs < 2592000) return _rtf.format(-Math.round(secs / 604800), 'week');
+    if (secs < 31536000) return _rtf.format(-Math.round(secs / 2592000), 'month');
+    return _rtf.format(-Math.round(secs / 31536000), 'year');
   }
   function timeUntil(ts){
     const d=ts-Date.now();
@@ -11732,10 +11810,10 @@ Analyze this comment against the community rules. Then write a brief, profession
   setInterval(()=>{ if (document.visibilityState === 'visible') _susRefresh(); }, 60_000);
   document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState === 'visible') _susRefresh(); });
   // Decorate newly-rendered author links as the page mutates.
-  try {
-    const _susObs = new MutationObserver(()=>{ _susApplyDecorations(false); });
-    _susObs.observe(document.body, { childList:true, subtree:true });
-  } catch(_){}
+  // v10.12.1 PB.3: _susObs merged into the shared _gamBodyObs below (declared
+  // at the cObs site) to eliminate a competing full-body MutationObserver.
+  // _gamBodyObs is wired after the cObs block; this comment is the marker.
+  var _gamSusObsMerged = true; // sentinel consumed by _gamBodyObs combiner
 
   // v10.8.0 M10 (TARD-2): cache of new-account flags populated by modUserCadence calls.
   // Key: lowercase username, value: { is_new: bool, age_days: number }
@@ -12644,11 +12722,105 @@ Analyze this comment against the community rules. Then write a brief, profession
     });
   }
   if(!IS_USERS_PAGE && !IS_BAN_PAGE){
-    const cObs=new MutationObserver(()=>{ injectBadges(); injectAllStrips(); });
-    cObs.observe(document.querySelector('.posts,.comments,.modmail-list,.comment-list') || document.body, {childList:true, subtree:true});
     injectBadges();
     injectAllStrips();
   }
+  // v10.12.1 PB.3: consolidated body observer — replaces _susObs + cObs with a
+  // single MutationObserver. Both callbacks fire from one RAF-batched handler,
+  // halving the number of observers firing on every DOM mutation.
+  // v10.12.1 PB.4: _susApplyDecorationsOnNodes scopes the sus-decoration scan
+  // to addedNodes subtrees instead of document.querySelectorAll on every mutation.
+  function _susApplyDecorationsOnNodes(addedNodes){
+    var sel = 'a[href^="/u/"]:not([data-gam-sus-decorated]):not([data-gam-new-decorated])';
+    for (var _i = 0; _i < addedNodes.length; _i++){
+      var node = addedNodes[_i];
+      if (!node || node.nodeType !== 1) continue;
+      if (node.matches && node.matches('a[href^="/u/"]')) _susDecorateOne(node);
+      if (node.querySelectorAll) {
+        var found = node.querySelectorAll(sel);
+        for (var _j = 0; _j < found.length; _j++) _susDecorateOne(found[_j]);
+      }
+    }
+  }
+  // Inner per-element decorator extracted from _susApplyDecorations for reuse.
+  function _susDecorateOne(a){
+    try {
+      var href = a.getAttribute('href') || '';
+      var m = href.match(/^\/u\/([^/?#]+)/);
+      if (!m) return;
+      var u = decodeURIComponent(m[1] || '').toLowerCase();
+      var row = _susState.rows.get(u);
+      var newEntry = _newAccountCache.get(u);
+      var isNew = newEntry && newEntry.is_new;
+      if (a.hasAttribute('data-gam-sus-decorated') && !row){
+        try {
+          var orig = a.getAttribute('data-gam-sus-orig-text');
+          if (orig != null) a.textContent = orig;
+          a.removeAttribute('data-gam-sus-decorated');
+          a.removeAttribute('data-gam-sus-orig-text');
+          a.style.color = isNew ? '#a78bfa' : '';
+          a.style.fontWeight = isNew ? '600' : '';
+          a.title = a.getAttribute('data-gam-sus-orig-title') || '';
+          a.removeAttribute('data-gam-sus-orig-title');
+        } catch(_){}
+        if (!isNew) return;
+      }
+      if (isNew && !a.hasAttribute('data-gam-new-decorated')){
+        a.setAttribute('data-gam-new-decorated', '1');
+        if (!a.hasAttribute('data-gam-sus-orig-text')){
+          a.setAttribute('data-gam-sus-orig-text', a.textContent || '');
+          a.setAttribute('data-gam-sus-orig-title', a.title || '');
+        }
+        var ageTxt = (newEntry && newEntry.age_days) ? newEntry.age_days + 'd' : '';
+        var newPrefix = 'ⓝ' + (ageTxt ? ageTxt : '') + ' ';
+        var txt2 = a.textContent || '';
+        if (!txt2.startsWith('ⓝ')) a.textContent = newPrefix + txt2;
+        a.style.color = a.style.color || '#a78bfa';
+        a.title = (ageTxt ? 'New account (' + ageTxt + '). ' : 'New account. ') + (a.title || '');
+      }
+      if (!row) return;
+      if (!a.hasAttribute('data-gam-sus-decorated')){
+        if (!a.hasAttribute('data-gam-sus-orig-text')){
+          a.setAttribute('data-gam-sus-orig-text', a.textContent || '');
+          a.setAttribute('data-gam-sus-orig-title', a.title || '');
+        }
+      }
+      a.setAttribute('data-gam-sus-decorated', '1');
+      var isHot = (row.comment_count_24h || 0) > 8;
+      a.style.color = isHot ? '#f04040' : '#f0a040';
+      a.style.fontWeight = isHot ? '700' : '600';
+      var reason = row.reason || '(no reason)';
+      var extra = isHot ? ' — ' + row.comment_count_24h + '/24h ⚠️' : '';
+      a.title = '\u{1F6A9} SUS by ' + (row.marked_by || '?') + ': ' + reason + extra;
+      var txt = a.textContent || '';
+      if (!/^\u{1F6A9}\s/u.test(txt)) a.textContent = '\u{1F6A9} ' + txt;
+    } catch(_){}
+  }
+  try {
+    // v10.12.1 PB.3: single consolidated MutationObserver replacing _susObs + cObs.
+    var _gamBodyObsRoot = (!IS_USERS_PAGE && !IS_BAN_PAGE)
+      ? (document.querySelector('.posts,.comments,.modmail-list,.comment-list') || document.body)
+      : document.body;
+    var _gamBodyObs = new MutationObserver(function(muts){
+      var added = [];
+      for (var mi = 0; mi < muts.length; mi++){
+        var nodes = muts[mi].addedNodes;
+        for (var ni = 0; ni < nodes.length; ni++){
+          if (nodes[ni].nodeType === 1) added.push(nodes[ni]);
+        }
+      }
+      if (!added.length) return;
+      // Sus decorations: scoped to addedNodes (PB.4)
+      _susApplyDecorationsOnNodes(added);
+      // Badge + strip injection: injectBadges/injectAllStrips are already
+      // internally idempotent (data-gam-tagged / dataset guards).
+      if (!IS_USERS_PAGE && !IS_BAN_PAGE){
+        try { injectBadges(); } catch(e){}
+        try { injectAllStrips(); } catch(e){}
+      }
+    });
+    _gamBodyObs.observe(_gamBodyObsRoot, { childList:true, subtree:true });
+  } catch(_){}
 
   // ╔══════════════════════════════════════════════════════════════════╗
   // ║  /USERS PAGE - TRIAGE CONSOLE                                  ║
@@ -12698,6 +12870,20 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (/\([^)]*[+*]\)[+*]/.test(expr)) return false;
     // Evil regex heuristic: many "(?:...|...)+"
     if (/(?:\(\?\:[^)]{2,}\|[^)]{2,}\)[+*])/.test(expr)) return false;
+    // v10.12.2 — additional ReDoS hardening (red-team #3):
+    // Backreferences combined with quantifiers/alternation cause catastrophic
+    // backtracking. We don't use them in the modtools rule schema, so reject
+    // any pattern containing one.
+    if (/\\[1-9]/.test(expr)) return false;
+    // Lookbehind with quantifier inside is a perf hazard and engine-inconsistent.
+    if (/\(\?<[=!]/.test(expr)) return false;
+    // Polynomial backtracking — cap total unbounded quantifiers across the
+    // pattern. Excludes those inside character classes [...] which match
+    // linearly. >6 unbounded quantifiers in one pattern is a strong RoDoS
+    // smell (e.g. `\d+\s*\d+\s*\d+\s*\d+` style stress patterns).
+    const exprNoCharClass = expr.replace(/\[[^\]]*\]/g, '');
+    const quantCount = (exprNoCharClass.match(/[+*]/g) || []).length;
+    if (quantCount > 6) return false;
     return true;
   }
 
@@ -22611,7 +22797,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // a path. Returns the same { ok, status, data, text, error } shape as
   // workerCall so call sites can swap with minimal churn.
   // AF-11 (Rule 31): unique request ID for every outbound RPC message.
+  // v10.12.1 PB.1: crypto.randomUUID() for collision-sensitive IDs (clientOpId, requestId).
   function __makeReqId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
     return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   }
 
@@ -23223,7 +23413,25 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 
   // v5.1.11 Crew: passive crawler. Harvests /u/username/ anchors from every
   // visited page and batches them to /profiles/seen (throttled, deduped).
-  const _seenInSession = new Set();
+  // v10.12.1 PB.2: bounded LRU replaces unbounded Set; cap at 5000 entries.
+  const _SEEN_MAX = 5000;
+  const _seenInSession = (function(){
+    const _s = new Set();
+    return {
+      has: function(k){ return _s.has(k); },
+      add: function(k){
+        if (_s.has(k)){ _s.delete(k); _s.add(k); return; }
+        _s.add(k);
+        if (_s.size > _SEEN_MAX){
+          var oldest = _s.values().next().value;
+          if (oldest !== undefined) _s.delete(oldest);
+        }
+      },
+      delete: function(k){ return _s.delete(k); },
+      clear: function(){ _s.clear(); },
+      get size(){ return _s.size; }
+    };
+  })();
   const _seenQueue = [];
   let _seenFlushIv = null;
   function harvestUsernamesFromDOM(){
