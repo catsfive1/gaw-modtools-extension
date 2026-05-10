@@ -305,17 +305,19 @@ try {
     [void]$dmLines.Add("Hey $user, welcome to the GAW mod team. Three-step setup below.")
     [void]$dmLines.Add('')
     [void]$dmLines.Add('1. INSTALL THE EXTENSION')
-    [void]$dmLines.Add('   You have two options.')
+    [void]$dmLines.Add('   You have two options. Pick A unless you want auto-updates.')
     [void]$dmLines.Add('')
-    [void]$dmLines.Add('   Option A (auto-update, recommended): I will share a Google Drive folder')
-    [void]$dmLines.Add("   called 'mod-tools' with you. When it shows up in your Drive, right-click")
-    [void]$dmLines.Add("   it and choose 'Available offline'. Then go to chrome://extensions/, turn")
+    [void]$dmLines.Add('   Option A (manual ZIP, recommended for first install): I will attach a')
+    [void]$dmLines.Add("   ZIP to this DM. Unzip it to a folder you will not move (e.g.")
+    [void]$dmLines.Add('   C:\Users\YourName\modtools-ext\). Then go to chrome://extensions/, turn')
     [void]$dmLines.Add("   on Developer Mode (top right), click 'Load unpacked', and select that")
-    [void]$dmLines.Add("   folder. Future updates land automatically when I publish.")
+    [void]$dmLines.Add("   folder. To update later, replace the ZIP contents and click reload.")
     [void]$dmLines.Add('')
-    [void]$dmLines.Add('   Option B (manual): Tell me and I will send you a ZIP. Unzip to a folder')
-    [void]$dmLines.Add('   you will not move (e.g. C:\Users\YourName\modtools-ext\), then load it')
-    [void]$dmLines.Add('   the same way as Option A.')
+    [void]$dmLines.Add('   Option B (auto-update, for long-term use): Tell me and I will share a')
+    [void]$dmLines.Add("   Google Drive folder called 'mod-tools' with your Gmail. When it shows up")
+    [void]$dmLines.Add("   in your Drive, right-click and choose 'Available offline'. Then load")
+    [void]$dmLines.Add("   the synced folder via chrome://extensions/ as in Option A. Future updates")
+    [void]$dmLines.Add("   land automatically when I publish to Drive.")
     [void]$dmLines.Add('')
     [void]$dmLines.Add('2. CLAIM YOUR INVITE')
     [void]$dmLines.Add('   Once the extension is loaded and pinned to your toolbar, click this link')
@@ -379,14 +381,48 @@ try {
     Say "  2. Select all (Ctrl+A) -> Copy (Ctrl+C)" Yellow
     Say "  3. Paste into Discord/Slack DM to $user" Yellow
     Say ''
-    Say "  4. SHARE THE DRIVE FOLDER with $user's Google account:" Yellow
-    Say "     - File Explorer: $DrivePath" DarkGray
-    Say "     - Right-click 'mod-tools' folder -> Share with people" DarkGray
-    Say "     - Add their Gmail, set 'Viewer' permission" DarkGray
+    Say "  4. ATTACH THE ZIP to the DM:" Yellow
+    Say "     $(Join-Path $DrivePath 'gaw-modtools-LATEST.zip')" DarkGray
+    Say "     (Drag the file into Discord/Slack alongside the DM text.)" DarkGray
+    Say ''
+    Say "     Alternative: if the new mod prefers auto-updates, share the Drive" DarkGray
+    Say "     folder instead -- File Explorer: $DrivePath -> Right-click 'mod-tools'" DarkGray
+    Say "     -> Share -> add their Gmail -> Viewer permission." DarkGray
     Say ''
     Say "  5. They click the mt_invite link in the DM after extension is loaded" Yellow
     Say ''
     Say "  Drive snapshot: $($result.driveZip) ($($result.driveVersion))" DarkGreen
+
+    # --- Step 7b: BLOCKING GATE (V14-FR1) ---------------------------------
+    # Audit: RALPH-FIRSTRUN FP-NEW-1 (HIGH). Without this gate, lead can forget
+    # to attach the ZIP / share the folder, new mod hits Chrome 'Manifest file
+    # is missing or unreadable' with no diagnosable cause. Force confirmation.
+    Say ''
+    SayHeader 'Step 7b: Confirm delivery (BLOCKING GATE)'
+    Say ''
+    Say "  Have you EITHER attached the ZIP to the DM" Yellow
+    Say "  OR shared the Drive folder with $user's Gmail?" Yellow
+    Say ''
+    $confirmAttempts = 0
+    while ($confirmAttempts -lt 3) {
+        $confirmAttempts++
+        $confirm = Read-Host 'Type SENT to confirm (or SKIP to bypass at your risk)'
+        $confirm = ($confirm | Out-String).Trim().ToUpper()
+        if ($confirm -eq 'SENT') {
+            Say "  -> Delivery confirmed. New mod can install." Green
+            break
+        }
+        if ($confirm -eq 'SKIP') {
+            Say "  -> Skipped at operator request. New mod may hit a manifest error." Yellow
+            $result.errors.Add('delivery gate bypassed')
+            break
+        }
+        Say "  -> Unrecognized input. Type exactly 'SENT' or 'SKIP'." Red
+    }
+    if ($confirmAttempts -ge 3 -and $confirm -ne 'SENT' -and $confirm -ne 'SKIP') {
+        Say "  -> Three failed confirmations. Treating as SKIP." Yellow
+        $result.errors.Add('delivery gate timeout')
+    }
 
     Say ''
     Say "Total elapsed: $((Get-Date) - $started)" DarkGray
