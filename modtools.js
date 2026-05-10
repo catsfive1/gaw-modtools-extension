@@ -25398,16 +25398,73 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     }
   }
 
+  // v10.13.3 W2 (UIUX2-19): map reason -> severity tier.
+  // 4 tiers per spec G.2: setup (amber), connectivity (yellow), credential
+  // (amber), unknown (red). Each gets distinct bg + border + label.
+  function __authBannerSeverity(reason) {
+    if (reason === 'no_token' || reason === 'short_token') {
+      return {
+        kind: 'setup',
+        // amber-warm (Bloomberg brand-adjacent)
+        bg: 'rgba(245, 158, 11, .95)',
+        borderColor: 'rgba(255, 220, 150, .35)',
+        title: 'GAW ModTools: setup needed',
+        label: reason === 'short_token' ? 'Token incomplete' : 'Setup needed'
+      };
+    }
+    if (reason === 'fetch_failed' || reason === 'no_response') {
+      return {
+        kind: 'connectivity',
+        // yellow (transient network)
+        bg: 'rgba(217, 197, 36, .95)',
+        borderColor: 'rgba(255, 240, 150, .35)',
+        title: 'GAW ModTools: connection issue',
+        label: 'Connection issue'
+      };
+    }
+    if (reason === 'whoami_status' || reason === 'whoami_empty') {
+      return {
+        kind: 'credential',
+        // amber (token rotated/expired -- needs update, not network)
+        bg: 'rgba(240, 160, 64, .95)',
+        borderColor: 'rgba(255, 220, 150, .35)',
+        title: 'GAW ModTools: token needs update',
+        label: 'Token needs update'
+      };
+    }
+    return {
+      kind: 'unknown',
+      // red (true error / catch-all)
+      bg: 'rgba(220, 40, 40, .95)',
+      borderColor: 'rgba(255, 255, 255, .15)',
+      title: 'GAW ModTools: auth failed',
+      label: 'Auth error'
+    };
+  }
+
   function __showAuthFailBanner(authResult) {
     try {
       // Don't double-render if already shown.
       if (document.getElementById('gam-auth-fail-banner')) return;
+      // v10.13.3 W2 (UIUX2-19 G.2): per-mode severity color tier.
+      const _sev = __authBannerSeverity(authResult && authResult.reason);
       // AF-33 (Rule 99): 3-step recovery wizard copy for each failure mode.
       // Steps are programmatically built as <li> nodes -- no innerHTML with
       // user-derived content (reason codes are all hardcoded strings here).
       const reasonSteps = (function(){
         const reason = authResult && authResult.reason;
-        if (reason === 'no_token' || reason === 'short_token') {
+        // v10.13.3 W2 (UIUX2-19 B.9): short_token split from no_token.
+        // short_token = something in storage but <32 chars (truncation).
+        // Different remediation: check what's already there, repaste cleanly.
+        if (reason === 'short_token') {
+          return [
+            'Step 1 of 3: Your stored token is shorter than expected (' + (authResult && authResult.tokenLen || 0) + ' chars). Likely a truncated paste.',
+            'Step 2 of 3: Click "Open ModTools popup" below, expand the Tokens card, and check what is currently saved.',
+            'Step 3 of 3: Repaste your token cleanly into the Team Mod Token field. Make sure no characters are missing at the start or end.',
+            'Still stuck? Ask your lead to resend the token. The original may have been clipped during copy.'
+          ];
+        }
+        if (reason === 'no_token') {
           return [
             'Step 1 of 3: Click "Open ModTools popup" (button below). The popup opens.',
             'Step 2 of 3: In the popup, select "I have an invite LINK" OR "I have a token". Paste what your lead sent you.',
@@ -25433,6 +25490,18 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
             'Still stuck? You may be using a lead token in the mod slot (or vice versa). Ask your lead which token type you need.'
           ];
         }
+        // v10.13.3 W2 (UIUX2-19 B.8): whoami_empty has its own branch.
+        // Token is valid (HTTP 200) but server returned no username field.
+        // Different posture from whoami_status (rotated) -- suggests revoke
+        // or stale row. Mod must re-issue, not just rotate.
+        if (reason === 'whoami_empty') {
+          return [
+            'Step 1 of 3: The worker accepted your token but returned no user profile. Your token may have been revoked or the server row is stale.',
+            'Step 2 of 3: Click "Open ModTools popup" below. Expand the Tokens card and click "Re-enter credentials".',
+            'Step 3 of 3: Ask your lead for a fresh invite link or a re-issued token. The current one will not work without server-side fix.',
+            'Still stuck? This is rare. Open DevTools (F12) > Console and paste any red errors to your lead.'
+          ];
+        }
         // Generic fallback
         return [
           'Auth check failed: ' + (reason || 'unknown') + '.',
@@ -25443,16 +25512,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       })();
       const b = document.createElement('div');
       b.id = 'gam-auth-fail-banner';
+      b.dataset.severity = _sev.kind;
       b.style.cssText = [
         'position:fixed','top:8px','right:8px','z-index:2147483640',
-        'max-width:380px','padding:10px 12px','background:rgba(220,40,40,.95)',
+        'max-width:380px','padding:10px 12px','background:' + _sev.bg,
         'color:#fff','font:12px/1.45 -apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif',
         'border-radius:8px','box-shadow:0 4px 16px rgba(0,0,0,.5)',
-        'border:1px solid rgba(255,255,255,.15)'
+        'border:1px solid ' + _sev.borderColor
       ].join(';');
       const title = document.createElement('div');
       title.style.cssText = 'font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:6px';
-      title.textContent = '\u{1F512} GAW ModTools: auth failed';
+      title.textContent = '\u{1F512} ' + _sev.title;
       // AF-33 (Rule 99): render steps as <ol><li> for clear numbered recovery path.
       // textContent only -- no innerHTML with user-derived content.
       const msg = document.createElement('div');
@@ -25571,7 +25641,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     // AF-30 (Rule 90): detect low-resource mode early; gates ambient prefetch
     try { await detectLowResource(); } catch(_){}
 
-    const __authResult = await __validateModAuth();
+    let __authResult = await __validateModAuth();
     // AF-25 (Rule 73): strip tokenLen from window-exposed auth result shape.
     // tokenLen leaks token byte-length to page-world JS. keep only ok/reason/status.
     try {
@@ -25582,6 +25652,37 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         // tokenLen intentionally omitted from window exposure
       };
     } catch(_){}
+    if (!(__authResult && __authResult.ok)) {
+      // v10.13.3 W2 (UIUX2-19 G.1): auto-attempt preloadSecrets+sync+revalidate
+      // BEFORE showing the banner, but only for modes where re-hydrate could
+      // help. If the recovery succeeds within ~150-400ms, the banner is
+      // suppressed entirely. Eligibility excludes 'no_token' (genuinely empty
+      // -- nothing to re-hydrate) but includes everything else. Hard-limited
+      // to ONE cycle to avoid the infinite loop risk callout.
+      const _autoAttemptable = ['fetch_failed','no_response','whoami_status','whoami_empty','short_token','exception'];
+      if (_autoAttemptable.includes(__authResult.reason)) {
+        try {
+          if (typeof preloadSecrets === 'function') await preloadSecrets();
+          if (typeof syncSecretsToBackgroundVault === 'function') await syncSecretsToBackgroundVault();
+          const _retry = await __validateModAuth();
+          if (_retry && _retry.ok) {
+            __authResult = _retry;
+            try {
+              window.__GAM_AUTH_RESULT = {
+                ok: _retry.ok,
+                reason: _retry.reason,
+                status: _retry.status
+              };
+            } catch(_){}
+            try {
+              console.log('%c[modtools v10.13.3 W2] auth auto-recovered -- banner suppressed', 'color:#3dd68c;font-weight:700');
+            } catch(_) {}
+          }
+        } catch(_autoErr) {
+          // Auto-attempt failed silently -- fall through to banner.
+        }
+      }
+    }
     if (!(__authResult && __authResult.ok)) {
       try {
         console.log('%c[modtools v9.5.3] auth gate failed -- UI suppressed.', 'color:#f04040;font-weight:700', __authResult);

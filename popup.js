@@ -185,19 +185,105 @@ function _cardWizardComplete() {
     btn.textContent = 'Re-run setup';
     btn.addEventListener('click', function(e) {
       e.stopPropagation();
-      const wiz = document.getElementById('firstRunWizard');
-      if (wiz) { wiz.style.display = ''; }
-      ['firstRunWizardStep1','firstRunWizardStep2','firstRunWizardSuccess']
-        .forEach(function(eid, i) {
-          const el2 = document.getElementById(eid);
-          if (el2) el2.style.display = i === 0 ? '' : 'none';
-        });
+      // v10.13.3 W2: re-route to State A (no separate #firstRunWizard wrapper).
+      // Reset wizard step 2 / success and switch state machine.
+      try { __tokSetState('first-run'); } catch(_){}
+      const step2 = document.getElementById('firstRunWizardStep2');
+      const success = document.getElementById('firstRunWizardSuccess');
+      if (step2)   step2.style.display = 'none';
+      if (success) success.style.display = 'none';
       card.setAttribute('open', '');
     });
     badge.style.display = '';
     badge.appendChild(btn);
   }
   chrome.storage.local.set({ gam_card_open_tokens: false }).catch(function() {});
+}
+
+// =============================================================================
+// v10.13.3 W2 (UIUX2-02) — Tokens tab three-state machine.
+// Single point of truth for tab render state. All states are pre-rendered in
+// HTML; this just swaps visibility on the two state divs. Eliminates the
+// flash-of-wrong-content for non-leads (P0-07) and the orphan claim button
+// outside the card (R-06).
+// =============================================================================
+function __tokSetState(state, opts) {
+  const firstRun  = document.getElementById('tokStateFirstRun');
+  const returning = document.getElementById('tokStateReturning');
+  if (firstRun)  firstRun.style.display  = (state === 'first-run')  ? '' : 'none';
+  if (returning) returning.style.display = (state !== 'first-run')  ? '' : 'none';
+  if (state === 'returning' || state === 'expired') {
+    __tokUpdateBanner(opts || {});
+  }
+}
+
+// Populate the verified-status banner with live data.
+// opts: { username, tier, verifiedAgo, ageDays, encrypted }
+function __tokUpdateBanner(opts) {
+  const banner    = document.getElementById('tokVerifiedBanner');
+  const icon      = document.getElementById('tokBannerIcon');
+  const primary   = document.getElementById('tokBannerPrimary');
+  const secondary = document.getElementById('tokBannerSecondary');
+  if (!banner || !primary || !secondary) return;
+
+  const ageDays = (opts.ageDays != null) ? Number(opts.ageDays) : -1;
+  let severity = 'ok';
+  if (ageDays >= 90)      severity = 'err';
+  else if (ageDays >= 60) severity = 'warn';
+
+  // Apply severity class (single class, no others)
+  banner.className = 'tok-banner ' + severity;
+  if (icon) icon.textContent = severity === 'ok' ? '✓' : severity === 'warn' ? '⚠' : '✗';
+
+  // Primary line
+  primary.textContent = (severity === 'err')
+    ? 'TOKEN EXPIRED — rotate required'
+    : (severity === 'warn' ? 'Token active — rotate soon' : 'Token active');
+
+  // Secondary: u/name * tier * verified Xs ago * ENC chip * age
+  secondary.innerHTML = '';
+  const parts = [];
+  if (opts.username)            parts.push('u/' + opts.username);
+  if (opts.tier)                parts.push(String(opts.tier).replace('_', '-') + ' tier');
+  if (opts.verifiedAgo != null) parts.push('verified ' + opts.verifiedAgo + 's ago');
+  parts.forEach(function(p, i) {
+    if (i > 0) secondary.appendChild(document.createTextNode(' · '));
+    secondary.appendChild(document.createTextNode(p));
+  });
+
+  // ENC chip — encryption is always-on since v10.11
+  const encChip = document.createElement('span');
+  encChip.className = 'tok-enc-chip';
+  encChip.title = 'Token stored encrypted (v10.11+)';
+  encChip.textContent = 'ENC';
+  secondary.appendChild(document.createTextNode(' · '));
+  secondary.appendChild(encChip);
+
+  // Age indicator (60-89d amber, >=90d red rotate-now)
+  if (ageDays >= 90) {
+    const ageEl = document.createElement('span');
+    ageEl.className = 'tok-age-err';
+    ageEl.textContent = 'age ' + ageDays + 'd';
+    secondary.appendChild(document.createTextNode(' · '));
+    secondary.appendChild(ageEl);
+    const rotateEl = document.createElement('button');
+    rotateEl.className = 'tok-banner-rotate-btn';
+    rotateEl.textContent = 'Rotate now';
+    rotateEl.addEventListener('click', function() {
+      const mgmt = document.getElementById('tokManagementDetails');
+      if (mgmt) mgmt.setAttribute('open', '');
+      const rotBtn = document.getElementById('rotateBtn');
+      if (rotBtn) rotBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    secondary.appendChild(document.createTextNode(' '));
+    secondary.appendChild(rotateEl);
+  } else if (ageDays >= 60) {
+    const ageEl = document.createElement('span');
+    ageEl.className = 'tok-age-warn';
+    ageEl.textContent = 'age ' + ageDays + 'd — rotate soon';
+    secondary.appendChild(document.createTextNode(' · '));
+    secondary.appendChild(ageEl);
+  }
 }
 // =============================================================================
 // END PATCH 1
@@ -1560,21 +1646,21 @@ async function loadToken() {
       const status = await __tokensStatus();
       const statusEl = $('tokenStatus');
       if (status.hasTeamToken) {
-        statusEl.className = 'pop-token-status';
-        statusEl.textContent = 'stored';
+        if (statusEl) {
+          statusEl.className = 'pop-token-status';
+          statusEl.textContent = 'stored';
+        }
         // v10.x: tokens card auto-collapse will fire after __applyTierGate whoami
         // (hasTeamToken alone is insufficient — wait for whoami result)
       } else {
-        // v9.2.5: direct new mods (e.g. PresidentialSeal pre-claim) toward
-        // the claim flow rather than the dead-end "not configured" message.
-        // v9.3.6: clearer first-run guidance per noob-rollout audit.
-        statusEl.textContent = '👋 First time? Click 📨 Claim invite below if you have a link, OR 📥 I have a rotation invite to enter the code manually. Both work.';
+        // v10.13.3 W2: explicit State A on no-token (replaces inline status text).
+        // Old guidance string is now redundant — State A's onboarding copy
+        // handles first-run messaging directly in #tokStateFirstRun.
+        try { __tokSetState('first-run'); } catch(_){}
         _cardAuthFailed();
       }
-      // Show claim-invite wrap when flag on (even before a code is staged --
-      // clicking with nothing staged surfaces a clear status message).
-      const wrap = $('claimInviteWrap');
-      if (wrap) wrap.style.display = '';
+      // v10.13.3 W2: #claimInviteWrap orphan removed (R-06). #claimInviteBtn
+      // now lives inside #tokStateFirstRun and is visibility-driven by state.
     } catch (e) {}
     return;
   }
@@ -1782,9 +1868,24 @@ async function __applyTierGate() {
   const tools = $('leadOnlyTools');
   if (!tools) return;
   tools.style.display = 'none';
+
+  // v10.13.3 W2: explicit timeout fallback. If whoami never resolves AND
+  // never rejects within 5s, the Tokens tab would otherwise stay in its
+  // pre-render limbo. Force back to first-run so the user has a clear path.
+  let _whoamiTimedOut = false;
+  const _whoamiTimer = setTimeout(function() {
+    _whoamiTimedOut = true;
+    try { __tokSetState('first-run'); } catch(_){}
+    try { _cardAuthFailed(); } catch(_){}
+  }, 5000);
+
   try {
     const r = await popupRpc('modWhoami');
+    if (_whoamiTimedOut) return; // timeout already fired the recovery
+    clearTimeout(_whoamiTimer);
     if (!r || !r.ok || !r.data) {
+      // v10.13.3 W2: explicit State A on auth fail (no flash)
+      try { __tokSetState('first-run'); } catch(_){}
       _cardAuthFailed();
       return;
     }
@@ -1799,12 +1900,41 @@ async function __applyTierGate() {
 
     __renderTierBadge(_gamTier);
     __applyTierVisibility(_gamTier, r);
-    // Auto-collapse tokens card on auth success
+
+    // v10.13.3 W2: compute token age from gam_settings.rotated_at, then
+    // switch the tab into State B/C via __tokSetState. Replaces the implicit
+    // "render everything, then hide via JS" pattern with explicit state.
+    let _ageDays = -1;
+    try {
+      const _st = await chrome.storage.local.get('gam_settings');
+      const _ra = _st && _st.gam_settings && _st.gam_settings.rotated_at;
+      if (_ra) _ageDays = Math.floor((Date.now() - new Date(_ra).getTime()) / 86400000);
+    } catch(_) {}
+    try {
+      __tokSetState('returning', {
+        username:    _gamWhoamiUsername,
+        tier:        _gamTier,
+        verifiedAgo: 0,
+        ageDays:     _ageDays,
+        encrypted:   true   // always true since v10.11
+      });
+    } catch(_){}
+
+    // v10.13.3 W2: Lead section now lives inside #tokStateReturning (Tokens
+    // tab State C). Show only for lead/senior_lead. The old #leadSection
+    // location inside #card-lead is gone.
+    const _leadSec = document.getElementById('leadSection');
+    if (_leadSec) _leadSec.style.display = (_gamTier === 'lead' || _gamTier === 'senior_lead') ? '' : 'none';
+
+    // Auto-collapse tokens card on auth success (kept for legacy badge path)
     await _cardAutoCollapseTokens(true);
     // Show lead KPI row + quick actions for full leads
     __loadLeadKpi();
   } catch (_) {
-    // Network/auth failure - stay hidden (fail-closed)
+    if (_whoamiTimedOut) return;
+    clearTimeout(_whoamiTimer);
+    // Network/auth failure - explicit State A, fail-closed
+    try { __tokSetState('first-run'); } catch(_){}
     _cardAuthFailed();
   }
 }
@@ -3168,16 +3298,9 @@ async function __claimInviteClick() {
   btn.addEventListener('click', __claimInviteClick);
 })();
 
-// Show the claim-invite wrap once we confirm the flag is on (loadToken also
-// toggles this, but we do it here too for robustness).
-(async function __maybeShowClaimInvite() {
-  try {
-    if (await __hardeningOnPopup()) {
-      const wrap = $('claimInviteWrap');
-      if (wrap) wrap.style.display = '';
-    }
-  } catch (e) {}
-})();
+// v10.13.3 W2: __maybeShowClaimInvite was a redundant IIFE that toggled
+// #claimInviteWrap visibility. The wrap is gone (R-06); #claimInviteBtn now
+// lives inside State A and is visibility-driven by __tokSetState. No-op.
 // --- v7.2 Platform Hardening END ---
 
 // AF-39 (Rule 116 / C.2.9): dynamic version — replaces stale hardcoded v5.2.8 in popup.html L24
@@ -3210,8 +3333,14 @@ loadLead();
 // shows welcome + auto-hides after 5s. Persists state in chrome.storage.session
 // so a refresh during step 2 doesn't reset.
 (async function initFirstRunWizard() {
-  const wiz = $('firstRunWizard');
-  if (!wiz) return;
+  // v10.13.3 W2: wizard wrapper #firstRunWizard removed; State A
+  // (#tokStateFirstRun) is the new container. We still need to gate path-
+  // button + step-2 + success behavior the same way, but the visibility
+  // of the container is now driven by __tokSetState() not local opacity.
+  const stateA = document.getElementById('tokStateFirstRun');
+  const path1 = document.getElementById('firstRunPathLink');
+  if (!stateA || !path1) return;
+
   // v10.3 (Auth Carry-Over RCA primary fix): wizard now reads via the SW
   // tokensStatus RPC instead of raw chrome.storage.local. Pre-fix the
   // wizard read local storage directly while loadToken read the SW vault;
@@ -3235,22 +3364,38 @@ loadLead();
     } catch (_) {}
   }
   if (hasToken) {
-    wiz.style.display = 'none';
+    // v10.13.3 W2: __applyTierGate will switch state to 'returning' on whoami
+    // success. Until then, leave the state-A pre-render visible — but the
+    // user's token is in storage, so __applyTierGate will fire shortly.
     return;
   }
-  // Show wizard, hide regular token sections to reduce confusion
-  wiz.style.display = 'block';
-  // Hide the legacy team-token input row + claim invite while wizard active
-  const legacyTeamToken = document.querySelector('label[for="tokenInput"]');
-  if (legacyTeamToken) {
-    const wrap = legacyTeamToken.closest('.pop-token, .pop-section');
-    if (wrap) wrap.style.opacity = '0.4';
-  }
+  // No token → State A. Reset step-2 / success containers; path row is
+  // always visible inside State A.
+  try { __tokSetState('first-run'); } catch(_){}
+  const _step2  = document.getElementById('firstRunWizardStep2');
+  const _ok     = document.getElementById('firstRunWizardSuccess');
+  if (_step2) _step2.style.display = 'none';
+  if (_ok)    _ok.style.display    = 'none';
 
+  // v10.13.3 W2: showStep semantics changed -- there's no step 1 (path row
+  // is always visible). showStep(2) shows step-2 form, showStep(3) shows
+  // success. showStep(1) is now an alias for "reset back to path picker"
+  // which means hide step-2 and success.
   function showStep(n) {
-    $('firstRunWizardStep1').style.display = n === 1 ? 'block' : 'none';
-    $('firstRunWizardStep2').style.display = n === 2 ? 'block' : 'none';
-    $('firstRunWizardSuccess').style.display = n === 3 ? 'block' : 'none';
+    const s2 = document.getElementById('firstRunWizardStep2');
+    const sk = document.getElementById('firstRunWizardSuccess');
+    if (s2) s2.style.display = n === 2 ? 'block' : 'none';
+    if (sk) sk.style.display = n === 3 ? 'block' : 'none';
+    // Hide the path-row only while step 2 / success are active
+    const pathRow = document.querySelector('#tokStateFirstRun .tok-path-row');
+    const pathDiv = document.querySelector('#tokStateFirstRun .tok-path-divider');
+    const claimEl = document.getElementById('claimInviteBtn');
+    const claimSt = document.getElementById('claimInviteStatus');
+    const showPicker = (n !== 2 && n !== 3);
+    if (pathRow) pathRow.style.display = showPicker ? '' : 'none';
+    if (pathDiv) pathDiv.style.display = showPicker ? '' : 'none';
+    if (claimEl) claimEl.style.display = showPicker ? '' : 'none';
+    if (claimSt) claimSt.style.display = showPicker ? '' : 'none';
   }
   showStep(1);
 
@@ -3328,10 +3473,9 @@ loadLead();
           try { await __noteWhoami(who.data.username); } catch(_){}
           $('firstRunSuccessName').textContent = 'Welcome, u/' + who.data.username + (who.data.is_lead ? ' (lead)' : '');
           showStep(3);
-          if (legacyTeamToken) {
-            const wrap = legacyTeamToken.closest('.pop-token, .pop-section');
-            if (wrap) wrap.style.opacity = '';
-          }
+          // v10.13.3 W2: legacy token-input opacity reset removed -- the token
+          // input now lives inside #tokManagementDetails (State B), not next to
+          // the wizard. State transition handles visibility.
           setTimeout(() => { _cardWizardComplete(); try { loadToken(); loadLead(); loadStats(); } catch(_){} }, 5000);
         } else {
           status.textContent = 'token minted but whoami probe failed -- try refreshing';
@@ -3367,10 +3511,9 @@ loadLead();
           try { await __noteWhoami(who.data.username); } catch(_){}
           $('firstRunSuccessName').textContent = 'Welcome, u/' + who.data.username + (who.data.is_lead ? ' (lead)' : '');
           showStep(3);
-          if (legacyTeamToken) {
-            const wrap = legacyTeamToken.closest('.pop-token, .pop-section');
-            if (wrap) wrap.style.opacity = '';
-          }
+          // v10.13.3 W2: legacy token-input opacity reset removed -- the token
+          // input now lives inside #tokManagementDetails (State B), not next to
+          // the wizard. State transition handles visibility.
           setTimeout(() => { _cardWizardComplete(); try { loadToken(); loadLead(); loadStats(); } catch(_){} }, 5000);
         } else {
           // Likely the user pasted an invite code instead of a token
@@ -3395,7 +3538,10 @@ loadLead();
   // Cards now carry data-tab directly in HTML; tab panels use [hidden].
   const TAB_MAP = {
     stats:  ['.pop-stats', '#pop-drill', '.pop-alert', '#dr-alert', '#firstrun-banner'],
-    tokens: ['#claimInviteWrap'],
+    // v10.13.3 W2: #claimInviteWrap orphan removed; #claimInviteBtn now lives
+    // inside #card-tokens > #tokStateFirstRun, so the card's data-tab="tokens"
+    // attribute already covers it. No legacy non-panel selectors here.
+    tokens: [],
     tools:  ['.pop-actions'],
     lead:   [],
     diag:   []
@@ -6321,19 +6467,25 @@ async function __loadLapsedMods() {
 })();
 
 // Restart setup button wiring
+// v10.13.3 W2: re-routes to State A. No more #firstRunWizard wrapper / Step1.
 (function wireRestartSetup() {
   const btn = $('restartSetupBtn');
   if (!btn) return;
   btn.addEventListener('click', function() {
-    const wiz = $('firstRunWizard');
-    if (wiz) { wiz.style.display = 'block'; }
-    // card-tokens is now a <div>, no setAttribute('open') needed — just ensure tab is active
-    const step1 = $('firstRunWizardStep1');
+    try { __tokSetState('first-run'); } catch(_){}
     const step2 = $('firstRunWizardStep2');
     const success = $('firstRunWizardSuccess');
-    if (step1) step1.style.display = 'block';
     if (step2) step2.style.display = 'none';
     if (success) success.style.display = 'none';
+    // Restore path-row visibility (showStep(1) equivalent)
+    const pathRow = document.querySelector('#tokStateFirstRun .tok-path-row');
+    const pathDiv = document.querySelector('#tokStateFirstRun .tok-path-divider');
+    const claimEl = document.getElementById('claimInviteBtn');
+    const claimSt = document.getElementById('claimInviteStatus');
+    if (pathRow) pathRow.style.display = '';
+    if (pathDiv) pathDiv.style.display = '';
+    if (claimEl) claimEl.style.display = '';
+    if (claimSt) claimSt.style.display = '';
   });
 })();
 // =============================================================================

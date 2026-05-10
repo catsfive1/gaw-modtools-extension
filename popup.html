@@ -448,89 +448,146 @@
 
   <!-- M4.3 REDTEAM-3: tokens tab panel wrapper -->
   <div id="tab-panel-tokens" role="tabpanel" aria-labelledby="tab-btn-tokens">
-  <!-- v10.12 UIUX-01: <details> -> <div> permanent panel. data-tab="tokens" -->
+  <!-- v10.13.3 W2 (UIUX2-02): Tokens tab three-state machine.
+       State A (#tokStateFirstRun): no token / whoami fail -> first-run wizard.
+       State B (#tokStateReturning, no #leadSection): authenticated mod.
+       State C (#tokStateReturning + #leadSection visible): authenticated lead.
+       __tokSetState() in popup.js drives transitions. #leadSection now lives
+       INSIDE #tokStateReturning, not in the Lead card -- eliminates the
+       ~200ms flash-of-lead-content for non-leads (P0-07, R-06). -->
   <div class="gam-card" id="card-tokens" data-tab="tokens">
     <div class="gam-card-header">
       <span class="gam-card-title">&#x1F511; Tokens</span>
       <span class="gam-card-badge" id="card-badge-tokens" style="display:none"></span>
     </div>
-    <div class="gam-card-body">
+    <div class="gam-card-body" style="padding:0">
 
-  <div class="pop-token">
-    <label for="tokenInput">&#x1F511; Team Mod Token</label>
-    <div class="pop-token-hint">Required for all mod actions (crawl, ban, notes, cross-mod sync)</div>
-    <input id="tokenInput" type="password" placeholder="paste once \u2014 stored locally">
-    <button id="tokenSave" class="pop-btn pop-btn-ghost">Save</button>
-    <div id="tokenStatus" class="pop-token-status"></div>
-    <!-- v8.5.0: per-mod token sovereignty. Rotate generates a new token only
-         the mod knows -- lead can no longer authenticate as them after this.
-         v9.4.4: margin-top 8 -> 4 to match tightened rhythm. -->
-    <div class="pop-tools" style="margin-top:4px">
-      <button id="rotateBtn" class="pop-btn pop-btn-ghost">&#x1F504; Rotate my token (lead loses access)</button>
-      <button id="claimRotateBtn" class="pop-btn pop-btn-ghost">&#x1F4E5; I have a rotation invite</button>
-    </div>
-    <div id="rotateStatus" class="pop-token-status"></div>
-  </div>
+      <!-- =====================================================
+           STATE A: first-run / not-yet-authed.
+           Default-visible until __tokSetState() decides otherwise.
+           Absorbs the orphan #claimInviteWrap (R-06) + the wizard.
+           ===================================================== -->
+      <div id="tokStateFirstRun" class="tok-onboard">
+        <div class="tok-onboard-headline">&#x2728; New mod setup</div>
+        <div class="tok-onboard-body">
+          Your lead sent you an invite. Pick your path below.
+        </div>
 
-  <!-- v9.21.0 - First-run onboarding wizard (Commander explicit ask).
-       Replaces the implicit "land on TOKENS tab + see banner" with a
-       proper 3-path guided flow. Hidden when a team token is saved.
-       Shown above the regular token inputs when no token. -->
-  <div id="firstRunWizard" style="display:none;background:#0a0a0b;border:2px solid #ff9933;padding:14px;margin:8px;font:11px/1.4 ui-monospace,JetBrains Mono,monospace">
-    <div id="firstRunWizardStep1" style="display:none">
-      <div style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:11px;margin-bottom:8px">✨ First-run setup · Step 1 of 2</div>
-      <div style="color:#e8e6e1;margin-bottom:12px">Welcome. Pick how your lead sent you in:</div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        <button id="firstRunPathLink" class="pop-btn" style="text-align:left;padding:10px 12px">📨 &nbsp;I have an invite LINK <span style="color:#5a5752;font-weight:400">(https://greatawakening.win/?mt_invite=...)</span></button>
-        <button id="firstRunPathCode" class="pop-btn" style="text-align:left;padding:10px 12px">🔢 &nbsp;I have an invite CODE <span style="color:#5a5752;font-weight:400">(48-char alphanumeric)</span></button>
-        <button id="firstRunPathToken" class="pop-btn" style="text-align:left;padding:10px 12px">🔑 &nbsp;I have a TEAM TOKEN <span style="color:#5a5752;font-weight:400">(already minted)</span></button>
-      </div>
-    </div>
-    <div id="firstRunWizardStep2" style="display:none">
-      <div style="color:#ff9933;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:11px;margin-bottom:8px">✨ First-run setup · Step 2 of 2</div>
-      <div id="firstRunStep2Prompt" style="color:#e8e6e1;margin-bottom:8px"></div>
-      <input id="firstRunInput" type="password" placeholder="paste here" style="width:100%;background:#050507;border:1px solid #3d3a35;color:#e8e6e1;padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.02em;margin-bottom:8px">
-      <div id="firstRunUsernameWrap" style="display:none;margin-bottom:8px">
-        <label style="color:#9b9892;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px">Your GAW username</label>
-        <input id="firstRunUsername" type="text" placeholder="e.g. catsfive" style="width:100%;background:#050507;border:1px solid #3d3a35;color:#e8e6e1;padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace">
-      </div>
-      <div style="display:flex;gap:6px">
-        <button id="firstRunBack" class="pop-btn pop-btn-ghost" style="flex:0 0 auto">← Back</button>
-        <button id="firstRunGo" class="pop-btn" style="flex:1;background:#ff9933;color:#0a0a0b;border-color:#ff9933;font-weight:600">Save & verify</button>
-      </div>
-      <div id="firstRunStatus" style="margin-top:8px;color:#9b9892;font-size:10px;line-height:1.4"></div>
-    </div>
-    <div id="firstRunWizardSuccess" style="display:none">
-      <div style="color:#44dd66;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:12px;margin-bottom:8px">&#x2713; Authenticated</div>
-      <div style="color:#e8e6e1;margin-bottom:12px" id="firstRunSuccessName">Welcome, u/...</div>
-      <div style="color:#9b9892;font-size:10.5px;line-height:1.5;margin-bottom:10px">Refresh greatawakening.win to see the status bar at the bottom. Your token is stored in IndexedDB backup so it survives extension reloads.</div>
-      <!-- v10.5.1 AFFORDANCE: explicit Done button gives users clear exit from success state.
-           Pre-fix: wizard stayed open with no close affordance; mods had to click the card header. -->
-      <button id="firstRunDone" class="pop-btn pop-btn-primary" style="width:100%">Done &#x2014; collapse this card</button>
-    </div>
-  </div>
+        <!-- PRIMARY CTA: claim from staged URL (most common path).
+             Same #claimInviteBtn ID -- existing JS wire unchanged. -->
+        <button id="claimInviteBtn" class="tok-cta-primary">
+          &#x1F4E8; Claim my invite
+        </button>
+        <div id="claimInviteStatus" class="pop-token-status" style="margin:0 0 8px"></div>
 
-  <!-- M4.3 REDTEAM-3: lead tab panel wrapper -->
-  <div id="tab-panel-lead" role="tabpanel" aria-labelledby="tab-btn-lead">
-  <!-- v10.12 UIUX-01: outer card stays <details> per CTO ruling (UIUX-08 inner deep-dive is nested <details>). -->
-  <!-- v10.12 UIUX-08: KPI / QA / lapsed moved INSIDE card; orphan divs eliminated. -->
-  <div class="gam-card" id="card-lead" data-tab="lead">
-    <div class="gam-card-header">
-      <span class="gam-card-title">&#x1F451; Lead</span>
-      <span class="gam-card-badge" id="card-badge-lead" style="display:none"></span>
-    </div>
-    <div class="gam-card-body">
+        <!-- SECONDARY: manual path selection (always visible, no separate "step 1") -->
+        <div class="tok-path-divider">or choose a path</div>
+        <div class="tok-path-row">
+          <button id="firstRunPathLink"  class="tok-path-btn">&#x1F4E8; Link</button>
+          <button id="firstRunPathCode"  class="tok-path-btn">&#x1F522; Code</button>
+          <button id="firstRunPathToken" class="tok-path-btn">&#x1F511; Raw token</button>
+        </div>
 
-  <!-- Lead token input (always visible for token-paste flow — v9.6.1 rule) -->
-  <div class="pop-token" id="leadSection">
-    <label for="leadInput">&#x1F451; Lead Mod Token</label>
-    <div class="pop-token-hint">Lead-only: rotation roster, invite generation, mod HUD</div>
-    <input id="leadInput" type="password" placeholder="lead-mod token — enables HUD + invites">
-    <button id="leadSave" class="pop-btn pop-btn-ghost">Save</button>
-    <div id="leadStatus" class="pop-token-status"></div>
+        <!-- v9.21.0 - First-run onboarding wizard (Commander explicit ask).
+             Replaces the implicit "land on TOKENS tab + see banner" with a
+             proper 3-path guided flow. Hidden when a team token is saved. -->
+        <!-- WIZARD STEP 2: replaces path row on path selection -->
+        <div id="firstRunWizardStep2" style="display:none;margin-top:12px">
+          <div class="tok-onboard-headline" style="font-size:10.5px">Step 2 of 2</div>
+          <div id="firstRunStep2Prompt" class="tok-onboard-body" style="margin-bottom:8px"></div>
+          <input id="firstRunInput" type="password" placeholder="paste here" style="width:100%;background:#060709;border:1px solid #3d3a35;color:#e8e6e1;padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;border-radius:4px;margin-bottom:8px;box-sizing:border-box">
+          <div id="firstRunUsernameWrap" style="display:none;margin-bottom:8px">
+            <label for="firstRunUsername" style="color:#9b9892;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px">Your GAW username</label>
+            <input id="firstRunUsername" type="text" placeholder="e.g. catsfive" style="width:100%;background:#060709;border:1px solid #3d3a35;color:#e8e6e1;padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;border-radius:4px;box-sizing:border-box">
+          </div>
+          <div style="display:flex;gap:6px">
+            <button id="firstRunBack" class="pop-btn pop-btn-ghost" style="flex:0 0 auto">&#x2190; Back</button>
+            <button id="firstRunGo" class="tok-cta-primary" style="flex:1;margin-bottom:0">Save &amp; verify</button>
+          </div>
+          <div id="firstRunStatus" style="margin-top:8px;color:#9b9892;font-size:10px;line-height:1.4"></div>
+        </div>
 
-    <!-- Lead-only tools — gated by __applyLeadGate -->
-    <div id="leadOnlyTools" style="display:none">
+        <!-- SUCCESS STATE: replaces everything on successful auth -->
+        <div id="firstRunWizardSuccess" style="display:none;margin-top:8px">
+          <div class="tok-banner ok" style="margin:0 0 10px">
+            <span class="tok-banner-icon">&#x2713;</span>
+            <div class="tok-banner-body">
+              <div class="tok-banner-primary" id="firstRunSuccessName">Authenticated</div>
+              <div class="tok-banner-secondary">
+                Token stored encrypted. Refresh greatawakening.win to activate the status bar.
+              </div>
+            </div>
+          </div>
+          <!-- v10.13.3 W2 (P0-27): full-width "Open greatawakening.win" link button on success.
+               Pre-fix: only instructional text, mods had to type the URL. -->
+          <a id="firstRunOpenGaw" href="https://greatawakening.win/" target="_blank" rel="noopener noreferrer"
+             class="tok-cta-primary" style="margin-bottom:8px;text-decoration:none">
+            &#x2197; Open greatawakening.win
+          </a>
+          <button id="firstRunDone" class="pop-btn pop-btn-ghost" style="width:100%">Done &#x2014; close setup</button>
+        </div>
+      </div><!-- /#tokStateFirstRun -->
+
+      <!-- =====================================================
+           STATE B/C: returning mod / lead (authenticated).
+           Hidden until __tokSetState('returning'|'expired') fires.
+           ===================================================== -->
+      <div id="tokStateReturning" style="display:none">
+
+        <!-- Verified-status banner (ok / warn / err based on token age) -->
+        <div class="tok-banner ok" id="tokVerifiedBanner">
+          <span class="tok-banner-icon" id="tokBannerIcon">&#x2713;</span>
+          <div class="tok-banner-body">
+            <div class="tok-banner-primary" id="tokBannerPrimary">Token active</div>
+            <div class="tok-banner-secondary" id="tokBannerSecondary">
+              <!-- popup.js __tokUpdateBanner injects: u/name * tier * verified Xs ago * ENC * age -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Token management accordion (collapsed post-auth) -->
+        <details class="tok-mgmt-details" id="tokManagementDetails">
+          <summary>Token management (rotate, re-enter)</summary>
+          <div class="tok-mgmt-body">
+            <div class="pop-token" style="border-top:none;padding:0 2px">
+              <label for="tokenInput">Team Mod Token</label>
+              <div class="pop-token-hint">Paste to replace stored token.</div>
+              <input id="tokenInput" type="password" placeholder="paste replacement token">
+              <button id="tokenSave" class="pop-btn pop-btn-ghost">Save</button>
+              <div id="tokenStatus" class="pop-token-status"></div>
+            </div>
+            <!-- v8.5.0: per-mod token sovereignty. Rotate generates a new token only
+                 the mod knows -- lead can no longer authenticate as them after this. -->
+            <div class="pop-tools" style="margin-top:6px">
+              <button id="rotateBtn" class="pop-btn pop-btn-ghost">&#x1F504; Rotate my token (lead loses access)</button>
+              <button id="claimRotateBtn" class="pop-btn pop-btn-ghost">&#x1F4E5; I have a rotation invite</button>
+            </div>
+            <div id="rotateStatus" class="pop-token-status"></div>
+          </div>
+        </details>
+
+        <!-- =====================================================
+             STATE C ADDITION: Lead section (tier = lead/sr-lead).
+             #leadSection MOVED here from #card-lead (R-06 / P0-07).
+             Hidden by default; __applyTierVisibility flips on for leads only.
+             ===================================================== -->
+        <div id="leadSection" style="display:none">
+          <hr class="tok-lead-sep">
+          <div class="tok-lead-header">
+            <span class="tok-lead-header-label">&#x1F451; Lead token</span>
+            <span class="tok-lead-tag">LEAD</span>
+          </div>
+          <div class="pop-token" style="border-top:none;padding:4px 10px 8px">
+            <div class="pop-token-hint" style="grid-column:1/-1;color:#f0a040">
+              Enables rotation roster, invite generation, and HUD.
+            </div>
+            <input id="leadInput" type="password" placeholder="lead-mod token">
+            <button id="leadSave" class="pop-btn pop-btn-ghost">Save</button>
+            <div id="leadStatus" class="pop-token-status"></div>
+          </div>
+
+          <!-- Lead-only tools - gated by __applyLeadGate -->
+          <div id="leadOnlyTools" style="display:none">
       <!-- Loading shimmer hint (v10.x sr-lead tier) -->
       <div id="srLeadEmptyHint" style="display:none;color:var(--bb-ink-faint);font-size:10.5px;padding:6px 0;border-bottom:1px solid var(--bb-line);margin-bottom:6px">
         Loading elevated tools&hellip;
@@ -768,34 +825,29 @@
 
       </details><!-- /#gam-lead-deepdive -->
 
-    </div><!-- /#leadOnlyTools -->
-  </div><!-- /#leadSection -->
+          </div><!-- /#leadOnlyTools -->
+        </div><!-- /#leadSection -->
 
-    </div><!-- /.gam-card-body lead -->
-  </div><!-- /#card-lead -->
-  </div><!-- /#tab-panel-lead (M4.3 REDTEAM-3) -->
+      </div><!-- /#tokStateReturning -->
 
-  <!-- v7.2 Platform Hardening: Claim invite button. When platformHardening is
-       on, URL-detected invite codes are staged into chrome.storage.session by
-       the content script and ONLY committed after this button + confirm.
-       v9.3.6: now visible by default (no display:none). With hardening flag
-       now default-true, every fresh install needs this button visible —
-       hiding it was the primary noob-rollout dead-end per the audit. The
-       click handler at popup.js:1379 already prints a clear status when
-       nothing is staged yet, so it's safe to show unconditionally. -->
-  <div class="pop-tools" id="claimInviteWrap">
-    <button id="claimInviteBtn" class="pop-btn pop-btn-ghost">&#x1F4E8; Claim invite</button>
-    <div id="claimInviteStatus" class="pop-token-status"></div>
-  </div>
-  <!-- v10.x: Restart setup button (non-destructive wizard re-entry) -->
-  <div id="restartSetupWrap" style="display:none;margin:6px 8px 0;text-align:right">
-    <button id="restartSetupBtn" class="pop-link" style="font-size:10.5px;color:#5a5752">
-      Re-enter credentials
-    </button>
-  </div>
+      <!-- v10.x: Restart setup button (non-destructive wizard re-entry).
+           Always visible (low prominence) so authed mods can re-run wizard
+           if they need to repaste. -->
+      <div id="restartSetupWrap" style="display:none;padding:2px 10px 8px;text-align:right">
+        <button id="restartSetupBtn" class="pop-link" style="font-size:10.5px;color:#5a5752">
+          Re-enter credentials
+        </button>
+      </div>
+
     </div><!-- /.gam-card-body tokens -->
   </div><!-- /#card-tokens -->
   </div><!-- /#tab-panel-tokens (M4.3 REDTEAM-3) -->
+
+  <!-- v10.13.3 W2: Lead panel = empty shell (R-06 / P0-07). Lead token + tools
+       moved INSIDE #card-tokens State C. Empty shell preserves aria-controls. -->
+  <div id="tab-panel-lead" role="tabpanel" aria-labelledby="tab-btn-lead" style="display:none">
+    <div class="gam-card" id="card-lead" data-tab="lead" style="display:none"><span id="card-badge-lead" class="gam-card-badge" style="display:none"></span></div>
+  </div>
 
   <!-- E.3.1 (Rule 94): Diagnostics tab section — data-tab="diag", hidden by default via wireTabNav -->
   <!-- M4.3 REDTEAM-3: role="tabpanel" + aria-labelledby added -->
