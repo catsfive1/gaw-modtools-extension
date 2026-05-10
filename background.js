@@ -369,7 +369,17 @@ function _semverCmp(a, b) {
   return 0;
 }
 
+// v10.12.3 (Vanguard audit-2 #4): singleton-promise wrapper. _initOnce() at
+// L460 protects the cold-boot path with its own _initReady cache, but the
+// 14+ direct `await loadSecrets()` call sites (alarm handlers, repair
+// actions, RPC pre-flight, settings.onChanged hooks) can each fire a
+// concurrent chrome.storage.local read on SW wake. The singleton collapses
+// concurrent calls to one in-flight read and clears the cache on settle so
+// later cache-invalidation calls re-fetch.
+let _loadSecretsPromise = null;
 async function loadSecrets() {
+  if (_loadSecretsPromise) return _loadSecretsPromise;
+  _loadSecretsPromise = (async () => {
   try {
     let s = {};
     if (chrome.storage && chrome.storage.session) {
@@ -451,6 +461,9 @@ async function loadSecrets() {
       }
     } catch (_) {}
   } catch (e) { /* service-worker may have been evicted; cache stays empty */ }
+  })();
+  _loadSecretsPromise.finally(() => { _loadSecretsPromise = null; });
+  return _loadSecretsPromise;
 }
 
 // v10.12.1 PA.2: gate RPC on init-ready to fix cold-boot 401 race
