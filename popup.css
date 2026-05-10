@@ -51,36 +51,12 @@ html, body {
 }
 
 /* ── Stats grid ─────────────────────────────────────────────────────── */
-.pop-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-  padding: 8px 12px;
-}
-.pop-stat {
-  background: #181b20;
-  border: 1px solid #2a2f38;
-  border-radius: 4px;
-  padding: 4px 4px;
-  text-align: center;
-  transition: border-color .12s, background .12s;
-}
-.pop-stat:hover { border-color: #3a3f48; background: #1c2028; }
-.pop-stat-val {
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1;
-  color: #e8eaed;
-  letter-spacing: -0.4px;
-}
-.pop-stat-label {
-  font-size: 9px;
-  color: #5c6370;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  margin-top: 4px;
-  font-weight: 600;
-}
+/* v10.13.0 W1 (P0-04): the v9.4.4-era .pop-stats / .pop-stat / .pop-stat-val
+   / .pop-stat-label rule block that previously lived here was a dead first
+   layer — every property was clobbered by the v9.7.0 Bloomberg block at
+   L913 with !important. Removing it kills the specificity-war noise; the
+   L913 block + the W1-merged 4-col override below is now canonical.
+   The .pop-stats.pop-tab-hidden chain at L1449 stays (separate concern). */
 
 /* ── Alert banner ───────────────────────────────────────────────────── */
 .pop-alert {
@@ -698,12 +674,20 @@ html, body {
   --bb-warn-bg:   rgba(240,160,64,0.10);
   --bb-purple:    #a78bfa;
   --bb-purple-bg: rgba(167,139,250,0.10);
+  /* v10.13.0 W1: schema-only token additions (no callsite migration in W1). */
+  /* W2-W4 incrementally migrate the relevant call sites onto these. */
+  --bb-blue:        #4A9EFF;  /* form / interactive chrome -- aligns with C.BLUE */
+  --bb-warn-status: #f59e0b;  /* status-bar 'connectivity yellow' tier (W2 auth banner) */
+  --bb-teal:        #14b8a6;  /* sibling to --bb-cyan; W2/W3 pop accents */
   --bb-r: 0;
   --bb-s1: 2px; --bb-s2: 4px; --bb-s3: 6px; --bb-s4: 8px;
   --bb-s5: 12px; --bb-s6: 16px; --bb-s7: 24px;
   --bb-font: ui-monospace, "JetBrains Mono", "IBM Plex Mono", "Cascadia Code", "Consolas", "Menlo", monospace;
   --bb-t-xs: 10px; --bb-t-sm: 11px; --bb-t-base: 12px;
   --bb-t-md: 13px; --bb-t-lg: 15px; --bb-t-xl: 18px; --bb-t-xxl: 22px;
+  /* v10.13.0 W1: stat-tile typographic scale, schema-only. */
+  --bb-t-stat-md: 20px; /* 7-tile dense layout */
+  --bb-t-stat-lg: 28px; /* hero / single-tile */
   /* v10.5: GAM Motion Grammar — 5 canonical duration/easing classes */
   --gam-dur-micro:      80ms;
   --gam-dur-appear:     160ms;
@@ -909,10 +893,14 @@ input:focus, textarea:focus, select:focus {
 .pop-token-status.err  { color: var(--bb-red) !important; }
 .pop-token-status.warn { color: var(--bb-yellow) !important; }
 
-/* Iter 9: stats grid — typographic ledger, NOT cards */
+/* Iter 9: stats grid — typographic ledger, NOT cards
+   v10.13.0 W1 (P0-04): consolidated. Was 3 separate .pop-stats rule blocks
+   (L54 dead, this block 3-col, L2292 4-col override). Now: this is the
+   single canonical rule. 4-col grid lives here directly; nth-child border
+   rules below are 4-col-aware (no more "fix the previous fix" override). */
 .pop-stats {
   display: grid !important;
-  grid-template-columns: repeat(3, 1fr) !important;
+  grid-template-columns: repeat(4, 1fr) !important;
   gap: 0 !important;
   border: 1px solid var(--bb-line) !important;
   border-radius: 0 !important;
@@ -930,8 +918,8 @@ input:focus, textarea:focus, select:focus {
   transition: background-color 100ms;
   position: relative;
 }
-.pop-stat:nth-child(3n) { border-right: none !important; }
-.pop-stat:nth-last-child(-n+3) { border-bottom: none !important; }
+.pop-stat:nth-child(4n) { border-right: none !important; }
+.pop-stat:nth-last-child(-n+4) { border-bottom: none !important; }
 .pop-stat:hover { background: var(--bb-amber-bg) !important; }
 .pop-stat .label, .pop-stat-label {
   font: 400 var(--bb-t-xs)/1.2 var(--bb-font) !important;
@@ -948,9 +936,18 @@ input:focus, textarea:focus, select:focus {
   letter-spacing: -0.01em;
   display: block;
 }
-.pop-stat[data-state="danger"] .value { color: var(--bb-red) !important; }
-.pop-stat[data-state="good"]   .value { color: var(--bb-green) !important; }
-.pop-stat[data-state="info"]   .value { color: var(--bb-cyan) !important; }
+/* v10.13.0 W1 (P0-03): data-state drives color, replacing inline style="color:..."
+   on 6 of 8 stat tiles. Existing selectors targeted `.value` only -- popup.html
+   actually emits `.pop-stat-val`, so the rules were inert. Added `.pop-stat-val`
+   to each selector + new `warn` state (notes/24h tile) using --bb-warn. */
+.pop-stat[data-state="danger"] .value,
+.pop-stat[data-state="danger"] .pop-stat-val { color: var(--bb-red) !important; }
+.pop-stat[data-state="good"] .value,
+.pop-stat[data-state="good"] .pop-stat-val   { color: var(--bb-green) !important; }
+.pop-stat[data-state="info"] .value,
+.pop-stat[data-state="info"] .pop-stat-val   { color: var(--bb-cyan) !important; }
+.pop-stat[data-state="warn"] .value,
+.pop-stat[data-state="warn"] .pop-stat-val   { color: var(--bb-warn) !important; }
 .pop-stat-trend, .pop-stat-delta {
   font: 400 var(--bb-t-xs)/1.2 var(--bb-font) !important;
   font-variant-numeric: tabular-nums;
@@ -1652,7 +1649,7 @@ input[type="checkbox"]:checked::after {
   letter-spacing: 0.06em !important;
   display: flex !important;
   align-items: center !important;
-  gap: 5px !important;
+  gap: 4px !important; /* v10.13.0 W1: 5px -> 4px snap-to-grid (UIUX2-27) */
 }
 
 /* Segmented crawl control (Data harvest) */
@@ -1750,7 +1747,7 @@ input[type="checkbox"]:checked::after {
 .pop-maint-action-row .pop-btn {
   flex: 1 !important;
   text-align: left !important;
-  padding: 5px 8px !important;
+  padding: 4px 8px !important; /* v10.13.0 W1: 5px -> 4px snap-to-grid (UIUX2-27) */
   min-height: 28px !important;
   background: transparent !important;
   border: none !important;
@@ -1861,6 +1858,17 @@ input[type="checkbox"]:checked::after {
   opacity: 0.85;
   font-variant-numeric: tabular-nums !important;
 }
+/* v10.13.0 W1 (R-03): directional delta colors. v10.12 H.4 wired the JS
+   delta computation but never shipped CSS for the [data-dir] attribute,
+   so all deltas rendered monochrome. Uses canonical existing semantic
+   tokens (--bb-green/--bb-red/--bb-ink-faint), not new aliases. */
+.gam-kpi-delta[data-dir="up"]   { color: var(--bb-green) !important; }
+.gam-kpi-delta[data-dir="down"] { color: var(--bb-red) !important; }
+.gam-kpi-delta[data-dir="flat"] { color: var(--bb-ink-faint) !important; }
+/* Same semantic for popup stat tile delta chips (P0-02 W1 wires these via JS) */
+.pop-stat-delta[data-dir="up"]   { color: var(--bb-green) !important; }
+.pop-stat-delta[data-dir="down"] { color: var(--bb-red) !important; }
+.pop-stat-delta[data-dir="flat"] { color: var(--bb-ink-faint) !important; }
 
 /* KPI loading pulse */
 .gam-kpi-tile[data-loading="true"] .gam-kpi-val {
@@ -2092,7 +2100,7 @@ input[type="checkbox"]:checked::after {
 }
 .gam-empty-state .gam-empty-cta {
   margin-top: 4px;
-  padding: 5px 12px;
+  padding: 4px 12px; /* v10.13.0 W1: 5px -> 4px snap-to-grid (UIUX2-27) */
   background: transparent;
   border: 1px solid var(--bb-cyan);
   color: var(--bb-cyan);
@@ -2245,6 +2253,10 @@ input[type="checkbox"]:checked::after {
   border-bottom: 1px solid var(--bb-line-hot);
   background: var(--bb-panel);
 }
+/* v10.13.0 W1 (UIUX2-34 click-targets): drill toolbar min-height was 0 on
+   filter/sort/export -- visible click-target was ~22px, below WCAG 2.2 SC
+   2.5.8 24px floor. Bump to 24px to clear the spec without changing visual
+   weight. */
 .pop-drill-filter {
   flex: 1;
   padding: 3px 6px !important;
@@ -2252,7 +2264,7 @@ input[type="checkbox"]:checked::after {
   background: var(--bb-sunken) !important;
   border: 1px solid var(--bb-line-hot) !important;
   color: var(--bb-ink) !important;
-  min-height: 0 !important;
+  min-height: 24px !important;
 }
 .pop-drill-sort {
   padding: 3px 6px !important;
@@ -2260,7 +2272,7 @@ input[type="checkbox"]:checked::after {
   background: var(--bb-sunken) !important;
   border: 1px solid var(--bb-line-hot) !important;
   color: var(--bb-ink) !important;
-  min-height: 0 !important;
+  min-height: 24px !important;
 }
 .pop-drill-export {
   font: 600 10px/1.2 var(--bb-font) !important;
@@ -2271,7 +2283,7 @@ input[type="checkbox"]:checked::after {
   cursor: pointer;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  min-height: 0 !important;
+  min-height: 24px !important;
   white-space: nowrap;
 }
 .pop-drill-export:hover { background: var(--bb-amber-bg) !important; }
@@ -2288,14 +2300,10 @@ input[type="checkbox"]:checked::after {
   text-align: right;
 }
 
-/* 4-col grid override for Stats tab (UIUX-09 §E.2) */
-.pop-stats {
-  grid-template-columns: repeat(4, 1fr) !important;
-}
-/* Fix nth-child border rules for 4-col layout */
-.pop-stat:nth-child(3n) { border-right: 1px solid var(--bb-line) !important; }
-.pop-stat:nth-child(4n) { border-right: none !important; }
-.pop-stat:nth-last-child(-n+4) { border-bottom: none !important; }
+/* v10.13.0 W1 (P0-04): the standalone 4-col override that lived here was
+   merged into the canonical .pop-stats block at L913. Eliminated the
+   specificity-war: source-order tie-break is no longer the only thing
+   keeping the 4-col layout in place. */
 
 /* ========================================================================
    v10.12 UIUX-20 §D — --bb-ink-faint contrast fix + tab [hidden] support

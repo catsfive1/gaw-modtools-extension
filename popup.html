@@ -63,7 +63,12 @@
 
   <!-- M4.3 REDTEAM-3: stats tab panel wrapper (role="tabpanel") -->
   <div id="tab-panel-stats" role="tabpanel" aria-labelledby="tab-btn-stats">
-  <!-- v10.12 UIUX-09: 4-col 8-tile grid. Each tile gets label-row + val + sparkline (data from loadStats()) -->
+  <!-- v10.13.0 W1 (UIUX2-01): 4-col 8-tile grid.
+       - Ghost <div class="pop-stat-spark"> stripped (P0-01). loadStats()
+         conditionally injects sparkline DOM only when 7d data > 0.
+       - Inline style="color:..." removed from 6 of 8 tiles (P0-03).
+         data-state attribute drives color via the Iter 9 .pop-stat[data-state]
+         rule block. JS sets data-state="info|good|warn|danger" per tile. -->
   <div class="pop-stats">
     <div class="pop-stat" data-drill="pending" title="Users awaiting first-decision triage. Click to list."
          role="button" tabindex="0" aria-label="Pending: — click to list">
@@ -72,73 +77,65 @@
         <span class="pop-stat-delta" id="d-pending" data-dir="none"></span>
       </div>
       <div class="pop-stat-val" id="s-pending">&mdash;</div>
-      <div class="pop-stat-spark" id="spark-pending" aria-hidden="true"></div>
     </div>
-    <div class="pop-stat" data-drill="dr" title="Death Row queue: scheduled bans pending execution. Click to list."
+    <div class="pop-stat" data-drill="dr" data-state="danger" title="Death Row queue: scheduled bans pending execution. Click to list."
          role="button" tabindex="0" aria-label="Death Row: — click to list">
       <div class="pop-stat-head">
         <div class="pop-stat-label">Death Row</div>
         <span class="pop-stat-delta" id="d-dr" data-dir="none"></span>
       </div>
-      <div class="pop-stat-val" id="s-dr" style="color:var(--bb-purple)">&mdash;</div>
-      <div class="pop-stat-spark" id="spark-dr" aria-hidden="true"></div>
+      <div class="pop-stat-val" id="s-dr">&mdash;</div>
     </div>
-    <div class="pop-stat" data-drill="banned" title="Users in your roster with status=banned. Click to list."
+    <div class="pop-stat" data-drill="banned" data-state="danger" title="Users in your roster with status=banned. Click to list."
          role="button" tabindex="0" aria-label="Banned: — click to list">
       <div class="pop-stat-head">
         <div class="pop-stat-label">Banned</div>
         <span class="pop-stat-delta" id="d-banned" data-dir="none"></span>
       </div>
-      <div class="pop-stat-val" id="s-banned" style="color:var(--bb-red)">&mdash;</div>
-      <div class="pop-stat-spark" id="spark-banned" aria-hidden="true"></div>
+      <div class="pop-stat-val" id="s-banned">&mdash;</div>
     </div>
-    <div class="pop-stat" data-drill="bans24" title="Mod actions tagged 'ban' in the last 24h (your local log). Click for detail."
+    <div class="pop-stat" data-drill="bans24" data-state="info" title="Mod actions tagged 'ban' in the last 24h (your local log). Click for detail."
          role="button" tabindex="0" aria-label="Bans / 24h: — click for detail">
       <div class="pop-stat-head">
         <div class="pop-stat-label">Bans / 24h</div>
         <span class="pop-stat-delta" id="d-today" data-dir="none"></span>
       </div>
-      <div class="pop-stat-val" id="s-today" style="color:var(--bb-cyan)">&mdash;</div>
-      <div class="pop-stat-spark" id="spark-today" aria-hidden="true"></div>
+      <div class="pop-stat-val" id="s-today">&mdash;</div>
     </div>
-    <div class="pop-stat" data-drill="msgs24" title="Messages and replies sent in the last 24h. Click for detail."
+    <div class="pop-stat" data-drill="msgs24" data-state="good" title="Messages and replies sent in the last 24h. Click for detail."
          role="button" tabindex="0" aria-label="Msgs / 24h: — click for detail">
       <div class="pop-stat-head">
         <div class="pop-stat-label">Msgs / 24h</div>
         <span class="pop-stat-delta" id="d-msgs" data-dir="none"></span>
       </div>
-      <div class="pop-stat-val" id="s-msgs" style="color:var(--bb-green)">&mdash;</div>
-      <div class="pop-stat-spark" id="spark-msgs" aria-hidden="true"></div>
+      <div class="pop-stat-val" id="s-msgs">&mdash;</div>
     </div>
-    <div class="pop-stat" data-drill="notes24" title="Mod notes written in the last 24h. Click for detail."
+    <div class="pop-stat" data-drill="notes24" data-state="warn" title="Mod notes written in the last 24h. Click for detail."
          role="button" tabindex="0" aria-label="Notes / 24h: — click for detail">
       <div class="pop-stat-head">
         <div class="pop-stat-label">Notes / 24h</div>
         <span class="pop-stat-delta" id="d-notes" data-dir="none"></span>
       </div>
-      <div class="pop-stat-val" id="s-notes" style="color:var(--bb-warn)">&mdash;</div>
-      <div class="pop-stat-spark" id="spark-notes" aria-hidden="true"></div>
+      <div class="pop-stat-val" id="s-notes">&mdash;</div>
     </div>
     <!-- ASK-086 / WAVE-B-AUX A.3: AI budget visibility. v10.10.1 P5: data-drill="ai24" -->
-    <div class="pop-stat" data-drill="ai24" title="AI calls used today vs your daily cap (e.g. 47/500). Click for per-call log."
+    <div class="pop-stat" data-drill="ai24" data-state="info" title="AI calls used today vs your daily cap (e.g. 47/500). Click for per-call log."
          role="button" tabindex="0" aria-label="AI today: — click for per-call log">
       <div class="pop-stat-head">
         <div class="pop-stat-label">AI today</div>
         <span class="pop-stat-delta" id="d-ai" data-dir="none"></span>
       </div>
-      <div class="pop-stat-val" id="s-ai-today" style="color:#c084fc">&mdash;</div>
-      <div class="pop-stat-spark" id="spark-ai" aria-hidden="true"></div>
+      <div class="pop-stat-val" id="s-ai-today">&mdash;</div>
     </div>
     <!-- 8th tile placeholder — v10.12.1 unsticky24 data source -->
     <!-- data source: v10.12.1+ unsticky24 RPC -->
-    <div class="pop-stat" data-drill="unsticky24" title="Posts auto-unstickied in last 24h. Click for log."
+    <div class="pop-stat" data-drill="unsticky24" data-state="info" title="Posts auto-unstickied in last 24h. Click for log."
          role="button" tabindex="0" aria-label="Auto-unsticky 24h: — click for log">
       <div class="pop-stat-head">
         <div class="pop-stat-label">Auto-UNS</div>
         <span class="pop-stat-delta" id="d-unsticky" data-dir="none"></span>
       </div>
-      <div class="pop-stat-val" id="s-unsticky" style="color:var(--bb-cyan)">--</div>
-      <div class="pop-stat-spark" id="spark-unsticky" aria-hidden="true"></div>
+      <div class="pop-stat-val" id="s-unsticky">--</div>
     </div>
   </div>
 
@@ -810,21 +807,27 @@
         <span class="gam-card-title">&#x1F4BB; Diagnostics</span>
       </summary>
       <div class="gam-card-body" id="diagCardBody">
+        <!-- v10.13.0 W1 (P0-25): hardcoded "Loading..." strings stripped from
+             these 4 diag divs. The wireDiagSkeletons() IIFE in popup.js patches
+             a skeleton shimmer in here on tab open; the literal "Loading..."
+             text was the race-window flash before the patch. Empty <span>
+             keeps the box height from collapsing and gives the skeleton
+             injector a known target. -->
         <!-- Section 1: System identity -->
         <div class="pop-section-label">System identity</div>
-        <div id="diagSysIdentity" class="pop-token-status" style="padding:4px 12px;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:10px;line-height:1.6">Loading...</div>
+        <div id="diagSysIdentity" class="pop-token-status" style="padding:4px 12px;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:10px;line-height:1.6"><span></span></div>
         <!-- Section 2: Service Worker health -->
         <div class="pop-section-label" style="margin-top:8px">Service Worker health</div>
-        <div id="diagSwHealth" class="pop-token-status" style="padding:4px 12px;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:10px;line-height:1.6">Loading...</div>
+        <div id="diagSwHealth" class="pop-token-status" style="padding:4px 12px;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:10px;line-height:1.6"><span></span></div>
         <!-- Section 3: RPC error log -->
         <div class="pop-section-label" style="margin-top:8px">RPC error log (last 50)</div>
-        <div id="diagRpcLog" style="padding:4px 12px;max-height:180px;overflow:auto;font-family:ui-monospace,monospace;font-size:10px;line-height:1.5">Loading...</div>
+        <div id="diagRpcLog" style="padding:4px 12px;max-height:180px;overflow:auto;font-family:ui-monospace,monospace;font-size:10px;line-height:1.5"><span></span></div>
         <div style="padding:4px 12px">
           <button id="diagExportErrors" class="pop-btn pop-btn-ghost" style="font-size:10px;padding:2px 8px">Copy errors to clipboard</button>
         </div>
         <!-- Section 4: Storage + audit -->
         <div class="pop-section-label" style="margin-top:8px">Storage + audit</div>
-        <div id="diagStorage" class="pop-token-status" style="padding:4px 12px;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:10px;line-height:1.6">Loading...</div>
+        <div id="diagStorage" class="pop-token-status" style="padding:4px 12px;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:10px;line-height:1.6"><span></span></div>
         <!-- Debug snapshot button lives here -->
         <div class="pop-tools" style="padding:4px 12px 8px">
           <button id="diagSnapshotBtn" class="pop-btn pop-btn-ghost" style="font-size:11px">&#x1F9EA; Copy full snapshot to clipboard</button>

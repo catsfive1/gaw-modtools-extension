@@ -406,6 +406,10 @@
     // === Interactive (content-script forms ONLY -- NOT brand) ===
     BLUE:    '#4A9EFF',    // form inputs, selects, interactive chrome (--bb-blue)
     ACCENT:  '#4A9EFF',    // LEGACY ALIAS -- equals BLUE. Use AMBER for brand, BLUE for forms. Remove in v10.11.
+    // v10.13.0 W1 schema-only: sibling to CYAN, mirrors --bb-teal. NO call sites
+    // migrated in W1 -- W2/W3 pop accent work consumes this when those tokens
+    // are migrated together to keep the diff coherent.
+    TEAL:    '#14b8a6',    // pop accent (--bb-teal)
     // === Utility ===
     WHITE:   '#fff',       // (was C.WHITE)
     BLACK:   '#000000',
@@ -19077,8 +19081,10 @@ Analyze this comment against the community rules. Then write a brief, profession
           states.push({ msg: susCount + ' SUS', color: 'var(--bb-red, #ff3b3b)', target: '/users', kind: 'sus' });
         }
         // v10.9.0 M3 (ASK-052): OP self-delete ticker state
+        // v10.13.0 W1: raw hex -> var(--bb-red) with literal fallback. Aligns with
+        // the SUS state above and lets future theme overrides flow through tokens.
         if (typeof _opDelCount24h === 'number' && _opDelCount24h > 0) {
-          states.push({ msg: _opDelCount24h + ' OP DEL', color: '#ff3b3b', target: null, kind: 'opdel' });
+          states.push({ msg: _opDelCount24h + ' OP DEL', color: 'var(--bb-red, #ff3b3b)', target: null, kind: 'opdel' });
         }
         // v10.10.0 M4: pending auto-actions count (lead-only; var init'd below)
         if (typeof _autoPendingCount === 'number' && _autoPendingCount > 0) {
@@ -21776,7 +21782,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   text-overflow: ellipsis;
   overflow: hidden;
   max-width: 200px;
-  font: 600 var(--bb-t-xs)/1 var(--bb-font) !important;
+  /* v10.13.0 W1 (P0-08 / R-04 / UIUX2-09 B1): the original "font" shorthand
+     pinned font-weight:600 !important, which clobbered the JS severity-weight
+     tier map at L19101 (_tickerWeightMap quiet:400, queue:500, auto:500,
+     modmail:600, dr:600, sus:700, opdel:700). 5 of 7 tiers were inert, all
+     rendering at 600. Split the shorthand: size + line-height + family stay
+     !important; weight is left to the JS-set inline style. */
+  font-size: var(--bb-t-xs) !important;
+  line-height: 1 !important;
+  font-family: var(--bb-font) !important;
   letter-spacing: 0.08em !important;
   color: var(--bb-ink-faint) !important;
   background: transparent !important;

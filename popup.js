@@ -729,6 +729,97 @@ async function withLoading(btn, label, fn) {
   }
 }
 
+// v10.13.0 W1 (P0-02 / R-02): stat-tile delta + sparkline helpers.
+// Pattern mirrors _updateKpiDelta() at L5876 but scoped to the 8 popup
+// stat tiles (Pending / DR / Banned / Bans-24h / Msgs-24h / Notes-24h /
+// AI-today / Auto-UNS). Reads previous value from sessionStorage key
+// 'gam_stats_prev_<tile>', writes current, renders directional chip into
+// the `#d-<key>` <span class="pop-stat-delta">. CSS rules in popup.css drive
+// color via [data-dir="up|down|flat"]; arrow glyphs are part of textContent.
+// Persisting in sessionStorage (not chrome.storage.local) is intentional --
+// the diff is "since last popup open in this session", not historical.
+function _updateStatDelta(tileId, newVal) {
+  try {
+    var key = 'gam_stats_prev_' + tileId;
+    var prev = sessionStorage.getItem(key);
+    sessionStorage.setItem(key, String(newVal));
+    var el = document.getElementById('d-' + tileId);
+    if (!el) return;
+    if (prev === null) {
+      el.textContent = '';
+      el.setAttribute('data-dir', 'none');
+      return;
+    }
+    var diff = newVal - Number(prev);
+    if (Number.isNaN(diff)) { el.textContent = ''; el.setAttribute('data-dir', 'none'); return; }
+    if (diff === 0) { el.textContent = '='; el.setAttribute('data-dir', 'flat'); return; }
+    // ASCII arrows (^/v) -- the JetBrains Mono / SF Mono ticker fonts have
+    // tabular glyphs for these; Unicode arrows would force the row to reflow.
+    var arrow = diff > 0 ? ' ^' : ' v';
+    el.textContent = (diff > 0 ? '+' : '') + diff + arrow;
+    el.setAttribute('data-dir', diff > 0 ? 'up' : 'down');
+  } catch (_) { /* sessionStorage may be quota-exceeded; non-fatal */ }
+}
+
+// v10.13.0 W1 (P0-01 / R-02): sparkline injector. Conditionally adds an
+// inline SVG mini-line into the `.pop-stat` tile ONLY when the 7d series has
+// at least one non-zero value. Previously a static `<div class="pop-stat-spark">`
+// shipped in popup.html with no JS ever writing to it (~14px dead-space per
+// tile); HTML now omits the box, JS injects it inside the .pop-stat tile when
+// data warrants. Series is a length-7 array of integers (oldest -> newest).
+function _injectStatSparkline(tileId, series) {
+  try {
+    if (!Array.isArray(series) || series.length === 0) return;
+    var hasData = false;
+    for (var i = 0; i < series.length; i++) { if (series[i] > 0) { hasData = true; break; } }
+    if (!hasData) return;
+    var tileEl = document.getElementById('s-' + tileId);
+    if (!tileEl) return;
+    var statEl = tileEl.closest('.pop-stat');
+    if (!statEl) return;
+    // Idempotent: remove any prior spark before re-injecting
+    var existing = statEl.querySelector('.pop-stat-spark');
+    if (existing) existing.remove();
+    var max = Math.max.apply(null, series);
+    if (max <= 0) return;
+    var w = 48, h = 12;
+    var step = w / (series.length - 1);
+    var pts = series.map(function(v, idx) {
+      var x = (idx * step).toFixed(1);
+      var y = (h - (v / max) * h).toFixed(1);
+      return x + ',' + y;
+    }).join(' ');
+    var spark = document.createElement('div');
+    spark.className = 'pop-stat-spark';
+    spark.setAttribute('aria-hidden', 'true');
+    spark.style.cssText = 'margin-top:2px;height:' + h + 'px;line-height:0;';
+    // Static SVG content from numeric series; no user-controlled strings.
+    spark.innerHTML = '<svg viewBox="0 0 ' + w + ' ' + h + '" width="' + w + '" height="' + h
+      + '" style="display:block"><polyline points="' + pts
+      + '" fill="none" stroke="currentColor" stroke-width="1" opacity="0.55"/></svg>';
+    statEl.appendChild(spark);
+  } catch (_) { /* non-fatal -- sparkline is decorative */ }
+}
+
+// v10.13.0 W1: 7d binning helper. Takes log array + a type-predicate,
+// returns length-7 array (oldest -> newest) of per-day counts.
+function _bin7d(log, predicate) {
+  var out = [0,0,0,0,0,0,0];
+  if (!Array.isArray(log)) return out;
+  var nowMs = Date.now();
+  for (var i = 0; i < log.length; i++) {
+    var l = log[i];
+    if (!l || !l.ts) continue;
+    var ts = new Date(l.ts).getTime();
+    if (Number.isNaN(ts)) continue;
+    var ageDays = Math.floor((nowMs - ts) / 86400000);
+    if (ageDays < 0 || ageDays >= 7) continue;
+    if (!predicate(l)) continue;
+    out[6 - ageDays]++;
+  }
+  return out;
+}
+
 async function loadStats() {
   try {
     const data = await chrome.storage.local.get([K.LOG, K.ROSTER, K.DR]);
@@ -760,6 +851,23 @@ async function loadStats() {
     $('s-msgs').textContent = todayMsgs;
     $('s-notes').textContent = todayNotes;
 
+    // v10.13.0 W1 (P0-02 / R-01): wire delta chips for the 6 local-data tiles.
+    // AI-today + Auto-UNS update inside their respective RPC fire-and-forget
+    // blocks below since their values arrive asynchronously.
+    _updateStatDelta('pending', pending);
+    _updateStatDelta('dr', drPending);
+    _updateStatDelta('banned', banned);
+    _updateStatDelta('today', todayBans);
+    _updateStatDelta('msgs', todayMsgs);
+    _updateStatDelta('notes', todayNotes);
+
+    // v10.13.0 W1 (P0-01 / R-02): inject sparklines for the 3 activity tiles
+    // ONLY if the 7d series has at least one non-zero day. Pending / DR /
+    // Banned are roster-state snapshots, not activity flows -- no sparkline.
+    _injectStatSparkline('today', _bin7d(log, function(l) { return l.type === 'ban'; }));
+    _injectStatSparkline('msgs',  _bin7d(log, function(l) { return l.type === 'message' || l.type === 'reply'; }));
+    _injectStatSparkline('notes', _bin7d(log, function(l) { return l.type === 'note'; }));
+
     // ASK-086 / WAVE-B-AUX A.3: fetch AI budget from worker /mod/stats.
     // Fire-and-forget — never blocks the local stat render above.
     // Shows "--" if worker is unreachable or fields not yet present (WAVE-C stats D1).
@@ -773,6 +881,8 @@ async function loadStats() {
           var cap   = r.data.ai_calls_cap;
           if (typeof calls === 'number' && typeof cap === 'number') {
             aiEl.textContent = calls + '/' + cap;
+            // v10.13.0 W1 (P0-02): delta on the calls-used number, not the X/Y label
+            _updateStatDelta('ai', calls);
           }
           // If fields missing, leave '--' placeholder (E.2.5 pattern).
         }
@@ -782,7 +892,22 @@ async function loadStats() {
     if (drReady > 0) {
       const alert = $('dr-alert');
       alert.style.display = 'block';
-      alert.textContent = '\u{1F480} ' + drReady + ' Death Row inmate' + (drReady > 1 ? 's' : '') + ' READY \u2014 visit GAW to execute.';
+      // v10.13.0 W1 (P1-01 / UIUX2-01): replaced skull color emoji with
+      // monochrome SVG warning icon. Keeps the urgency signal but matches
+      // the terminal aesthetic and works under accessibility forced-colors
+      // / monochrome themes. Static template -- no user content.
+      alert.innerHTML =
+        '<svg viewBox="0 0 24 24" width="14" height="14" fill="none"'
+        + ' stroke="currentColor" stroke-width="2" stroke-linecap="round"'
+        + ' stroke-linejoin="round" aria-hidden="true"'
+        + ' style="vertical-align:-2px;margin-right:4px">'
+        + '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0'
+        + ' 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/>'
+        + '<line x1="12" y1="9" x2="12" y2="13"/>'
+        + '<circle cx="12" cy="17" r="0.5"/>'
+        + '</svg>'
+        + drReady + ' Death Row inmate' + (drReady > 1 ? 's' : '')
+        + ' READY \u2014 visit GAW to execute.';
     }
 
     const ver = chrome.runtime.getManifest().version;
@@ -3946,7 +4071,7 @@ const __DRILL_EMPTY_HINT = {
   bans24:  'No ban actions logged in the last 24h.',
   msgs24:  'No mod messages or replies sent in the last 24h.',
   notes24: 'No mod notes written in the last 24h.',
-  ai24:    'No AI calls logged today, or usage data not yet available from /mod/stats. Full AI usage drill-down coming v10.11.'  // v10.10.1 P5 (DESIGN-09)
+  ai24:    'No AI calls logged today, or usage data not yet available from /mod/stats. Per-call detail is not retained at the worker.'  // v10.13.0 W1 (P0-05)
 };
 
 // Format an ms-epoch or ISO ts as "HH:MM" if today, else "Mon DD".
@@ -4223,28 +4348,33 @@ async function renderDrillDown(key) {
   }
 }
 
-// v10.10.1 P5 (DESIGN-09): AI tile drill-down placeholder.
-// Full per-call log with timestamps ships v10.11 once /mod/stats exposes ai_calls_today array.
-// For now: shows current AI Today value from the tile + a clear placeholder message.
+// v10.13.0 W1 (P0-05): AI tile drill -- honest empty state.
+// Was a v10.10.1 placeholder reading "coming v10.11"; v10.12.4 ships and
+// the per-call log was never wired (and the daily snapshot rolls up before
+// per-call detail is queryable -- not "coming," not retained at all). We
+// surface the rolled-up calls/cap value the tile already has, then state
+// plainly that per-call detail is unavailable. Uses gamMakeEmpty() for
+// consistent empty-state visual treatment.
 function __renderAi24(body) {
   const aiVal = ($('s-ai-today') || {}).textContent || '—';
   const wrap = document.createElement('div');
-  wrap.className = 'pop-drill-empty';
-  wrap.style.cssText = 'padding:16px 14px;text-align:left;';
+  wrap.style.cssText = 'padding:12px 14px;';
   const valLine = document.createElement('p');
-  valLine.style.cssText = 'font-size:22px;font-weight:600;color:#c084fc;margin:0 0 8px;font-variant-numeric:tabular-nums;';
+  valLine.style.cssText = 'font-size:22px;font-weight:600;color:var(--bb-purple);margin:0 0 4px;font-variant-numeric:tabular-nums;text-align:left;';
   valLine.textContent = aiVal;
   const labelLine = document.createElement('p');
-  labelLine.style.cssText = 'font-size:11px;color:#9b9892;margin:0 0 12px;text-transform:uppercase;letter-spacing:0.08em;';
+  labelLine.style.cssText = 'font-size:11px;color:var(--bb-ink-dim);margin:0 0 12px;text-transform:uppercase;letter-spacing:0.08em;text-align:left;';
   labelLine.textContent = 'AI calls today';
-  const hint = document.createElement('p');
-  hint.style.cssText = 'font-size:10px;color:#5a5752;margin:0;line-height:1.5;';
-  hint.textContent = 'Per-call log (timestamp, action type, token cost) coming v10.11 -- requires /mod/stats ai_calls_today array from worker.';
   wrap.appendChild(valLine);
   wrap.appendChild(labelLine);
-  wrap.appendChild(hint);
+  // Honest empty state -- per-call detail is not retained anywhere.
+  const empty = gamMakeEmpty({
+    headline: 'Per-call log unavailable',
+    desc: 'AI usage rolls up at the daily snapshot — per-call detail is not retained.'
+  });
+  wrap.appendChild(empty);
   body.appendChild(wrap);
-  __setDrillMeta('AI usage drill-down -- v10.11');
+  __setDrillMeta('AI usage');
   __lastDrill = { key: 'ai24', rows: [], cols: [] };
 }
 
