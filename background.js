@@ -213,21 +213,26 @@ async function _cryptMigrateSettings() {
     var patch = Object.assign({}, s);
 
     // Migrate workerModToken
+    // v10.11.1 HOTFIX: do NOT delete plaintext after encrypting. If decrypt later
+    // fails (CryptoKey-from-IDB clone state issue, key rotation, etc.) the
+    // token would be lost forever. Keep plaintext as safety net; loadSecrets
+    // prefers plaintext anyway. Plaintext deletion deferred to v10.12+ once
+    // round-trip decrypt is verified across SW restarts.
     if (typeof s.workerModToken === 'string' && s.workerModToken.length > 0 && !_cryptIsEncrypted(s.workerModToken_encrypted)) {
       try {
         patch.workerModToken_encrypted = await _cryptEncrypt(s.workerModToken);
-        delete patch.workerModToken;
+        // (intentionally NOT deleting patch.workerModToken — keep plaintext as fallback)
         changed = true;
       } catch (e) {
         try { console.warn('[ModTools v10.11 CRYPT] workerModToken encrypt failed:', e.message); } catch (_) {}
       }
     }
 
-    // Migrate leadModToken
+    // Migrate leadModToken — v10.11.1 HOTFIX: keep plaintext as safety net (see workerModToken comment)
     if (typeof s.leadModToken === 'string' && s.leadModToken.length > 0 && !_cryptIsEncrypted(s.leadModToken_encrypted)) {
       try {
         patch.leadModToken_encrypted = await _cryptEncrypt(s.leadModToken);
-        delete patch.leadModToken;
+        // (intentionally NOT deleting patch.leadModToken — keep plaintext as fallback)
         changed = true;
       } catch (e) {
         try { console.warn('[ModTools v10.11 CRYPT] leadModToken encrypt failed:', e.message); } catch (_) {}
@@ -364,28 +369,34 @@ async function loadSecrets() {
         let workerPlain = '';
         let leadPlain = '';
 
-        if (_cryptIsEncrypted(ls.workerModToken_encrypted)) {
+        // v10.11.1 HOTFIX: prefer plaintext FIRST. The v10.11.0 release tried
+        // encrypted first and zeroed the token on decrypt failure -- which
+        // happens when CryptoKey-from-IDB structured-clone state is lost
+        // across SW restarts. Result: forced re-auth on every load. Now:
+        // try plaintext first (always reliable); fall back to decrypt only
+        // when plaintext is missing. The migration patch in v10.11.1 also
+        // STOPS deleting plaintext after encryption, so plaintext is always
+        // the safety net.
+        if (typeof ls.workerModToken === 'string' && ls.workerModToken.length > 0) {
+          workerPlain = ls.workerModToken;
+        } else if (_cryptIsEncrypted(ls.workerModToken_encrypted)) {
           try {
             workerPlain = await _cryptDecrypt(ls.workerModToken_encrypted);
           } catch (e) {
-            // Decrypt failure: key rotated or data corrupted -- zero this token, force re-auth.
-            try { console.warn('[ModTools v10.11 CRYPT] workerModToken decrypt failed, clearing:', e.message); } catch (_) {}
+            try { console.warn('[ModTools v10.11.1 CRYPT] workerModToken decrypt failed, no plaintext fallback:', e.message); } catch (_) {}
             workerPlain = '';
           }
-        } else if (typeof ls.workerModToken === 'string') {
-          // Plaintext still present (pre-migration boot) -- use as-is; migration will encrypt it shortly.
-          workerPlain = ls.workerModToken;
         }
 
-        if (_cryptIsEncrypted(ls.leadModToken_encrypted)) {
+        if (typeof ls.leadModToken === 'string' && ls.leadModToken.length > 0) {
+          leadPlain = ls.leadModToken;
+        } else if (_cryptIsEncrypted(ls.leadModToken_encrypted)) {
           try {
             leadPlain = await _cryptDecrypt(ls.leadModToken_encrypted);
           } catch (e) {
-            try { console.warn('[ModTools v10.11 CRYPT] leadModToken decrypt failed, clearing:', e.message); } catch (_) {}
+            try { console.warn('[ModTools v10.11.1 CRYPT] leadModToken decrypt failed, no plaintext fallback:', e.message); } catch (_) {}
             leadPlain = '';
           }
-        } else if (typeof ls.leadModToken === 'string') {
-          leadPlain = ls.leadModToken;
         }
 
         s = { workerModToken: workerPlain, leadModToken: leadPlain };
@@ -2202,11 +2213,15 @@ const RPC_HANDLERS = {
           if (chrome.storage && chrome.storage.local) {
             const cur = await chrome.storage.local.get('gam_settings');
             const base = { ...((cur && cur.gam_settings) || {}) };
-            delete base.workerModToken; // remove plaintext field
+            // v10.11.1 HOTFIX: write BOTH plaintext AND encrypted. Plaintext
+            // is the reliable safety net; encrypted is opportunistic. Don't
+            // delete plaintext (was causing token loss when decrypt failed
+            // on next SW restart).
+            base.workerModToken = candidate;
             try {
               base.workerModToken_encrypted = await _cryptEncrypt(candidate);
             } catch (_) {
-              base.workerModToken = candidate; // IDB unavailable: fall back to plaintext
+              // Encryption failed -- plaintext is sufficient.
             }
             const nowMs = Date.now();
             base.workerModToken_issued_at = nowMs;
