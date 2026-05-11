@@ -2,10 +2,14 @@
 
 ## TL;DR
 
+**First-install recommended path:** Path B (lead attaches a ZIP to the DM you'll receive). It's the fastest and doesn't require Google Drive access. To update later, the lead re-attaches a new ZIP and you replace the folder.
+
+**For mods who want auto-updates** (lead pushes a new version → it lands on your machine automatically): Path A. Requires Google Drive Desktop installed + the lead must share a Drive folder with your Gmail.
+
 Do you have **Google Drive Desktop** installed on this machine?
 
-- **Yes** — follow [Path A](#path-a--with-drive-desktop). The folder auto-syncs; you pick it once and forget it.
-- **No** — follow [Path B](#path-b--without-drive-desktop). You download a ZIP, unzip it to a stable folder, load it.
+- **Yes — and you want auto-updates** → follow [Path A](#path-a--with-drive-desktop). The shared folder auto-syncs; you pick it once and forget it.
+- **No — or for first install** → follow [Path B](#path-b--without-drive-desktop). You unzip the ZIP your lead DM'd you to a stable folder, load it.
 
 Either path takes under 10 minutes on Chrome. Brave users: read the [Brave section](#brave-gotcha) before you start.
 
@@ -82,7 +86,7 @@ Your lead will send you either an **invite link** or a **raw token**. Use the pa
 4. A small notice will appear asking you to open the ModTools popup
 5. Click the GAW ModTools icon in your toolbar
 6. Click **Claim invite**
-7. Enter your GAW username when prompted and click **Claim**
+7. Enter your GAW username when prompted. The wizard shows a live format hint (allowed chars: `A-Z a-z 0-9 _ -`, length 2-64) — if the chip turns green, you're good. Click **Claim**.
 8. You should see a confirmation that your token has been saved
 
 **Path 5B — You received a raw token** (a long string of random characters):
@@ -198,6 +202,15 @@ The backend worker may be deploying an update. Wait 60 seconds and try again. If
 ### Extension icon shows a red badge
 
 Open the popup. Either your token is missing (go to the Tokens tab and run Verify) or the extension has hit a maintenance window (check the Maintenance tab). The red badge clears itself once the issue is resolved.
+
+### Banner says "Connection re-established" or "Extension was reloaded"
+
+These two banner texts mean different things (as of v10.14):
+
+- **"Connection re-established"** — Chrome paused the extension's background service worker (normal — saves memory) and now woke it back up. No action needed; this is healthy lifecycle behavior. The banner self-dismisses.
+- **"Extension was reloaded"** — the extension was actually reloaded (you reloaded it, or an update landed). Drafts in open textareas may have been preserved via the local mirror (modmail/macros) — look for a small "Draft restored" chip. If you don't see it, your latest typing may have been lost; retry.
+
+If the banner persists for more than a minute, hard-refresh greatawakening.win (Ctrl+Shift+R).
 
 ### The status bar does not appear on greatawakening.win
 
