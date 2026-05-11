@@ -2452,6 +2452,19 @@ const RPC_HANDLERS = {
     }
   },
 
+  // v10.14.4: CS-side auto-unsticky scan ingest. Worker cron is dead in
+  // production (CF Bot Fight Mode 403s worker-to-worker fetches with a JS
+  // challenge interstitial -- workers can't solve those). Real lead browsers
+  // on the GAW homepage scrape stickies from the DOM and POST them here;
+  // worker applies same threshold check and queues. Lead-only.
+  autoUnstickyScanReport: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const stickies = Array.isArray(args && args.stickies) ? args.stickies : [];
+      return await _rpcWorkerCall('POST', '/admin/auto-unsticky-scan', { stickies }, { asLead: true });
+    }
+  },
+
   // ---- bugReport*: lead/visible-mod read; lead-only write/visibility -----
   // v9.4.4 — surfaces the previously dead-letter `bug_reports` D1 table to the
   // popup so leads can triage incoming reports without a separate dashboard.

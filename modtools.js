@@ -28293,4 +28293,80 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     }, 1500);
   })();
 
+  // v10.14.4: CS-side auto-unsticky scanner. The worker cron (v10.10.0
+  // design) is blocked by Cloudflare Bot Fight Mode -- worker-to-worker
+  // fetches receive a JS challenge interstitial that workers cannot solve.
+  // Confirmed via 3h of auto.scan_fetch_fail audit chain entries + v10.14.3
+  // diagnostic deploy showing HTTP 403 + cf-ray + "Attention Required!"
+  // body. Real browsers solve the challenge transparently, so leads on the
+  // GAW homepage scrape stickies from the DOM and POST candidates to
+  // /admin/auto-unsticky-scan; the worker applies the same threshold check
+  // and queue insert as the cron would have. Same data flow, different
+  // ingress.
+  (function _gamAutoUnstickyCsScanner() {
+    try {
+      if (location.pathname !== '/') return; // stickies live on the root
+      setTimeout(async function _doAutoUnstickyScan() {
+        try {
+          if (typeof isLeadMod !== 'function' || !isLeadMod()) return; // lead-only
+          // 5-min throttle via chrome.storage.local to absorb refresh storms
+          // and multi-tab leads. Matches the original cron cadence.
+          const now = Date.now();
+          const lastScanKey = 'gam_last_auto_unsticky_scan_at';
+          let lastScan = 0;
+          try {
+            const rd = await new Promise(function(res) {
+              chrome.storage.local.get(lastScanKey, function(v) { res(v); });
+            });
+            lastScan = Number(rd && rd[lastScanKey] || 0);
+          } catch (_) {}
+          if (now - lastScan < 5 * 60 * 1000) return;
+          // Scrape .post.sticky elements from the homepage DOM.
+          const stickyEls = document.querySelectorAll('.post.sticky[data-id]');
+          if (!stickyEls.length) return;
+          const stickies = [];
+          stickyEls.forEach(function(el) {
+            try {
+              const thingId = el.getAttribute('data-id');
+              if (!thingId) return;
+              const scoreEl = el.querySelector('.count');
+              const votes = scoreEl ? parseInt(scoreEl.textContent || '0', 10) : 0;
+              const timeEl = el.querySelector('time[datetime]');
+              let createdAt = Math.floor(now / 1000);
+              if (timeEl) {
+                const t = Date.parse(timeEl.getAttribute('datetime'));
+                if (!isNaN(t)) createdAt = Math.floor(t / 1000);
+              }
+              const ageH = (now - createdAt * 1000) / (3600 * 1000);
+              const titleEl = el.querySelector('a.title');
+              const title = titleEl ? (titleEl.textContent || '').trim().slice(0, 200) : '';
+              stickies.push({ thingId: thingId, votes: votes, ageH: ageH, createdAt: createdAt, title: title });
+            } catch (_) { /* skip malformed sticky */ }
+          });
+          if (!stickies.length) return;
+          // Save throttle BEFORE the POST so failures don't unblock retries.
+          try { chrome.storage.local.set({ [lastScanKey]: now }); } catch (_) {}
+          let resp;
+          try {
+            resp = await rpcCall('autoUnstickyScanReport', { stickies: stickies });
+          } catch (e) {
+            console.warn('[gam-auto-unsticky-cs] RPC failed', e);
+            return;
+          }
+          if (resp && resp.ok) {
+            const q = Number(resp.queued || 0);
+            if (q > 0) {
+              try { snack('Auto-unsticky: ' + q + ' candidate(s) queued (lead-side scan)', 'good'); } catch (_) {}
+              try { console.log('[gam-auto-unsticky-cs] queued=' + q + ' skipped=' + (resp.skipped_count || 0), resp); } catch (_) {}
+            } else {
+              try { console.log('[gam-auto-unsticky-cs] no candidates met thresholds; reported=' + stickies.length, resp); } catch (_) {}
+            }
+          }
+        } catch (e) {
+          try { console.warn('[gam-auto-unsticky-cs] scan error', e); } catch (_) {}
+        }
+      }, 4000); // delay 4s after document_end to let lazy content settle
+    } catch (_) { /* never block init */ }
+  })();
+
 })();
