@@ -2439,7 +2439,11 @@ const RPC_HANDLERS = {
     async handler() { return await _rpcWorkerCall('GET', '/mod/settings', undefined); }
   },
   adminSettingsWrite: {
-    allowed_callers: [RPC_CALLER_POPUP],
+    // v10.14.3: opened to CONTENT caller for the auto-unsticky GEAR sync. Worker
+    // still enforces `is_lead=1` on /admin/settings (gaw-mod-proxy-v2.js L1950),
+    // so a non-lead content-script call cannot succeed — the allowed_callers
+    // softening only widens the trusted RPC surface, not the worker contract.
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
     async handler(args) {
       const key = String(args && args.key || '');
       const value = String(args && args.value || '');

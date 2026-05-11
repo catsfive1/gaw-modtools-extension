@@ -11809,18 +11809,47 @@ Analyze this comment against the community rules. Then write a brief, profession
     // tab via SW. Thresholds mirror worker-side team_settings namespace.
     if (isLeadMod()) {
       addSection('\u{1F501} Auto-Unsticky Monitoring');
+      // v10.14.3: Auto-unsticky thresholds. The worker cron reads team_settings
+      // keys (autoUnstickyEnabled / autoUnstickyMaxHours / autoUnstickyUpvoteThreshold)
+      // -- NOT the extension-side gam_settings keys directly. Pre-v10.14.3 the
+      // popup wrote only to gam_settings, so threshold tweaks were theatrical
+      // and the cron continued using its hardcoded defaults. v10.14.3 wires the
+      // change handlers below to ALSO PUT /admin/settings via the adminSettingsWrite
+      // RPC (background.js -- now allowed from CONTENT caller). Worker enforces
+      // is_lead=1 anyway, so non-leads silently fail-safe on the worker side.
+      var _AUTO_UNSTICKY_KEY_MAP = {
+        'auto_unsticky_enabled': 'autoUnstickyEnabled',
+        'auto_unsticky_max_hours': 'autoUnstickyMaxHours',
+        'auto_unsticky_min_upvotes': 'autoUnstickyUpvoteThreshold'
+      };
+      function _syncAutoUnstickyToWorker(extKey, value) {
+        var workerKey = _AUTO_UNSTICKY_KEY_MAP[extKey];
+        if (!workerKey) return;
+        var workerValue = (typeof value === 'boolean') ? (value ? 'true' : 'false') : String(value);
+        rpcCall('adminSettingsWrite', { key: workerKey, value: workerValue }).then(function(r) {
+          if (r && r.ok) {
+            try { snack('Synced ' + workerKey + '=' + workerValue + ' to worker', 'good'); } catch(_) {}
+          } else {
+            try { snack('Worker sync failed: ' + ((r && r.error) || 'unknown'), 'warn'); } catch(_) {}
+          }
+        }).catch(function(e) {
+          try { snack('Worker sync error: ' + (e && e.message || e), 'warn'); } catch(_) {}
+        });
+      }
       addToggle('Auto-unsticky enabled', 'auto_unsticky_enabled',
-        'Worker monitors GAW every 5 min. When a stickied post crosses BOTH age and upvote thresholds, the queued action is executed by the next mod with a GAW tab open. OFF by default -- lead must opt in.');
+        'Worker monitors GAW every 5 min. When a stickied post crosses BOTH age and upvote thresholds, the queued action is executed by the next mod with a GAW tab open. OFF by default -- lead must opt in. Changes sync to worker on save.',
+        function(enabled) { _syncAutoUnstickyToWorker('auto_unsticky_enabled', enabled); });
       {
         var _auIdH = 'gam-set-auto_unsticky_max_hours';
         var _auIdU = 'gam-set-auto_unsticky_min_upvotes';
         var _auRow = el('div', { cls: 'gam-settings-row' });
-        var _auCurH = Number(getSetting('auto_unsticky_max_hours', 10)) || 10;
-        var _auCurU = Number(getSetting('auto_unsticky_min_upvotes', 110)) || 110;
+        // v10.14.3: defaults aligned with current worker team_settings (9h / 100 upvotes).
+        var _auCurH = Number(getSetting('auto_unsticky_max_hours', 9)) || 9;
+        var _auCurU = Number(getSetting('auto_unsticky_min_upvotes', 100)) || 100;
         _auRow.innerHTML =
           '<div class="gam-settings-info">' +
           '<label class="gam-settings-lbl">Auto-unsticky thresholds</label>' +
-          '<div class="gam-settings-desc">Post must exceed BOTH max age (hours) AND min upvotes to be queued. Worker reads these on each cron tick.</div>' +
+          '<div class="gam-settings-desc">Post must exceed BOTH max age (hours) AND min upvotes to be queued. Worker reads these on each cron tick -- changes sync to worker on save.</div>' +
           '<div style="display:flex;gap:8px;margin-top:6px;align-items:center">' +
             '<label style="font-size:10px;color:#9b9892">max age hrs</label>' +
             '<input id="' + _auIdH + '" type="number" min="1" max="240" value="' + _auCurH + '" style="width:60px;padding:3px 6px;background:#050507;color:#e8e6e1;border:1px solid #3d3a35;font:11px ui-monospace,monospace;font-variant-numeric:tabular-nums">' +
@@ -11829,14 +11858,16 @@ Analyze this comment against the community rules. Then write a brief, profession
           '</div>' +
           '</div>';
         _auRow.querySelector('#' + _auIdH).addEventListener('change', function(e) {
-          var v = Math.max(1, Math.min(240, parseInt(e.target.value, 10) || 10));
+          var v = Math.max(1, Math.min(240, parseInt(e.target.value, 10) || 9));
           setSetting('auto_unsticky_max_hours', v);
           e.target.value = v;
+          _syncAutoUnstickyToWorker('auto_unsticky_max_hours', v);
         });
         _auRow.querySelector('#' + _auIdU).addEventListener('change', function(e) {
-          var v = Math.max(1, Math.min(10000, parseInt(e.target.value, 10) || 110));
+          var v = Math.max(1, Math.min(10000, parseInt(e.target.value, 10) || 100));
           setSetting('auto_unsticky_min_upvotes', v);
           e.target.value = v;
+          _syncAutoUnstickyToWorker('auto_unsticky_min_upvotes', v);
         });
         c.appendChild(_auRow);
       }
