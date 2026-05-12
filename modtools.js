@@ -7603,7 +7603,7 @@
     });
     const dismissBtn = document.createElement('button');
     dismissBtn.textContent = 'Dismiss';
-    dismissBtn.style.cssText = 'background:transparent;color:#9b9892;border:1px solid #5a5752;border-radius:3px;padding:4px 8px;cursor:pointer;white-space:nowrap';
+    dismissBtn.style.cssText = 'background:transparent;color:#9b9892;border:1px solid #7a7672;border-radius:3px;padding:4px 8px;cursor:pointer;white-space:nowrap'; /* v.next a11y: border 2.5:1 -> 4.1:1 (UI 3:1 pass) */
     dismissBtn.addEventListener('click', function() { try { snackEl.remove(); } catch(_){} });
     snackEl.appendChild(msgEl);
     snackEl.appendChild(retryBtn);
@@ -7661,7 +7661,7 @@
         '<span><b>ModTools updated.</b> The extension was reloaded — refresh this page to reconnect.</span>' +
         '<span style="flex:1"></span>' +
         '<button id="gam-ext-orphaned-reload" style="background:var(--bb-amber);border:none;color:#0a0a0b;padding:4px 12px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Reload page</button>' +
-        '<button id="gam-ext-orphaned-dismiss" style="background:transparent;border:1px solid #5a5752;color:#9b9892;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Dismiss</button>';
+        '<button id="gam-ext-orphaned-dismiss" style="background:transparent;border:1px solid #7a7672;color:#9b9892;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Dismiss</button>'; /* v.next a11y: border 2.5:1 -> 4.1:1 */
       document.body.appendChild(b);
       const reload = b.querySelector('#gam-ext-orphaned-reload');
       const dismiss = b.querySelector('#gam-ext-orphaned-dismiss');
@@ -8740,41 +8740,53 @@
     const queueComment = item ? getContentText(item) : '';
     const queueLink = item ? getPermalink(item) : '';
 
+    // v10.16.3: 2-col layout. Left col = "what do I know" (passive intel:
+    // summary chips + score + note hover + local history + reported comment).
+    // Right col = "what do I/AI think" (AI conformity + mods-only note + tip).
+    // All IDs preserved so async handlers (#gam-mc-intel-summary etc) still
+    // find their mount points via root.querySelector. Below ~520px the grid
+    // collapses to a single column (see .gam-mc-intel-2col CSS).
     root.innerHTML = `
-      <div class="gam-mc-intel-compact">
-        <div id="gam-mc-intel-summary" class="gam-mc-loading">\u{1F50D} loading account summary...</div>
-        <div id="gam-mc-intel-score" class="gam-mc-loading">\u{1F50D} analyzing recent activity...</div>
-        <div id="gam-mc-intel-note"></div>
-      </div>
-      ${queueComment ? `
-      <div class="gam-mc-section">
-        <div class="gam-mc-h">\u{1F4CC} Reported comment</div>
-        <div class="gam-mc-evidence-text" style="margin-bottom:4px">"${escapeHtml(queueComment.slice(0,300))}${queueComment.length>300?'\u2026':''}"</div>
-        ${queueLink ? `<a class="gam-mc-evidence-link" href="${escapeHtml(queueLink)}" target="_blank">\u{1F517} view post</a>` : ''}
-      </div>` : ''}
-      <div class="gam-mc-section">
-        <div class="gam-mc-h">Local mod history</div>
-        <div id="gam-mc-intel-hist"></div>
-      </div>
-      <div class="gam-mc-ai-reply" id="gam-mc-intel-ai-wrap">
-        <div class="gam-mc-ai-header">
-          <span>\u{1F916} AI Sidebar Conformity Check</span>
-          <select class="gam-mc-ai-engine" id="gam-intel-ai-engine">
-            <option value="llama3" ${getSetting('aiEngine','llama3')==='llama3'?'selected':''}>Llama 3 (free, CF Worker)</option>
-            <option value="grok" ${getSetting('aiEngine','llama3')==='grok'?'selected':''}>Grok / xAI</option>
-          </select>
-          <button class="gam-btn gam-mc-ai-btn" id="gam-intel-ai-go">\u{1F9E0} Analyze comments</button>
-        </div>
-        <div id="gam-intel-ai-out" style="display:none">
-          <textarea class="gam-input gam-textarea gam-mc-ai-text" id="gam-intel-ai-text" rows="6" readonly placeholder="AI analysis will appear here..."></textarea>
-          <div style="display:flex;gap:6px;margin-top:4px">
-            <button class="gam-btn gam-mc-ai-use" id="gam-intel-ai-copy">\u{1F4CB} Copy</button>
+      <div class="gam-mc-intel-2col">
+        <div class="gam-mc-intel-col gam-mc-intel-col-left">
+          <div class="gam-mc-intel-compact">
+            <div id="gam-mc-intel-summary" class="gam-mc-loading">\u{1F50D} loading account summary...</div>
+            <div id="gam-mc-intel-score" class="gam-mc-loading">\u{1F50D} analyzing recent activity...</div>
+            <div id="gam-mc-intel-note"></div>
+          </div>
+          ${queueComment ? `
+          <div class="gam-mc-section">
+            <div class="gam-mc-h">\u{1F4CC} Reported comment</div>
+            <div class="gam-mc-evidence-text" style="margin-bottom:4px">"${escapeHtml(queueComment.slice(0,300))}${queueComment.length>300?'\u2026':''}"</div>
+            ${queueLink ? `<a class="gam-mc-evidence-link" href="${escapeHtml(queueLink)}" target="_blank">\u{1F517} view post</a>` : ''}
+          </div>` : ''}
+          <div class="gam-mc-section">
+            <div class="gam-mc-h">Local mod history</div>
+            <div id="gam-mc-intel-hist"></div>
           </div>
         </div>
-        <div id="gam-intel-ai-err" class="gam-mc-banner gam-mc-banner-red" style="display:none"></div>
+        <div class="gam-mc-intel-col gam-mc-intel-col-right">
+          <div class="gam-mc-ai-reply" id="gam-mc-intel-ai-wrap">
+            <div class="gam-mc-ai-header">
+              <span>\u{1F916} AI Sidebar Conformity Check</span>
+              <select class="gam-mc-ai-engine" id="gam-intel-ai-engine">
+                <option value="llama3" ${getSetting('aiEngine','llama3')==='llama3'?'selected':''}>Llama 3 (free, CF Worker)</option>
+                <option value="grok" ${getSetting('aiEngine','llama3')==='grok'?'selected':''}>Grok / xAI</option>
+              </select>
+              <button class="gam-btn gam-mc-ai-btn" id="gam-intel-ai-go">\u{1F9E0} Analyze comments</button>
+            </div>
+            <div id="gam-intel-ai-out" style="display:none">
+              <textarea class="gam-input gam-textarea gam-mc-ai-text" id="gam-intel-ai-text" rows="6" readonly placeholder="AI analysis will appear here..."></textarea>
+              <div style="display:flex;gap:6px;margin-top:4px">
+                <button class="gam-btn gam-mc-ai-use" id="gam-intel-ai-copy">\u{1F4CB} Copy</button>
+              </div>
+            </div>
+            <div id="gam-intel-ai-err" class="gam-mc-banner gam-mc-banner-red" style="display:none"></div>
+          </div>
+          <div id="gam-mc-modnote-mount"></div>
+          <div class="gam-mc-intel-tip">\u{1F4A1} Hovering any username anywhere on GAW now shows this same intel instantly.</div>
+        </div>
       </div>
-      <div class="gam-mc-intel-tip">\u{1F4A1} Hovering any username anywhere on GAW now shows this same intel instantly.</div>
-      <div id="gam-mc-modnote-mount"></div>
     `;
 
     // v6.1.2: Mods-only team-synced note field.
@@ -9585,7 +9597,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           regen.addEventListener('click', () => { pv.remove(); macroPick.dispatchEvent(new Event('change')); macroPick.value = '__ai__'; macroPick.dispatchEvent(new Event('change')); });
           const dismiss = document.createElement('button');
           dismiss.textContent = 'Dismiss';
-          dismiss.style.cssText = 'background:transparent;border:1px solid #2a2825;color:#5a5752;padding:3px 8px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase';
+          dismiss.style.cssText = 'background:transparent;border:1px solid #2a2825;color:#9b9892;padding:3px 8px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase';
           dismiss.addEventListener('click', () => pv.remove());
           actions.appendChild(regen);
           actions.appendChild(dismiss);
@@ -10247,7 +10259,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     root.innerHTML = `
       <div class="gam-mc-section">
         <div class="gam-mc-h" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <span>Note history <span class="gam-mc-hint" id="mc-note-count">(loading...)</span> <span class="gam-mc-hint" style="color:#5a5752">· newest first</span></span>
+          <span>Note history <span class="gam-mc-hint" id="mc-note-count">(loading...)</span> <span class="gam-mc-hint" style="color:#9b9892">· newest first</span></span>
           <button class="gam-btn gam-btn-cancel" id="mc-note-clear-all" style="font-size:10px;padding:3px 8px" title="Archive prior notes with a marker entry (history preserved, visually divided)">\u{1F9F9} Clear all</button>
         </div>
         <div id="mc-note-history" class="gam-mc-note-history">\u{1F50D} loading notes...</div>
@@ -10268,7 +10280,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           </span>
         </div>
         <textarea class="gam-input gam-textarea" id="mc-note-body" rows="6" placeholder="Add your mod note here..."></textarea>
-        <div class="gam-mc-hint" id="mc-note-charcount" style="text-align:right;margin-top:3px;font-size:10px;color:#5a5752">0 chars</div>
+        <div class="gam-mc-hint" id="mc-note-charcount" style="text-align:right;margin-top:3px;font-size:10px;color:#9b9892">0 chars</div>
       </div>
       <div id="mc-note-status"></div>
     `;
@@ -10307,7 +10319,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       const __updateCharCount = () => {
         const n = (body.value || '').length;
         charCountEl.textContent = n + ' char' + (n === 1 ? '' : 's');
-        charCountEl.style.color = (n > 500) ? 'var(--bb-amber-warm, #f0a040)' : '#5a5752';
+        charCountEl.style.color = (n > 500) ? 'var(--bb-amber-warm, #f0a040)' : '#9b9892'; /* v.next a11y: #5a5752 -> #9b9892 (2.5:1 -> 6.5:1) */
       };
       body.addEventListener('input', __updateCharCount);
       __updateCharCount();
@@ -11444,7 +11456,10 @@ Analyze this comment against the community rules. Then write a brief, profession
         });
         c.appendChild(drl);
         // Sticky bottom action bar for batch ops. Hidden until 1+ selected.
-        const drBatchBar = el('div',{ id:'gam-dr-batch-bar', style:{display:'none',alignItems:'center',gap:'10px',padding:'8px 10px',marginTop:'8px',background:'rgba(255,153,51,0.10)',border:'1px solid rgba(255,153,51,0.30)',borderRadius:'4px'} },
+        // v10.16.2 P3 hotfix: position:sticky + bottom:0 so the bar stays visible
+        // when the operator scrolls down through a long DR queue. Background
+        // matches the panel chrome so it doesn't visually float on top of rows.
+        const drBatchBar = el('div',{ id:'gam-dr-batch-bar', style:{display:'none',alignItems:'center',gap:'10px',padding:'8px 10px',marginTop:'8px',background:'#1a1c20',border:'1px solid rgba(255,153,51,0.30)',borderRadius:'4px',position:'sticky',bottom:'0',zIndex:'2',boxShadow:'0 -2px 8px rgba(0,0,0,0.4)'} },
           el('span',{ 'data-batch-count':'1', style:{color:C.AMBER,fontWeight:'600',fontSize:'12px'} }, '0 selected'),
           el('button',{ cls:'gam-btn gam-btn-small gam-btn-danger', style:{marginLeft:'auto',padding:'4px 10px'}, onclick: () => {
             const checks = drl.querySelectorAll('input[data-dr-select="1"]:checked');
@@ -12147,7 +12162,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         var _auStatusId = 'gam-auto-unsticky-status';
         _auStatusRow.innerHTML =
           '<div class="gam-settings-info" style="cursor:pointer" id="' + _auStatusId + '">' +
-          '<span class="gam-settings-desc" style="font-size:10px;color:#5a5752">' +
+          '<span class="gam-settings-desc" style="font-size:10px;color:#9b9892">' +
           'Last poll: -- &middot; -- queued &middot; -- executed in 24h' +
           ' <span style="color:#4A9EFF;text-decoration:underline;cursor:pointer">[view recent]</span>' +
           '</span></div>';
@@ -17812,10 +17827,10 @@ Analyze this comment against the community rules. Then write a brief, profession
       // HEADER -- unchanged
       '<div style="background:#0a0a0b;border-bottom:1px solid #3d3a35;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0">' +
         '<span style="color:var(--bb-amber);font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:12px">\u{1F4E5} Modmail</span>' +
-        '<span style="color:#5a5752;font-size:10px">— full panel</span>' +
+        '<span style="color:#9b9892;font-size:10px">— full panel</span>' +
         '<span style="flex:1"></span>' +
         '<button data-refresh="1" title="Refresh" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:3px 8px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Refresh</button>' +
-        '<button data-close="1" title="Close (ESC)" style="background:transparent;border:none;color:#5a5752;padding:2px 8px;cursor:pointer;font-size:18px;line-height:1">x</button>' +
+        '<button data-close="1" title="Close (ESC)" style="background:transparent;border:none;color:#9b9892;padding:2px 8px;cursor:pointer;font-size:18px;line-height:1">x</button>' +
       '</div>' +
       // BODY -- 3-column flex row
       '<div style="flex:1 1 auto;display:flex;overflow:hidden">' +
@@ -17823,11 +17838,11 @@ Analyze this comment against the community rules. Then write a brief, profession
         '<div id="gam-mmp-list" style="width:240px;flex-shrink:0;border-right:1px solid #2a2f38;overflow-y:auto;background:#0f1114">loading...</div>' +
         // COL 2: intel strip + messages
         '<div id="gam-mmp-center" style="flex:1;display:flex;flex-direction:column;overflow:hidden;background:#181b20">' +
-          '<div id="gam-mmp-intel" style="height:40px;flex-shrink:0;border-bottom:1px solid #2a2f38;display:flex;align-items:center;gap:8px;padding:0 12px;color:#5a5752;font-size:10px">Select a thread</div>' +
+          '<div id="gam-mmp-intel" style="height:40px;flex-shrink:0;border-bottom:1px solid #2a2f38;display:flex;align-items:center;gap:8px;padding:0 12px;color:#9b9892;font-size:10px">Select a thread</div>' +
           '<div id="gam-mmp-detail" style="flex:1;overflow-y:auto;padding:14px;color:#9b9892">' +
             '<div style="text-align:center;padding:40px 20px">' +
-              '<div style="color:#5a5752;font-size:11px;letter-spacing:0.08em;text-transform:uppercase">Select a thread</div>' +
-              '<div style="color:#5a5752;font-size:10px;margin-top:6px">Pick a thread on the left to see messages + AI reply candidates.</div>' +
+              '<div style="color:#9b9892;font-size:11px;letter-spacing:0.08em;text-transform:uppercase">Select a thread</div>' +
+              '<div style="color:#9b9892;font-size:10px;margin-top:6px">Pick a thread on the left to see messages + AI reply candidates.</div>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -17837,7 +17852,7 @@ Analyze this comment against the community rules. Then write a brief, profession
             '<span style="color:#7cb8ff;font-size:9px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase">AI Drafts</span>' +
           '</div>' +
           '<div id="gam-mmp-ai-host" style="padding:10px">' +
-            '<div style="color:#5a5752;font-size:10px">Select a thread</div>' +
+            '<div style="color:#9b9892;font-size:10px">Select a thread</div>' +
           '</div>' +
         '</div>' +
       '</div>';
@@ -18060,7 +18075,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         _attachSentinel();
       } else {
         const end = document.createElement('div');
-        end.style.cssText = 'padding:10px 12px;color:#5a5752;font-size:10px;text-align:center;letter-spacing:0.04em;text-transform:uppercase';
+        end.style.cssText = 'padding:10px 12px;color:#9b9892;font-size:10px;text-align:center;letter-spacing:0.04em;text-transform:uppercase';
         end.textContent = '— end of recent threads —';
         list.appendChild(end);
       }
@@ -18070,7 +18085,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       _detachSentinel();
       const sentinel = document.createElement('div');
       sentinel.dataset.mmSentinel = '1';
-      sentinel.style.cssText = 'height:24px;display:flex;align-items:center;justify-content:center;color:#5a5752;font-size:10px;letter-spacing:0.04em;text-transform:uppercase';
+      sentinel.style.cssText = 'height:24px;display:flex;align-items:center;justify-content:center;color:#9b9892;font-size:10px;letter-spacing:0.04em;text-transform:uppercase';
       sentinel.textContent = '… loading more …';
       list.appendChild(sentinel);
       try {
@@ -18375,14 +18390,14 @@ Analyze this comment against the community rules. Then write a brief, profession
     pop.innerHTML =
       '<div style="background:#0a0a0b;border-bottom:1px solid #2a2825;padding:8px 12px;display:flex;align-items:center;gap:8px;flex-shrink:0">' +
         '<span style="color:var(--bb-amber);font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:11px">\u{1F4E5} Modmail</span>' +
-        '<span style="color:#5a5752;font-size:10px">(separate from team chat)</span>' +
+        '<span style="color:#9b9892;font-size:10px">(separate from team chat)</span>' +
         '<span style="flex:1"></span>' +
         // v9.24.0 (Commander 2026-05-08): REFRESH button. Forces re-run of
         // /modmail/recent + auto-fires the firehose crawl so the inbox is
         // never stuck on stale cached data.
         '<button data-refresh="1" title="Refresh + run firehose backfill" style="background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:2px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">↻ REFRESH</button>' +
         '<button data-expand="1" title="Expand to full panel" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:2px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">↗ EXPAND</button>' +
-        '<button data-close="1" style="background:transparent;border:none;color:#5a5752;padding:2px 6px;cursor:pointer;font-size:16px;line-height:1">×</button>' +
+        '<button data-close="1" style="background:transparent;border:none;color:#9b9892;padding:2px 6px;cursor:pointer;font-size:16px;line-height:1">×</button>' +
       '</div>' +
       '<div id="gam-modmail-body" style="flex:1 1 auto;overflow-y:auto;padding:6px 0">loading recent modmail...</div>';
     document.body.appendChild(pop);
@@ -18487,7 +18502,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         return _loadModmailList(true);
       }
       if (threads.length === 0) {
-        body.innerHTML = '<div style="padding:12px;color:#9b9892">No modmail threads after firehose backfill.<br><br>' + (note ? '<span style="color:#5a5752;font-size:10px">' + escapeHtml(note) + '</span>' : 'You may need to visit /modmail directly first to seed the firehose, or check that you are logged into GAW.') + '</div>';
+        body.innerHTML = '<div style="padding:12px;color:#9b9892">No modmail threads after firehose backfill.<br><br>' + (note ? '<span style="color:#9b9892;font-size:10px">' + escapeHtml(note) + '</span>' : 'You may need to visit /modmail directly first to seed the firehose, or check that you are logged into GAW.') + '</div>';
         return;
       }
       body.innerHTML = '';
@@ -18684,13 +18699,13 @@ Analyze this comment against the community rules. Then write a brief, profession
         '#gam-active-mods-popover .gam-am-seg button{background:transparent;border:none;border-right:1px solid #2a2825;color:#9b9892;padding:2px 8px;cursor:pointer;font:600 10px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.04em}',
         '#gam-active-mods-popover .gam-am-seg button:last-child{border-right:none}',
         '#gam-active-mods-popover .gam-am-seg button[aria-pressed="true"]{background:rgba(255,153,51,0.14);color:var(--bb-amber)}',
-        '#gam-active-mods-popover .gam-am-divider{display:flex;align-items:center;gap:8px;padding:4px 10px 2px;color:#5a5752;font:600 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.1em;text-transform:uppercase}',
+        '#gam-active-mods-popover .gam-am-divider{display:flex;align-items:center;gap:8px;padding:4px 10px 2px;color:#9b9892;font:600 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.1em;text-transform:uppercase}',
         '#gam-active-mods-popover .gam-am-divider::before,#gam-active-mods-popover .gam-am-divider::after{content:"";flex:1;height:1px;background:#2a2825}',
         '#gam-active-mods-popover .gam-am-row{display:flex;align-items:center;gap:8px;padding:3px 10px;border-bottom:1px solid #1e1c1a}',
         '#gam-active-mods-popover .gam-am-dot{width:6px;height:6px;border-radius:50%;flex:0 0 auto}',
         '#gam-active-mods-popover .gam-am-dot--active{background:#3dd68c}',
         '#gam-active-mods-popover .gam-am-dot--idle{background:#ffd84d}',
-        '#gam-active-mods-popover .gam-am-dot--stale{background:#5a5752}',
+        '#gam-active-mods-popover .gam-am-dot--stale{background:#7a7672}', /* v.next a11y: 2.5:1 -> 4.1:1 (graphical 3:1 pass) */
         '#gam-active-mods-popover .gam-am-name{color:#66ccff;font-weight:600;flex:0 0 auto}',
         '#gam-active-mods-popover .gam-am-page{color:#9b9892;font-size:10px;flex:1;text-align:left;text-decoration:none;max-width:40ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block}',
         '#gam-active-mods-popover .gam-am-page:hover{color:#e8e6e1;text-decoration:underline}',
@@ -18708,7 +18723,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           '<button data-w="8"  aria-pressed="false">8H</button>' +
           '<button data-w="24" aria-pressed="false">24H</button>' +
         '</div>' +
-        '<button data-close="1" aria-label="Close popover" style="background:transparent;border:none;color:#5a5752;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1">×</button>' +
+        '<button data-close="1" aria-label="Close popover" style="background:transparent;border:none;color:#9b9892;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1">×</button>' +
       '</div>' +
       '<div id="gam-active-mods-body" style="padding:4px 0 8px;max-height:340px;overflow-y:auto">loading...</div>';
     document.body.appendChild(pop);
@@ -18738,7 +18753,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       try { setSetting('activeModsWindow', hours); } catch(_){}
       highlightWindow(hours);
       const body = pop.querySelector('#gam-active-mods-body');
-      body.innerHTML = '<div style="padding:8px 10px;color:#5a5752">querying...</div>';
+      body.innerHTML = '<div style="padding:8px 10px;color:#9b9892">querying...</div>';
       const cutoff = Date.now() - hours * 3600_000;
       const res = await rpcCall('presenceOnline', { since: cutoff });
       if (!res || !res.ok || !res.data) {
@@ -18750,7 +18765,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       const titleEl = pop.querySelector('#gam-am-title');
       if (titleEl) titleEl.textContent = 'Active mods (' + mods.length + ')';
       if (mods.length === 0) {
-        body.innerHTML = '<div style="padding:8px 10px;color:#5a5752">no mods seen in last ' + hours + 'h</div>';
+        body.innerHTML = '<div style="padding:8px 10px;color:#9b9892">no mods seen in last ' + hours + 'h</div>';
         return;
       }
       // v10.13.1 W3: enrich + sort by recency desc + tier-classify
@@ -18873,7 +18888,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     spacer.style.flex = '1';
     var closeBtn = document.createElement('button');
     closeBtn.textContent = '×';
-    closeBtn.style.cssText = 'background:transparent;border:none;color:#5a5752;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1';
+    closeBtn.style.cssText = 'background:transparent;border:none;color:#9b9892;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1';
     closeBtn.addEventListener('click', function() { _auClose(); });
     hdr.appendChild(title); hdr.appendChild(spacer); hdr.appendChild(closeBtn);
     pop.appendChild(hdr);
@@ -18882,7 +18897,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     body.style.cssText = 'padding:6px 10px;max-height:360px;overflow-y:auto';
 
     var loadingEl = document.createElement('div');
-    loadingEl.style.cssText = 'color:#5a5752;text-align:center;padding:16px 0;font-size:10px';
+    loadingEl.style.cssText = 'color:#9b9892;text-align:center;padding:16px 0;font-size:10px';
     loadingEl.textContent = 'Loading...';
     body.appendChild(loadingEl);
     pop.appendChild(body);
@@ -18917,7 +18932,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       var rows = (res && res.ok && Array.isArray(res.actions)) ? res.actions : [];
       if (rows.length === 0) {
         var empty = document.createElement('div');
-        empty.style.cssText = 'color:#5a5752;text-align:center;padding:16px 0;font-size:10px';
+        empty.style.cssText = 'color:#9b9892;text-align:center;padding:16px 0;font-size:10px';
         empty.textContent = 'No recent auto-unsticky actions';
         body.appendChild(empty);
         return;
@@ -18926,7 +18941,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       var tbl = document.createElement('table');
       tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:10px';
       var thead = document.createElement('thead');
-      thead.innerHTML = '<tr style="color:#5a5752;border-bottom:1px solid #2a2825">' +
+      thead.innerHTML = '<tr style="color:#9b9892;border-bottom:1px solid #2a2825">' +
         '<th style="text-align:left;padding:3px 6px">Status</th>' +
         '<th style="text-align:left;padding:3px 6px">Target</th>' +
         '<th style="text-align:left;padding:3px 6px">Queued</th>' +
@@ -18995,7 +19010,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     const closeBtn = document.createElement('button');
     closeBtn.textContent = '×';
     closeBtn.setAttribute('aria-label', 'Close');
-    closeBtn.style.cssText = 'background:transparent;border:none;color:#5a5752;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1';
+    closeBtn.style.cssText = 'background:transparent;border:none;color:#9b9892;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1';
     hdr.appendChild(title); hdr.appendChild(closeBtn);
     pop.appendChild(hdr);
 
@@ -19006,7 +19021,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       ss.textContent = [
         '.gam-sus-drill{max-height:0;overflow:hidden;transition:max-height 160ms cubic-bezier(0.4,0,0.2,1),opacity 120ms ease;opacity:0}',
         '.gam-sus-drill.open{max-height:300px;opacity:1;overflow-y:auto}',
-        '.gam-sus-chevron{transition:transform 160ms cubic-bezier(0.4,0,0.2,1);display:inline-block;color:#5a5752;font-size:9px;user-select:none;cursor:pointer;padding:0 4px}',
+        '.gam-sus-chevron{transition:transform 160ms cubic-bezier(0.4,0,0.2,1);display:inline-block;color:#9b9892;font-size:9px;user-select:none;cursor:pointer;padding:0 4px}',
         '.gam-sus-row.expanded .gam-sus-chevron{transform:rotate(90deg);color:var(--bb-amber)}',
         '.gam-sus-dr-btn{background:transparent;border:1px solid #ffd84d;color:#ffd84d;padding:1px 6px;cursor:pointer;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;transition:background 80ms,color 80ms;white-space:nowrap}',
         '.gam-sus-dr-btn:hover{background:rgba(255,216,77,0.15)}',
@@ -19015,7 +19030,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-sus-tard-divider::before,.gam-sus-tard-divider::after{content:"";flex:1;height:1px;background:rgba(168,85,247,0.25)}',
         '.gam-sus-tard-row{border-left:2px solid rgba(168,85,247,0.4);padding-left:6px}',
         '.gam-sus-drill-inner{background:#0a0a0b;border:1px solid #2a2825;border-left:2px solid var(--bb-amber);margin:4px 0 6px 16px;padding:6px 8px;font-size:10px}',
-        '.gam-sus-drill-section-hdr{color:#5a5752;font-size:9px;letter-spacing:0.08em;text-transform:uppercase;margin:4px 0 2px}',
+        '.gam-sus-drill-section-hdr{color:#9b9892;font-size:9px;letter-spacing:0.08em;text-transform:uppercase;margin:4px 0 2px}',
         '.gam-sus-drill-post{color:#9b9892;font-size:9px;padding:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.gam-sus-note-input{width:100%;box-sizing:border-box;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:10px ui-monospace,monospace;padding:4px 6px;resize:vertical;min-height:40px;margin-top:4px}',
         '.gam-sus-note-input:focus{outline:none;border-color:#9b9892}',
@@ -19048,14 +19063,14 @@ Analyze this comment against the community rules. Then write a brief, profession
     function _loadSusDrillContent(username, drillEl, rowData) {
       const inner = drillEl.querySelector('.gam-sus-drill-inner');
       if (!inner || inner.dataset.loaded) return;
-      inner.innerHTML = '<div style="color:#5a5752;font-size:9px;padding:4px 0">loading activity…</div>';
+      inner.innerHTML = '<div style="color:#9b9892;font-size:9px;padding:4px 0">loading activity…</div>';
 
       rpcCall('modUserCadence', { username: username }).then(function(resp) {
         inner.dataset.loaded = '1';
         const posts = (resp && resp.data && Array.isArray(resp.data.recent_posts)) ? resp.data.recent_posts : [];
         let html = '<div class="gam-sus-drill-section-hdr">LAST ACTIVITY</div>';
         if (posts.length === 0) {
-          html += '<div class="gam-sus-drill-post" style="color:#5a5752">no recent posts cached</div>';
+          html += '<div class="gam-sus-drill-post" style="color:#9b9892">no recent posts cached</div>';
         } else {
           posts.slice(0, 3).forEach(function(p) {
             const snippet = escapeHtml((p.body || p.title || '').slice(0, 64));
@@ -19179,7 +19194,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           });
         }
       }).catch(function() {
-        inner.innerHTML = '<div style="color:#5a5752;font-size:9px">activity unavailable</div>';
+        inner.innerHTML = '<div style="color:#9b9892;font-size:9px">activity unavailable</div>';
         inner.dataset.loaded = '1';
       });
     }
@@ -19232,7 +19247,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
 
       const metaEl = document.createElement('div');
-      metaEl.style.cssText = 'color:#5a5752;font-size:9px;padding-left:14px;margin-top:1px';
+      metaEl.style.cssText = 'color:#9b9892;font-size:9px;padding-left:14px;margin-top:1px';
       const agoText = markedAt ? timeAgo(new Date(markedAt).toISOString()) : '';
       metaEl.textContent = 'by ' + (markedBy || '?') + (agoText ? ' · ' + agoText : '');
       leftZone.appendChild(metaEl);
@@ -19426,7 +19441,7 @@ Analyze this comment against the community rules. Then write a brief, profession
               const existing = getSetting('autoTardRules', []) || [];
               if (existing.some(function(r){ return r && r.pattern === pat; })) {
                 drRuleBtn.textContent = '✓ EXISTS';
-                drRuleBtn.style.borderColor = '#5a5752'; drRuleBtn.style.color = '#5a5752';
+                drRuleBtn.style.borderColor = '#7a7672'; drRuleBtn.style.color = '#9b9892'; /* v.next a11y: border 2.5:1 -> 4.1:1; text 2.5:1 -> 6.5:1 */
                 try { snack('Pattern already in autoTardRules: ' + pat, 'info'); } catch(_){}
                 return;
               }
@@ -19505,7 +19520,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     footLink.href = '/users';
     footLink.target = '_blank';
     footLink.rel = 'noopener';
-    footLink.style.cssText = 'color:#5a5752;font-size:9px;text-decoration:none';
+    footLink.style.cssText = 'color:#9b9892;font-size:9px;text-decoration:none';
     footLink.textContent = 'Open Death Row →';
     foot.appendChild(footLink);
     pop.appendChild(foot);
@@ -19626,7 +19641,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-dr-band-hdr.band-imminent::before,.gam-dr-band-hdr.band-imminent::after{background:rgba(255,59,59,0.25)}',
         '.gam-dr-band-hdr.band-today{color:#ffd84d;background:rgba(255,216,77,0.04)}',
         '.gam-dr-band-hdr.band-today::before,.gam-dr-band-hdr.band-today::after{background:rgba(255,216,77,0.2)}',
-        '.gam-dr-band-hdr.band-deferred{color:#5a5752}',
+        '.gam-dr-band-hdr.band-deferred{color:#9b9892}',
         '.gam-dr-band-hdr.band-deferred::before,.gam-dr-band-hdr.band-deferred::after{background:#2a2825}',
         '.gam-dr-row{padding:5px 10px;border-bottom:1px solid #1e1c1a;display:flex;flex-direction:column;gap:2px;border-left:2px solid transparent}',
         '.gam-dr-row.band-imminent{border-left-color:#ff3b3b;background:rgba(255,59,59,0.03)}',
@@ -19639,7 +19654,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-dr-countdown.urg-critical{color:#ff3b3b}',
         '.gam-dr-countdown.urg-imminent{color:#ff6b35}',
         '.gam-dr-countdown.urg-today{color:#ffd84d}',
-        '.gam-dr-countdown.urg-deferred{color:#5a5752}',
+        '.gam-dr-countdown.urg-deferred{color:#9b9892}',
         '@media (prefers-reduced-motion: no-preference){',
         '  @keyframes gam-dr-cd-pulse{0%,100%{opacity:1}50%{opacity:.4}}',
         '  .gam-dr-countdown.urg-critical{animation:gam-dr-cd-pulse 1s ease-in-out infinite}',
@@ -19686,13 +19701,13 @@ Analyze this comment against the community rules. Then write a brief, profession
     const closeBtn = document.createElement('button');
     closeBtn.textContent = '×';
     closeBtn.setAttribute('aria-label', 'Close');
-    closeBtn.style.cssText = 'background:transparent;border:none;color:#5a5752;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1';
+    closeBtn.style.cssText = 'background:transparent;border:none;color:#9b9892;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1';
     hdr.appendChild(title); hdr.appendChild(closeBtn);
     pop.appendChild(hdr);
 
     // Sort bar with Cancel All
     const sortBar = document.createElement('div');
-    sortBar.style.cssText = 'background:#0e0e11;border-bottom:1px solid #2a2825;padding:3px 10px;display:flex;align-items:center;gap:8px;font-size:9px;color:#5a5752;letter-spacing:0.06em';
+    sortBar.style.cssText = 'background:#0e0e11;border-bottom:1px solid #2a2825;padding:3px 10px;display:flex;align-items:center;gap:8px;font-size:9px;color:#9b9892;letter-spacing:0.06em';
     const sortLabel = document.createElement('span');
     sortLabel.textContent = 'FIRES FIRST';
     const cancelAllBtn = document.createElement('button');
@@ -19809,7 +19824,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         const line3 = document.createElement('div');
         line3.style.cssText = 'display:flex;align-items:center;gap:5px;padding-left:17px;margin-top:1px';
         const qAgoEl = document.createElement('span');
-        qAgoEl.style.cssText = 'color:#5a5752;font-size:9px;flex:1';
+        qAgoEl.style.cssText = 'color:#9b9892;font-size:9px;flex:1';
         qAgoEl.textContent = queuedAt ? ('queued ' + timeAgo(new Date(queuedAt).toISOString())) : '';
         line3.appendChild(qAgoEl);
 
@@ -19992,7 +20007,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     footLink.href = '/users?tab=deathrow';
     footLink.target = '_blank';
     footLink.rel = 'noopener';
-    footLink.style.cssText = 'color:#5a5752;font-size:9px;text-decoration:none';
+    footLink.style.cssText = 'color:#9b9892;font-size:9px;text-decoration:none';
     footLink.textContent = 'Open full Death Row view →';
     foot.appendChild(footLink);
     pop.appendChild(foot);
@@ -20057,8 +20072,8 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-queue-row.fading{opacity:0;transition:opacity 400ms ease}',
         '.gam-queue-row-line1{display:flex;align-items:baseline;gap:6px;font-size:10px;font-weight:600;color:#e8e6e1}',
         '.gam-queue-row-title{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-        '.gam-queue-row-age{color:#5a5752;font-size:9px;font-weight:400;white-space:nowrap}',
-        '.gam-queue-row-line2{display:flex;align-items:center;gap:6px;margin-top:2px;font-size:9px;color:#5a5752}',
+        '.gam-queue-row-age{color:#9b9892;font-size:9px;font-weight:400;white-space:nowrap}',
+        '.gam-queue-row-line2{display:flex;align-items:center;gap:6px;margin-top:2px;font-size:9px;color:#9b9892}',
         // v10.13.1 W3: author span gets max-width 120px + ellipsis. Long usernames
         // were stealing horizontal space from the title; row would visually wrap.
         '.gam-queue-author{color:#66ccff;cursor:pointer;text-decoration:none;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}',
@@ -20072,12 +20087,12 @@ Analyze this comment against the community rules. Then write a brief, profession
         '.gam-queue-btn-appr:hover:not(:disabled){background:rgba(68,221,102,0.12)}',
         '.gam-queue-btn-rem{color:#ff3b3b}',
         '.gam-queue-btn-rem:hover:not(:disabled){background:rgba(255,59,59,0.12)}',
-        '.gam-queue-btn-open{color:#5a5752}',
+        '.gam-queue-btn-open{color:#9b9892}',
         '.gam-queue-btn-open:hover{color:#9b9892}',
         '.gam-queue-skeleton-bar{display:inline-block;background:#2a2825;border-radius:2px;height:9px}',
         '.gam-queue-undo-toast{background:#1a1f1a;border:1px solid #44dd66;padding:6px 10px;font-size:9px;display:flex;align-items:center;gap:8px}',
         '.gam-queue-undo-btn{color:#44dd66;background:none;border:none;cursor:pointer;font:700 9px ui-monospace,monospace;padding:0;text-decoration:underline}',
-        '.gam-queue-undo-countdown{color:#5a5752}',
+        '.gam-queue-undo-countdown{color:#9b9892}',
       ].join('');
       document.head.appendChild(ss);
     }
@@ -20089,12 +20104,12 @@ Analyze this comment against the community rules. Then write a brief, profession
     title.style.cssText = 'color:#66ccff;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:10px;flex:1';
     title.textContent = 'QUEUE — LOADING...';
     const refreshBtn = document.createElement('button');
-    refreshBtn.style.cssText = 'background:transparent;border:1px solid #3d3a35;color:#5a5752;padding:1px 5px;cursor:pointer;font:9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
+    refreshBtn.style.cssText = 'background:transparent;border:1px solid #3d3a35;color:#9b9892;padding:1px 5px;cursor:pointer;font:9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
     refreshBtn.textContent = 'Refresh';
     const closeBtn = document.createElement('button');
     closeBtn.textContent = '×';
     closeBtn.setAttribute('aria-label', 'Close');
-    closeBtn.style.cssText = 'background:transparent;border:none;color:#5a5752;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1';
+    closeBtn.style.cssText = 'background:transparent;border:none;color:#9b9892;padding:2px 4px;cursor:pointer;font-size:14px;line-height:1';
     hdr.appendChild(title); hdr.appendChild(refreshBtn); hdr.appendChild(closeBtn);
     pop.appendChild(hdr);
 
@@ -20111,7 +20126,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     footLink.href = '/mod/queue';
     footLink.target = '_blank';
     footLink.rel = 'noopener';
-    footLink.style.cssText = 'color:#5a5752;font-size:9px;text-decoration:none';
+    footLink.style.cssText = 'color:#9b9892;font-size:9px;text-decoration:none';
     footLink.textContent = 'Open /mod/queue →';
     foot.appendChild(footLink);
     pop.appendChild(foot);
@@ -20288,7 +20303,7 @@ Analyze this comment against the community rules. Then write a brief, profession
             gapHdr.textContent = depthStr + ' items pending but row data unavailable.';
             gapWrap.appendChild(gapHdr);
             const gapHint = document.createElement('div');
-            gapHint.style.cssText = 'margin-bottom:8px;color:#5a5752';
+            gapHint.style.cssText = 'margin-bottom:8px;color:#9b9892';
             gapHint.textContent = 'Open /mod/queue to review manually, or retry the snapshot.';
             gapWrap.appendChild(gapHint);
             const gapBtnRow = document.createElement('div');
@@ -21020,7 +21035,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           states.push({ msg: _autoPendingCount + ' AUTO Q', color: 'var(--bb-purple, #c084fc)', target: null, kind: 'auto' });
         }
         if (states.length === 0) {
-          states.push({ msg: 'site quiet', color: 'var(--bb-ink-faint, #5a5752)', target: null, kind: 'quiet' });
+          states.push({ msg: 'site quiet', color: 'var(--bb-ink-dim, #9b9892)', target: null, kind: 'quiet' }); /* v.next a11y: faint -> dim, fallback 2.5:1 -> 6.5:1 */
         }
       } catch(_e){ /* swallow */ }
       __tickerStates = states;
@@ -22828,6 +22843,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-tip-note-text{font-size:11px;color:${C.TEXT};font-style:italic;line-height:1.4}
 
 /* Compact Intel tab */
+/* v10.16.3: 2-col INTEL layout. Left = "what do I know" (passive intel),
+   right = "what do I/AI think" (analysis + notes). Collapses to single
+   column below 520px so narrow viewports stay readable. */
+.gam-mc-intel-2col{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.gam-mc-intel-col{display:flex;flex-direction:column;gap:10px;min-width:0}
+@media (max-width: 520px){.gam-mc-intel-2col{grid-template-columns:1fr}}
 .gam-mc-intel-compact{display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;margin-bottom:12px}
 .gam-mc-chips{display:flex;flex-wrap:wrap;gap:4px}
 .gam-mc-chip{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:${C.BG3};color:${C.TEXT2};border:1px solid ${C.BORDER}}
@@ -22977,7 +22998,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   /* Ink — warm off-white, neutral, NEVER pure white */
   --bb-ink:       #e8e6e1;
   --bb-ink-dim:   #9b9892;
-  --bb-ink-faint: #5a5752;
+  --bb-ink-faint: #7a7672; /* v.next a11y P3: was #5a5752 (2.5:1 hard fail). Mirrors popup.css. */
 
   /* Borders — visible but quiet */
   --bb-line:      #2a2825;
@@ -23318,7 +23339,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .pop-token input::placeholder,
 .gam-modal input::placeholder,
 .gam-mc-textarea::placeholder {
-  color: var(--bb-ink-faint) !important;
+  /* v.next a11y: --bb-ink-faint -> --bb-ink-dim. Placeholders with essential info need 4.5:1. */
+  color: var(--bb-ink-dim) !important;
   font-style: normal;
 }
 
@@ -23350,7 +23372,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .pop-stat-label,
 .pop-stat .label,
 .pop-stat-name {
-  font: 400 var(--bb-t-xs)/1.2 var(--bb-font) !important;
+  /* v.next a11y: --bb-t-xs (10px) -> --bb-t-sm (11px) for label legibility.
+     Mirrors popup.css. Color stays --bb-ink-dim (#9b9892), 6.5:1 on --bb-panel. */
+  font: 400 var(--bb-t-sm)/1.2 var(--bb-font) !important;
   color: var(--bb-ink-dim) !important;
   text-transform: uppercase;
   letter-spacing: 0.08em !important;
@@ -23380,7 +23404,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 }
 .pop-stat-trend[data-dir="up"]   { color: var(--bb-green) !important; }
 .pop-stat-trend[data-dir="down"] { color: var(--bb-red) !important; }
-.pop-stat-trend[data-dir="flat"] { color: var(--bb-ink-faint) !important; }
+.pop-stat-trend[data-dir="flat"] { color: var(--bb-ink-dim) !important; } /* v.next a11y: faint -> dim */
 
 /* ── Iter 15 ── Drill-in panel: inline terminal, NOT modal */
 .pop-drill,
@@ -23466,8 +23490,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   margin-bottom: var(--bb-s2);
 }
 .pop-token-hint {
+  /* v.next a11y: --bb-ink-faint -> --bb-ink-dim. Hints carry essential info. */
   font: 400 var(--bb-t-xs)/1.4 var(--bb-font) !important;
-  color: var(--bb-ink-faint) !important;
+  color: var(--bb-ink-dim) !important;
   margin: var(--bb-s1) 0 var(--bb-s3) 0 !important;
 }
 .pop-token-status {
@@ -23563,7 +23588,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   letter-spacing: 0.02em;
 }
 .gam-mc-msg-time {
-  color: var(--bb-ink-faint) !important;
+  /* v.next a11y: --bb-ink-faint -> --bb-ink-dim. Mod-chat timestamps need AA. */
+  color: var(--bb-ink-dim) !important;
   font-size: var(--bb-t-xs);
   margin-left: var(--bb-s2);
 }
@@ -23783,7 +23809,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   font-size: 10.5px; line-height: 1.4;
 }
 .gam-mc-link-preview-host {
-  color: #5a5752; font-size: 9.5px;
+  color: #9b9892; font-size: 9.5px;
   letter-spacing: 0.06em; text-transform: uppercase;
   margin-top: 4px;
 }
@@ -23826,7 +23852,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   line-height: 1 !important;
   font-family: var(--bb-font) !important;
   letter-spacing: 0.08em !important;
-  color: var(--bb-ink-faint) !important;
+  /* v.next a11y: --bb-ink-faint -> --bb-ink-dim. Status-bar ticker quiet state; JS overrides for active severity. */
+  color: var(--bb-ink-dim) !important;
   background: transparent !important;
   border: 1px solid transparent !important;
   cursor: pointer;
@@ -24206,11 +24233,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-empty-state {
   display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 6px; padding: 20px 12px;
-  text-align: center; color: #5a5752; font: 10px/1.4 ui-monospace, monospace;
+  text-align: center; color: #9b9892; font: 10px/1.4 ui-monospace, monospace;
 }
 .gam-empty-icon { font-size: 24px; line-height: 1; opacity: 0.6; }
 .gam-empty-headline { color: #9b9892; font-weight: 600; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
-.gam-empty-desc { color: #5a5752; font-size: 9px; }
+.gam-empty-desc { color: #9b9892; font-size: 9px; }
 .gam-empty-cta {
   background: transparent; border: 1px solid var(--bb-amber); color: var(--bb-amber);
   padding: 2px 8px; cursor: pointer; font: 600 9px ui-monospace, monospace;
@@ -24228,7 +24255,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-error-chip.hard { background: rgba(255,59,59,0.18); color: #ff3b3b; }
 .gam-error-chip.soft { background: rgba(240,160,64,0.15); color: var(--bb-amber-warm); }
 .gam-error-msg { color: #c8c5c0; font-size: 10px; margin: 2px 0; }
-.gam-error-hint { color: #5a5752; font-size: 9px; }
+.gam-error-hint { color: #9b9892; font-size: 9px; }
 .gam-error-retry {
   background: transparent; border: 1px solid #9b9892; color: #9b9892;
   padding: 1px 6px; cursor: pointer; font: 600 8px ui-monospace, monospace;
@@ -29059,7 +29086,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           '#gam-tour-card{position:fixed;background:#0a0a0b;border:1px solid #ff9933;padding:14px 16px;max-width:340px;font-size:12px;line-height:1.45;z-index:9999999;box-shadow:0 8px 24px rgba(0,0,0,0.6)}',
           '#gam-tour-card .gam-tour-label{color:#ff9933;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;font-size:10px;margin-bottom:6px}',
           '#gam-tour-card .gam-tour-text{color:#e8e6e1;margin-bottom:12px}',
-          '#gam-tour-card .gam-tour-meta{color:#5a5752;font-size:10px;margin-bottom:10px;letter-spacing:0.04em}',
+          '#gam-tour-card .gam-tour-meta{color:#9b9892;font-size:10px;margin-bottom:10px;letter-spacing:0.04em}',
           '#gam-tour-card .gam-tour-row{display:flex;gap:8px;align-items:center;justify-content:flex-end}',
           '#gam-tour-card button{background:transparent;color:#9b9892;border:1px solid #3d3a35;padding:6px 12px;font:600 11px ui-monospace,monospace;cursor:pointer;letter-spacing:0.04em;text-transform:uppercase;min-height:32px}',
           '#gam-tour-card button:hover{background:rgba(255,255,255,0.04);color:#e8e6e1}',
