@@ -532,6 +532,50 @@
           <div id="firstRunStatus" style="margin-top:8px;color:#9b9892;font-size:10px;line-height:1.4"></div>
         </div>
 
+        <!-- v10.15.1 D-22: install accordion. Companion to v10.15.0 status-bar
+             tour. The tour handled post-install ORIENTATION (Phase 2 friction);
+             this accordion handles BEFORE-install / install-broken paths --
+             chrome://extensions, Developer Mode, Load Unpacked, Drive sharing
+             (UIUX2-36 FP-2/3/4). Native <details> = a11y free. Collapsed by
+             default so primary CTA stays prominent. Always visible in State A. -->
+        <details id="firstRunInstallAccordion" style="margin-top:14px;border:1px solid #3d3a35;background:#060709;border-radius:4px">
+          <summary style="cursor:pointer;padding:10px 12px;font:600 11px ui-monospace,JetBrains Mono,monospace;color:#e8e6e1;letter-spacing:0.04em;text-transform:uppercase;list-style:none;display:flex;align-items:center;justify-content:space-between;min-height:32px;box-sizing:border-box">
+            <span>&#x1F6E0; Install help &middot; chrome extensions / drive / ZIP</span>
+            <span style="color:#9b9892;font-size:10px">expand &#x25BE;</span>
+          </summary>
+          <div style="padding:2px 12px 12px 12px;color:#9b9892;font-size:11px;line-height:1.55">
+            <p style="margin:4px 0 8px">If the ModTools status bar isn't visible on <strong>greatawakening.win</strong>, you need to load the extension first.</p>
+
+            <p style="margin:8px 0 4px;color:#e8e6e1;font-weight:600;letter-spacing:0.04em">Recommended: Manual ZIP</p>
+            <ol style="margin:0;padding-left:18px">
+              <li>Save the ZIP your lead sent you to a stable folder (e.g. <code style="color:#ff9933;background:rgba(255,153,51,0.08);padding:0 3px">C:\Users\YourName\modtools-ext\</code>). Don't leave it in Downloads &mdash; Chrome breaks if you move it later.</li>
+              <li>Unzip in place. The folder should contain <code style="color:#ff9933;background:rgba(255,153,51,0.08);padding:0 3px">manifest.json</code> at its top level.</li>
+              <li>Open Chrome and go to <code style="color:#ff9933;background:rgba(255,153,51,0.08);padding:0 3px">chrome://extensions/</code>.</li>
+              <li>Toggle <strong>Developer mode</strong> ON (switch top-right of the page).</li>
+              <li>Click <strong>Load unpacked</strong> and select your unzipped folder.</li>
+              <li>Click the puzzle-piece icon in the Chrome toolbar &rarr; pin <strong>GAW ModTools</strong>.</li>
+              <li>Return here and paste your token / claim your invite above.</li>
+            </ol>
+
+            <p style="margin:12px 0 4px;color:#e8e6e1;font-weight:600;letter-spacing:0.04em">For auto-updates: Google Drive</p>
+            <ol style="margin:0;padding-left:18px">
+              <li>Have <strong>Google Drive Desktop</strong> installed (<a href="https://drive.google.com/drive/download" target="_blank" rel="noopener noreferrer" style="color:#4A9EFF">drive.google.com/drive/download</a>).</li>
+              <li>Ask your lead to share the <code style="color:#ff9933;background:rgba(255,153,51,0.08);padding:0 3px">mod-tools</code> folder with your Gmail.</li>
+              <li>In File Explorer, find the folder under your Drive (e.g. <code style="color:#ff9933;background:rgba(255,153,51,0.08);padding:0 3px">G:\My Drive\mod-tools\</code>).</li>
+              <li>Right-click the folder &rarr; <strong>Available offline</strong>. Wait for the green checkmark.</li>
+              <li>Continue from step 3 of Manual ZIP above, but select the synced Drive folder.</li>
+              <li>Future updates land automatically when your lead publishes.</li>
+            </ol>
+
+            <p style="margin:12px 0 4px;color:#e8e6e1;font-weight:600;letter-spacing:0.04em">Troubleshooting</p>
+            <ul style="margin:0;padding-left:18px">
+              <li>"Manifest file is missing or unreadable" &rarr; wrong folder selected. Pick the one with <code style="color:#ff9933;background:rgba(255,153,51,0.08);padding:0 3px">manifest.json</code> directly inside.</li>
+              <li><strong>Brave users:</strong> Brave Shields may strip the <code style="color:#ff9933;background:rgba(255,153,51,0.08);padding:0 3px">?mt_invite</code> URL parameter. Use the <strong>Raw token</strong> path above instead, or lower Shields for greatawakening.win.</li>
+              <li>Still stuck &rarr; DM your lead, or read the <a href="https://raw.githubusercontent.com/catsfive1/gaw-mod-shared-flags/main/INSTALL.md" target="_blank" rel="noopener noreferrer" style="color:#4A9EFF">full install guide</a>.</li>
+            </ul>
+          </div>
+        </details>
+
         <!-- SUCCESS STATE: replaces everything on successful auth -->
         <div id="firstRunWizardSuccess" style="display:none;margin-top:8px">
           <div class="tok-banner ok" style="margin:0 0 10px">

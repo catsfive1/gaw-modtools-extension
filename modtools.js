@@ -8438,6 +8438,30 @@
         }
         // v10.14.2 MC2: BAN duration shortcuts. Only fires on BAN tab.
         // Map: p=permanent (-1), 7=7d, 3=3d, 1=1d, w=1w(=7d alias), 0=warning(0)
+        // v10.15.1 V14-MC5: j/k navigation in QUICK tab. Vim-style cycle
+        // through .gam-mc-quick buttons (skip disabled). Tab-bound only --
+        // the global guard above already excludes INPUT/TEXTAREA/SELECT and
+        // .gam-mc-dur duration buttons. j = next, k = prev. Enter on a
+        // focused button uses native click semantics (no extra handler).
+        if (mc._gamTab === 'quick' && (k === 'j' || k === 'J' || k === 'k' || k === 'K')) {
+          const quickBtns = Array.from(mc.querySelectorAll('.gam-mc-quick:not([disabled])'));
+          if (quickBtns.length) {
+            const active = document.activeElement;
+            let idx = quickBtns.indexOf(active);
+            const goingDown = (k === 'j' || k === 'J');
+            // Wrap-around: from "no selection" j starts at 0, k starts at last.
+            // From "selection" j goes idx+1 (wrap to 0 if past end), k goes idx-1
+            // (wrap to last if before start). Bloomberg-style endless cycle so
+            // a power user can spin through buttons without looking at indexes.
+            if (idx === -1) idx = goingDown ? -1 : quickBtns.length;
+            let next = goingDown ? idx + 1 : idx - 1;
+            if (next >= quickBtns.length) next = 0;
+            if (next < 0) next = quickBtns.length - 1;
+            e.preventDefault();
+            try { quickBtns[next].focus(); } catch (_) {}
+            return;
+          }
+        }
         if (mc._gamTab === 'ban') {
           const durMap = { 'p': -1, 'P': -1, 'w': 7, 'W': 7, '7': 7, '3': 3, '0': 0 };
           // Note: '1' is already consumed by the tab-switch path above (idx 0
@@ -11322,7 +11346,25 @@ Analyze this comment against the community rules. Then write a brief, profession
     let hnPanel = document.getElementById('gam-hot-now-panel');
     if (!hnPanel) {
       hnPanel = el('div', { id: 'gam-hot-now-panel' });
+      // v10.15.1 (RALPH-FOCUS-TRAPS R12): a11y -- dialog semantics + focus
+      // trap. The audit also flagged R-Hot: ESC dismissal was wired via
+      // closeAllPanels() but the SEL set didn't include #gam-hot-now-panel.
+      // Bind ESC directly on the panel here so it always dismisses.
+      hnPanel.setAttribute('role', 'dialog');
+      hnPanel.setAttribute('aria-modal', 'true');
+      hnPanel.setAttribute('aria-label', 'Hot Now triage panel');
+      hnPanel.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          try { _closeHotNowPanel(); } catch (_) {}
+        }
+      });
       document.body.appendChild(hnPanel);
+      try {
+        if (typeof installFocusTrap === 'function') {
+          hnPanel._gamHnFocusTrapCleanup = installFocusTrap(hnPanel) || null;
+        }
+      } catch (_) {}
     }
     hnPanel.innerHTML = '';
 
@@ -17288,6 +17330,15 @@ Analyze this comment against the community rules. Then write a brief, profession
 
       document.body.appendChild(panel);
       STATE.panelEl = panel;
+      // v10.15.1 (RALPH-FOCUS-TRAPS R10): install focus trap on the mod-chat
+      // right-docked panel. role=dialog + aria-modal=true already set at the
+      // el() construction site; installFocusTrap handles Tab/Shift-Tab cycle
+      // bounds + ESC dismiss + focus-restore-to-opener on close.
+      try {
+        if (typeof installFocusTrap === 'function') {
+          STATE._focusTrapCleanup = installFocusTrap(panel) || null;
+        }
+      } catch (_) {}
       renderRecipientOptions();
       return panel;
     }
