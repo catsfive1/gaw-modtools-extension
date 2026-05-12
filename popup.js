@@ -3552,6 +3552,12 @@ loadLead();
     const sk = document.getElementById('firstRunWizardSuccess');
     if (s2) s2.style.display = n === 2 ? 'block' : 'none';
     if (sk) sk.style.display = n === 3 ? 'block' : 'none';
+    // v10.15.5 QA-A2 LOW: hide the install accordion during the wizard success
+    // state. Pre-fix the green success banner + Open-GAW CTA + Done button
+    // appeared side-by-side with the still-visible "Install help" expandable
+    // accordion (mild UX noise after a successful claim).
+    const accord = document.getElementById('firstRunInstallAccordion');
+    if (accord) accord.style.display = (n === 3) ? 'none' : '';
     // Hide the path-row only while step 2 / success are active
     const pathRow = document.querySelector('#tokStateFirstRun .tok-path-row');
     const pathDiv = document.querySelector('#tokStateFirstRun .tok-path-divider');

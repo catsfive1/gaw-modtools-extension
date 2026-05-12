@@ -4183,7 +4183,16 @@
   // for that). Returns a cleanup function; caller stashes it on
   // rootEl._gamFocusCleanup so the modal close path can invoke it.
   function installFocusTrap(rootEl){
-    if (!__uxOn() || !rootEl) return function(){};
+    // v10.15.5 QA-A4 P0: removed __uxOn() gate. A11y focus containment is
+    // a baseline accessibility feature, not opt-in visual polish. Previous
+    // __uxOn-gated behavior silently no-op'd 5+ focus-trap ships (Help/
+    // Settings/ModLog/BugReport modals from v10.14.1 F1, snack action UNDO
+    // from v10.13.5 P0-D, Mod Chat + Hot-Now from v10.15.1, Preflight +
+    // Modmail full panel from v10.15.3) for any operator who hadn't toggled
+    // features.uxPolish=true. Default flag is FALSE per modtools.js:1740, so
+    // the vast majority of mods got aria attrs without actual Tab containment.
+    // Trap now installs unconditionally when rootEl is provided.
+    if (!rootEl) return function(){};
     const FOCUSABLE = 'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
     const prevActive = document.activeElement;
     function getItems(){
@@ -7846,6 +7855,13 @@
         // If a text-modal sub-panel is open on top of us (gam-v72-asktext),
         // let that handle ESC first. We only handle if no inner modal is up.
         if (document.querySelector('.gam-v72-asktext')) return;
+        // v10.15.5 QA-A3 P0: skip generic showModal ESC for Mod Console panel.
+        // _mcKbHandler owns ESC on gam-mc-panel for the v10.15.2 3-step draft
+        // protection feature (empty drafts close, drafted text shows confirm
+        // row). Pre-fix this generic handler fired FIRST (capture-phase, same
+        // registration order) and called closeAllPanels(), tearing down
+        // _mcKbHandler before the draft-protection branch could run.
+        if (p && p.id === 'gam-mc-panel') return;
         e.preventDefault();
         e.stopPropagation();
         closeAllPanels();
@@ -8513,7 +8529,17 @@
           const noteDraft  = (mc.querySelector('#mc-note-body') || {}).value || '';
           const msgDraft   = (mc.querySelector('#mc-msg-body')  || {}).value || '';
           const anyDraft = (banDraft.trim() + noteDraft.trim() + msgDraft.trim()).length > 0;
-          if (!anyDraft) return; // empty -> let other ESC handlers (closeAllPanels) take over
+          // v10.15.5 QA-A3 P0: empty-drafts path now closes the Mod Console
+          // itself. Pre-fix this branch returned and relied on showModal's
+          // generic ESC handler to close, but that handler is now skipped for
+          // gam-mc-panel (we own ESC fully). Without explicit closeAllPanels
+          // here, ESC on an empty Mod Console did nothing -- regression vs
+          // prior behavior.
+          if (!anyDraft) {
+            e.preventDefault();
+            try { closeAllPanels && closeAllPanels(); } catch (_) {}
+            return;
+          }
           // Existing confirm row? ESC dismisses it (returns user to typing).
           let confirmRow = mc.querySelector('#mc-esc-confirm');
           if (confirmRow) {
@@ -17509,6 +17535,11 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     function closePanel(){
       if (!STATE.panelEl) return;
+      // v10.15.5 QA-A4 P1: invoke focus-trap cleanup so focus restores to the
+      // element that opened the panel. Pre-fix STATE._focusTrapCleanup was
+      // stored at panel build but never called -- focus stayed inside the
+      // (now-hidden via CSS class) panel.
+      try { if (typeof STATE._focusTrapCleanup === 'function') STATE._focusTrapCleanup(); STATE._focusTrapCleanup = null; } catch (_) {}
       STATE.panelEl.classList.remove('gam-mc-open');
       stopAllPolling();
       startClosedPolling();
@@ -17652,7 +17683,15 @@ Analyze this comment against the community rules. Then write a brief, profession
   // restores selection.
   function _showModmailPanel() {
     const existing = document.getElementById('gam-modmail-panel');
-    if (existing) { existing.remove(); return; }
+    if (existing) {
+      // v10.15.5 QA-A4 P1: invoke focus-trap cleanup on toggle-already-open
+      // dismissal path. Pre-fix this path skipped the cleanup that the
+      // [data-close] click handler does, so the trap listener leaked until
+      // GC. Now symmetric with the click-close path.
+      try { if (typeof existing._gamMmpFocusTrapCleanup === 'function') existing._gamMmpFocusTrapCleanup(); } catch (_) {}
+      existing.remove();
+      return;
+    }
     const panel = document.createElement('div');
     panel.id = 'gam-modmail-panel';
     // v10.14.1 PRM4: class enables PRM-gated transition; inline keeps geometry.
@@ -17732,6 +17771,10 @@ Analyze this comment against the community rules. Then write a brief, profession
     document.addEventListener('keydown', function escHandler(ev) {
       if (ev.key === 'Escape') {
         document.removeEventListener('keydown', escHandler);
+        // v10.15.5 QA-A4 P1: invoke focus-trap cleanup before removing the
+        // panel. ESC is the dominant close path (advertised in title=
+        // "Close (ESC)") -- this was the loudest focus-restore miss.
+        try { if (typeof panel._gamMmpFocusTrapCleanup === 'function') panel._gamMmpFocusTrapCleanup(); } catch (_) {}
         if (panel.parentNode) panel.remove();
       }
     });
@@ -20423,18 +20466,28 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (typeof location !== 'undefined' && location.search && location.search.indexOf('gam_open_chat=1') >= 0) {
       setTimeout(function() {
         try {
-          if (window.__GAM_MOD_CHAT && typeof window.__GAM_MOD_CHAT.open === 'function') {
-            window.__GAM_MOD_CHAT.open();
-          } else if (window.__GAM_MOD_CHAT && typeof window.__GAM_MOD_CHAT.toggle === 'function') {
-            window.__GAM_MOD_CHAT.toggle();
+          // v10.15.5 QA-A1 MED: ModChat exports openPanel/togglePanel (see
+          // L17517). The original open/toggle names were dead code; the
+          // feature worked only via the badge-click fallback below. Now the
+          // primary path runs the explicit API.
+          if (window.__GAM_MOD_CHAT && typeof window.__GAM_MOD_CHAT.openPanel === 'function') {
+            window.__GAM_MOD_CHAT.openPanel();
+          } else if (window.__GAM_MOD_CHAT && typeof window.__GAM_MOD_CHAT.togglePanel === 'function') {
+            window.__GAM_MOD_CHAT.togglePanel();
           } else {
             // Last-resort: click the status-bar chat badge if it exists
             var badge = document.getElementById('gam-mc-badge');
             if (badge) badge.click();
           }
-          // Clean the URL so a refresh doesn't re-open / leave the param visible
+          // Clean the URL so a refresh doesn't re-open / leave the param visible.
+          // v10.15.5 QA-A1 MED: use URLSearchParams so multi-param URLs serialize
+          // correctly. Pre-fix regex chain broke on inputs like
+          // ?gam_open_chat=1&other=y -- left "&other=y" without leading "?".
           try {
-            var cleanUrl = location.pathname + location.search.replace(/[?&]gam_open_chat=1/, '').replace(/^\?&/, '?').replace(/\?$/, '');
+            var sp = new URLSearchParams(location.search);
+            sp.delete('gam_open_chat');
+            var cleanQs = sp.toString();
+            var cleanUrl = location.pathname + (cleanQs ? '?' + cleanQs : '');
             history.replaceState(null, '', cleanUrl + location.hash);
           } catch (_) {}
         } catch (_) {}
