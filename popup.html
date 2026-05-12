@@ -22,15 +22,16 @@
   <!-- M5 REDTEAM-3: skip link for keyboard/AT users. Visible on focus only. -->
   <style>
     .pop-skip-link {
+      /* v.next P4: #4A9EFF -> var(--bb-blue). #1a1d23 kept (no exact token). */
       position: absolute;
       top: -100%;
       left: 0;
       background: #1a1d23;
-      color: #4A9EFF;
+      color: var(--bb-blue);
       padding: 6px 12px;
       font-size: 11px;
       z-index: 9999;
-      border: 1px solid #4A9EFF;
+      border: 1px solid var(--bb-blue);
       text-decoration: none;
     }
     .pop-skip-link:focus { top: 0; }
@@ -518,18 +519,18 @@
         <div id="firstRunWizardStep2" style="display:none;margin-top:12px">
           <div class="tok-onboard-headline" style="font-size:10.5px">Step 2 of 2</div>
           <div id="firstRunStep2Prompt" class="tok-onboard-body" style="margin-bottom:8px" aria-live="polite" aria-atomic="true"></div>
-          <input id="firstRunInput" type="password" placeholder="paste here" style="width:100%;background:#060709;border:1px solid #3d3a35;color:#e8e6e1;padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;border-radius:4px;margin-bottom:8px;box-sizing:border-box">
+          <input id="firstRunInput" type="password" placeholder="paste here" style="width:100%;background:#060709;border:1px solid var(--bb-line-hot);color:var(--bb-ink);padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;border-radius:4px;margin-bottom:8px;box-sizing:border-box">
           <div id="firstRunUsernameWrap" style="display:none;margin-bottom:8px">
-            <label for="firstRunUsername" style="color:#9b9892;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px">Your GAW username</label>
-            <input id="firstRunUsername" type="text" placeholder="e.g. catsfive" pattern="[A-Za-z0-9_-]{2,64}" maxlength="64" style="width:100%;background:#060709;border:1px solid #3d3a35;color:#e8e6e1;padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;border-radius:4px;box-sizing:border-box">
+            <label for="firstRunUsername" style="color:var(--bb-ink-dim);font-size:10px;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px">Your GAW username</label>
+            <input id="firstRunUsername" type="text" placeholder="e.g. catsfive" pattern="[A-Za-z0-9_-]{2,64}" maxlength="64" style="width:100%;background:#060709;border:1px solid var(--bb-line-hot);color:var(--bb-ink);padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;border-radius:4px;box-sizing:border-box">
             <!-- v10.14.2 FR3: format hint + live validation chip -->
-            <small id="firstRunUsernameHint" style="display:block;margin-top:4px;color:#5a5752;font-size:10px;letter-spacing:0.02em">Allowed: A-Z a-z 0-9 _ -, 2-64 chars</small>
+            <small id="firstRunUsernameHint" style="display:block;margin-top:4px;color:var(--bb-ink-dim);font-size:10px;letter-spacing:0.02em">Allowed: A-Z a-z 0-9 _ -, 2-64 chars</small>
           </div>
           <div style="display:flex;gap:6px">
             <button id="firstRunBack" class="pop-btn pop-btn-ghost" style="flex:0 0 auto">&#x2190; Back</button>
             <button id="firstRunGo" class="tok-cta-primary" style="flex:1;margin-bottom:0">Save &amp; verify</button>
           </div>
-          <div id="firstRunStatus" style="margin-top:8px;color:#9b9892;font-size:10px;line-height:1.4" aria-live="polite" aria-atomic="true" role="status"></div>
+          <div id="firstRunStatus" style="margin-top:8px;color:var(--bb-ink-dim);font-size:10px;line-height:1.4" aria-live="polite" aria-atomic="true" role="status"></div>
         </div>
 
         <!-- v10.15.1 D-22: install accordion. Companion to v10.15.0 status-bar
@@ -647,7 +648,7 @@
             <span class="tok-lead-tag">LEAD</span>
           </div>
           <div class="pop-token" style="border-top:none;padding:4px 10px 8px">
-            <div class="pop-token-hint" style="grid-column:1/-1;color:#f0a040">
+            <div class="pop-token-hint" style="grid-column:1/-1;color:var(--bb-warn)">
               Enables rotation roster, invite generation, and HUD.
             </div>
             <input id="leadInput" type="password" placeholder="lead-mod token">
@@ -903,7 +904,7 @@
            Always visible (low prominence) so authed mods can re-run wizard
            if they need to repaste. -->
       <div id="restartSetupWrap" style="display:none;padding:2px 10px 8px;text-align:right">
-        <button id="restartSetupBtn" class="pop-link" style="font-size:10.5px;color:#5a5752">
+        <button id="restartSetupBtn" class="pop-link" style="font-size:10.5px;color:var(--bb-ink-dim)">
           Re-enter credentials
         </button>
       </div>

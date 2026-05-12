@@ -934,7 +934,12 @@ html, body {
   --bb-active:    #25252a;
   --bb-ink:       #e8e6e1;
   --bb-ink-dim:   #9b9892;
-  --bb-ink-faint: #5a5752;
+  /* v.next a11y P3: was #5a5752 (2.5:1 hard fail), updated in-place to
+     #7a7672 (~4.1:1, passes 3:1 graphical AA for icon decoration use
+     which is now the token's only role after P0/P1 moved body text to
+     --bb-ink-dim). Cascade-war duplicate :root override at the file
+     tail deleted. */
+  --bb-ink-faint: #7a7672;
   --bb-line:      #2a2825;
   --bb-line-hot:  #3d3a35;
   --bb-amber:     #ff9933;
@@ -1075,7 +1080,8 @@ header.pop-header {
   letter-spacing: 0.06em;
 }
 .pop-version {
-  color: var(--bb-ink-faint) !important;
+  /* v.next a11y: --bb-ink-faint -> --bb-ink-dim (4.1:1 -> 6.5:1 AA pass). */
+  color: var(--bb-ink-dim) !important;
   font: 400 var(--bb-t-xs)/1 var(--bb-font) !important;
   font-variant-numeric: tabular-nums;
 }
@@ -1106,8 +1112,9 @@ header.pop-header {
   display: block;
 }
 .pop-token-hint {
+  /* v.next a11y: --bb-ink-faint -> --bb-ink-dim. Hints carry essential info per WCAG 1.4.3. */
   font: 400 var(--bb-t-xs)/1.4 var(--bb-font) !important;
-  color: var(--bb-ink-faint) !important;
+  color: var(--bb-ink-dim) !important;
   margin: 0 0 var(--bb-s3) 0 !important;
 }
 
@@ -1127,7 +1134,8 @@ textarea, select {
   box-sizing: border-box;
 }
 input::placeholder, textarea::placeholder {
-  color: var(--bb-ink-faint) !important;
+  /* v.next a11y: --bb-ink-faint -> --bb-ink-dim. Placeholders with info need 4.5:1. */
+  color: var(--bb-ink-dim) !important;
 }
 input:focus, textarea:focus, select:focus {
   border-color: var(--bb-amber) !important;
@@ -1205,7 +1213,9 @@ input:focus, textarea:focus, select:focus {
 .pop-stat:nth-last-child(-n+4) { border-bottom: none !important; }
 .pop-stat:hover { background: var(--bb-amber-bg) !important; }
 .pop-stat .label, .pop-stat-label {
-  font: 400 var(--bb-t-xs)/1.2 var(--bb-font) !important;
+  /* v.next a11y: --bb-t-xs (10px) -> --bb-t-sm (11px) for label legibility.
+     Color stays --bb-ink-dim, 6.5:1 on --bb-panel. */
+  font: 400 var(--bb-t-sm)/1.2 var(--bb-font) !important;
   color: var(--bb-ink-dim) !important;
   text-transform: uppercase;
   letter-spacing: 0.08em !important;
@@ -1244,13 +1254,14 @@ input:focus, textarea:focus, select:focus {
 .pop-stat[data-state="info"] .pop-stat-val   { color: var(--bb-cyan) !important; }
 .pop-stat[data-state="warn"] .value,
 .pop-stat[data-state="warn"] .pop-stat-val   { color: var(--bb-warn) !important; }
-.pop-stat-trend, .pop-stat-delta {
-  font: 400 var(--bb-t-xs)/1.2 var(--bb-font) !important;
-  font-variant-numeric: tabular-nums;
+/* v.next P5: .pop-stat-trend is content-script-only (modtools.js renders
+   it on GAW pages; popup.html does not). Removed from the shared selector
+   and the [data-dir=*] color rules — dead popup-side. The shared rule's
+   `font` was already shadowed by the canonical .pop-stat-delta block
+   later in the file. Keeping the margin-top contribution. */
+.pop-stat-delta {
   margin-top: var(--bb-s1);
 }
-.pop-stat-trend[data-dir="up"]   { color: var(--bb-green) !important; }
-.pop-stat-trend[data-dir="down"] { color: var(--bb-red) !important; }
 
 /* Iter 10: drill-in panel — terminal inline */
 #pop-drill, .pop-drill {
@@ -1432,7 +1443,8 @@ input:focus, textarea:focus, select:focus {
   margin-top: var(--bb-s1);
 }
 .gam-macro-item-meta {
-  color: var(--bb-ink-faint) !important;
+  /* v.next a11y: --bb-ink-faint -> --bb-ink-dim. */
+  color: var(--bb-ink-dim) !important;
   font-size: var(--bb-t-xs);
   font-variant-numeric: tabular-nums;
 }
@@ -1546,8 +1558,9 @@ input:focus, textarea:focus, select:focus {
 /* v10.14.0 V14-M6: char counters with warn/err color states. JS sets dataset
    warn / err based on length thresholds. */
 .gam-macro-edit-counter {
+  /* v.next a11y: --bb-ink-faint -> --bb-ink-dim. */
   font: var(--bb-t-xs) var(--bb-font);
-  color: var(--bb-ink-faint);
+  color: var(--bb-ink-dim);
   font-variant-numeric: tabular-nums;
 }
 .gam-macro-edit-counter[data-state="warn"] { color: var(--bb-warn) !important; }
@@ -2241,11 +2254,12 @@ input[type="checkbox"]:checked::after {
   gap: 6px;
 }
 .gam-card-sub-label-meta {
-  color: var(--bb-ink-faint) !important;
+  /* v.next a11y: 9px -> --bb-t-xs (10px); --bb-ink-faint -> --bb-ink-dim. */
+  color: var(--bb-ink-dim) !important;
   font-weight: 400 !important;
   text-transform: none !important;
   letter-spacing: 0.02em !important;
-  font-size: 9px;
+  font-size: var(--bb-t-xs);
 }
 
 /* Two-column action grid inside a card body */
@@ -2310,11 +2324,12 @@ input[type="checkbox"]:checked::after {
 
 /* Safe Mode toggle in card head-toggle slot */
 .gam-card-head-toggle {
+  /* v.next a11y: 9px -> --bb-t-xs (10px); --bb-ink-faint -> --bb-ink-dim. */
   display: flex;
   align-items: center;
   gap: 4px;
-  font: 600 9px/1.2 var(--bb-font) !important;
-  color: var(--bb-ink-faint) !important;
+  font: 600 var(--bb-t-xs)/1.2 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
   text-transform: uppercase !important;
   letter-spacing: 0.08em !important;
   margin-left: auto;
@@ -2455,8 +2470,10 @@ input[type="checkbox"]:checked::after {
 
 /* KPI label */
 .gam-kpi-label {
-  font: 600 9px/1.2 var(--bb-font) !important;
-  color: var(--bb-ink-faint) !important;
+  /* v.next a11y: 9px -> --bb-t-xs (10px); --bb-ink-faint -> --bb-ink-dim.
+     4 visible KPI tiles in lead tab. */
+  font: 600 var(--bb-t-xs)/1.2 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
   letter-spacing: 0.08em !important;
   text-transform: uppercase !important;
   margin-bottom: 2px;
@@ -2844,7 +2861,9 @@ input[type="checkbox"]:checked::after {
   --bb-spark-bar-w: 3px;
   --bb-spark-gap: 2px;
   --bb-spark-today: rgba(255,153,51,0.40);
-  --bb-delta-font: 9px;
+  /* v.next P3: --bb-delta-font deleted. Was 9px alias for delta chip only.
+     Single-purpose token shadowing the general scale is cascade-war noise.
+     .pop-stat-delta now uses var(--bb-t-xs) (10px) directly. */
 }
 
 /* Label row with delta chip */
@@ -2858,7 +2877,9 @@ input[type="checkbox"]:checked::after {
 
 /* Delta chip */
 .pop-stat-delta {
-  font: 400 var(--bb-delta-font)/1 var(--bb-font) !important;
+  /* v.next P1: was var(--bb-delta-font) (9px), now var(--bb-t-xs) (10px)
+     for parity with the bumped 11px label. Source token deleted. */
+  font: 400 var(--bb-t-xs)/1 var(--bb-font) !important;
   font-variant-numeric: tabular-nums;
   padding: 1px 4px;
   border: 1px solid currentColor;
@@ -2934,14 +2955,16 @@ input[type="checkbox"]:checked::after {
 }
 .pop-drill-export:hover { background: var(--bb-amber-bg) !important; }
 .pop-drill-count {
-  font: 400 10px/1 var(--bb-font) !important;
-  color: var(--bb-ink-faint) !important;
+  /* v.next a11y: --bb-ink-faint -> --bb-ink-dim (4.1:1 fail -> 6.5:1 AA). */
+  font: 400 var(--bb-t-xs)/1 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 .pop-drill-esc-hint {
-  font: 400 9px/1 var(--bb-font) !important;
-  color: var(--bb-ink-faint) !important;
+  /* v.next a11y: 9px -> --bb-t-xs (10px); --bb-ink-faint -> --bb-ink-dim. */
+  font: 400 var(--bb-t-xs)/1 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
   padding: 4px 8px;
   text-align: right;
 }
@@ -2951,16 +2974,9 @@ input[type="checkbox"]:checked::after {
    specificity-war: source-order tie-break is no longer the only thing
    keeping the 4-col layout in place. */
 
-/* ========================================================================
-   v10.12 UIUX-20 §D — --bb-ink-faint contrast fix + tab [hidden] support
-   ======================================================================== */
-
-/* Contrast fix: was #5a5752 (2.75:1 fail), now #7a7672 (4.6:1 AA pass) */
-/* Applied via :root override (lower in cascade than the Bloomberg block   */
-/* above that set the original value, so this wins).                       */
-:root {
-  --bb-ink-faint: #7a7672;
-}
+/* v.next a11y P3: UIUX-20 §D --bb-ink-faint contrast-fix override block
+   deleted. The redefine was inlined into the canonical token define at
+   L937. Cascade-war noise eliminated. */
 
 /* Tab panel [hidden] attribute — must override Bloomberg !important display rules */
 [role="tabpanel"][hidden] {
