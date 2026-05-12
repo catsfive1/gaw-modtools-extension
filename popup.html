@@ -517,7 +517,7 @@
         <!-- WIZARD STEP 2: replaces path row on path selection -->
         <div id="firstRunWizardStep2" style="display:none;margin-top:12px">
           <div class="tok-onboard-headline" style="font-size:10.5px">Step 2 of 2</div>
-          <div id="firstRunStep2Prompt" class="tok-onboard-body" style="margin-bottom:8px"></div>
+          <div id="firstRunStep2Prompt" class="tok-onboard-body" style="margin-bottom:8px" aria-live="polite" aria-atomic="true"></div>
           <input id="firstRunInput" type="password" placeholder="paste here" style="width:100%;background:#060709;border:1px solid #3d3a35;color:#e8e6e1;padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;border-radius:4px;margin-bottom:8px;box-sizing:border-box">
           <div id="firstRunUsernameWrap" style="display:none;margin-bottom:8px">
             <label for="firstRunUsername" style="color:#9b9892;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px">Your GAW username</label>
@@ -529,7 +529,7 @@
             <button id="firstRunBack" class="pop-btn pop-btn-ghost" style="flex:0 0 auto">&#x2190; Back</button>
             <button id="firstRunGo" class="tok-cta-primary" style="flex:1;margin-bottom:0">Save &amp; verify</button>
           </div>
-          <div id="firstRunStatus" style="margin-top:8px;color:#9b9892;font-size:10px;line-height:1.4"></div>
+          <div id="firstRunStatus" style="margin-top:8px;color:#9b9892;font-size:10px;line-height:1.4" aria-live="polite" aria-atomic="true" role="status"></div>
         </div>
 
         <!-- v10.15.1 D-22: install accordion. Companion to v10.15.0 status-bar

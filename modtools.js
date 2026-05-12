@@ -8480,6 +8480,60 @@
           }
         }
       }
+      // v10.15.2 V14-MC8: ESC draft protection. Pressing ESC with unsaved
+      // text in BAN message / NOTE body / MESSAGE body now prompts the
+      // operator instead of silently closing the Mod Console. ESC with
+      // empty drafts closes immediately (no annoying confirm on empty
+      // panels). Implementation: ESC pressed -> check the 3 draft textareas
+      // -> if any has trimmed length > 0, render an inline confirm row in
+      // the Mod Console header with [Discard] [Keep typing] buttons.
+      // 3-step framing: (1) ESC pressed, (2) confirm row visible, (3) only
+      // 'Discard' actually closes -- ESC again or 'Keep typing' dismisses
+      // the confirm without closing. Tab-scoped via mc.isConnected guard
+      // above; no global ESC swallowing.
+      if (e.key === 'Escape' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        try {
+          const banDraft   = (mc.querySelector('#mc-ban-msg')   || {}).value || '';
+          const noteDraft  = (mc.querySelector('#mc-note-body') || {}).value || '';
+          const msgDraft   = (mc.querySelector('#mc-msg-body')  || {}).value || '';
+          const anyDraft = (banDraft.trim() + noteDraft.trim() + msgDraft.trim()).length > 0;
+          if (!anyDraft) return; // empty -> let other ESC handlers (closeAllPanels) take over
+          // Existing confirm row? ESC dismisses it (returns user to typing).
+          let confirmRow = mc.querySelector('#mc-esc-confirm');
+          if (confirmRow) {
+            e.preventDefault();
+            confirmRow.remove();
+            return;
+          }
+          // Otherwise build + show the confirm row in the Mod Console head.
+          e.preventDefault();
+          e.stopPropagation();
+          const head = mc.querySelector('.gam-mc-head, .gam-mc-tabs') || mc.firstElementChild || mc;
+          confirmRow = document.createElement('div');
+          confirmRow.id = 'mc-esc-confirm';
+          confirmRow.setAttribute('role', 'alert');
+          confirmRow.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,153,51,0.10);border-top:1px solid #ff9933;border-bottom:1px solid #ff9933;font:11px ui-monospace,"JetBrains Mono",monospace;color:#e8e6e1';
+          confirmRow.innerHTML = '<span style="flex:1">⚠ Unsaved draft text. Close anyway?</span>' +
+            '<button id="mc-esc-discard" style="background:transparent;color:#ff3b3b;border:1px solid #ff3b3b;padding:6px 12px;font:600 11px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;min-height:32px">Discard</button>' +
+            '<button id="mc-esc-keep" style="background:transparent;color:#9b9892;border:1px solid #3d3a35;padding:6px 12px;font:600 11px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;min-height:32px">Keep typing</button>';
+          // Insert after head so it doesn't shift tab buttons
+          if (head && head.parentNode) head.parentNode.insertBefore(confirmRow, head.nextSibling);
+          else mc.insertBefore(confirmRow, mc.firstChild);
+          confirmRow.querySelector('#mc-esc-discard').addEventListener('click', function() {
+            try { closeAllPanels && closeAllPanels(); } catch (_) {}
+          });
+          confirmRow.querySelector('#mc-esc-keep').addEventListener('click', function() {
+            confirmRow.remove();
+            // Restore focus to whichever textarea had a draft
+            try {
+              if (banDraft.trim().length)  (mc.querySelector('#mc-ban-msg')   || {}).focus && mc.querySelector('#mc-ban-msg').focus();
+              else if (noteDraft.trim().length) (mc.querySelector('#mc-note-body') || {}).focus && mc.querySelector('#mc-note-body').focus();
+              else (mc.querySelector('#mc-msg-body') || {}).focus && mc.querySelector('#mc-msg-body').focus();
+            } catch (_) {}
+          });
+          return;
+        } catch (_) {}
+      }
       // Ctrl+Enter: submit current tab's primary action.
       if (e.ctrlKey && (e.key === 'Enter' || e.key === '\n' || e.key === '\r')) {
         const curTab = mc._gamTab;
@@ -10599,63 +10653,85 @@ Analyze this comment against the community rules. Then write a brief, profession
     const onDR = rosterEntry && rosterEntry.status==='deathrow';
     const canRemove = !!(item && getContentId(item));
 
+    // v10.15.2 V14-MC6: QUICK tab category grouping. 11 buttons divided into
+    // 4 logical groups with subheaders. Existing j/k nav (V14-MC5) uses
+    // mc.querySelectorAll('.gam-mc-quick'), which matches buttons regardless
+    // of wrapper div -- so cycling continues to work across groups seamlessly.
     root.innerHTML = `
-      <div class="gam-mc-grid">
-        <button class="gam-mc-quick" data-q="watch">
-          <span class="gam-mc-q-icon">\u{1F440}</span>
-          <span class="gam-mc-q-label">${w ? 'Unwatch' : 'Watch'}</span>
-          <span class="gam-mc-q-sub">${w ? 'Remove from watchlist' : 'Add to watchlist'}</span>
-        </button>
-        <button class="gam-mc-quick" data-q="dr72" ${onDR?'disabled':''}>
-          <span class="gam-mc-q-icon">\u{1F480}</span>
-          <span class="gam-mc-q-label">Death Row 72h</span>
-          <span class="gam-mc-q-sub">${onDR?'Already queued':'Let them post, then auto-ban'}</span>
-        </button>
-        <button class="gam-mc-quick" data-q="dr96" ${onDR?'disabled':''}>
-          <span class="gam-mc-q-icon">\u{1F480}</span>
-          <span class="gam-mc-q-label">Death Row 96h</span>
-          <span class="gam-mc-q-sub">${onDR?'Already queued':'4 day delayed ban'}</span>
-        </button>
-        <button class="gam-mc-quick" data-q="dr7d" ${onDR?'disabled':''}>
-          <span class="gam-mc-q-icon">\u{1F480}</span>
-          <span class="gam-mc-q-label">Death Row 7d</span>
-          <span class="gam-mc-q-sub">${onDR?'Already queued':'7 day delayed ban'}</span>
-        </button>
-        <button class="gam-mc-quick" data-q="perma">
-          <span class="gam-mc-q-icon" style="color:${C.RED}">\u26A0</span>
-          <span class="gam-mc-q-label">Perma-ban (no msg)</span>
-          <span class="gam-mc-q-sub">For obvious troll usernames</span>
-        </button>
-        <button class="gam-mc-quick" data-q="remove" ${canRemove?'':'disabled'}>
-          <span class="gam-mc-q-icon">\u{1F5D1}</span>
-          <span class="gam-mc-q-label">Remove this ${canRemove?(getContentType(item)):'content'}</span>
-          <span class="gam-mc-q-sub">${canRemove?'Quick-remove without ban':'No content context'}</span>
-        </button>
-        <button class="gam-mc-quick" data-q="permalink">
-          <span class="gam-mc-q-icon">\u{1F517}</span>
-          <span class="gam-mc-q-label">Copy permalink</span>
-          <span class="gam-mc-q-sub">Copy profile URL</span>
-        </button>
-        <button class="gam-mc-quick" data-q="profile">
-          <span class="gam-mc-q-icon">\u{1F464}</span>
-          <span class="gam-mc-q-label">Open GAW profile</span>
-          <span class="gam-mc-q-sub">Native /u/ page in new tab</span>
-        </button>
-        <button class="gam-mc-quick" data-q="flag">
-          <span class="gam-mc-q-icon" style="color:${C.YELLOW||'#E8A317'}">\u2691</span>
-          <span class="gam-mc-q-label">Flag user (team)</span>
-          <span class="gam-mc-q-sub">Share a warning with other mods</span>
-        </button>
-        <button class="gam-mc-quick" data-q="title">
-          <span class="gam-mc-q-icon">\u{1F3C5}</span>
-          <span class="gam-mc-q-label">Grant title</span>
-          <span class="gam-mc-q-sub">MVP / Sauced / custom flair</span>
-        </button>
-        <button class="gam-mc-quick" data-q="sniper">
-          <span class="gam-mc-q-icon">\u{1F3AF}</span>
-          <span class="gam-mc-q-label">DR Sniper (125h after 1st comment)</span>
-          <span class="gam-mc-q-sub">Trap: ban after they next post</span>
-        </button>
+      <div class="gam-mc-quick-group">
+        <div class="gam-mc-quick-header">\u{1F441} Surveillance</div>
+        <div class="gam-mc-grid">
+          <button class="gam-mc-quick" data-q="watch">
+            <span class="gam-mc-q-icon">\u{1F440}</span>
+            <span class="gam-mc-q-label">${w ? 'Unwatch' : 'Watch'}</span>
+            <span class="gam-mc-q-sub">${w ? 'Remove from watchlist' : 'Add to watchlist'}</span>
+          </button>
+          <button class="gam-mc-quick" data-q="flag">
+            <span class="gam-mc-q-icon" style="color:${C.YELLOW||'#E8A317'}">\u2691</span>
+            <span class="gam-mc-q-label">Flag user (team)</span>
+            <span class="gam-mc-q-sub">Share a warning with other mods</span>
+          </button>
+        </div>
+      </div>
+      <div class="gam-mc-quick-group">
+        <div class="gam-mc-quick-header">\u{1F480} Death Row \u00B7 delayed bans</div>
+        <div class="gam-mc-grid">
+          <button class="gam-mc-quick" data-q="dr72" ${onDR?'disabled':''}>
+            <span class="gam-mc-q-icon">\u{1F480}</span>
+            <span class="gam-mc-q-label">Death Row 72h</span>
+            <span class="gam-mc-q-sub">${onDR?'Already queued':'Let them post, then auto-ban'}</span>
+          </button>
+          <button class="gam-mc-quick" data-q="dr96" ${onDR?'disabled':''}>
+            <span class="gam-mc-q-icon">\u{1F480}</span>
+            <span class="gam-mc-q-label">Death Row 96h</span>
+            <span class="gam-mc-q-sub">${onDR?'Already queued':'4 day delayed ban'}</span>
+          </button>
+          <button class="gam-mc-quick" data-q="dr7d" ${onDR?'disabled':''}>
+            <span class="gam-mc-q-icon">\u{1F480}</span>
+            <span class="gam-mc-q-label">Death Row 7d</span>
+            <span class="gam-mc-q-sub">${onDR?'Already queued':'7 day delayed ban'}</span>
+          </button>
+          <button class="gam-mc-quick" data-q="sniper">
+            <span class="gam-mc-q-icon">\u{1F3AF}</span>
+            <span class="gam-mc-q-label">DR Sniper (125h after 1st comment)</span>
+            <span class="gam-mc-q-sub">Trap: ban after they next post</span>
+          </button>
+        </div>
+      </div>
+      <div class="gam-mc-quick-group">
+        <div class="gam-mc-quick-header">\u26A0 Immediate punish</div>
+        <div class="gam-mc-grid">
+          <button class="gam-mc-quick" data-q="perma">
+            <span class="gam-mc-q-icon" style="color:${C.RED}">\u26A0</span>
+            <span class="gam-mc-q-label">Perma-ban (no msg)</span>
+            <span class="gam-mc-q-sub">For obvious troll usernames</span>
+          </button>
+          <button class="gam-mc-quick" data-q="remove" ${canRemove?'':'disabled'}>
+            <span class="gam-mc-q-icon">\u{1F5D1}</span>
+            <span class="gam-mc-q-label">Remove this ${canRemove?(getContentType(item)):'content'}</span>
+            <span class="gam-mc-q-sub">${canRemove?'Quick-remove without ban':'No content context'}</span>
+          </button>
+        </div>
+      </div>
+      <div class="gam-mc-quick-group">
+        <div class="gam-mc-quick-header">\u{1F4CE} Reference \u00B7 rewards</div>
+        <div class="gam-mc-grid">
+          <button class="gam-mc-quick" data-q="permalink">
+            <span class="gam-mc-q-icon">\u{1F517}</span>
+            <span class="gam-mc-q-label">Copy permalink</span>
+            <span class="gam-mc-q-sub">Copy profile URL</span>
+          </button>
+          <button class="gam-mc-quick" data-q="profile">
+            <span class="gam-mc-q-icon">\u{1F464}</span>
+            <span class="gam-mc-q-label">Open GAW profile</span>
+            <span class="gam-mc-q-sub">Native /u/ page in new tab</span>
+          </button>
+          <button class="gam-mc-quick" data-q="title">
+            <span class="gam-mc-q-icon">\u{1F3C5}</span>
+            <span class="gam-mc-q-label">Grant title</span>
+            <span class="gam-mc-q-sub">MVP / Sauced / custom flair</span>
+          </button>
+        </div>
       </div>
       <div id="mc-quick-status"></div>
     `;
@@ -21722,6 +21798,9 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-mc-banner-red{background:rgba(240,64,64,.1);color:${C.RED};border:1px solid rgba(240,64,64,.25)}
 
 .gam-mc-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.gam-mc-quick-group{margin-bottom:12px}
+.gam-mc-quick-group:last-of-type{margin-bottom:0}
+.gam-mc-quick-header{font:600 10px ui-monospace,"JetBrains Mono",monospace;color:#9b9892;text-transform:uppercase;letter-spacing:0.08em;padding:6px 4px 4px;border-bottom:1px solid #3d3a35;margin-bottom:8px}
 /* v9.4.0: quick-action tile padding 14→12, fits 4-up grid better. */
 .gam-mc-quick{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:5px;padding:12px;text-align:left;cursor:pointer;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};display:flex;flex-direction:column;gap:4px;transition:all .15s}
 .gam-mc-quick:hover{border-color:${C.BORDER2};background:${C.BG3}}
