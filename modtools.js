@@ -22119,7 +22119,7 @@ Analyze this comment against the community rules. Then write a brief, profession
    bar buttons gave no signal which was active. Now: blue ring on :focus-visible
    so keyboard users see exactly which icon they're on. */
 .gam-bar-icon:focus-visible,
-.gam-bar-icon-brand:focus-visible{outline:2px solid ${C.ACCENT};outline-offset:2px}
+.gam-bar-icon-brand:focus-visible{outline:2px solid ${C.AMBER};outline-offset:2px}
 select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text-align:center;font-size:12px;min-height:32px!important;min-width:32px!important} /* v10.6.2 HOTFIX UIUX-03 P0.2: select can't use ::after hit-extension, enforce 32px min tap target */
 #gam-sess-pill{font-size:11px}
 #gam-dr-count{width:auto;padding:0 6px;font-size:11px;font-weight:600}
@@ -22282,7 +22282,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 /* ── Loop-2: typography pass ── */
 .gam-t-user-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:3px;line-height:1.2}
 .gam-t-user-meta{margin-top:0;font-size:10px;line-height:1.1}
-.gam-t-user-name-text:hover{color:${C.ACCENT};text-decoration:underline}
+.gam-t-user-name-text:hover{color:${C.AMBER};text-decoration:underline}
 .gam-t-user-meta{font-size:9px;color:${C.TEXT3};display:flex;gap:6px;align-items:center;margin-top:1px;line-height:1.3}
 .gam-t-ip{font-size:10px;color:${C.TEXT3};font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.2px}
 /* v5.1.9 UI Loop 2: larger risk dots + subtle glow for faster scanning */
@@ -22299,7 +22299,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-prior{font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:rgba(240,64,64,.15);color:${C.RED}}
 .gam-t-status{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
 .gam-t-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:3px;display:inline-block;width:fit-content;text-transform:uppercase;letter-spacing:.6px}
-.gam-t-badge-new{background:rgba(74,158,255,.12);color:${C.ACCENT}}
+.gam-t-badge-new{background:rgba(255,153,51,.12);color:${C.AMBER}}
 .gam-t-badge-suspect{background:rgba(240,160,64,.15);color:${C.WARN}}
 .gam-t-badge-cleared{background:rgba(61,214,140,.12);color:${C.GREEN}}
 .gam-t-badge-watching{background:rgba(255,214,10,.12);color:${C.YELLOW}}
@@ -22460,7 +22460,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
    the bar that benefits from blur anyway. */
 .gam-mm-bar{position:sticky;top:0;z-index:9999970;display:flex;justify-content:center;align-items:center;gap:8px;padding:8px 12px;margin:-12px -12px 10px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:0 0 6px 6px;flex-wrap:wrap;box-shadow:inset 3px 0 0 ${C.ACCENT}, 0 4px 12px rgba(0,0,0,.35)}
 .gam-mm-bar-label{font-size:12px;color:${C.TEXT};margin-right:6px}
-.gam-mm-bar-label b{color:${C.ACCENT};margin-left:2px}
+.gam-mm-bar-label b{color:${C.AMBER};margin-left:2px}
 .gam-mm-bar-btn{padding:5px 10px;background:${C.BG3};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT};font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:all .15s}
 .gam-mm-bar-btn:hover{border-color:${C.ACCENT};color:${C.ACCENT}}
 .gam-mm-bar-btn.gam-mm-bar-danger{color:${C.RED};border-color:rgba(240,64,64,.3)}
@@ -24626,6 +24626,29 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
 
   async function rpcCall(name, args){
+    // v10.15.4 UIUX2-40 E13: client-side rate limit for modmail AI generate.
+    // Burst-clicking "Generate" on N modmail threads can fire N concurrent
+    // Llama calls at the worker; with no client-side guard the operator
+    // can DDOS our own AI binding (HTTP 429 + 5-second cooldown ripple).
+    // Single-depth recursion via _aiBypass flag means the original body
+    // below runs unchanged after the gate releases. FIFO queue.
+    if (name === 'modmailAiReplyForThread' && !rpcCall._aiBypass) {
+      if ((rpcCall._aiInflight || 0) >= 3) {
+        await new Promise(function(res) {
+          (rpcCall._aiQueue || (rpcCall._aiQueue = [])).push(res);
+        });
+      }
+      rpcCall._aiInflight = (rpcCall._aiInflight || 0) + 1;
+      rpcCall._aiBypass = true;
+      try {
+        return await rpcCall(name, args);
+      } finally {
+        rpcCall._aiBypass = false;
+        rpcCall._aiInflight = Math.max(0, (rpcCall._aiInflight || 1) - 1);
+        const _next = (rpcCall._aiQueue || []).shift();
+        if (_next) try { _next(); } catch (_) {}
+      }
+    }
     // v9.5.2: detect Extension Context Invalidated state up front. After a
     // build/install reload, content scripts in already-open tabs are orphaned
     // -- chrome.runtime is severed. Report a clear, actionable error so every
