@@ -18064,7 +18064,14 @@ Analyze this comment against the community rules. Then write a brief, profession
         return '<div style="background:#0a0a0b;border:1px solid #3d3a35;padding:10px;display:flex;flex-direction:column;gap:6px">' +
           '<div style="color:' + c + ';font-weight:600;letter-spacing:0.06em;text-transform:uppercase;font-size:10px">' + escapeHtml(rp.tone || 'reply') + ' · ' + escapeHtml(rp.label || '') + '</div>' +
           '<div style="color:#e8e6e1;font-size:11px;line-height:1.5;white-space:pre-wrap">' + escapeHtml(rp.body) + '</div>' +
-          '<div style="display:flex;gap:6px;margin-top:4px">' +
+          '<div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">' +
+            // v10.15.7: ✉ Pre-fill + open is the new primary send-direct path
+            // (1-click semi-direct: stages AI body in chrome.storage.session,
+            // opens the GAW thread; CS init on /modmail/thread/<id> reads the
+            // stage and pastes into the reply textarea, user reviews + hits
+            // Send). Keeps a human-in-the-loop confirmation step. The old
+            // "Copy + open thread" path remains for mods who want raw clipboard.
+            '<button data-prefill-body="' + escapeHtml(rp.body) + '" style="background:var(--bb-amber);border:1px solid var(--bb-amber);color:#0a0a0b;padding:4px 10px;cursor:pointer;font:700 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">✉ Pre-fill + open</button>' +
             '<button data-use-body="' + escapeHtml(rp.body) + '" style="background:transparent;border:1px solid #44dd66;color:#44dd66;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Copy + open thread</button>' +
           '</div>' +
         '</div>';
@@ -18091,6 +18098,34 @@ Analyze this comment against the community rules. Then write a brief, profession
           try { await navigator.clipboard.writeText(body); } catch(_){}
           window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
           try { snack('✓ Reply copied + tracked. Paste on the GAW thread.', 'success'); } catch(_){}
+        });
+      });
+      // v10.15.7: ✉ Pre-fill + open -- new send-direct path. Stages the AI body
+      // in chrome.storage.session under gam_modmail_prefill_<thread_id> with
+      // an explicit ts (15-min TTL on read side). Opens the thread; the
+      // /modmail/thread/<id> CS init block (~L12700 area, search for
+      // _gamModmailPrefillCheck) reads the stage, fills the reply textarea
+      // via the same selector chain at L12778, focuses + flashes an "AI
+      // pre-filled" badge, and clears the stage. User reviews + clicks the
+      // real Send. Tracked via modmailTrackResponse same as Copy+open path.
+      host.querySelectorAll('[data-prefill-body]').forEach((btn, idx) => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const body = btn.getAttribute('data-prefill-body');
+          try {
+            const tone = (replies[idx] && replies[idx].tone) || null;
+            rpcCall('modmailTrackResponse', {
+              thread_id: t.thread_id, sender: t.first_user,
+              subject: t.subject || '', response_body: body,
+              ai_used: 1, ai_tone: tone, sent_at: Date.now()
+            }).catch(() => {});
+          } catch(_){}
+          try {
+            const key = 'gam_modmail_prefill_' + t.thread_id;
+            await chrome.storage.session.set({ [key]: { body: body, ts: Date.now() } });
+          } catch(_){}
+          window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
+          try { snack('✓ Pre-fill queued. Review the AI text on the thread + click Send.', 'success'); } catch(_){}
         });
       });
     }
@@ -28704,6 +28739,77 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         }
       }, 4000); // delay 4s after document_end to let lazy content settle
     } catch (_) { /* never block init */ }
+  })();
+
+  // v10.15.7: send-direct (semi-direct) modmail prefill checker. Runs on
+  // /modmail/thread/<id> page loads (the GAW thread page where the operator
+  // posts the reply). Looks for a chrome.storage.session entry under
+  // gam_modmail_prefill_<thread_id> staged by the modmail panel's "✉ Pre-fill
+  // + open" button. If found and within a 15-min TTL, pastes the AI body into
+  // the reply textarea using the same defensive selector chain established at
+  // modtools.js:12778 (form#respond textarea, textarea[name="message"], etc.),
+  // focuses the textarea, flashes an "AI PRE-FILLED" badge, clears the stage,
+  // and lets the operator review + click the real Send button. Net: removes
+  // the copy-paste step from the daily-mod modmail reply hot path while
+  // preserving the human-in-the-loop confirmation.
+  (function _gamModmailPrefillCheck() {
+    try {
+      var m = location.pathname.match(/^\/modmail\/thread\/([^/]+)/);
+      if (!m) return;
+      var threadId = m[1];
+      var key = 'gam_modmail_prefill_' + threadId;
+      // Use setTimeout to let the page render its reply form first. 800ms is
+      // enough for GAW's server-rendered form; the retry loop below covers
+      // slower renders too.
+      var attempts = 0;
+      function _doPrefill() {
+        attempts++;
+        try {
+          if (!chrome || !chrome.storage || !chrome.storage.session) return;
+          chrome.storage.session.get(key, function(rd) {
+            try {
+              var staged = rd && rd[key];
+              if (!staged || !staged.body) return;
+              // 15-min TTL on the stage. If stale, just clear it.
+              var ageMs = Date.now() - Number(staged.ts || 0);
+              if (ageMs > 15 * 60 * 1000) {
+                try { chrome.storage.session.remove(key); } catch (_) {}
+                return;
+              }
+              var ta = document.querySelector('form#respond textarea, textarea[name="message"], .reply-form textarea, form textarea');
+              if (!ta) {
+                // Form not rendered yet -- retry up to 6 times across 6s.
+                if (attempts < 7) setTimeout(_doPrefill, 1000);
+                return;
+              }
+              // Fill + focus
+              ta.value = staged.body;
+              try { ta.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+              try { ta.focus(); } catch (_) {}
+              // Clear the stage so a reload doesn't re-paste over manual edits.
+              try { chrome.storage.session.remove(key); } catch (_) {}
+              // Flash a small "AI PRE-FILLED" badge near the textarea so the
+              // operator knows the text isn't theirs yet -- review before send.
+              try {
+                var badge = document.createElement('div');
+                badge.id = 'gam-mm-prefill-badge';
+                badge.textContent = 'AI PRE-FILLED · review + click Send';
+                badge.style.cssText = 'position:fixed;top:60px;right:20px;z-index:9999990;background:#ff9933;color:#0a0a0b;padding:6px 12px;font:700 11px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;text-transform:uppercase;border-radius:3px;box-shadow:0 2px 8px rgba(0,0,0,0.55);opacity:1;transition:opacity 300ms ease-out';
+                document.body.appendChild(badge);
+                setTimeout(function() {
+                  badge.style.opacity = '0';
+                  setTimeout(function() { if (badge.parentNode) badge.remove(); }, 400);
+                }, 4500);
+              } catch (_) {}
+              try { console.log('[gam-modmail-prefill] AI body pasted into reply textarea for thread', threadId); } catch (_) {}
+            } catch (e) {
+              try { console.warn('[gam-modmail-prefill] error', e); } catch (_) {}
+            }
+          });
+        } catch (_) {}
+      }
+      setTimeout(_doPrefill, 800);
+    } catch (_) {}
   })();
 
   // v10.15.0 D-22: status bar tooltip tour. Defined at the bottom of the
