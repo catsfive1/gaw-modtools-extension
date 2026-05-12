@@ -1427,7 +1427,8 @@
   //   5. Modal close (X) button (from showModal chrome)
   function openBugReportModal(){
     // v8.1 ux kbd-audit: flag-on marks report body as a labeled region.
-    const __axBugBody = __uxOn() ? { tabindex: '0', role: 'region', 'aria-label': 'Bug report form' } : {};
+    // v10.15.10 R4: a11y baseline (was __uxOn()-gated; ungated to match v10.15.5 focus-trap policy).
+    const __axBugBody = { tabindex: '0', role: 'region', 'aria-label': 'Bug report form' };
     const body = el('div', { cls:'gam-bug-report-body', ...__axBugBody });
 
     const intro = el('div', { cls:'gam-bug-report-intro' },
@@ -1450,7 +1451,7 @@
     body.appendChild(ta);
 
     // v8.1 ux kbd-audit: flag-on makes the live char counter an aria-live polite region.
-    const __axCounter = __uxOn() ? { tabindex: '0', role: 'status', 'aria-live': 'polite' } : {};
+    const __axCounter = { tabindex: '0', role: 'status', 'aria-live': 'polite' };
     const counter = el('div', { cls:'gam-bug-report-counter', id:'gam-bug-counter', ...__axCounter }, '0 / 2000 (min 20)');
     body.appendChild(counter);
     // AF-26 (Rule 78): V3 debounce 50ms -- char counter DOM write on every keystroke
@@ -1467,7 +1468,7 @@
     body.appendChild(snapRow);
 
     // v8.1 ux kbd-audit: flag-on marks actions row as a group for screen readers.
-    const __axActions = __uxOn() ? { tabindex: '-1', role: 'group', 'aria-label': 'Bug report actions' } : {};
+    const __axActions = { tabindex: '-1', role: 'group', 'aria-label': 'Bug report actions' };
     const actions = el('div', { cls:'gam-bug-report-actions', ...__axActions });
     const cancelBtn = el('button', { cls:'gam-btn gam-btn-cancel' }, 'Cancel');
     const submitBtn = el('button', { cls:'gam-btn gam-btn-accent' }, 'Submit');
@@ -2893,8 +2894,9 @@
             background:'rgba(0,0,0,0.55)', zIndex:'2147483646',
             display:'flex', alignItems:'center', justifyContent:'center' }
         });
-        // v8.1 ux kbd-audit: flag-on marks panel as dialog + labelledby for SR/kbd context.
-        const __axPanel = __uxOn() ? { tabindex: '-1', role: 'dialog', 'aria-modal': 'true' } : {};
+        // v10.15.10 R4: a11y baseline (was __uxOn()-gated; ungated to match v10.15.5 focus-trap policy).
+        // SR announces askText popovers as modals now.
+        const __axPanel = { tabindex: '-1', role: 'dialog', 'aria-modal': 'true' };
         const panel = el('div', {
           cls: 'gam-modal gam-v72-asktext',
           style: { background:'#1a1c20', color:'#e4e4e4', borderRadius:'8px',
@@ -2920,8 +2922,8 @@
         });
         // v8.1 ux: link the label element to its input (flag-gated).
         try { linkLabel(labelRow, input); } catch(e){}
-        // v8.1 ux kbd-audit: flag-on adds role=alert so validation errors are announced.
-        const __axErr = __uxOn() ? { tabindex: '0', role: 'alert', 'aria-live': 'polite' } : {};
+        // v10.15.10 R4: a11y baseline (was __uxOn()-gated; ungated for SR validation-error announcement).
+        const __axErr = { tabindex: '0', role: 'alert', 'aria-live': 'polite' };
         const err = el('div', {
           style: { color:'#E74C3C', fontSize:'12px', marginTop:'6px',
             minHeight:'16px' },
@@ -3752,7 +3754,7 @@
           style: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.65)', zIndex: 10000000, display: 'flex', alignItems: 'center', justifyContent: 'center' }
         });
         // v8.1 ux kbd-audit: flag-on marks Park modal as a dialog.
-        const __axPark = __uxOn() ? { tabindex: '-1', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Park for senior review' } : {};
+        const __axPark = { tabindex: '-1', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Park for senior review' };
         const modal = el('div', {
           cls: 'gam-v80-park-modal',
           style: { background: '#1a202c', color: '#e2e8f0', padding: '18px 20px', borderRadius: '6px', minWidth: '380px', maxWidth: '520px', border: '1px solid #4a5568' },
@@ -3785,7 +3787,7 @@
         });
         submit.textContent = '\u23F8 Park';
         // v8.1 ux kbd-audit: flag-on marks status region as aria-live for announcements.
-        const __axStatus = __uxOn() ? { tabindex: '0', role: 'status', 'aria-live': 'polite' } : {};
+        const __axStatus = { tabindex: '0', role: 'status', 'aria-live': 'polite' };
         const status = el('div', { style: { fontSize: '11px', color: '#a0aec0', marginTop: '6px' }, ...__axStatus });
         function close(){
           // v8.1 ux: run focus-trap cleanup if installed.
@@ -5946,7 +5948,7 @@
       for (let i = 1; i <= 6; i++) {
         // v8.1 ux kbd-audit: flag-on adds tabindex + role=region + aria-label so
         // scrollable sections are reachable via Tab. Flag-off: empty spread.
-        const __axSec = __uxOn() ? { tabindex: '0', role: 'region', 'aria-label': SECTION_TITLES[i - 1] } : {};
+        const __axSec = { tabindex: '0', role: 'region', 'aria-label': SECTION_TITLES[i - 1] };
         // v8.1 ux: flag-on swaps three legacy gam-skeleton divs for a single
         // renderSkeleton('paragraph') node (3 shimmering lines). Flag-off
         // retains the v8.0 three-div layout byte-for-byte.
@@ -8438,8 +8440,10 @@
     if (mc){ mc._gamUsername = username; mc._gamItem = item; mc._gamTab = tab; }
     renderTab(tab);
     panelOpen = 'modconsole';
-    // v8.1 ux: focus trap on Mod Console popover (flag-gated inside helper).
-    try { if (mc) installFocusTrap(mc); } catch(e){}
+    // v10.15.10 R5: removed duplicate installFocusTrap call. showModal at L7875
+    // already installs the trap on every modal it creates. Redundant install here
+    // produced two keydown listeners doing the same Tab-cycle work (no user-facing
+    // defect; idempotent containment) -- now a single source of truth at showModal.
 
     // v10.13.4 W4 (P0-keyboard): number keys 1-6 switch tabs, Ctrl+Enter
     // submits within tab. Guard inputs/select/textarea/.gam-mc-dur so typing
