@@ -12209,7 +12209,9 @@ Analyze this comment against the community rules. Then write a brief, profession
     addSection('\u{1F95A} Fun');
     addToggle('Easter Eggs', 'easterEggsEnabled', 'Enable Q-themed easter eggs in the mod interface. \u{1F910}');
 
-    showModal('gam-settings-panel','\u2699\u{FE0F} Settings', c, '520px');
+    // v10.16.8: widened from 520px \u2192 720px to give each column ~340px of room
+    // for the 2-col multi-column flow (see .gam-settings-panel CSS).
+    showModal('gam-settings-panel','\u2699\u{FE0F} Settings', c, '720px');
     panelOpen='settings';
   }
 
@@ -22951,12 +22953,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-pop-submit:hover{opacity:.9;background:${C.PURPLE};color:#fff}
 
 /* v5.2.8 Settings panel */
-.gam-settings-panel{display:flex;flex-direction:column;gap:2px}
+/* v10.16.8: 2-col multi-column layout. Modal widened to 720px (see openSettings)
+   so each column has ~340px of room. break-after:avoid-column on section headers
+   prevents orphaned headers at column bottom; break-inside:avoid on rows keeps
+   label+control together. Browser balances columns automatically. */
+.gam-settings-panel{column-count:2;column-gap:20px;column-fill:balance}
+@media (max-width: 600px){.gam-settings-panel{column-count:1}}
 /* ── Loop-4: settings panel refinement ── */
-.gam-settings-section{font-size:9px;font-weight:800;color:${C.TEXT3};text-transform:uppercase;letter-spacing:1px;padding:14px 0 5px;border-top:1px solid ${C.BORDER};margin-top:6px;display:flex;align-items:center;gap:6px}
+.gam-settings-section{font-size:9px;font-weight:800;color:${C.TEXT3};text-transform:uppercase;letter-spacing:1px;padding:14px 0 5px;border-top:1px solid ${C.BORDER};margin-top:6px;display:flex;align-items:center;gap:6px;break-after:avoid-column;-webkit-column-break-after:avoid}
 .gam-settings-section::after{content:'';flex:1;height:1px;background:${C.BORDER};opacity:.5}
 .gam-settings-section:first-child{border-top:none;margin-top:0;padding-top:0}
-.gam-settings-row{display:flex;align-items:center;gap:14px;padding:7px 10px;border-radius:5px;transition:background .1s}
+.gam-settings-row{display:flex;align-items:center;gap:14px;padding:7px 10px;border-radius:5px;transition:background .1s;break-inside:avoid;-webkit-column-break-inside:avoid}
 .gam-settings-row:hover{background:rgba(255,255,255,.04)}
 .gam-settings-info{flex:1;min-width:0}
 .gam-settings-lbl{display:block;font-size:12px;font-weight:600;color:${C.TEXT};cursor:pointer;user-select:none;letter-spacing:-.1px}
