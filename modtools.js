@@ -17812,14 +17812,13 @@ Analyze this comment against the community rules. Then write a brief, profession
     const detail = panel.querySelector('#gam-mmp-detail');
     let currentThreads = [];
     // v10.14.2 MM1 (UIUX2-40 R2): scroll-triggered pagination state.
-    // Initial render shows 30 threads (existing behavior). When the sentinel
-    // at the end of the list intersects the viewport, expand the window up to
-    // the worker's hard cap of 50 (`background.js:2637`). Past 50, no further
-    // pages -- worker would need schema/RPC work which is explicitly out of
-    // scope for this wave.
-    const _PAGE_INITIAL = 30;
-    const _PAGE_HARD_CAP = 50; // matches modmailRecent worker cap
+    // v10.15.8: real pagination via offset. Initial render shows 30 threads.
+    // Each sentinel-trigger fetches the next 30 with offset=_shownCount until
+    // worker returns has_more=false. Worker side-cap is offset 5000 (~167
+    // pages, way past realistic depth).
+    const _PAGE_SIZE = 30;
     let _shownCount = 0;
+    let _hasMore = true;
     let _paginationLoading = false;
     let _intersectObs = null;
 
@@ -17865,31 +17864,36 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     async function _loadNextPage() {
       if (_paginationLoading) return;
-      if (_shownCount >= currentThreads.length && _shownCount >= _PAGE_HARD_CAP) return;
+      if (!_hasMore && _shownCount >= currentThreads.length) return;
       _paginationLoading = true;
       _detachSentinel();
       try {
-        // If we already have more threads cached than shown, just append them.
+        // If we have cached threads not yet rendered (firehose pre-populated),
+        // render those before hitting the network.
         if (_shownCount < currentThreads.length) {
-          const nextSlice = currentThreads.slice(_shownCount, _shownCount + _PAGE_INITIAL);
+          const nextSlice = currentThreads.slice(_shownCount, _shownCount + _PAGE_SIZE);
           nextSlice.forEach(t => list.appendChild(_renderRow(t)));
           _shownCount += nextSlice.length;
-        } else if (currentThreads.length < _PAGE_HARD_CAP) {
-          // Fetch the wider window (up to 50) and append the new arrivals.
-          const wider = await rpcCall('modmailRecent', { limit: _PAGE_HARD_CAP });
-          if (wider && wider.ok && wider.data && wider.data.ok && Array.isArray(wider.data.threads)) {
-            const all = wider.data.threads;
-            const fresh = all.slice(currentThreads.length);
-            fresh.forEach(t => list.appendChild(_renderRow(t)));
-            _shownCount += fresh.length;
-            currentThreads = all;
+        } else if (_hasMore) {
+          // Fetch the next page via offset (v10.15.8 real pagination).
+          const next = await rpcCall('modmailRecent', { limit: _PAGE_SIZE, offset: _shownCount });
+          if (next && next.ok && next.data && next.data.ok && Array.isArray(next.data.threads)) {
+            const newThreads = next.data.threads;
+            newThreads.forEach(t => list.appendChild(_renderRow(t)));
+            _shownCount += newThreads.length;
+            currentThreads = currentThreads.concat(newThreads);
+            _hasMore = !!next.data.has_more;
+          } else {
+            // Worker rejected or returned malformed -- stop trying.
+            _hasMore = false;
           }
         }
-      } catch(_){}
+      } catch(_){
+        _hasMore = false; // network/worker failure -- terminate pagination
+      }
       _paginationLoading = false;
-      // Re-attach sentinel only if more cached rows remain to render.
-      // Once we've rendered everything (cached or fetched), terminal hint.
-      if (_shownCount < currentThreads.length) {
+      // Re-attach sentinel if more rows remain (cached OR on server).
+      if (_shownCount < currentThreads.length || _hasMore) {
         _attachSentinel();
       } else {
         const end = document.createElement('div');
@@ -17924,6 +17928,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       // backfill so the inbox is always fresh, not stale-D1.
       _detachSentinel();
       _shownCount = 0;
+      _hasMore = true; // v10.15.8: reset for new pagination cycle
       if (forceFirehose) {
         list.innerHTML = '<div style="padding:14px;color:var(--bb-amber);font-size:10px">⏳ Running firehose backfill from /modmail (≈5s)…</div>';
         try {
@@ -17934,12 +17939,13 @@ Analyze this comment against the community rules. Then write a brief, profession
       } else {
         list.innerHTML = '<div style="padding:14px;color:#9b9892">loading...</div>';
       }
-      const res = await rpcCall('modmailRecent', { limit: _PAGE_INITIAL });
+      const res = await rpcCall('modmailRecent', { limit: _PAGE_SIZE, offset: 0 });
       if (!res || !res.ok || !res.data || !res.data.ok) {
         list.innerHTML = '<div style="padding:14px;color:#ff3b3b">Failed to load: ' + escapeHtml(String((res && res.data && res.data.error) || (res && res.error) || 'unknown')) + '</div>';
         return;
       }
       currentThreads = res.data.threads || [];
+      _hasMore = !!res.data.has_more; // v10.15.8: trust worker's has_more flag
       const note = res.data.note || '';
       // v9.24.0 - auto-firehose on empty (Commander 2026-05-08): if 0 threads
       // on initial open, automatically run the crawl to populate D1.
@@ -17959,8 +17965,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       list.innerHTML = '';
       currentThreads.forEach(t => list.appendChild(_renderRow(t)));
       _shownCount = currentThreads.length;
-      // Attach sentinel only if there might be more rows (worker cap is 50).
-      if (_shownCount < _PAGE_HARD_CAP) _attachSentinel();
+      // Attach sentinel if worker says more available (real pagination).
+      if (_hasMore) _attachSentinel();
     }
 
     async function renderDetail(t) {
