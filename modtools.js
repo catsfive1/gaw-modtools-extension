@@ -2168,11 +2168,27 @@
         </div>
       `;
       document.body.appendChild(wrap);
+      // v10.15.3 (RALPH-FOCUS-TRAPS R13): a11y -- preflight is a destructive
+      // confirmation modal (ban-perma, DR cancel-all, etc.). Without a focus
+      // trap, Tab leaks to the page underneath and the operator could click
+      // through the backdrop on a real GAW button by mistake. Install trap
+      // with cleanup wired into finish() so the listener doesn't outlive the
+      // modal.
+      wrap.setAttribute('role', 'dialog');
+      wrap.setAttribute('aria-modal', 'true');
+      wrap.setAttribute('aria-label', danger ? 'Destructive action confirmation' : 'Action confirmation');
+      let _preflightTrapCleanup = null;
+      try {
+        if (typeof installFocusTrap === 'function') {
+          _preflightTrapCleanup = installFocusTrap(wrap) || null;
+        }
+      } catch (_) {}
       const yes = wrap.querySelector('[data-pf="yes"]');
       const no = wrap.querySelector('[data-pf="no"]');
       const escHandler = (e)=>{ if(e.key==='Escape') finish(false); };
       function finish(v){
         document.removeEventListener('keydown', escHandler);
+        try { if (typeof _preflightTrapCleanup === 'function') _preflightTrapCleanup(); } catch(_){}
         wrap.remove();
         resolve(v);
       }
@@ -17688,8 +17704,28 @@ Analyze this comment against the community rules. Then write a brief, profession
     document.body.appendChild(panel);
     requestAnimationFrame(() => { panel.style.transform = 'translateX(0)'; });
 
+    // v10.15.3 (RALPH-FOCUS-TRAPS R11): a11y -- modmail full panel is a
+    // modal-style right-docked surface (covers significant page area, blocks
+    // page interaction). Tab should cycle inside the panel, not leak to the
+    // page. Install trap; cleanup runs via the data-close handler below which
+    // calls panel.remove() (focus trap helper handles its own cleanup on
+    // detach but we store the disposer for explicit teardown too).
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', 'Modmail full panel');
+    try {
+      if (typeof installFocusTrap === 'function') {
+        panel._gamMmpFocusTrapCleanup = installFocusTrap(panel) || null;
+      }
+    } catch (_) {}
+
     panel.addEventListener('click', e => {
-      if (e.target.closest('[data-close]')) { e.stopPropagation(); panel.remove(); return; }
+      if (e.target.closest('[data-close]')) {
+        e.stopPropagation();
+        try { if (typeof panel._gamMmpFocusTrapCleanup === 'function') panel._gamMmpFocusTrapCleanup(); } catch(_){}
+        panel.remove();
+        return;
+      }
       // v9.24.0 - REFRESH on the full panel also forces firehose now.
       if (e.target.closest('[data-refresh]')) { e.stopPropagation(); loadList(true); return; }
     });
