@@ -11724,6 +11724,27 @@ Analyze this comment against the community rules. Then write a brief, profession
     addToggle('Theme Harmony', 'harmonizeTheme', 'Derive ModTools accent from GAW\'s own color wheel (180\u00B0 complement).', ()=>{ /* reload required */ });
     addToggle('Mail Hover Highlight', 'mailHoverHighlight', 'Highlight modmail senders throughout the page when hovering a modmail message.');
 
+    // v10.15.0 D-22: replay status-bar tour. Universally available (not
+    // lead-gated). Resets the seen-flag and re-fires the 7-stop tour.
+    {
+      const _tourRow = el('div', { cls: 'gam-settings-row' });
+      _tourRow.innerHTML =
+        '<div class="gam-settings-info">' +
+        '<label class="gam-settings-lbl">Status-bar tour</label>' +
+        '<div class="gam-settings-desc">Replay the 7-stop first-run orientation tour. Useful when explaining the bar to a new mod or after a UI change.</div>' +
+        '</div>' +
+        '<button class="pop-btn pop-btn-ghost" id="gam-replay-tour-btn" style="min-height:32px;padding:6px 14px;font:600 11px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase">Replay</button>';
+      _tourRow.querySelector('#gam-replay-tour-btn').addEventListener('click', function() {
+        try { closeSettings && closeSettings(); } catch (_) {}
+        try {
+          if (typeof window.__gamStatusBarTour === 'function') {
+            setTimeout(function() { window.__gamStatusBarTour(); }, 200);
+          }
+        } catch (_) {}
+      });
+      c.appendChild(_tourRow);
+    }
+
     addSection('\u26A1 Moderation');
     addSelect('Console Position', 'modConsoleDock',
       [{value:'modal',label:'Center modal'},{value:'right',label:'Right panel'},{value:'left',label:'Left panel'}],
@@ -20785,6 +20806,18 @@ Analyze this comment against the community rules. Then write a brief, profession
     document.body.appendChild(bar);
     // v10.6.2 HOTFIX UIUX-03 P1: prevent bar from occluding feed content
     try { document.body.style.paddingBottom = '56px'; } catch(_) {}
+
+    // v10.15.0 D-22 (RALPH-FIRSTRUN-V14 R-V14-1): first-run status-bar tour.
+    // The single biggest unfixed TTFS lever per the v10.14 ralph audit. Walks
+    // a new mod through the 7 most-used bar icons with one-line explanations.
+    // Auto-trigger on first CS load after install; gated by gam_tour_seen_v1.
+    // Lead can replay anytime from GEAR (added below in the settings panel).
+    try {
+      if (!getSetting('gam_tour_seen_v1', false)) {
+        setTimeout(function() { try { _gamStatusBarTour(); } catch (_) {} }, 2000);
+      }
+    } catch (_) {}
+
     updateDeathRowCounter();
     setInterval(updateDeathRowCounter, 5000);
     pollSessionHealth();
@@ -28401,5 +28434,180 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       }, 4000); // delay 4s after document_end to let lazy content settle
     } catch (_) { /* never block init */ }
   })();
+
+  // v10.15.0 D-22: status bar tooltip tour. Defined at the bottom of the
+  // outer IIFE so it has access to getSetting / setSetting / snack closures
+  // but is hoisted as a window-scoped function (via window.__gamStatusBarTour)
+  // and as a local function name (_gamStatusBarTour) so the auto-trigger at
+  // L20791 can call it. The "Replay tour" GEAR button (registered in the
+  // settings panel section) hits the same entry point.
+  function _gamStatusBarTour() {
+    try {
+      if (document.getElementById('gam-tour-overlay')) return; // already running
+      const bar = document.getElementById('gam-status-bar');
+      if (!bar) { setTimeout(_gamStatusBarTour, 500); return; }
+
+      // 7 stops -- the most-used / least-discoverable icons for a new mod.
+      // Each stop resolves via document.querySelector against the bar so
+      // missing icons (page-conditional ones) skip gracefully.
+      const stops = [
+        { sel: '#gam-status-bar .gam-bar-brand', label: 'SHIELD (brand)',
+          text: 'GAW ModTools is loaded. Click the shield anytime for the site-health probe (auth, worker reach, queue depth).' },
+        { sel: '#gam-status-bar [title="Settings"]', label: 'GEAR',
+          text: 'Settings + opt-in features. Auto-unsticky thresholds, mod-chat toggle, status-bar tweaks, and the "Replay tour" button live here.' },
+        { sel: '#gam-status-bar [title^="Mod log"]', label: 'MOD LOG',
+          text: 'Your action history + Death Row queue. Keyboard shortcut: Ctrl+Shift+L from anywhere on greatawakening.win.' },
+        { sel: '#gam-mm-trigger, #gam-status-bar [title^="Modmail"]', label: 'MODMAIL',
+          text: 'Modmail inbox shortcut. The counter pings on new messages; click to open the right-docked panel without leaving the page.' },
+        { sel: '#gam-status-bar [title^="Keybinds"]', label: 'HELP',
+          text: 'Keyboard shortcuts cheatsheet -- includes the daily-mod hot-path chords (Ctrl+Shift+B/R/X/P, etc.). Ctrl+Shift+H anywhere.' },
+        { sel: '#gam-mc-badge', label: 'MOD CHAT',
+          text: 'Mod-to-mod direct messaging. The 💬 icon shows unread count; the panel docks right with full thread history.' },
+        { sel: '#gam-bar-ticker', label: 'TICKER',
+          text: 'Live signal feed: queue depth / modmail unread / DR pending / SUS count / OP-deletes. Click any state to open its triage popover.' },
+      ];
+
+      // Resolve stops to elements; drop misses.
+      const resolved = [];
+      for (let i = 0; i < stops.length; i++) {
+        try {
+          const target = bar.querySelector(stops[i].sel) || document.querySelector(stops[i].sel);
+          if (target) resolved.push({ ...stops[i], el: target });
+        } catch (_) {}
+      }
+      if (!resolved.length) return; // bar exists but no recognizable icons -- bail
+
+      const overlay = document.createElement('div');
+      overlay.id = 'gam-tour-overlay';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.setAttribute('aria-label', 'GAW ModTools first-run tour');
+      overlay.style.cssText = [
+        'position:fixed', 'top:0', 'left:0', 'right:0', 'bottom:0',
+        'background:rgba(5,5,7,0.72)', 'z-index:9999998',
+        'font-family:ui-monospace,"JetBrains Mono",monospace', 'color:#e8e6e1',
+        'animation:gam-tour-fade-in 200ms ease-out',
+      ].join(';');
+
+      // PRM gate: if reduce-motion, suppress the fade-in animation.
+      try {
+        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          overlay.style.animation = 'none';
+        }
+      } catch (_) {}
+
+      // Inject keyframes + spotlight style once.
+      if (!document.getElementById('gam-tour-style')) {
+        const s = document.createElement('style');
+        s.id = 'gam-tour-style';
+        s.textContent = [
+          '@keyframes gam-tour-fade-in{from{opacity:0}to{opacity:1}}',
+          '.gam-tour-spotlight{position:relative;z-index:9999999;outline:2px solid #ff9933;outline-offset:3px;box-shadow:0 0 0 9999px rgba(5,5,7,0.72);border-radius:3px}',
+          '#gam-tour-card{position:fixed;background:#0a0a0b;border:1px solid #ff9933;padding:14px 16px;max-width:340px;font-size:12px;line-height:1.45;z-index:9999999;box-shadow:0 8px 24px rgba(0,0,0,0.6)}',
+          '#gam-tour-card .gam-tour-label{color:#ff9933;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;font-size:10px;margin-bottom:6px}',
+          '#gam-tour-card .gam-tour-text{color:#e8e6e1;margin-bottom:12px}',
+          '#gam-tour-card .gam-tour-meta{color:#5a5752;font-size:10px;margin-bottom:10px;letter-spacing:0.04em}',
+          '#gam-tour-card .gam-tour-row{display:flex;gap:8px;align-items:center;justify-content:flex-end}',
+          '#gam-tour-card button{background:transparent;color:#9b9892;border:1px solid #3d3a35;padding:6px 12px;font:600 11px ui-monospace,monospace;cursor:pointer;letter-spacing:0.04em;text-transform:uppercase;min-height:32px}',
+          '#gam-tour-card button:hover{background:rgba(255,255,255,0.04);color:#e8e6e1}',
+          '#gam-tour-card button.gam-tour-primary{background:#ff9933;color:#0a0a0b;border-color:#ff9933}',
+          '#gam-tour-card button.gam-tour-primary:hover{background:#ffb95c}',
+          '#gam-tour-card button.gam-tour-skip{margin-right:auto}',
+        ].join('\n');
+        document.head.appendChild(s);
+      }
+
+      document.body.appendChild(overlay);
+
+      let idx = 0;
+      let currentSpotlight = null;
+
+      function _renderStep() {
+        // Remove prior spotlight class
+        if (currentSpotlight) {
+          try { currentSpotlight.classList.remove('gam-tour-spotlight'); } catch (_) {}
+        }
+        const step = resolved[idx];
+        if (!step) { _closeTour(true); return; }
+
+        // Spotlight target
+        try { step.el.classList.add('gam-tour-spotlight'); } catch (_) {}
+        currentSpotlight = step.el;
+
+        // Position card adjacent to target (above the bar, since bar is at bottom)
+        const r = step.el.getBoundingClientRect();
+        const card = document.getElementById('gam-tour-card') || document.createElement('div');
+        card.id = 'gam-tour-card';
+        const isLast = idx === resolved.length - 1;
+        card.innerHTML =
+          '<div class="gam-tour-label">' + step.label + ' &middot; ' + (idx + 1) + ' of ' + resolved.length + '</div>' +
+          '<div class="gam-tour-text"></div>' +
+          '<div class="gam-tour-meta">Press ESC to skip &middot; &rarr; for next</div>' +
+          '<div class="gam-tour-row">' +
+          '<button class="gam-tour-skip" id="gam-tour-skip">Skip tour</button>' +
+          (isLast
+            ? '<button class="gam-tour-primary" id="gam-tour-done">Done &middot; don\'t show again</button>'
+            : '<button class="gam-tour-primary" id="gam-tour-next">Next &rarr;</button>') +
+          '</div>';
+        // Set text via textContent to avoid HTML-escape pitfalls
+        const textEl = card.querySelector('.gam-tour-text');
+        if (textEl) textEl.textContent = step.text;
+
+        if (!card.parentNode) document.body.appendChild(card);
+
+        // Position: try to place above the target; fall back to centered.
+        try {
+          const cardW = 340;
+          const cardH = card.offsetHeight || 140;
+          let left = r.left + (r.width / 2) - (cardW / 2);
+          let top = r.top - cardH - 16; // 16px gap above target
+          // Clamp to viewport
+          left = Math.max(8, Math.min(window.innerWidth - cardW - 8, left));
+          if (top < 8) top = r.bottom + 16;
+          card.style.left = left + 'px';
+          card.style.top = top + 'px';
+        } catch (_) {
+          card.style.left = '50%'; card.style.top = '50%'; card.style.transform = 'translate(-50%,-50%)';
+        }
+
+        // Wire buttons
+        const skipBtn = card.querySelector('#gam-tour-skip');
+        if (skipBtn) skipBtn.addEventListener('click', function() { _closeTour(false); }, { once: true });
+        const nextBtn = card.querySelector('#gam-tour-next');
+        if (nextBtn) nextBtn.addEventListener('click', function() { idx++; _renderStep(); }, { once: true });
+        const doneBtn = card.querySelector('#gam-tour-done');
+        if (doneBtn) doneBtn.addEventListener('click', function() { _closeTour(true); }, { once: true });
+      }
+
+      function _closeTour(markSeen) {
+        try {
+          if (currentSpotlight) currentSpotlight.classList.remove('gam-tour-spotlight');
+          const card = document.getElementById('gam-tour-card');
+          if (card && card.parentNode) card.parentNode.removeChild(card);
+          if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+          document.removeEventListener('keydown', _keyHandler, true);
+          if (markSeen) {
+            try { setSetting('gam_tour_seen_v1', true); } catch (_) {}
+          }
+        } catch (_) {}
+      }
+
+      function _keyHandler(e) {
+        if (e.key === 'Escape') { e.preventDefault(); _closeTour(false); return; }
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          if (idx < resolved.length - 1) { idx++; _renderStep(); }
+          else _closeTour(true);
+        }
+      }
+      document.addEventListener('keydown', _keyHandler, true);
+
+      _renderStep();
+    } catch (e) {
+      try { console.warn('[gam-tour] failed', e); } catch (_) {}
+    }
+  }
+  // Expose for GEAR replay button.
+  try { window.__gamStatusBarTour = _gamStatusBarTour; } catch (_) {}
 
 })();
