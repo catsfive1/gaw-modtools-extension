@@ -17812,6 +17812,13 @@ Analyze this comment against the community rules. Then write a brief, profession
       // [data-close] click handler does, so the trap listener leaked until
       // GC. Now symmetric with the click-close path.
       try { if (typeof existing._gamMmpFocusTrapCleanup === 'function') existing._gamMmpFocusTrapCleanup(); } catch (_) {}
+      // v10.16.10: also detach the document-level ESC keydown handler that
+      // was installed when this panel was originally mounted. Pre-fix the
+      // toggle-close path called existing.remove() but left the handler
+      // alive on document -- next ESC fired panel.remove() on a detached
+      // node (harmless) AND kept the closure-captured panel reachable
+      // (GC-blocked). Every toggle-cycle accumulated one stale handler.
+      try { if (typeof existing._gamMmpEscHandler === 'function') document.removeEventListener('keydown', existing._gamMmpEscHandler); } catch (_) {}
       existing.remove();
       return;
     }
@@ -17891,16 +17898,20 @@ Analyze this comment against the community rules. Then write a brief, profession
       // v9.24.0 - REFRESH on the full panel also forces firehose now.
       if (e.target.closest('[data-refresh]')) { e.stopPropagation(); loadList(true); return; }
     });
-    document.addEventListener('keydown', function escHandler(ev) {
+    // v10.16.10: store handler ref on panel element so the toggle-close
+    // path in the re-open branch can detach it without waiting for ESC.
+    const _mmpEscHandler = function (ev) {
       if (ev.key === 'Escape') {
-        document.removeEventListener('keydown', escHandler);
+        document.removeEventListener('keydown', _mmpEscHandler);
         // v10.15.5 QA-A4 P1: invoke focus-trap cleanup before removing the
         // panel. ESC is the dominant close path (advertised in title=
         // "Close (ESC)") -- this was the loudest focus-restore miss.
         try { if (typeof panel._gamMmpFocusTrapCleanup === 'function') panel._gamMmpFocusTrapCleanup(); } catch (_) {}
         if (panel.parentNode) panel.remove();
       }
-    });
+    };
+    panel._gamMmpEscHandler = _mmpEscHandler;
+    document.addEventListener('keydown', _mmpEscHandler);
 
     const list = panel.querySelector('#gam-mmp-list');
     const detail = panel.querySelector('#gam-mmp-detail');
