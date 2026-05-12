@@ -11436,10 +11436,15 @@ Analyze this comment against the community rules. Then write a brief, profession
         dr.forEach(d=>{
           const cb = el('input',{ type:'checkbox', 'data-dr-select':'1', 'data-dr-user': d.username, 'aria-label':'Select ' + d.username + ' for batch action', style:{margin:'0 8px 0 0',cursor:'pointer',flex:'0 0 auto'} });
           cb.addEventListener('change', _drRefreshSelectionState);
+          // v10.16.5: surface DR reason inline (truncated to 28 chars). Lets
+          // operator differentiate queued DRs at a glance without hovering.
+          const reasonStr = String(d.reason || '').trim();
+          const reasonShort = reasonStr.length > 28 ? reasonStr.slice(0, 28) + '…' : reasonStr;
           drl.appendChild(el('div',{cls:'gam-log-row'},
             cb,
             el('span',{cls:'gam-log-type', style:{color:C.PURPLE}}, '\u{1F480}'),
             el('span',{cls:'gam-log-user'}, d.username),
+            reasonShort ? el('span',{ style:{color:'#7a7670',fontSize:'10px',fontStyle:'italic',marginLeft:'4px'}, title: reasonStr }, '· ' + reasonShort) : null,
             el('span',{cls:'gam-log-violation'}, 'Executes in '+timeUntil(d.executeAt)),
             el('button',{cls:'gam-btn gam-btn-small gam-btn-cancel', style:{marginLeft:'auto', padding:'2px 8px'}, onclick:()=>{
               // AF-34 (Rule 101): record dr-remove for System A undo
