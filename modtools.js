@@ -22065,7 +22065,7 @@ Analyze this comment against the community rules. Then write a brief, profession
 /* ── Iter-3: modal + console polish ── */
 /* v9.4.0: dropped the inset 1px highlight (the ",0 0 0 1px rgba(255,255,255,.04)"
    was pure visual noise on a 1px border). Shadow now a single clean layer. */
-.gam-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.97);z-index:9999995;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:8px;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};opacity:0;transition:opacity .15s,transform .18s;box-shadow:0 24px 48px rgba(0,0,0,.6);max-height:85vh;display:flex;flex-direction:column;overflow:hidden}
+.gam-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.97);z-index:9999995;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:8px;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};opacity:0;transition:opacity .15s,transform .18s;box-shadow:0 24px 48px rgba(0,0,0,.6);max-height:85vh;max-width:95vw;display:flex;flex-direction:column;overflow:hidden}
 /* v9.4.0: header padding 11/16 → 10/14, body padding 16 → 12. Closes
    ~10px of vertical+horizontal whitespace per modal — substantial when
    stacked across stats / actions / form fields. */
