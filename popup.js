@@ -2439,10 +2439,13 @@ function __dmTemplate(username, code, ttlHours) {
     'Expires in ' + (ttlHours || 72) + 'h and is single-use. Once you claim it, your token will be one ONLY YOU know.';
 }
 
-function __makeCopyBtn(label, payload, parentBtn) {
+function __makeCopyBtn(label, payload, parentBtn, primary) {
   const b = document.createElement('button');
-  b.className = 'pop-btn pop-btn-ghost';
-  b.style.cssText = 'font-size:10px;padding:2px 6px;margin-right:4px';
+  // v10.15.6: primary variant for the lead's most-used artifact (DM template).
+  b.className = primary ? 'pop-btn pop-btn-primary' : 'pop-btn pop-btn-ghost';
+  b.style.cssText = primary
+    ? 'font-size:10px;padding:3px 8px;margin-right:4px;font-weight:600'
+    : 'font-size:10px;padding:2px 6px;margin-right:4px';
   b.textContent = label;
   // v10.13.2 W5: route through copyWithPulse (3-layer fallback + COPIED flash)
   b.addEventListener('click', function () { copyWithPulse(b, payload); });
@@ -2475,11 +2478,15 @@ function __renderInviteResult(container, invite, ttlHours) {
 
   const btnRow = document.createElement('div');
   btnRow.className = 'gam-invite-btn-row';
-  // v9.2.6: "Copy invite link" is the lead's primary action. Most useful
-  // payload for handing to the target mod via Discord/Signal/etc.
+  // v10.15.6: DM template promoted to FIRST + primary styling per Commander
+  // 2026-05-12 "convenient" feedback. The pre-filled Discord DM is the
+  // highest-leverage artifact (greeting + clickable URL + manual fallback +
+  // TTL note + single-use disclaimer) and was previously third/last/ghost.
+  // Pre-v9.2.6 order (URL / code / DM) optimised for "share a URL anywhere";
+  // current order optimises for "paste a complete DM into Discord and go."
+  btnRow.appendChild(__makeCopyBtn('✉ Copy DM template', __dmTemplate(invite.username, invite.code, ttlHours), null, true));
   btnRow.appendChild(__makeCopyBtn('🔗 Copy invite link', inviteUrl));
   btnRow.appendChild(__makeCopyBtn('Copy code only', invite.code));
-  btnRow.appendChild(__makeCopyBtn('Copy DM template', __dmTemplate(invite.username, invite.code, ttlHours)));
   block.appendChild(btnRow);
 
   container.appendChild(block);

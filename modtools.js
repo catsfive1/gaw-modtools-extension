@@ -8453,6 +8453,14 @@
     function _mcKbHandler(e){
       // Only fire when this Mod Console modal is open & in the DOM.
       if (!mc || !mc.isConnected) return;
+      // v10.15.6 QA-B3 R3 (P2): if an askText sub-modal is open on top of
+      // the Mod Console (QUICK tab's title-grant chains 3 askText prompts;
+      // also reached via the NOTE/MESSAGE tabs' inline prompts), let askText
+      // own the keypress. Matches the showModal escHandler's guard at
+      // modtools.js:7857. Pre-fix ESC inside an askText opened over the MC
+      // fired BOTH askText.onKey AND _mcKbHandler's draft-confirm path,
+      // producing a confusing double-prompt (askText cancel + MC draft warn).
+      if (document.querySelector('.gam-v72-asktext')) return;
       const t = e.target;
       const tn = (t && t.tagName) || '';
       const inField = (tn === 'INPUT' || tn === 'TEXTAREA' || tn === 'SELECT');
@@ -11587,6 +11595,14 @@ Analyze this comment against the community rules. Then write a brief, profession
   function _closeHotNowPanel() {
     const hnPanel = document.getElementById('gam-hot-now-panel');
     if (!hnPanel) return;
+    // v10.15.6 QA-B1+B3 R2 (P1): invoke focus-trap cleanup so focus restores
+    // to the SIREN trigger button. Pre-fix the trap install at panel creation
+    // (modtools.js:11334 area) stored the disposer on hnPanel._gamHnFocusTrapCleanup
+    // but no close path invoked it. Pre-v10.15.5 this was invisible (uxOn gate);
+    // post-v10.15.5 the trap is real, focus-restore is missing. Cleanup must
+    // run BEFORE the setTimeout-deferred DOM removal so the trap can read
+    // panel.contains(activeElement) and bounce focus correctly.
+    try { if (typeof hnPanel._gamHnFocusTrapCleanup === 'function') hnPanel._gamHnFocusTrapCleanup(); } catch (_) {}
     hnPanel.classList.remove('gam-hn-open');
     setTimeout(function() { if (hnPanel.parentNode) hnPanel.remove(); }, 180);
     panelOpen = null;
@@ -17470,6 +17486,19 @@ Analyze this comment against the community rules. Then write a brief, profession
       // than nothing.
       const _vbuild = 'v9.6.4';
       try { console.log('%c[modchat ' + _vbuild + '] openPanel begin', 'color:#3dd68c;font-weight:700'); } catch(_){}
+      // v10.15.6 QA-B1+B3 R1 (P1): re-install focus trap on cached re-open.
+      // buildPanel short-circuits when STATE.panelEl exists (DOM reuse for
+      // perf) -- so the trap install at L17456 never runs again after the
+      // first build. Pre-v10.15.5 this was invisible (uxOn gate made trap
+      // a no-op); post-v10.15.5 the gate is gone, so re-opens silently lose
+      // Tab containment + focus-restore. Install trap here if the cached
+      // panel exists and its cleanup is null (set by closePanel on prior
+      // close), regenerating the trap fresh for the new open session.
+      try {
+        if (STATE.panelEl && typeof installFocusTrap === 'function' && !STATE._focusTrapCleanup) {
+          STATE._focusTrapCleanup = installFocusTrap(STATE.panelEl) || null;
+        }
+      } catch (_) {}
       function _step(name, fn){
         try {
           console.log('[modchat] step:', name);
