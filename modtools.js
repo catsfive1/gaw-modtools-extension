@@ -17821,6 +17821,11 @@ Analyze this comment against the community rules. Then write a brief, profession
     let _hasMore = true;
     let _paginationLoading = false;
     let _intersectObs = null;
+    // v10.15.9: risk-chip cache. Map<username, {account_age_days, ban_count, actions_7d}>.
+    // Populated by `_fetchAndApplyRiskChips` after each list/page render.
+    // Lives for the lifetime of the panel (cleared on full reload via loadList).
+    const _userRiskCache = new Map();
+    let _riskFetchInFlight = false;
 
     function _renderRow(t) {
       const row = document.createElement('div');
@@ -17837,7 +17842,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         renderDetail(t);
       });
       const head = document.createElement('div');
-      head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:3px';
+      head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap';
       const who = document.createElement('span');
       who.style.cssText = 'color:#66ccff;font-weight:600;font-size:11px;flex:0 0 auto';
       who.textContent = 'u/' + (t.first_user || '?');
@@ -17846,6 +17851,12 @@ Analyze this comment against the community rules. Then write a brief, profession
       status.style.cssText = 'color:' + (sc[t.status] || '#9b9892') + ';font-size:9px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600';
       status.textContent = t.status || 'new';
       head.appendChild(who); head.appendChild(status);
+      // v10.15.9: risk-chip placeholder, populated async by _applyRiskChips.
+      const chips = document.createElement('span');
+      chips.dataset.riskChips = '1';
+      chips.dataset.riskUser = t.first_user || '';
+      chips.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-left:auto;flex:0 0 auto';
+      head.appendChild(chips);
       const subj = document.createElement('div');
       subj.style.cssText = 'color:#e8e6e1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:2px';
       subj.textContent = t.subject || '(no subject)';
@@ -17854,6 +17865,84 @@ Analyze this comment against the community rules. Then write a brief, profession
       preview.textContent = (t.last_body || '').slice(0, 80);
       row.appendChild(head); row.appendChild(subj); row.appendChild(preview);
       return row;
+    }
+
+    // v10.15.9: render risk chips from cache for a given chip-container element.
+    // Idempotent -- clears existing chips before re-rendering. Format-pure
+    // (no network access; renders only from _userRiskCache).
+    function _applyRiskChipsToEl(chipsEl) {
+      try {
+        const user = chipsEl.dataset.riskUser;
+        if (!user) return;
+        const stats = _userRiskCache.get(user);
+        if (!stats) return;
+        // Clear existing chips (re-render-safe).
+        chipsEl.innerHTML = '';
+        const mk = (text, bg, fg) => {
+          const c = document.createElement('span');
+          c.style.cssText = 'display:inline-block;padding:1px 5px;border-radius:2px;font-size:9px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;background:' + bg + ';color:' + fg + ';line-height:1.4';
+          c.textContent = text;
+          return c;
+        };
+        // Account age chip: <7d red NEW, <30d amber, otherwise hidden.
+        const age = stats.account_age_days;
+        if (typeof age === 'number' && age >= 0) {
+          if (age < 7) {
+            const lbl = age === 0 ? 'NEW · TODAY' : ('NEW · ' + age + 'd');
+            chipsEl.appendChild(mk(lbl, 'rgba(255,59,59,0.18)', '#ff6b6b'));
+          } else if (age < 30) {
+            chipsEl.appendChild(mk(age + 'd', 'rgba(255,153,51,0.16)', '#ff9933'));
+          }
+        }
+        // Ban-count chip: >=1 red with count.
+        if (stats.ban_count >= 1) {
+          chipsEl.appendChild(mk('✋ ' + stats.ban_count, 'rgba(255,59,59,0.18)', '#ff6b6b'));
+        }
+        // Recent-actions chip: >=1 amber (7d window).
+        if (stats.actions_7d >= 1) {
+          chipsEl.appendChild(mk('⏱ ' + stats.actions_7d + '/7d', 'rgba(255,216,77,0.16)', '#ffd84d'));
+        }
+      } catch(_){}
+    }
+
+    // v10.15.9: batch-fetch risk stats for users in the rendered list and
+    // apply chips to each row. Skips users already in the cache. Single
+    // RPC per page (worker accepts up to 60 users/call). Failure modes:
+    // bad response or thrown error => silent no-op (chips just don't appear).
+    async function _fetchAndApplyRiskChips() {
+      try {
+        if (_riskFetchInFlight) return;
+        const chipEls = list.querySelectorAll('span[data-risk-chips="1"]');
+        if (!chipEls.length) return;
+        // Collect uncached users; render chips for cached ones immediately.
+        const needFetch = new Set();
+        chipEls.forEach(el => {
+          const u = el.dataset.riskUser;
+          if (!u) return;
+          if (_userRiskCache.has(u)) {
+            _applyRiskChipsToEl(el);
+          } else {
+            needFetch.add(u);
+          }
+        });
+        if (!needFetch.size) return;
+        _riskFetchInFlight = true;
+        const users = [...needFetch].slice(0, 60);
+        const res = await rpcCall('modmailBatchRiskStats', { users });
+        _riskFetchInFlight = false;
+        if (!res || !res.ok || !res.data || !res.data.ok || !res.data.stats) return;
+        for (const u of users) {
+          const s = res.data.stats[u];
+          if (s) _userRiskCache.set(u, s);
+        }
+        // Re-walk rows -- new cache entries get rendered now.
+        list.querySelectorAll('span[data-risk-chips="1"]').forEach(el => {
+          const u = el.dataset.riskUser;
+          if (u && _userRiskCache.has(u)) _applyRiskChipsToEl(el);
+        });
+      } catch(_) {
+        _riskFetchInFlight = false;
+      }
     }
 
     function _detachSentinel() {
@@ -17892,6 +17981,8 @@ Analyze this comment against the community rules. Then write a brief, profession
         _hasMore = false; // network/worker failure -- terminate pagination
       }
       _paginationLoading = false;
+      // v10.15.9: fire risk-chip fetch for newly appended rows.
+      _fetchAndApplyRiskChips();
       // Re-attach sentinel if more rows remain (cached OR on server).
       if (_shownCount < currentThreads.length || _hasMore) {
         _attachSentinel();
@@ -17965,6 +18056,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       list.innerHTML = '';
       currentThreads.forEach(t => list.appendChild(_renderRow(t)));
       _shownCount = currentThreads.length;
+      // v10.15.9: fire-and-forget risk-chip fetch (non-blocking).
+      _fetchAndApplyRiskChips();
       // Attach sentinel if worker says more available (real pagination).
       if (_hasMore) _attachSentinel();
     }

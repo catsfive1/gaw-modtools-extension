@@ -2648,11 +2648,24 @@ const RPC_HANDLERS = {
     }
   },
   // v9.14.0 - list recent modmail threads from modmail_threads (Commander #44).
+  // v10.15.8 - real pagination: accept optional offset arg, forward to worker.
   modmailRecent: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
     async handler(args) {
-      const limit = Math.min(50, Math.max(5, parseInt(args && args.limit, 10) || 15));
-      return await _rpcWorkerCall('GET', '/modmail/recent?limit=' + limit, undefined);
+      const limit = Math.min(100, Math.max(5, parseInt(args && args.limit, 10) || 15));
+      const offset = Math.min(5000, Math.max(0, parseInt(args && args.offset, 10) || 0));
+      const qs = '?limit=' + limit + (offset > 0 ? ('&offset=' + offset) : '');
+      return await _rpcWorkerCall('GET', '/modmail/recent' + qs, undefined);
+    }
+  },
+  // v10.15.9 - batch risk stats for modmail thread rows. Takes users[] and
+  // returns aggregated account_age_days + ban_count + actions_7d per user.
+  // One batch RPC replaces N per-row lookups when rendering the inbox.
+  modmailBatchRiskStats: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const users = Array.isArray(args && args.users) ? args.users : [];
+      return await _rpcWorkerCall('POST', '/modmail/batch-risk-stats', { users });
     }
   },
   // v9.13.0 - track a sent modmail response for AI history-awareness.
