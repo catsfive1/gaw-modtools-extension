@@ -11384,10 +11384,48 @@ Analyze this comment against the community rules. Then write a brief, profession
 
       const dr=getDeathRowPending();
       if(dr.length>0){
+        // v10.16.0: DR popover batch mode -- checkbox column + sticky action bar.
+        // State lives in the DOM (checkbox.checked); rebuilds on every panel open.
         c.appendChild(el('div',{cls:'gam-section-title'},`\u{1F480} Death Row (${dr.length})`));
+        // Section header row with "Select all" checkbox + selection count.
+        const drHeader = el('div',{cls:'gam-log-row', style:{padding:'4px 6px',borderBottom:'1px solid #2a2825',fontSize:'10px',color:'#9b9892',letterSpacing:'0.04em',textTransform:'uppercase'}});
+        const drSelectAll = el('input',{ type:'checkbox', id:'gam-dr-select-all', 'aria-label':'Select all death-row items', style:{margin:'0 8px 0 0',cursor:'pointer'} });
+        const drHeaderLabel = el('label',{ for:'gam-dr-select-all', style:{cursor:'pointer',flex:'1 1 auto'} }, 'Select all (' + dr.length + ')');
+        const drSelCount = el('span',{ id:'gam-dr-sel-count', style:{color:C.AMBER,fontWeight:'600'} }, '');
+        drHeader.appendChild(drSelectAll);
+        drHeader.appendChild(drHeaderLabel);
+        drHeader.appendChild(drSelCount);
+        c.appendChild(drHeader);
         const drl=el('div',{cls:'gam-log-list'});
+        // Refresh selection-state UI: updates count + toolbar visibility.
+        function _drRefreshSelectionState(){
+          try {
+            const checks = drl.querySelectorAll('input[data-dr-select="1"]');
+            let selected = 0;
+            checks.forEach(c => { if (c.checked) selected++; });
+            drSelCount.textContent = selected > 0 ? selected + ' selected' : '';
+            // Sync "select all" header check: indeterminate if some, checked if all.
+            drSelectAll.checked = (selected === checks.length && checks.length > 0);
+            drSelectAll.indeterminate = (selected > 0 && selected < checks.length);
+            // Toggle sticky action bar visibility.
+            const bar = document.getElementById('gam-dr-batch-bar');
+            if (bar) {
+              bar.style.display = selected > 0 ? 'flex' : 'none';
+              const lbl = bar.querySelector('[data-batch-count]');
+              if (lbl) lbl.textContent = selected + ' selected';
+            }
+          } catch(_){}
+        }
+        drSelectAll.addEventListener('change', () => {
+          const checks = drl.querySelectorAll('input[data-dr-select="1"]');
+          checks.forEach(c => { c.checked = drSelectAll.checked; });
+          _drRefreshSelectionState();
+        });
         dr.forEach(d=>{
+          const cb = el('input',{ type:'checkbox', 'data-dr-select':'1', 'data-dr-user': d.username, 'aria-label':'Select ' + d.username + ' for batch action', style:{margin:'0 8px 0 0',cursor:'pointer',flex:'0 0 auto'} });
+          cb.addEventListener('change', _drRefreshSelectionState);
           drl.appendChild(el('div',{cls:'gam-log-row'},
+            cb,
             el('span',{cls:'gam-log-type', style:{color:C.PURPLE}}, '\u{1F480}'),
             el('span',{cls:'gam-log-user'}, d.username),
             el('span',{cls:'gam-log-violation'}, 'Executes in '+timeUntil(d.executeAt)),
@@ -11403,6 +11441,33 @@ Analyze this comment against the community rules. Then write a brief, profession
           ));
         });
         c.appendChild(drl);
+        // Sticky bottom action bar for batch ops. Hidden until 1+ selected.
+        const drBatchBar = el('div',{ id:'gam-dr-batch-bar', style:{display:'none',alignItems:'center',gap:'10px',padding:'8px 10px',marginTop:'8px',background:'rgba(255,153,51,0.10)',border:'1px solid rgba(255,153,51,0.30)',borderRadius:'4px'} },
+          el('span',{ 'data-batch-count':'1', style:{color:C.AMBER,fontWeight:'600',fontSize:'12px'} }, '0 selected'),
+          el('button',{ cls:'gam-btn gam-btn-small gam-btn-danger', style:{marginLeft:'auto',padding:'4px 10px'}, onclick: () => {
+            const checks = drl.querySelectorAll('input[data-dr-select="1"]:checked');
+            const selectedUsers = [];
+            checks.forEach(c => { if (c.dataset.drUser) selectedUsers.push(c.dataset.drUser); });
+            if (selectedUsers.length === 0) return;
+            if (!confirm('Cancel death row for ' + selectedUsers.length + ' user' + (selectedUsers.length === 1 ? '' : 's') + '?\n\n' + selectedUsers.join('\n'))) return;
+            // Capture full DR records BEFORE removal so undo can restore.
+            const drNow = getDeathRow();
+            const recs = selectedUsers.map(u => drNow.find(x => x.username.toLowerCase() === u.toLowerCase())).filter(Boolean);
+            recs.forEach(r => {
+              try { _recordUndoAction({ type: 'dr-remove', target: r.username, reason: r.reason, delayMs: (r.executeAt - (r.queuedAt || Date.now())), executeAt: r.executeAt }); } catch(_){}
+              removeFromDeathRow(r.username);
+              try { rosterSetStatus(r.username, 'new'); } catch(_){}
+            });
+            snack(recs.length + ' removed from death row', 'info');
+            closeAllPanels();
+            openModLog();
+          } }, '\u{2716} Cancel selected'),
+          el('button',{ cls:'gam-btn gam-btn-small', style:{padding:'4px 10px'}, onclick: () => {
+            drl.querySelectorAll('input[data-dr-select="1"]').forEach(c => { c.checked = false; });
+            _drRefreshSelectionState();
+          } }, 'Clear')
+        );
+        c.appendChild(drBatchBar);
       }
 
       const list=el('div',{cls:'gam-log-list'});
