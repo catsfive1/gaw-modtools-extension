@@ -11432,7 +11432,9 @@ Analyze this comment against the community rules. Then write a brief, profession
             el('button',{cls:'gam-btn gam-btn-small gam-btn-cancel', style:{marginLeft:'auto', padding:'2px 8px'}, onclick:()=>{
               // AF-34 (Rule 101): record dr-remove for System A undo
               // CRITICAL FIX: store delayMs so undo can call addToDeathRow(username, delayMs, reason) correctly
-              try { _recordUndoAction({ type: 'dr-remove', target: d.username, reason: d.reason, delayMs: (d.executeAt - (d.queuedAt || Date.now())), executeAt: d.executeAt }); } catch(_){}
+              // v10.16.1 hotfix: clamp delayMs to >=0 so undo of a stale/past-executeAt entry
+              // doesn't end up with negative delay (which addToDeathRow would set as executeAt in the past).
+              try { _recordUndoAction({ type: 'dr-remove', target: d.username, reason: d.reason, delayMs: Math.max(0, d.executeAt - (d.queuedAt || Date.now())), executeAt: d.executeAt }); } catch(_){}
               removeFromDeathRow(d.username);
               rosterSetStatus(d.username,'new');
               snack(d.username+' removed from death row','info');
@@ -11454,7 +11456,8 @@ Analyze this comment against the community rules. Then write a brief, profession
             const drNow = getDeathRow();
             const recs = selectedUsers.map(u => drNow.find(x => x.username.toLowerCase() === u.toLowerCase())).filter(Boolean);
             recs.forEach(r => {
-              try { _recordUndoAction({ type: 'dr-remove', target: r.username, reason: r.reason, delayMs: (r.executeAt - (r.queuedAt || Date.now())), executeAt: r.executeAt }); } catch(_){}
+              // v10.16.1 hotfix: clamp delayMs to >=0 (see single-row Cancel above).
+              try { _recordUndoAction({ type: 'dr-remove', target: r.username, reason: r.reason, delayMs: Math.max(0, r.executeAt - (r.queuedAt || Date.now())), executeAt: r.executeAt }); } catch(_){}
               removeFromDeathRow(r.username);
               try { rosterSetStatus(r.username, 'new'); } catch(_){}
             });
@@ -18089,6 +18092,11 @@ Analyze this comment against the community rules. Then write a brief, profession
       _detachSentinel();
       _shownCount = 0;
       _hasMore = true; // v10.15.8: reset for new pagination cycle
+      // v10.16.1 hotfix: clear risk-chip cache + reset in-flight guard.
+      // Without this, a refresh persists stale risk stats AND if a fetch was
+      // mid-flight, the in-flight guard would block the post-reload fetch.
+      _userRiskCache.clear();
+      _riskFetchInFlight = false;
       if (forceFirehose) {
         list.innerHTML = '<div style="padding:14px;color:var(--bb-amber);font-size:10px">⏳ Running firehose backfill from /modmail (≈5s)…</div>';
         try {
