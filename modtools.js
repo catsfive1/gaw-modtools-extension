@@ -22314,9 +22314,17 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-drawer-title { font-size:14px; font-weight:700; margin:0; flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; letter-spacing:-.1px; }
 .gam-drawer-mark-precedent, .gam-drawer-close { background:transparent; border:1px solid ${C.BORDER}; color:${C.TEXT}; border-radius:4px; cursor:pointer; padding:4px 10px; font:inherit; font-size:11px; font-weight:600; transition:background .12s,border-color .12s; }
 .gam-drawer-mark-precedent:hover, .gam-drawer-close:hover { background:${C.BG3}; border-color:${C.BORDER2}; }
-.gam-drawer-body { flex:1; overflow-y:auto; }
-.gam-drawer-section { padding:10px 14px; border-bottom:1px solid ${C.BORDER}; }
-.gam-drawer-section h3 { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:${C.TEXT2}; margin:0 0 6px; }
+.gam-drawer-body { flex:1; overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:10px; }
+/* v10.16.7: card-style sections instead of flat border-bottom dividers.
+   Each of the 6 IntelDrawer sections (What this is / Why it matters /
+   What changed / What the team knows / What ModTools recommends / What
+   happened last time) now reads as an elevated card -- background +
+   border + radius + subtle shadow -- so operator scans visual blocks
+   instead of a continuous wall of text. Title bar tints amber-accent
+   for stronger hierarchy. Border-bottom divider removed (gap on
+   .gam-drawer-body handles spacing). */
+.gam-drawer-section { padding:10px 12px; background:${C.BG3}; border:1px solid ${C.BORDER}; border-left:3px solid ${C.AMBER}; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,0.25); }
+.gam-drawer-section h3 { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:${C.AMBER}; margin:0 0 6px; padding-bottom:4px; border-bottom:1px solid ${C.BORDER}; }
 .gam-drawer-section p { margin:4px 0; font-size:12px; line-height:1.45; }
 .gam-drawer-section button { font:inherit; }
 .gam-skeleton { height:12px; background:linear-gradient(90deg,${C.BG2},${C.BORDER2},${C.BG2}); background-size:200% 100%; animation:gam-shimmer 1.2s infinite; border-radius:3px; margin:4px 0; }
