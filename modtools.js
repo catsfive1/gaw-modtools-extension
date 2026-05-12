@@ -20227,6 +20227,37 @@ Analyze this comment against the community rules. Then write a brief, profession
   // STATE.msgById mutation.
   try { window.__GAM_MOD_CHAT = ModChat; } catch(_){}
 
+  // v10.14.5: ?gam_open_chat=1 URL param auto-opens the mod-chat panel after
+  // the extension has mounted ModChat on window. The popup Quick Actions
+  // "Chat" button uses this param to give leads a one-click path into chat
+  // from the popup (previously the button went to GAW /mod/chat which is
+  // a server-side route that returns "An error occurred, please try again"
+  // -- not connected to our extension's chat panel). 1s delay lets the
+  // status bar finish rendering so ModChat.open() finds its #gam-mc-badge
+  // anchor.
+  try {
+    if (typeof location !== 'undefined' && location.search && location.search.indexOf('gam_open_chat=1') >= 0) {
+      setTimeout(function() {
+        try {
+          if (window.__GAM_MOD_CHAT && typeof window.__GAM_MOD_CHAT.open === 'function') {
+            window.__GAM_MOD_CHAT.open();
+          } else if (window.__GAM_MOD_CHAT && typeof window.__GAM_MOD_CHAT.toggle === 'function') {
+            window.__GAM_MOD_CHAT.toggle();
+          } else {
+            // Last-resort: click the status-bar chat badge if it exists
+            var badge = document.getElementById('gam-mc-badge');
+            if (badge) badge.click();
+          }
+          // Clean the URL so a refresh doesn't re-open / leave the param visible
+          try {
+            var cleanUrl = location.pathname + location.search.replace(/[?&]gam_open_chat=1/, '').replace(/^\?&/, '?').replace(/\?$/, '');
+            history.replaceState(null, '', cleanUrl + location.hash);
+          } catch (_) {}
+        } catch (_) {}
+      }, 1000);
+    }
+  } catch (_) {}
+
   // v9.6.0: Modmail hints panel. Floating reference card on /modmail/*
   // surfaces. Lists shortcuts + hints to speed up triage. Collapsible (small
   // ?-tab when minimized). State persisted via setSetting.
@@ -20702,6 +20733,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       fbBtn,
       el('span', { cls:'gam-bar-sep' }),
       filterSel,
+      el('span', { cls:'gam-bar-sep' }), // v10.14.5: break up the 10-icon run -- separates passive filter from active counters
       drBtn,
       sirenBtn,
       sirenClearBtn,
@@ -20739,6 +20771,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         });
         return tardBtn;
       })(),
+      el('span', { cls:'gam-bar-sep' }), // v10.14.5: separate queue counters from page/context icons
       mmBtn,
       c5Btn,
       IS_USERS_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.ACCENT, cursor:'default'}, title:'Triage Console active' }, '\u{1F4CA}') : null,
