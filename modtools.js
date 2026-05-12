@@ -23018,6 +23018,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
    red overlay for the same duration without the scale/fade. */
 .gam-ee-flash{position:fixed;inset:0;z-index:99999998;background:rgba(240,64,64,.22);pointer-events:none}
 @media (prefers-reduced-motion: no-preference){.gam-ee-flash{animation:gam-ee-fade .8s ease forwards}}
+/* v10.16.12: red-white-blue sweep for EE12 ("1776" keystroke). Fires once,
+   ~1.2s total, PRM-gated. Reduce-motion users get an instant flat overlay
+   that auto-removes via the .remove() timeout. */
+.gam-ee-flag-sweep{position:fixed;inset:0;z-index:99999998;pointer-events:none;background:linear-gradient(120deg,rgba(192,57,43,.18) 0%,rgba(232,230,225,.18) 50%,rgba(46,89,167,.18) 100%)}
+@media (prefers-reduced-motion: no-preference){.gam-ee-flag-sweep{animation:gam-ee-flag-sweep 1.2s ease-out forwards}}
+@keyframes gam-ee-flag-sweep{0%{opacity:0;transform:translateX(-12%)}30%{opacity:1;transform:translateX(0)}70%{opacity:1;transform:translateX(0)}100%{opacity:0;transform:translateX(12%)}}
 /* v10.14.1 PRM4 (RALPH PRM F-5): inline-style transitions for the modmail
    slide panel + similar slide-in surfaces moved to PRM-gated CSS classes.
    Reduce-motion users get instant placement; everyone else gets the slide. */
@@ -26543,7 +26549,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   setInterval(autoRefreshTick, 60 * 1000); // check every minute
 
   // ╔══════════════════════════════════════════════════════════════════╗
-  // ║  EASTER EGGS (v5.2.8) — 10 Q-themed surprises for the mod team ║
+  // ║  EASTER EGGS — 13 Q-themed surprises for the mod team           ║
+  // ║  v5.2.8 added EE1-EE10; v10.16.12 added EE11-EE13                ║
   // ╚══════════════════════════════════════════════════════════════════╝
   let _sessionBans = 0;
   let _bansTodayMarked = false;
@@ -26727,6 +26734,61 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         }
       }, 200);
     });
+
+    // ── EE11 (v10.16.12): November 22 → JFK Remembrance banner ──────
+    // Date-trigger family with EE8 (April 17 Q-Day). The patriot remembers.
+    (function checkJFKDay(){
+      const d = new Date();
+      if (d.getMonth() === 10 && d.getDate() === 22){  // November is month 10 (0-indexed)
+        setTimeout(()=>{
+          const b = document.createElement('div');
+          b.style.cssText = `position:fixed;bottom:48px;left:50%;transform:translateX(-50%);z-index:9999990;background:linear-gradient(90deg,#1a1a2e,#c0392b 50%,#1a1a2e);color:#e8e6e1;padding:8px 20px;border-radius:6px;font:700 13px -apple-system,system-ui,sans-serif;letter-spacing:.3px;box-shadow:0 4px 20px rgba(192,57,43,.5);pointer-events:none`;
+          b.textContent = '\u{1F1FA}\u{1F1F8} November 22 — JFK. Patriots remember. \u{1F1FA}\u{1F1F8}';
+          document.body.appendChild(b);
+          setTimeout(()=>b.remove(), 8000);
+        }, 1500);
+      }
+    })();
+
+    // ── EE12 (v10.16.12): "1776" typed anywhere → Founders' code ─────
+    // Keystroke family with EE9 ("PAIN") and EE10 ("DECLAS"). Pairs with
+    // EE13 below (1776-action milestone) -- both reference the founding year.
+    let _seventeenBuf = '';
+    document.addEventListener('keydown', e=>{
+      if (!getSetting('easterEggsEnabled',true)) return;
+      if (document.activeElement && ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) return;
+      _seventeenBuf = (_seventeenBuf + e.key).slice(-4);
+      if (_seventeenBuf === '1776'){
+        _seventeenBuf = '';
+        // Red-white-blue sweep across the screen, ~1.2s, PRM-aware via
+        // class hook (animation suppressed when prefers-reduced-motion).
+        const sweep = document.createElement('div');
+        sweep.className = 'gam-ee-flag-sweep';
+        document.body.appendChild(sweep);
+        setTimeout(()=>sweep.remove(), 1400);
+        snack('\u{1F985} 1776 — Founders’ code activated. The Republic stands.', 'success');
+      }
+    });
+
+    // ── EE13 (v10.16.12): Mod log hits 1776 total actions → Republic ─
+    // Counter milestone family with EE7 (centennial). Fires once per local
+    // install (`gam_ee_1776` flag persisted via safeSet). The patriot's
+    // founding-year achievement -- counterpart to EE7 100-multiples.
+    (async function check1776(){
+      try {
+        const rawLog = await safeGet(K.LOG, null);
+        const log = Array.isArray(rawLog) ? rawLog : [];
+        const total = log.length;
+        const markedRaw = await safeGet('gam_ee_1776', '0');
+        const marked = parseInt(markedRaw || '0', 10);
+        if (total >= 1776 && marked < 1){
+          await safeSet('gam_ee_1776', '1');
+          setTimeout(()=>{
+            try { _eeOverlay('\u{1F985} 1776 ACTIONS LOGGED \u{1F985}', 'The Republic is restored. You hold the line.'); } catch(_){}
+          }, 2000);
+        }
+      } catch(e){}
+    })();
   }
 
   // v9.3.0 P0-1: server-validated mod auth gate. Returns true ONLY if the
