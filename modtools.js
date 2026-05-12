@@ -18159,7 +18159,10 @@ Analyze this comment against the community rules. Then write a brief, profession
         '<div style="margin-bottom:14px">' +
           '<div style="color:var(--bb-amber);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px">Thread</div>' +
           '<div style="color:#e8e6e1;font-size:13px;font-weight:600;margin-bottom:6px">' + escapeHtml(t.subject || '(no subject)') + '</div>' +
-          '<div style="color:#9b9892;font-size:11px">From: <span style="color:#66ccff">u/' + escapeHtml(t.first_user) + '</span> · ' + (t.message_count || 1) + ' messages · status: ' + escapeHtml(t.status || 'new') + '</div>' +
+          '<div style="color:#9b9892;font-size:11px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">' +
+            '<span>From: <span style="color:#66ccff">u/' + escapeHtml(t.first_user) + '</span> · ' + (t.message_count || 1) + ' messages · status: ' + escapeHtml(t.status || 'new') + '</span>' +
+            '<span data-risk-chips="1" data-risk-user="' + escapeHtml(t.first_user || '') + '" style="display:inline-flex;align-items:center;gap:4px"></span>' +
+          '</div>' +
         '</div>' +
         '<div style="margin-bottom:14px">' +
           '<div style="color:var(--bb-amber);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px">Most recent message</div>' +
@@ -18168,6 +18171,32 @@ Analyze this comment against the community rules. Then write a brief, profession
         '<div style="display:flex;gap:8px;margin-top:12px">' +
           '<button data-open="' + escapeHtml(t.thread_id) + '" style="background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Open thread on GAW</button>' +
         '</div>';
+
+      // v10.16.4: surface risk chips in the detail header from cache.
+      // If cache miss (operator opened detail before initial risk fetch
+      // returned), fire a one-user batch then render. Pure-additive --
+      // detail pane continues to render fully even if this fails.
+      try {
+        const headerChipEl = detail.querySelector('span[data-risk-chips="1"]');
+        if (headerChipEl) {
+          if (_userRiskCache.has(t.first_user)) {
+            _applyRiskChipsToEl(headerChipEl);
+          } else if (t.first_user) {
+            // Cache miss -- fetch this single user, populate cache, render.
+            rpcCall('modmailBatchRiskStats', { users: [t.first_user] }).then(res => {
+              if (!res || !res.ok || !res.data || !res.data.ok || !res.data.stats) return;
+              const s = res.data.stats[t.first_user];
+              if (s) {
+                _userRiskCache.set(t.first_user, s);
+                // Element may have been replaced if operator clicked another
+                // row -- re-query and only render if still in the DOM.
+                const stillThere = detail.querySelector('span[data-risk-chips="1"][data-risk-user="' + (t.first_user || '').replace(/"/g, '\\"') + '"]');
+                if (stillThere) _applyRiskChipsToEl(stillThere);
+              }
+            }).catch(() => {});
+          }
+        }
+      } catch(_) {}
 
       // V11 #3: populate intel strip
       _renderIntelStrip(t);
