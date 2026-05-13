@@ -27460,6 +27460,31 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
 
   async function init(){
+    // v10.16.21: orphan-state guard. If the user reloaded the extension
+    // while this tab was already open, Chrome leaves the OLD content
+    // script alive but `chrome.runtime` becomes undefined (or its id is
+    // missing). Init then crashes at the first chrome.runtime.onMessage
+    // call (modtools.js:27664) with TypeError: Cannot read properties of
+    // undefined (reading 'onMessage'). Pre-fix the existing catch handler
+    // showed a red "ModTools failed to boot" banner that didn't tell the
+    // user the actual fix (reload the page). Now: detect orphan state
+    // FIRST, surface the canonical _gamShowExtOrphanedBanner ("Extension
+    // was reloaded -- refresh this page to reconnect"), and abort init
+    // cleanly instead of letting a TypeError leak.
+    try {
+      const _rid = chrome && chrome.runtime && chrome.runtime.id;
+      const _hasOnMsg = chrome && chrome.runtime && chrome.runtime.onMessage;
+      if (!_rid || !_hasOnMsg) {
+        console.warn('[modtools] orphan content script detected at init -- chrome.runtime invalidated. Aborting init; user must reload the page.');
+        try { if (typeof _gamShowExtOrphanedBanner === 'function') _gamShowExtOrphanedBanner(); } catch (_) {}
+        return; // abort init cleanly
+      }
+    } catch (_) {
+      // chrome.runtime access itself threw -- definitely orphaned. Same flow.
+      try { if (typeof _gamShowExtOrphanedBanner === 'function') _gamShowExtOrphanedBanner(); } catch (__) {}
+      return;
+    }
+
     await preloadSecrets();
     await syncSecretsToBackgroundVault();
     purgeSecretsFromPageStorage();
@@ -27726,10 +27751,26 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // v5.2.4: guard the whole boot so a single bug can never silently kill the extension.
   init().catch(err => {
     console.error('[modtools] init FAILED', err);
+    // v10.16.21: detect orphan-state TypeError specifically and route to
+    // the canonical orphan banner instead of the generic red "failed to
+    // boot" banner. The pattern "Cannot read properties of undefined
+    // (reading 'X')" with X being a chrome.runtime member is the
+    // signature of an orphaned content script. Friendlier UX -- the
+    // orphan banner tells the user to refresh the page, which is the
+    // actual fix.
+    const _msg = String(err && err.message || err);
+    const _isOrphanError =
+      /Cannot read.*undefined.*(?:onMessage|sendMessage|connect|getURL|getManifest|id)/i.test(_msg) ||
+      /Extension context invalidated/i.test(_msg) ||
+      (chrome && chrome.runtime && !chrome.runtime.id);
+    if (_isOrphanError) {
+      try { if (typeof _gamShowExtOrphanedBanner === 'function') _gamShowExtOrphanedBanner(); } catch (_) {}
+      return;
+    }
     try {
       const banner = document.createElement('div');
       banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#b00;color:#fff;padding:8px 14px;font:12px/1.4 ui-sans-serif,system-ui,sans-serif;text-align:center';
-      banner.textContent = `GAW ModTools failed to boot: ${String(err && err.message || err)}. Open DevTools Console for details.`;
+      banner.textContent = `GAW ModTools failed to boot: ${_msg}. Open DevTools Console for details.`;
       document.body && document.body.appendChild(banner);
     } catch(e){}
   });
