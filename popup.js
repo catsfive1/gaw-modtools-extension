@@ -2668,15 +2668,27 @@ function __buildRosterRow(m, tokens) {
   row.dataset.rosterMod = m.mod_username;
   row.style.cssText = 'padding:6px;border-bottom:1px solid #1a1c20';
 
+  // v10.16.18: row layout collapse-resistant. Pre-fix the popup body was
+  // 380px (popup.css L1012 'Iter 1-2 body / global' clobbered the v9.2.4
+  // 520px that was specifically chosen to avoid ellipsis on roster row
+  // labels). At 380px with Issue/Re-issue button + tier dropdown (for full
+  // leads), the info column got squeezed to near-zero width and the name
+  // div's white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+  // collapsed names entirely -- Commander reported "doesn't show the names
+  // of the mods! I have to guess!" Fix: flex-wrap on the row top container
+  // so buttons drop below info when space is tight; min-width:140px on info
+  // guarantees the name column never shrinks below readable; name itself
+  // is allowed to wrap onto 2 lines (white-space:normal + word-break:break-
+  // all) so a long username is fully visible even at narrow widths instead
+  // of becoming invisible.
   const top = document.createElement('div');
-  top.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:6px';
+  top.style.cssText = 'display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px;row-gap:4px';
 
   const info = document.createElement('div');
-  info.style.cssText = 'flex:1;min-width:0';
+  info.style.cssText = 'flex:1 1 140px;min-width:140px';
 
   const name = document.createElement('div');
-  // v9.2.3: ellipsis on long usernames so they never push the Re-issue button off-screen.
-  name.style.cssText = 'color:#e4e4e4;font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+  name.style.cssText = 'color:#e4e4e4;font-weight:600;font-size:12px;line-height:1.3;word-break:break-all';
   name.textContent = m.mod_username + (m.is_lead ? ' 👑' : '');
   info.appendChild(name);
 
