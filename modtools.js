@@ -25434,8 +25434,18 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       if (!isBrave) return;
       // v10.8.0 M7 (UIUX-06 P1): show banner on ANY Brave install — token check removed.
       // Pre-fix: gated on !workerModToken so fresh installs without a token never saw the rescue banner.
-      const st = await new Promise(res => { try { chrome.storage.local.get(['gam_brave_banner_dismissed'], res); } catch(_) { res({}); } });
-      if (st && st.gam_brave_banner_dismissed) return;
+      // v10.16.23 (QA4 P2): the dismissal flag was permanent (just a boolean
+      // timestamp). After dismissal a Brave user receiving a re-invite would
+      // never see the rescue banner again -- silent fail on the re-onboarding
+      // path. Now: expire dismissal after 30 days OR whenever a fresh invite
+      // is staged (gam_pending_invite set since last dismissal). Both triggers
+      // surface the rescue banner when it actually matters.
+      const _braveKeys = await new Promise(res => { try { chrome.storage.local.get(['gam_brave_banner_dismissed', 'gam_pending_invite_backup'], res); } catch(_) { res({}); } });
+      const _dismissedAt = (_braveKeys && _braveKeys.gam_brave_banner_dismissed) || 0;
+      const _staleByTime = _dismissedAt > 0 && (Date.now() - _dismissedAt) > (30 * 24 * 60 * 60 * 1000);
+      const _bk = (_braveKeys && _braveKeys.gam_pending_invite_backup) || null;
+      const _staleByFreshInvite = !!(_bk && _bk.staged_at && _bk.staged_at > _dismissedAt);
+      if (_dismissedAt && !_staleByTime && !_staleByFreshInvite) return;
       // Build banner. Self-contained CSS so it survives before init() builds GAM_CSS.
       const wrap = document.createElement('div');
       wrap.id = 'gam-brave-banner';

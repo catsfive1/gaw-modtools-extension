@@ -3540,15 +3540,29 @@ async function __claimInviteClick() {
       statusEl.textContent = msg;
       return;
     }
-    try { await chrome.storage.session.remove('gam_pending_invite'); } catch (e) {}
-    // v10.0: also purge the local backup mirror once successfully claimed.
-    try { await chrome.storage.local.remove('gam_pending_invite_backup'); } catch (e) {}
+    // v10.16.23 (QA5 P1-A): collapse the two-step cleanup (session.remove +
+    // local.remove) into a single Promise.all so a popup-close mid-await
+    // can't leave gam_pending_invite_backup orphaned in local storage with
+    // session already cleared. Both cleanups race in parallel; the popup
+    // closing kills both. Symmetric atomic cleanup matches the symmetric
+    // atomic staging in modtools.js.
+    try {
+      await Promise.all([
+        chrome.storage.session.remove('gam_pending_invite'),
+        chrome.storage.local.remove('gam_pending_invite_backup')
+      ]);
+    } catch (e) { /* both best-effort */ }
     const claimData = rClaim.data || {};
     statusEl.className = 'pop-token-status ok';
     statusEl.textContent = '\u2713 claimed \u2014 you are now ' + (claimData.mod_username || username);
-    // v10.16.22: clear self-rotated flag so the post-claim rotate CTA + the
-    // auto-prompt below both fire correctly for this fresh claim.
-    try { await chrome.storage.local.remove('gam_self_rotated_at'); } catch (_) {}
+    // v10.16.23 (QA5 P1-B): DON'T remove gam_self_rotated_at here. v10.16.22
+    // removed it before the auto-rotate confirm, which created a 3-write
+    // sequence (remove \u2192 auto-rotate set OR ctaDismiss set) and made the
+    // amber CTA banner flash visible briefly. Now: only clear the flag if
+    // the user DECLINES the auto-rotate prompt below (so the banner shows
+    // as a backup discoverability surface). If they accept and rotation
+    // succeeds, the set at L3580 writes the correct timestamp. If they
+    // accept and rotation fails, we still clear so they're reminded.
     try { await loadToken(); } catch (e) {}
     try { await loadLead(); } catch (e) {}
 
@@ -3572,21 +3586,47 @@ async function __claimInviteClick() {
         okLabel: '\u{1F504} Rotate now',
         cancelLabel: 'Skip (rotate later)'
       });
-      if (wantRotate) {
+      if (!wantRotate) {
+        // v10.16.23 (QA5 P1-B): user declined auto-rotate. Clear the flag NOW
+        // so the v10.16.20 amber CTA banner re-surfaces as backup
+        // discoverability. If we don't clear, the banner would only appear
+        // if the flag was missing for some other reason -- and a freshly-
+        // claimed mod who declined the prompt SHOULD still see the banner.
+        try { await chrome.storage.local.remove('gam_self_rotated_at'); } catch (_) {}
+      } else {
         try {
           const rRot = await popupRpc('authRotateSelf', {});
           if (rRot && rRot.ok) {
             statusEl.textContent = '\u2713 claimed + rotated \u2014 you are now ' + (claimData.mod_username || username) + ' (lead lost impersonation access)';
             try { await chrome.storage.local.set({ gam_self_rotated_at: Date.now() }); } catch (_) {}
             try { await loadToken(); } catch (_) {}
+          } else if (rRot && rRot.error === 'rotation_save_failed') {
+            // v10.16.23 (QA2 P0): mirror manual rotateToken() CRITICAL branch at
+            // popup.js:2920. The worker DID rotate the token but the local
+            // storage write failed -- the mod is now operating on an
+            // INVALIDATED server-side token that they can't recover from
+            // without lead intervention. Surface the CRITICAL banner instead
+            // of the generic "retry from Tokens tab" message.
+            statusEl.className = 'pop-token-status err';
+            statusEl.textContent = '\u2713 claimed BUT CRITICAL: token rotated on server, FAILED to save locally. ' +
+              'You may be locked out after browser restart. ' +
+              'Contact lead mod for a fresh rotation invite to recover. Detail: ' + (rRot.detail || '');
+            // Don't clear gam_self_rotated_at -- the server DID rotate; banner
+            // can't help (re-rotation would also fail until lead reissues).
           } else {
             // Rotation failed -- claim is still valid, just leave a warning.
             statusEl.textContent = '\u2713 claimed (rotation failed: ' + ((rRot && rRot.error) || 'unknown') + ' \u2014 retry from Tokens tab)';
             statusEl.className = 'pop-token-status warn';
+            // v10.16.23 (QA5 P1-B follow-up): clear flag so the amber CTA
+            // banner re-surfaces as backup. Lead still has impersonation
+            // access; mod needs to retry rotation.
+            try { await chrome.storage.local.remove('gam_self_rotated_at'); } catch (_) {}
           }
         } catch (rotErr) {
           statusEl.textContent = '\u2713 claimed (rotation error: ' + (rotErr && rotErr.message || rotErr) + ' \u2014 retry from Tokens tab)';
           statusEl.className = 'pop-token-status warn';
+          // Same as generic-failure branch above: surface the banner.
+          try { await chrome.storage.local.remove('gam_self_rotated_at'); } catch (_) {}
         }
       }
     } catch (_) { /* confirm modal failed -- continue */ }
