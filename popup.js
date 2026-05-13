@@ -2664,40 +2664,28 @@ async function __issueBulkFromRoster(panel, tokens) {
 }
 
 function __buildRosterRow(m, tokens) {
+  // v10.16.19: VERTICAL-STACK rebuild. Previous flex-row layouts (v9.2.3
+  // ellipsis, v10.16.18 flex-wrap) both proved unreliable at 380px popup
+  // body width when buttons + tier dropdown ate the horizontal budget.
+  // Commander reported names STILL invisible on v10.16.18. Bulletproof fix:
+  // stop using flex layout for the primary info entirely. Each row is now
+  // a vertical stack -- name on its OWN line at full row width, status
+  // below, action buttons on a third line. No flex collapse possible. The
+  // name occupies the entire row width (~340px after padding) so any
+  // username is fully visible at 13px font without truncation or ellipsis.
   const row = document.createElement('div');
   row.dataset.rosterMod = m.mod_username;
-  row.style.cssText = 'padding:6px;border-bottom:1px solid #1a1c20';
+  row.style.cssText = 'padding:8px 6px;border-bottom:1px solid #1a1c20;display:flex;flex-direction:column;gap:3px';
 
-  // v10.16.18: row layout collapse-resistant. Pre-fix the popup body was
-  // 380px (popup.css L1012 'Iter 1-2 body / global' clobbered the v9.2.4
-  // 520px that was specifically chosen to avoid ellipsis on roster row
-  // labels). At 380px with Issue/Re-issue button + tier dropdown (for full
-  // leads), the info column got squeezed to near-zero width and the name
-  // div's white-space:nowrap;overflow:hidden;text-overflow:ellipsis
-  // collapsed names entirely -- Commander reported "doesn't show the names
-  // of the mods! I have to guess!" Fix: flex-wrap on the row top container
-  // so buttons drop below info when space is tight; min-width:140px on info
-  // guarantees the name column never shrinks below readable; name itself
-  // is allowed to wrap onto 2 lines (white-space:normal + word-break:break-
-  // all) so a long username is fully visible even at narrow widths instead
-  // of becoming invisible.
-  const top = document.createElement('div');
-  top.style.cssText = 'display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px;row-gap:4px';
-
-  const info = document.createElement('div');
-  info.style.cssText = 'flex:1 1 140px;min-width:140px';
-
+  // ── Line 1: NAME (own row, full width, prominent) ──
   const name = document.createElement('div');
-  name.style.cssText = 'color:#e4e4e4;font-weight:600;font-size:12px;line-height:1.3;word-break:break-all';
+  name.style.cssText = 'color:#e4e4e4;font-weight:700;font-size:13px;line-height:1.3;word-break:break-all';
   name.textContent = m.mod_username + (m.is_lead ? ' 👑' : '');
-  info.appendChild(name);
+  row.appendChild(name);
 
+  // ── Line 2: STATUS (rotated date / never-rotated warning) ──
   const status = document.createElement('div');
-  // v9.2.4: status text wraps naturally. Pre-fix, ellipsis truncated
-  // "⚠ never rotated -- lead can still impersonate" to "...lea...",
-  // hiding the actually-important warning. Full text is more useful
-  // than a tidy single line; wrap to 2 lines if needed.
-  status.style.cssText = 'font-size:10px;line-height:1.4';
+  status.style.cssText = 'font-size:10px;line-height:1.4;word-break:break-word';
   if (m.rotated_at) {
     status.style.color = '#3dd68c';
     status.textContent = '✓ rotated ' + new Date(m.rotated_at).toLocaleDateString() +
@@ -2709,14 +2697,20 @@ function __buildRosterRow(m, tokens) {
   if (m.active_invites > 0) {
     status.textContent += ' · ' + m.active_invites + ' active invite(s)';
   }
-  info.appendChild(status);
+  row.appendChild(status);
 
-  top.appendChild(info);
+  // ── Line 3: ACTION BUTTONS (own row, flex with wrap) ──
+  // Only added if there's anything to put here (non-lead → Issue button,
+  // full lead viewer → tier dropdown). For mods viewing a lead's own row,
+  // skip the actions line entirely so the row is compact.
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:2px';
+  let actionsHaveContent = false;
 
   if (!m.is_lead) {
     const btn = document.createElement('button');
     btn.className = 'pop-btn pop-btn-ghost';
-    btn.style.cssText = 'font-size:10px;padding:3px 8px;flex-shrink:0';
+    btn.style.cssText = 'font-size:10px;padding:3px 10px';
     btn.textContent = m.rotated_at ? 'Re-issue' : 'Issue';
     btn.addEventListener('click', async function () {
       btn.disabled = true;
@@ -2725,17 +2719,22 @@ function __buildRosterRow(m, tokens) {
         await __issueSingleFromRoster(m.mod_username, row, tokens);
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Re-issue';
+        btn.textContent = m.rotated_at ? 'Re-issue' : 'Issue';
       }
     });
-    top.appendChild(btn);
+    actions.appendChild(btn);
+    actionsHaveContent = true;
   }
 
   // v10.x Patch 4: tier dropdown (full lead only)
   if (_gamTier === 'lead') {
+    const tierWrap = document.createElement('label');
+    tierWrap.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:10px;color:#9b9892';
+    tierWrap.appendChild(document.createTextNode('tier:'));
     const tierSel = document.createElement('select');
     tierSel.className = 'roster-tier-sel';
     tierSel.dataset.mod = m.mod_username;
+    tierSel.style.cssText = 'font-size:10px;padding:1px 4px;background:#0a0a0b;color:#e4e4e4;border:1px solid #2a2a2a';
     const curTier = m.tier || (m.is_lead ? 'lead' : 'mod');
     tierSel.dataset.curtier = curTier;
     ['mod', 'senior_lead', 'lead'].forEach(function(t) {
@@ -2747,10 +2746,12 @@ function __buildRosterRow(m, tokens) {
     });
     tierSel.setAttribute('data-curtier', curTier);
     tierSel.addEventListener('change', function() { __confirmTierChange(m.mod_username, tierSel); });
-    top.appendChild(tierSel);
+    tierWrap.appendChild(tierSel);
+    actions.appendChild(tierWrap);
+    actionsHaveContent = true;
   }
 
-  row.appendChild(top);
+  if (actionsHaveContent) row.appendChild(actions);
   return row;
 }
 
@@ -2941,10 +2942,39 @@ async function claimRotationInvite() {
   if (!status) return;
   status.className = 'pop-token-status';
   try {
+    // v10.16.19: pre-fill from chrome.storage.session if the recipient
+    // clicked the invite URL recently. The content script's invite-claim
+    // IIFE (modtools.js L25478) stages the code into gam_pending_invite
+    // and the username into gam_pending_invite_for. Pre-fix this
+    // claimRotationInvite handler ignored both -- mods had to retype
+    // both fields even when the staged data was sitting right there.
+    // Commander reported "their invites never work" -- partial root
+    // cause: too much friction for non-technical mods to claim. Also
+    // checks the chrome.storage.local backup that survives session.
+    let stagedCode = '';
+    let stagedUsername = '';
+    try {
+      const sess = await chrome.storage.session.get(['gam_pending_invite', 'gam_pending_invite_for']);
+      stagedCode = (sess && sess.gam_pending_invite) || '';
+      const stagedFor = sess && sess.gam_pending_invite_for;
+      if (stagedFor && stagedFor !== '__paste_into_token_field__') stagedUsername = stagedFor;
+    } catch (_) {}
+    if (!stagedCode) {
+      try {
+        const lo = await chrome.storage.local.get('gam_pending_invite_backup');
+        const bk = lo && lo.gam_pending_invite_backup;
+        if (bk && bk.code && Date.now() - (bk.staged_at || 0) < 24 * 60 * 60 * 1000) {
+          stagedCode = bk.code;
+          if (bk.gaw_username) stagedUsername = bk.gaw_username;
+        }
+      } catch (_) {}
+    }
+
     const username = await __popupAskText({
       title: 'Claim rotation invite',
-      label: 'Your GAW username (must match the invite)',
+      label: 'Your GAW username (must match the invite)' + (stagedUsername ? ' — auto-filled from invite link' : ''),
       placeholder: 'username',
+      initialValue: stagedUsername || '',
       max: 32,
       validate: function (v) {
         if (!v) return 'username required';
@@ -2955,8 +2985,9 @@ async function claimRotationInvite() {
 
     const code = await __popupAskText({
       title: 'Invite code',
-      label: 'Paste the rotation invite code from the lead mod',
+      label: 'Paste the rotation invite code from the lead mod' + (stagedCode ? ' — auto-filled from invite link' : ''),
       placeholder: 'invite code',
+      initialValue: stagedCode || '',
       max: 96,
       validate: function (v) {
         if (!v) return 'code required';
