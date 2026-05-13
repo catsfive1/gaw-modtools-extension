@@ -3019,6 +3019,10 @@ async function claimRotationInvite() {
     status.className = 'pop-token-status ok';
     status.textContent = '✓ claimed -- you are now ' + (claimData.mod_username || username);
     _showVerifyTokenBtn();
+    // v10.16.20: clear the self-rotated flag -- this is a fresh claim,
+    // the new token came from a lead invite, the CTA should re-surface
+    // so the new mod is prompted to self-rotate.
+    try { await chrome.storage.local.remove('gam_self_rotated_at'); } catch (_) {}
     try { await loadToken(); } catch (e) {}  } catch (e) {
     status.className = 'pop-token-status err';
     status.textContent = 'claim failed: ' + (e && e.message || e);
@@ -3138,6 +3142,64 @@ function _showVerifyTokenBtn() {
   if (r) r.addEventListener('click', function () { withLoading(r, 'rotating…', rotateToken); });
   const c = $('claimRotateBtn');
   if (c) c.addEventListener('click', function () { withLoading(c, 'claiming…', claimRotationInvite); });
+  // v10.16.20: prominent self-rotate CTA. Wires the banner button + manages
+  // visibility based on `gam_self_rotated_at` flag. Banner shows when the
+  // mod has an authenticated token (workerModToken length>=32) AND has
+  // never self-rotated. Hides once rotateToken succeeds (which sets the
+  // flag below).
+  const ctaBtn = $('selfRotateCtaBtn');
+  const ctaWrap = $('selfRotateCta');
+  const ctaDismiss = $('selfRotateCtaDismiss');
+  if (ctaBtn) ctaBtn.addEventListener('click', function () {
+    withLoading(ctaBtn, 'rotating…', async function () {
+      await rotateToken();
+      // After successful rotation rotateToken sets status='✓ rotated ...'
+      // We check + write the persistent flag here. If rotation failed the
+      // CTA stays visible.
+      try {
+        const status = $('rotateStatus');
+        const ok = status && /rotated/.test(status.textContent || '');
+        if (ok) {
+          await chrome.storage.local.set({ gam_self_rotated_at: Date.now() });
+          if (ctaWrap) ctaWrap.style.display = 'none';
+        }
+      } catch (_) {}
+    });
+  });
+  // v10.16.20: Dismiss path for mods who already self-rotated before this
+  // banner shipped (or who genuinely don't want to rotate, e.g. lead is
+  // themselves). Sets the same flag without actually rotating. Re-shows
+  // ONLY if the underlying token changes (chrome.storage.onChanged below
+  // re-evaluates), which is the right behavior -- a fresh claim should
+  // re-surface the CTA.
+  if (ctaDismiss) ctaDismiss.addEventListener('click', async function () {
+    try {
+      await chrome.storage.local.set({ gam_self_rotated_at: Date.now() });
+      if (ctaWrap) ctaWrap.style.display = 'none';
+    } catch (_) {}
+  });
+  // v10.16.20: also auto-open the token-management details for unrotated
+  // mods so they discover the alternate paths (re-enter token, etc.) when
+  // they expand the disclosure -- separate from the CTA above.
+  async function _evaluateSelfRotateCta() {
+    try {
+      const out = await chrome.storage.local.get(['gam_settings', 'gam_self_rotated_at']);
+      const s = (out && out.gam_settings) || {};
+      const hasToken = !!(s.workerModToken && String(s.workerModToken).length >= 32);
+      const hasRotated = !!(out && out.gam_self_rotated_at);
+      // Show CTA only when authed AND not yet self-rotated.
+      if (ctaWrap) ctaWrap.style.display = (hasToken && !hasRotated) ? '' : 'none';
+      // Auto-open the details when needed.
+      const det = $('tokManagementDetails');
+      if (det && hasToken && !hasRotated) det.setAttribute('open', '');
+    } catch (_) {}
+  }
+  _evaluateSelfRotateCta();
+  try {
+    chrome.storage.onChanged.addListener(function (changes) {
+      if (changes && (changes.gam_settings || changes.gam_self_rotated_at)) _evaluateSelfRotateCta();
+    });
+  } catch (_) {}
 })();
 
 // v9.2.5: hide the "Rotate my token" button when there is no token to rotate.

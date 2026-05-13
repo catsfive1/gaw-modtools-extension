@@ -615,6 +615,25 @@
           </div>
         </div>
 
+        <!-- v10.16.20: Self-rotation CTA — visible by default for any mod
+             who has NOT yet self-rotated (gam_self_rotated_at unset).
+             Commander reported: after claiming a lead-issued invite, the
+             mod has no obvious path to rotate their own token; the Rotate
+             button is buried inside a collapsed <details>. This banner
+             surfaces the action right next to the verified-status banner
+             so it's impossible to miss. Hides once the mod successfully
+             self-rotates (gam_self_rotated_at written in popup.js). -->
+        <div id="selfRotateCta" class="tok-banner" style="display:none;background:rgba(255,153,51,0.08);border:1px solid var(--bb-amber);color:#ffd84d;margin-top:8px;padding:10px 12px;border-radius:4px">
+          <div style="font-weight:700;font-size:12px;margin-bottom:4px;letter-spacing:0.04em">&#x26A0; Rotate your token now</div>
+          <div style="font-size:11px;line-height:1.4;color:#ffe0b3;margin-bottom:8px">
+            Your current token was issued by the lead and the lead can still authenticate as you. Rotate to generate a new token only you know &mdash; the lead loses impersonation access.
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button id="selfRotateCtaBtn" class="pop-btn pop-btn-ghost" style="background:var(--bb-amber);color:#0a0a0b;border:none;font-weight:700">&#x1F504; Rotate now (one click)</button>
+            <button id="selfRotateCtaDismiss" class="pop-btn pop-btn-ghost" style="font-size:10px;color:#9b9892" title="Hide this banner permanently if you've already rotated">Already rotated &mdash; dismiss</button>
+          </div>
+        </div>
+
         <!-- Token management accordion (collapsed post-auth) -->
         <details class="tok-mgmt-details" id="tokManagementDetails">
           <summary>Token management (rotate, re-enter)</summary>
