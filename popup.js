@@ -3546,8 +3546,50 @@ async function __claimInviteClick() {
     const claimData = rClaim.data || {};
     statusEl.className = 'pop-token-status ok';
     statusEl.textContent = '\u2713 claimed \u2014 you are now ' + (claimData.mod_username || username);
+    // v10.16.22: clear self-rotated flag so the post-claim rotate CTA + the
+    // auto-prompt below both fire correctly for this fresh claim.
+    try { await chrome.storage.local.remove('gam_self_rotated_at'); } catch (_) {}
     try { await loadToken(); } catch (e) {}
     try { await loadLead(); } catch (e) {}
+
+    // v10.16.22: AUTO-PROMPT self-rotate immediately after successful claim.
+    // Commander explicitly asked: "workflow-wise, once this is finished,
+    // it should offer the ability to rotate the mod token (away from the
+    // lead token) immediately." Previously the rotate path was either
+    // (a) buried inside a collapsed <details> or (b) surfaced only via
+    // the v10.16.20 amber CTA banner which the operator had to notice on
+    // their own. Now: immediately after claim, fire a confirm modal that
+    // offers one-click rotate -- so the lead's record of the original
+    // invite-derived token can never be used to impersonate this mod.
+    // Non-blocking: skip on confirm-cancel, log + continue if rotate fails.
+    try {
+      const wantRotate = await __popupConfirm({
+        title: '\u{1F510} Rotate your token now?',
+        body: 'You\'re now authenticated as ' + (claimData.mod_username || username) + '.\n\n' +
+              'Your current token came from your lead\'s rotation invite, so the lead can still authenticate AS YOU until you rotate.\n\n' +
+              'Rotating generates a fresh random token that ONLY YOU know -- the lead loses impersonation access.\n\n' +
+              'Recommended. You can rotate again any time from the Tokens tab.',
+        okLabel: '\u{1F504} Rotate now',
+        cancelLabel: 'Skip (rotate later)'
+      });
+      if (wantRotate) {
+        try {
+          const rRot = await popupRpc('authRotateSelf', {});
+          if (rRot && rRot.ok) {
+            statusEl.textContent = '\u2713 claimed + rotated \u2014 you are now ' + (claimData.mod_username || username) + ' (lead lost impersonation access)';
+            try { await chrome.storage.local.set({ gam_self_rotated_at: Date.now() }); } catch (_) {}
+            try { await loadToken(); } catch (_) {}
+          } else {
+            // Rotation failed -- claim is still valid, just leave a warning.
+            statusEl.textContent = '\u2713 claimed (rotation failed: ' + ((rRot && rRot.error) || 'unknown') + ' \u2014 retry from Tokens tab)';
+            statusEl.className = 'pop-token-status warn';
+          }
+        } catch (rotErr) {
+          statusEl.textContent = '\u2713 claimed (rotation error: ' + (rotErr && rotErr.message || rotErr) + ' \u2014 retry from Tokens tab)';
+          statusEl.className = 'pop-token-status warn';
+        }
+      }
+    } catch (_) { /* confirm modal failed -- continue */ }
 
     // ASK-069 / WAVE-B-AUX A.2: welcome celebration toast \u2014 first-time claim only.
     // gam_welcomed flag persists in local storage; skip banner on subsequent claims.
@@ -3645,15 +3687,24 @@ loadLead();
     // username/tier/age into the banner shortly. Showing State B
     // immediately avoids a flash-of-empty-tokens-card.
     try { __tokSetState('returning', { username: '', tier: 'mod', verifiedAgo: 0, ageDays: -1, encrypted: true }); } catch(_){}
-    return;
+    // v10.16.22: DON'T early-return. The path-button + step-2 listeners
+    // below MUST be wired even when a token is already stored, because
+    // the operator can re-enter State A via the "Re-run setup" button
+    // (added in _cardWizardComplete) and click LINK/CODE/Raw-token. Pre-
+    // fix the early return left those buttons dead -- Commander reported
+    // "I go to CODE to manually enter the invite code into the mod's
+    // browser but nothing pops up. It does not show a field where I can
+    // enter the invite token." Listener wiring is idempotent (only fires
+    // once per popup load), no harm in always running it.
+  } else {
+    // No token → State A. Reset step-2 / success containers; path row is
+    // always visible inside State A.
+    try { __tokSetState('first-run'); } catch(_){}
+    const _step2  = document.getElementById('firstRunWizardStep2');
+    const _ok     = document.getElementById('firstRunWizardSuccess');
+    if (_step2) _step2.style.display = 'none';
+    if (_ok)    _ok.style.display    = 'none';
   }
-  // No token → State A. Reset step-2 / success containers; path row is
-  // always visible inside State A.
-  try { __tokSetState('first-run'); } catch(_){}
-  const _step2  = document.getElementById('firstRunWizardStep2');
-  const _ok     = document.getElementById('firstRunWizardSuccess');
-  if (_step2) _step2.style.display = 'none';
-  if (_ok)    _ok.style.display    = 'none';
 
   // v10.13.3 W2: showStep semantics changed -- there's no step 1 (path row
   // is always visible). showStep(2) shows step-2 form, showStep(3) shows
