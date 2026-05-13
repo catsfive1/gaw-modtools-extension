@@ -12125,9 +12125,18 @@ Analyze this comment against the community rules. Then write a brief, profession
           try { snack('Worker sync error: ' + (e && e.message || e), 'warn'); } catch(_) {}
         });
       }
-      addToggle('Auto-unsticky enabled', 'auto_unsticky_enabled',
+      addToggle('Auto-unsticky enabled (team-wide)', 'auto_unsticky_enabled',
         'Worker monitors GAW every 5 min. When a stickied post crosses BOTH age and upvote thresholds, the queued action is executed by the next mod with a GAW tab open. OFF by default -- lead must opt in. Changes sync to worker on save.',
         function(enabled) { _syncAutoUnstickyToWorker('auto_unsticky_enabled', enabled); });
+      // v10.16.13: lead-personal mode -- enables auto-unsticky on THIS
+      // browser only (lead's local autoUnstickyTick fires every 4 min on
+      // visible community pages, calls apiSticky directly, no worker
+      // queue involvement). Use this to run auto-unsticky solo without
+      // enabling team-wide execution. Independent of the team toggle above.
+      // Local-only -- does NOT sync to worker team_settings.
+      addToggle('Personal mode (lead-only — this browser only)',
+        'auto_unsticky_lead_personal_only',
+        'When ON: auto-unsticky runs on YOUR browser only via direct unsticky calls every 4 min on visible community pages. Does NOT enable team-wide execution (worker queue stays dormant). Use this to run auto-unsticky solo without involving other mods, or to test thresholds before flipping the team-wide toggle above. Local-only -- no worker sync.');
       {
         var _auIdH = 'gam-set-auto_unsticky_max_hours';
         var _auIdU = 'gam-set-auto_unsticky_min_upvotes';
@@ -26322,7 +26331,14 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   //         in gam_sticky_cooldowns[id] = ts.
   //   - One post per tick to avoid spamming. Tick every 4 minutes.
   async function autoUnstickyTick(){
-    if (!getSetting('autoUnstickyEnabled', false)) return;
+    // v10.16.13: lead-personal mode -- the lead can run auto-unsticky on
+    // THIS browser only without enabling the team-wide worker queue. Gate
+    // passes if EITHER (a) the regular per-mod local toggle is on, OR
+    // (b) lead-personal mode is on AND this user is the lead. Personal
+    // mode is local-only (no worker sync), so other mods see no change
+    // and the team-wide queue execution path stays dormant.
+    const _personalLeadMode = !!getSetting('auto_unsticky_lead_personal_only', false) && isLeadMod();
+    if (!getSetting('autoUnstickyEnabled', false) && !_personalLeadMode) return;
     if (document.visibilityState === 'hidden') return;
     const COOLDOWN_MS = 6 * 60 * 60 * 1000;
     const maxHours = Number(getSetting('autoUnstickyMaxHours', 12)) || 12;
@@ -29006,6 +29022,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       setTimeout(async function _doAutoUnstickyScan() {
         try {
           if (typeof isLeadMod !== 'function' || !isLeadMod()) return; // lead-only
+          // v10.16.13: skip the CS-scan queue path when lead-personal mode is
+          // on. In personal mode the lead's local autoUnstickyTick handles
+          // unstickying directly via apiSticky() -- no need to populate the
+          // worker team queue (which would also let other mods claim and
+          // execute, defeating the "personal only" intent).
+          try { if (typeof getSetting === 'function' && getSetting('auto_unsticky_lead_personal_only', false)) return; } catch (_) {}
           // 5-min throttle via chrome.storage.local to absorb refresh storms
           // and multi-tab leads. Matches the original cron cadence.
           const now = Date.now();
