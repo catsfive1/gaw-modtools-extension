@@ -11397,8 +11397,23 @@ Analyze this comment against the community rules. Then write a brief, profession
       const dr=getDeathRowPending();
       if(dr.length>0){
         // v10.16.0: DR popover batch mode -- checkbox column + sticky action bar.
-        // State lives in the DOM (checkbox.checked); rebuilds on every panel open.
+        // v10.16.17: filter dropdown -- combined with batch mode, lets operator
+        // "cancel all stale DRs" in 3 clicks (filter >24h, select all, cancel).
+        // State lives in the DOM (checkbox.checked, row.dataset.filteredOut);
+        // rebuilds on every panel open.
         c.appendChild(el('div',{cls:'gam-section-title'},`\u{1F480} Death Row (${dr.length})`));
+        // v10.16.17: filter row -- positioned above the select-all header.
+        const drFilterRow = el('div', { style:{display:'flex',alignItems:'center',gap:'8px',padding:'4px 6px',fontSize:'10px',color:'#9b9892'} });
+        drFilterRow.appendChild(el('label', { 'for':'gam-dr-filter', style:{textTransform:'uppercase',letterSpacing:'0.04em',fontWeight:'600'} }, 'Filter by age:'));
+        const drFilterSel = el('select', { id:'gam-dr-filter', 'aria-label':'Filter death-row queue by queued-time age', style:{background:'#0a0a0b',color:'#e8e6e1',border:'1px solid #2a2825',padding:'2px 6px',font:'10px ui-monospace,monospace',cursor:'pointer'} });
+        ['all|All','gt1h|Queued >1h ago','gt6h|Queued >6h ago','gt24h|Queued >24h ago'].forEach(opt => {
+          const [v, t] = opt.split('|');
+          const o = document.createElement('option');
+          o.value = v; o.textContent = t;
+          drFilterSel.appendChild(o);
+        });
+        drFilterRow.appendChild(drFilterSel);
+        c.appendChild(drFilterRow);
         // Section header row with "Select all" checkbox + selection count.
         const drHeader = el('div',{cls:'gam-log-row', style:{padding:'4px 6px',borderBottom:'1px solid #2a2825',fontSize:'10px',color:'#9b9892',letterSpacing:'0.04em',textTransform:'uppercase'}});
         const drSelectAll = el('input',{ type:'checkbox', id:'gam-dr-select-all', 'aria-label':'Select all death-row items', style:{margin:'0 8px 0 0',cursor:'pointer'} });
@@ -11410,15 +11425,23 @@ Analyze this comment against the community rules. Then write a brief, profession
         c.appendChild(drHeader);
         const drl=el('div',{cls:'gam-log-list'});
         // Refresh selection-state UI: updates count + toolbar visibility.
+        // v10.16.17: skips checkboxes inside filtered-out rows so the count
+        // reflects only what the operator can actually see + act on.
         function _drRefreshSelectionState(){
           try {
             const checks = drl.querySelectorAll('input[data-dr-select="1"]');
             let selected = 0;
-            checks.forEach(c => { if (c.checked) selected++; });
+            let visibleTotal = 0;
+            checks.forEach(c => {
+              const row = c.closest('.gam-log-row');
+              if (row && row.dataset.filteredOut === '1') return; // skip hidden
+              visibleTotal++;
+              if (c.checked) selected++;
+            });
             drSelCount.textContent = selected > 0 ? selected + ' selected' : '';
-            // Sync "select all" header check: indeterminate if some, checked if all.
-            drSelectAll.checked = (selected === checks.length && checks.length > 0);
-            drSelectAll.indeterminate = (selected > 0 && selected < checks.length);
+            // Sync "select all" header check based on visible-only rows.
+            drSelectAll.checked = (selected === visibleTotal && visibleTotal > 0);
+            drSelectAll.indeterminate = (selected > 0 && selected < visibleTotal);
             // Toggle sticky action bar visibility.
             const bar = document.getElementById('gam-dr-batch-bar');
             if (bar) {
@@ -11429,8 +11452,39 @@ Analyze this comment against the community rules. Then write a brief, profession
           } catch(_){}
         }
         drSelectAll.addEventListener('change', () => {
+          // v10.16.17: select-all operates on VISIBLE (non-filtered-out) rows only.
           const checks = drl.querySelectorAll('input[data-dr-select="1"]');
-          checks.forEach(c => { c.checked = drSelectAll.checked; });
+          checks.forEach(c => {
+            const row = c.closest('.gam-log-row');
+            if (row && row.dataset.filteredOut === '1') return; // skip hidden
+            c.checked = drSelectAll.checked;
+          });
+          _drRefreshSelectionState();
+        });
+        // v10.16.17: filter dropdown handler. Hides rows by age threshold.
+        // Auto-unchecks rows that get hidden (so filtered-out rows don't
+        // sneak into a subsequent batch cancel).
+        drFilterSel.addEventListener('change', () => {
+          const now = Date.now();
+          const v = drFilterSel.value;
+          let visibleCount = 0;
+          drl.querySelectorAll('input[data-dr-select="1"]').forEach(cb => {
+            const row = cb.closest('.gam-log-row');
+            if (!row) return;
+            const uname = cb.dataset.drUser || '';
+            const rec = dr.find(d => d.username.toLowerCase() === uname.toLowerCase());
+            if (!rec) return;
+            const ageMs = now - (rec.queuedAt || 0);
+            let show = true;
+            if (v === 'gt1h') show = ageMs > 60 * 60 * 1000;
+            else if (v === 'gt6h') show = ageMs > 6 * 60 * 60 * 1000;
+            else if (v === 'gt24h') show = ageMs > 24 * 60 * 60 * 1000;
+            row.style.display = show ? '' : 'none';
+            row.dataset.filteredOut = show ? '' : '1';
+            if (show) visibleCount++;
+            else if (cb.checked) cb.checked = false; // uncheck hidden
+          });
+          drHeaderLabel.textContent = 'Select all (' + visibleCount + (visibleCount < dr.length ? ' of ' + dr.length : '') + ')';
           _drRefreshSelectionState();
         });
         dr.forEach(d=>{
