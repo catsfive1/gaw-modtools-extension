@@ -12250,6 +12250,37 @@ Analyze this comment against the community rules. Then write a brief, profession
         });
         c.appendChild(_auRow);
       }
+      // v10.16.24: Title-pattern exceptions. Lead-editable list of titles
+      // that must NEVER be auto-unstickied regardless of age/upvote
+      // thresholds. "GENERAL CHAT" is hardcoded as a permanent baseline
+      // (cannot be removed). Each line is a case-insensitive substring
+      // match OR a /regex/flags pattern. Local-only setting (not synced
+      // to worker team_settings) -- this lead's browser owns the
+      // filter at the CS-scan POST step + at the local autoUnstickyTick
+      // step, both before the worker ever sees the candidate.
+      {
+        var _auExId = 'gam-set-auto_unsticky_title_exceptions';
+        var _auExRow = el('div', { cls: 'gam-settings-row' });
+        var _auExCur = String(getSetting('auto_unsticky_title_exceptions', '') || '');
+        _auExRow.innerHTML =
+          '<div class="gam-settings-info">' +
+            '<label class="gam-settings-lbl" for="' + _auExId + '">\u{1F6E1} Auto-unsticky title exceptions</label>' +
+            '<div class="gam-settings-desc">One pattern per line. Stickies whose title CONTAINS any of these patterns will NEVER be auto-unstickied. Case-insensitive substring match. Wrap in <code style="color:#ff9933;background:rgba(255,153,51,0.08);padding:0 3px">/.../i</code> for regex. <strong style="color:#ff9933">"GENERAL CHAT" is permanently protected</strong> (hardcoded baseline).</div>' +
+            '<textarea id="' + _auExId + '" maxlength="2000" rows="4" placeholder="e.g.&#10;Weekly Roundup&#10;Announcement&#10;/^megathread/i" style="width:100%;margin-top:6px;background:#050507;color:#e8e6e1;border:1px solid #3d3a35;padding:6px 8px;font:11px ui-monospace,monospace;border-radius:3px;resize:vertical;box-sizing:border-box"></textarea>' +
+            '<div style="margin-top:4px;color:#5a5752;font-size:10px"><span id="' + _auExId + '-status"></span></div>' +
+          '</div>';
+        var _auExTa = _auExRow.querySelector('#' + _auExId);
+        _auExTa.value = _auExCur;
+        var _auExStat = _auExRow.querySelector('#' + _auExId + '-status');
+        _auExTa.addEventListener('blur', function() {
+          var v = String(_auExTa.value || '').slice(0, 2000);
+          setSetting('auto_unsticky_title_exceptions', v);
+          var lineCount = v.split(/\r?\n/).map(function(s) { return s.trim(); }).filter(Boolean).length;
+          if (_auExStat) _auExStat.textContent = '✓ saved (' + lineCount + ' custom pattern' + (lineCount === 1 ? '' : 's') + ' + 1 hardcoded "GENERAL CHAT")';
+          try { snack('Title exceptions saved (' + (lineCount + 1) + ' protected patterns total)', 'good'); } catch (_) {}
+        });
+        c.appendChild(_auExRow);
+      }
       // Status line: last-poll info + queued/executed counts. Clicking opens
       // the M3 recent-actions popover. Reads from modAutoActionRecent RPC.
       {
@@ -26555,6 +26586,45 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     });
     return out;
   }
+  // v10.16.24: title-pattern exception for auto-unsticky. Hardcoded patterns
+  // always protect "GENERAL CHAT" threads (Commander's permanent baseline).
+  // Lead + sr-lead can add more via GEAR settings -- one pattern per line in
+  // auto_unsticky_title_exceptions. Each pattern is a case-insensitive
+  // substring match against the sticky's title text. Patterns of the form
+  // /regex/flags are compiled as RegExp. Used by BOTH the per-mod local
+  // autoUnstickyTick path AND the lead-side _gamAutoUnstickyCsScanner that
+  // posts candidates to the worker queue. Defense-in-depth: both paths
+  // filter independently so a misbehaving scanner can't queue an exempt
+  // post and no team-side execution can fire an exempt unsticky.
+  function _autoUnstickyTitleExempted(rawTitle) {
+    const title = String(rawTitle || '').toLowerCase().trim();
+    if (!title) return false;
+    // Hardcoded permanent exceptions (cannot be removed by anyone).
+    const HARDCODED = ['general chat'];
+    for (const pat of HARDCODED) {
+      if (title.indexOf(pat) !== -1) return true;
+    }
+    // User-extensible patterns from settings (lead-editable via GEAR).
+    let raw = '';
+    try { raw = String(getSetting('auto_unsticky_title_exceptions', '') || '').trim(); } catch (_) {}
+    if (!raw) return false;
+    const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    for (const line of lines) {
+      // Regex form: /pattern/flags  (e.g. /^weekly.*roundup/i)
+      const m = line.match(/^\/(.+)\/([gimsuy]*)$/);
+      if (m) {
+        try {
+          const r = new RegExp(m[1], m[2] || 'i');
+          if (r.test(String(rawTitle || ''))) return true;
+        } catch (_) { /* malformed regex -- skip silently */ }
+        continue;
+      }
+      // Plain substring (case-insensitive).
+      if (title.indexOf(line.toLowerCase()) !== -1) return true;
+    }
+    return false;
+  }
+
   // v9.12.0 - autoUnstickyTick re-enabled per Commander #15 with option (c)
   // from the v8.6.3 deferral comment: durable client-side dedupe via
   // chrome.storage.local with a 6-hour cooldown that survives page reloads.
@@ -26614,6 +26684,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       // after a successful toggle so the node won't re-match on the next tick.
       const isActuallySticky = p.classList.contains('stickied') || p.classList.contains('sticky');
       if (!isActuallySticky) continue;
+      // v10.16.24: title-exception guard. GENERAL CHAT and lead-defined
+      // protected patterns are NEVER auto-unstickied regardless of age/
+      // upvotes/thresholds. Hardcoded baseline + user-extensible via GEAR.
+      const _titleEl = p.querySelector('a.title');
+      const _titleText = _titleEl ? (_titleEl.textContent || '').trim() : '';
+      if (_autoUnstickyTitleExempted(_titleText)) {
+        try { _diagLog('sticky', 'auto-unsticky SKIPPED (title exempt) id=' + id + ' title="' + _titleText.slice(0, 80) + '"'); } catch (_) {}
+        continue;
+      }
       // Candidate -- toggle and record
       try {
         const r = await apiSticky(id);
@@ -29340,6 +29419,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
               const ageH = (now - createdAt * 1000) / (3600 * 1000);
               const titleEl = el.querySelector('a.title');
               const title = titleEl ? (titleEl.textContent || '').trim().slice(0, 200) : '';
+              // v10.16.24: title-exception guard at the scanner level. Skip
+              // before pushing to the candidates list so exempt stickies
+              // (GENERAL CHAT + lead-defined patterns) never reach the
+              // worker queue. Defense-in-depth: even if a future code path
+              // bypasses this filter, autoUnstickyTick also filters before
+              // toggling. Both paths reference the same helper, single
+              // source of truth for what's protected.
+              if (typeof _autoUnstickyTitleExempted === 'function' && _autoUnstickyTitleExempted(title)) {
+                try { console.log('[gam-auto-unsticky-cs] SKIPPED exempt title:', title.slice(0, 80)); } catch (_) {}
+                return;
+              }
               stickies.push({ thingId: thingId, votes: votes, ageH: ageH, createdAt: createdAt, title: title });
             } catch (_) { /* skip malformed sticky */ }
           });
