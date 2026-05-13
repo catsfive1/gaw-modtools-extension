@@ -26196,19 +26196,59 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       </span>
       <button class="gam-update-btn" id="gam-update-reload" title="Open chrome://extensions to reload">\u21bb Reload extension</button>
       ${installer ? `<a class="gam-update-btn" href="${escapeHtml(installer)}" target="_blank" rel="noopener">\u{1F4E5} Installer</a>` : ''}
+      <button class="gam-update-btn" id="gam-update-reload-page" title="Reload THIS page to pick up the new content script after extension was reloaded">\u21bb Reload page</button>
       <button class="gam-update-btn gam-update-btn-alt" id="gam-update-recheck" title="Check again now">\u{1F504} Recheck</button>
       <button class="gam-update-close" title="Dismiss until next remote version bump">\u2716</button>
     `;
     document.body.appendChild(bar);
+    // v10.16.14: cleanup helper -- removes banner + clears orphan-poll timer.
+    function _gamUpdateBannerCleanup() {
+      try { if (bar._gamOrphanPoll) { clearInterval(bar._gamOrphanPoll); bar._gamOrphanPoll = null; } } catch(_){}
+      try { bar.remove(); } catch(_){}
+    }
     bar.querySelector('.gam-update-close').addEventListener('click', ()=>{
       setSetting('updateDismissedFor', remote);
-      bar.remove();
+      _gamUpdateBannerCleanup();
     });
     bar.querySelector('#gam-update-recheck').addEventListener('click', ()=>{
-      bar.remove();
+      _gamUpdateBannerCleanup();
       setSetting('updateDismissedFor', '');
       checkForUpdate(true);
     });
+    // v10.16.14: new "Reload page" button -- the missing step in the
+    // operator's mental model. Commander reported: "I update [the extension],
+    // but [the banner] doesn't reflect it." Root cause: VERSION is captured
+    // at content-script INJECTION time; an open tab from before the extension
+    // reload still displays its captured v10.16.1 even though the EXTENSION
+    // is now v10.16.13. Hard-refresh of the page is required for the new
+    // content script to inject. This button does that in one click.
+    const reloadPageBtn = bar.querySelector('#gam-update-reload-page');
+    if (reloadPageBtn) {
+      reloadPageBtn.addEventListener('click', ()=>{
+        try { location.reload(); } catch(_) { try { window.location.href = window.location.href; } catch(__){} }
+      });
+    }
+    // v10.16.14: orphan-state polling. When the user clicks Reload arrow in
+    // chrome://extensions, the OLD content script (the one rendering this
+    // banner) becomes orphaned -- chrome.runtime.id throws / returns falsy.
+    // At that point the banner's "you're on v10.16.1" text is provably stale
+    // (the extension is v10.16.13). Detect this and SWAP the banner from
+    // the stale update banner to the (correct, orphan-aware) reload prompt.
+    // Polls every 3s; the existing _gamShowExtOrphanedBanner is the canonical
+    // orphan banner that this hand-off delegates to.
+    bar._gamOrphanPoll = setInterval(()=>{
+      let alive = true;
+      try {
+        const _rid = chrome && chrome.runtime && chrome.runtime.id;
+        if (!_rid) alive = false;
+      } catch(_) { alive = false; }
+      if (!alive) {
+        try { clearInterval(bar._gamOrphanPoll); } catch(_){}
+        bar._gamOrphanPoll = null;
+        try { bar.remove(); } catch(_){}
+        try { if (typeof _gamShowExtOrphanedBanner === 'function') _gamShowExtOrphanedBanner(); } catch(_){}
+      }
+    }, 3000);
     // v9.3.14 (Vanguard C-3): Reload button copies the chrome:// URL to clipboard
     // (Chrome refuses to navigate to chrome:// URLs from content-script anchor
     // clicks, so we fall back to clipboard + instructions).
