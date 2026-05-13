@@ -11845,6 +11845,33 @@ Analyze this comment against the community rules. Then write a brief, profession
     });
     c.appendChild(details);
 
+    // v10.16.15: surface the v10.15.7→v10.16.x feature wave so mods can
+    // discover what's new without reading the changelog. Collapsed by
+    // default; the most discoverable bits get a section heading instead
+    // of being buried in the kbd-shortcut <details>.
+    const recent = el('details', { cls:'gam-help-details' });
+    recent.appendChild(el('summary', { cls:'gam-help-summary' }, 'Recent additions (v10.15 → v10.16)'));
+    const recentItems = [
+      ['\u{1F4EC} Modmail send-direct prefill', 'On any AI candidate card, click "✉ Pre-fill + open" — opens the GAW thread in a new tab and auto-pastes the AI text into the reply textarea. You just review + click Send. Removes the copy/paste step.'],
+      ['\u{1F4EC} Modmail risk chips', 'Each thread row shows inline chips: NEW · Nd (account age <30d, red <7d), ✋ Nbans (lifetime), ⏱ N/7d (recent actions). Same chips persist on the detail header so you keep the context while composing.'],
+      ['\u{1F4EC} Modmail real pagination', 'Inbox scrolls past the old 50-thread cap. Scroll the list — sentinel triggers next page automatically. No reinstall needed.'],
+      ['\u{1F4EC} Status auto-flips to "replied"', 'After you send via pre-fill, the thread’s status updates to "replied" on the next inbox refresh. No more guessing what you’ve already answered.'],
+      ['\u{1F4EC} j / k thread navigation', 'In the modmail panel, press j or k to move through the thread list, Enter to open detail. Skips when typing in the reply box.'],
+      ['\u{1F480} Death Row batch mode', 'Each pending DR row gets a checkbox + the section gets a "Select all" header. Pick multiple and click "✖ Cancel selected" to bulk-cancel.'],
+      ['\u{1F480} Death Row reason inline', 'Each row now shows the queued reason next to the username (truncated; hover for full text). Informed batch-cancel.'],
+      ['⚙️ Auto-unsticky personal mode', 'In GEAR (lead-only): "Personal mode (this browser only)" toggle lets you run auto-unsticky solo without enabling the team-wide queue.'],
+      ['\u{1F50D} Intel Drawer cards', 'Hover any username — the 6 intel sections now render as elevated cards with amber accents. Same content, much easier to scan.'],
+      ['\u{1F4DA} Mod Console INTEL 2-col', 'Right-click a post → Mod Console → Intel tab now uses a 2-col layout: facts on left (summary/history/comment), AI + notes on right. AI conformity check is no longer below-the-fold.'],
+      ['\u{1F525} Easter eggs (13 total)', 'Toggle in GEAR → "Easter Eggs" (default on). Some require triggers: Konami code, "1776" anywhere outside an input, "DECLAS" in a textarea, "PAIN" outside an input, 17th ban of session, etc. Hidden but on-theme.'],
+    ];
+    recentItems.forEach(([k,d])=>{
+      recent.appendChild(el('div',{cls:'gam-help-row', style:{'align-items':'flex-start','padding':'6px 4px'}},
+        el('span',{cls:'gam-help-key', style:{'min-width':'190px','white-space':'normal','font-weight':'600','color':'var(--bb-amber)'}}, k),
+        el('span',{cls:'gam-help-desc'}, d)
+      ));
+    });
+    c.appendChild(recent);
+
     showModal('gam-help-panel','\u{2753} Help', c, '560px');
     panelOpen='help';
   }
@@ -17828,6 +17855,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       // node (harmless) AND kept the closure-captured panel reachable
       // (GC-blocked). Every toggle-cycle accumulated one stale handler.
       try { if (typeof existing._gamMmpEscHandler === 'function') document.removeEventListener('keydown', existing._gamMmpEscHandler); } catch (_) {}
+      // v10.16.15: also detach the j/k keyboard nav handler on toggle-close.
+      try { if (typeof existing._gamMmpKbHandler === 'function') document.removeEventListener('keydown', existing._gamMmpKbHandler); } catch (_) {}
       existing.remove();
       return;
     }
@@ -17901,6 +17930,9 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (e.target.closest('[data-close]')) {
         e.stopPropagation();
         try { if (typeof panel._gamMmpFocusTrapCleanup === 'function') panel._gamMmpFocusTrapCleanup(); } catch(_){}
+        // v10.16.15: detach ESC + j/k keydown handlers on click-close path.
+        try { if (typeof panel._gamMmpEscHandler === 'function') document.removeEventListener('keydown', panel._gamMmpEscHandler); } catch(_){}
+        try { if (typeof panel._gamMmpKbHandler === 'function') document.removeEventListener('keydown', panel._gamMmpKbHandler); } catch(_){}
         panel.remove();
         return;
       }
@@ -17912,6 +17944,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     const _mmpEscHandler = function (ev) {
       if (ev.key === 'Escape') {
         document.removeEventListener('keydown', _mmpEscHandler);
+        // v10.16.15: also detach j/k handler on ESC close path.
+        try { if (typeof panel._gamMmpKbHandler === 'function') document.removeEventListener('keydown', panel._gamMmpKbHandler); } catch (_) {}
         // v10.15.5 QA-A4 P1: invoke focus-trap cleanup before removing the
         // panel. ESC is the dominant close path (advertised in title=
         // "Close (ESC)") -- this was the loudest focus-restore miss.
@@ -17921,6 +17955,57 @@ Analyze this comment against the community rules. Then write a brief, profession
     };
     panel._gamMmpEscHandler = _mmpEscHandler;
     document.addEventListener('keydown', _mmpEscHandler);
+
+    // v10.16.15: j/k keyboard navigation through modmail thread list.
+    // Pattern lifted from Mod Console QUICK tab (modtools.js:8442 area):
+    // j = next row, k = prev row, Enter = open detail of focused row.
+    // Skips when focus is in an input/textarea/select so typing in the
+    // detail-pane reply or AI box doesn't hijack keys. Focused row gets
+    // an amber outline (visually distinct from the click-selected state
+    // which uses background + border-left).
+    let _focusedRowIndex = -1;
+    function _mmpFocusRow(idx) {
+      const rows = list.querySelectorAll('[data-thread-id]');
+      if (!rows.length) { _focusedRowIndex = -1; return; }
+      if (idx < 0) idx = 0;
+      if (idx >= rows.length) idx = rows.length - 1;
+      rows.forEach((r, i) => {
+        if (i === idx) {
+          r.dataset.kbdFocused = '1';
+          r.style.outline = '2px solid var(--bb-amber)';
+          r.style.outlineOffset = '-2px';
+          try { r.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
+        } else if (r.dataset.kbdFocused === '1') {
+          r.dataset.kbdFocused = '';
+          r.style.outline = '';
+          r.style.outlineOffset = '';
+        }
+      });
+      _focusedRowIndex = idx;
+    }
+    const _mmpKbHandler = function (ev) {
+      if (!panel.isConnected) return;
+      // Skip if focus is in an input/textarea/select/contenteditable.
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || ae.isContentEditable)) return;
+      // Skip if any modal/popover is open over the modmail panel (askText, preflight, etc.)
+      if (document.querySelector('.gam-v72-asktext, .gam-preflight-wrap')) return;
+      if (ev.key === 'j' || ev.key === 'J') {
+        ev.preventDefault();
+        _mmpFocusRow(_focusedRowIndex < 0 ? 0 : _focusedRowIndex + 1);
+      } else if (ev.key === 'k' || ev.key === 'K') {
+        ev.preventDefault();
+        _mmpFocusRow(_focusedRowIndex < 0 ? 0 : _focusedRowIndex - 1);
+      } else if (ev.key === 'Enter' && _focusedRowIndex >= 0) {
+        const rows = list.querySelectorAll('[data-thread-id]');
+        if (_focusedRowIndex < rows.length) {
+          ev.preventDefault();
+          try { rows[_focusedRowIndex].click(); } catch (_) {}
+        }
+      }
+    };
+    panel._gamMmpKbHandler = _mmpKbHandler;
+    document.addEventListener('keydown', _mmpKbHandler);
 
     const list = panel.querySelector('#gam-mmp-list');
     const detail = panel.querySelector('#gam-mmp-detail');
