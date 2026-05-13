@@ -2668,6 +2668,18 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('POST', '/modmail/batch-risk-stats', { users });
     }
   },
+  // v10.16.16 - mark a modmail thread as resolved without sending a reply.
+  // Worker flips status='resolved' + claimed_by + last_seen. Use for
+  // informational threads, thank-yous, or anything that doesn't warrant a
+  // response but the mod wants off the active triage list.
+  modmailMarkResolved: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const thread_id = String(args && args.thread_id || '');
+      if (!thread_id) return { ok: false, error: 'thread_id required' };
+      return await _rpcWorkerCall('POST', '/modmail/mark-resolved', { thread_id });
+    }
+  },
   // v9.13.0 - track a sent modmail response for AI history-awareness.
   // Best-effort, fire-and-forget. Caller passes (thread_id, sender,
   // response_body, optional subject/ai_used/ai_tone). Worker inserts row

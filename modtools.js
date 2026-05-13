@@ -18280,8 +18280,13 @@ Analyze this comment against the community rules. Then write a brief, profession
           '<div style="color:var(--bb-amber);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px">Most recent message</div>' +
           '<div style="background:#0a0a0b;border:1px solid #2a2825;padding:10px;color:#e8e6e1;font-size:11px;line-height:1.5;white-space:pre-wrap">' + escapeHtml(t.last_body || '(empty)') + '</div>' +
         '</div>' +
-        '<div style="display:flex;gap:8px;margin-top:12px">' +
+        '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">' +
           '<button data-open="' + escapeHtml(t.thread_id) + '" style="background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Open thread on GAW</button>' +
+          // v10.16.16: Mark Resolved -- close the thread without a reply.
+          // Hidden when already resolved/archived so the operator doesn't
+          // double-mark and so the panel doesn't look stale.
+          (t.status === 'resolved' || t.status === 'archived' ? '' :
+            '<button data-mark-resolved="' + escapeHtml(t.thread_id) + '" title="Mark this thread as resolved without sending a reply -- removes it from active triage" style="background:transparent;border:1px solid #44dd66;color:#44dd66;padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">✓ Mark resolved</button>') +
         '</div>';
 
       // v10.16.4: surface risk chips in the detail header from cache.
@@ -18319,6 +18324,52 @@ Analyze this comment against the community rules. Then write a brief, profession
         const id = e.target.getAttribute('data-open');
         window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(id), '_blank');
       });
+
+      // v10.16.16: wire Mark Resolved button. Confirms via window.confirm
+      // (not preflight modal -- this is a low-risk action, not destructive).
+      // On success: snack + flip the row's status badge in the list + flip
+      // the detail header's status text so the operator sees immediate
+      // feedback without waiting for the next loadList refresh.
+      const _mrBtn = detail.querySelector('[data-mark-resolved]');
+      if (_mrBtn) {
+        _mrBtn.addEventListener('click', async e => {
+          e.stopPropagation();
+          const id = _mrBtn.getAttribute('data-mark-resolved');
+          if (!id) return;
+          if (!confirm('Mark this thread as resolved without replying?\n\nThread will move off the active triage list. The original sender is NOT notified.')) return;
+          _mrBtn.disabled = true;
+          _mrBtn.textContent = '✓ Marking...';
+          try {
+            const r = await rpcCall('modmailMarkResolved', { thread_id: id });
+            if (r && r.ok && r.data && r.data.ok) {
+              // Update local cache + visible row badge
+              t.status = 'resolved';
+              const rowEl = list.querySelector('[data-thread-id="' + (id || '').replace(/"/g, '\\"') + '"]');
+              if (rowEl) {
+                const statusEl = rowEl.querySelector('.gam-log-type, span'); // best-effort
+                rowEl.querySelectorAll('span').forEach(sp => {
+                  if (/^(new|claimed|replied|resolved|awaiting|archived)$/i.test((sp.textContent || '').trim())) {
+                    sp.textContent = 'resolved';
+                    sp.style.color = '#44dd66';
+                  }
+                });
+              }
+              // Hide the button (re-render would be cleaner but this is fast)
+              _mrBtn.style.display = 'none';
+              snack('Thread marked resolved', 'success');
+            } else {
+              _mrBtn.disabled = false;
+              _mrBtn.textContent = '✓ Mark resolved';
+              const errMsg = (r && r.data && r.data.error) || (r && r.error) || 'unknown';
+              snack('Mark-resolved failed: ' + errMsg, 'error');
+            }
+          } catch (err) {
+            _mrBtn.disabled = false;
+            _mrBtn.textContent = '✓ Mark resolved';
+            snack('Mark-resolved error: ' + (err && err.message || err), 'error');
+          }
+        });
+      }
 
       // Render AI candidates from cache OR fire fresh
       const aiHost = panel.querySelector('#gam-mmp-ai-host');
