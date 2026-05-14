@@ -3476,6 +3476,12 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('GET', '/admin/audit/verify?limit=' + limit + '&from=' + from, undefined, { asLead: true });
     }
   },
+  // v10.16.26: lightweight audit-chain health summary (lead-only). Sub-100ms
+  // aggregate query suitable for a 30s refresh tile in the popup.
+  adminAuditHealth: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('GET', '/admin/audit/health', undefined, { asLead: true }); }
+  },
   adminDisableMod: {
     allowed_callers: [RPC_CALLER_POPUP],
     async handler() {

@@ -16435,10 +16435,22 @@ Analyze this comment against the community rules. Then write a brief, profession
     if(pending.length===0){ drEl.style.display='none'; return; }
     drEl.style.display='';
     drEl.innerHTML = `\u{1F480} ${pending.length}` + (ready.length>0 ? `<sup style="color:${C.RED};margin-left:3px">!</sup>` : '');
-    drEl.style.color = ready.length>0 ? C.RED : C.PURPLE;
-    drEl.title = ready.length>0
-      ? `${pending.length} on Death Row \u2014 ${ready.length} READY to execute (visit GAW)`
-      : `${pending.length} on Death Row`;
+    // v10.16.26: color-shift on operator-overload signal. >10 pending = red
+    // (queue is getting heavy; lead should consider executing or culling).
+    // Ready-to-execute supersedes (always red). Title reflects state for a11y.
+    if (ready.length > 0) {
+      drEl.style.color = C.RED;
+      drEl.title = `${pending.length} on Death Row \u2014 ${ready.length} READY to execute (visit GAW)`;
+      drEl.dataset.overload = '1';
+    } else if (pending.length > 10) {
+      drEl.style.color = C.RED;
+      drEl.title = `${pending.length} on Death Row (HEAVY) \u2014 consider filter + batch-cancel stale entries`;
+      drEl.dataset.overload = '1';
+    } else {
+      drEl.style.color = C.PURPLE;
+      drEl.title = `${pending.length} on Death Row`;
+      drEl.dataset.overload = '';
+    }
   }
 
   // ╔══════════════════════════════════════════════════════════════════╗
@@ -17966,6 +17978,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         '<span style="color:var(--bb-amber);font-weight:600;letter-spacing:0.08em;text-transform:uppercase;font-size:12px">\u{1F4E5} Modmail</span>' +
         '<span style="color:#9b9892;font-size:10px">— full panel</span>' +
         '<span style="flex:1"></span>' +
+        '<button data-compose-new="1" title="Compose new modmail to a user (opens GAW /modmail/compose with recipient pre-filled)" style="background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:3px 10px;cursor:pointer;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">✉ NEW</button>' +
         '<button data-refresh="1" title="Refresh" style="background:transparent;border:1px solid #2a2825;color:#9b9892;padding:3px 8px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Refresh</button>' +
         '<button data-close="1" title="Close (ESC)" style="background:transparent;border:none;color:#9b9892;padding:2px 8px;cursor:pointer;font-size:18px;line-height:1">x</button>' +
       '</div>' +
@@ -18023,6 +18036,44 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       // v9.24.0 - REFRESH on the full panel also forces firehose now.
       if (e.target.closest('[data-refresh]')) { e.stopPropagation(); loadList(true); return; }
+      // v10.16.26: COMPOSE NEW -- prompts for recipient + subject + body,
+      // stages the draft in chrome.storage.session under gam_modmail_compose_new
+      // with 15-min TTL, then opens GAW /modmail/compose in a new tab.
+      // A new CS IIFE (_gamModmailComposeAutoFill) on /modmail/compose page
+      // loads the staged draft and auto-fills the form -- the operator
+      // reviews and clicks the real GAW Send. Same pattern as v10.15.7
+      // send-direct prefill, no worker dependency, uses operator's
+      // existing authenticated cookies.
+      if (e.target.closest('[data-compose-new]')) {
+        e.stopPropagation();
+        (async () => {
+          try {
+            const recipient = window.prompt('Recipient GAW username (no u/ prefix):', '');
+            if (!recipient || !/^[A-Za-z0-9_-]{2,32}$/.test(recipient.trim())) {
+              if (recipient !== null) snack('Compose cancelled: invalid username shape', 'warn');
+              return;
+            }
+            const subject = window.prompt('Subject (optional, max 200 chars):', '') || '';
+            const body = window.prompt('Message body (max 4000 chars). You can edit on GAW before sending:', '') || '';
+            if (!body.trim()) {
+              snack('Compose cancelled: body required', 'warn');
+              return;
+            }
+            const draft = {
+              recipient: recipient.trim(),
+              subject: String(subject).slice(0, 200),
+              body: String(body).slice(0, 4000),
+              ts: Date.now()
+            };
+            try { await chrome.storage.session.set({ gam_modmail_compose_new: draft }); } catch (_) {}
+            window.open('https://greatawakening.win/modmail/compose', '_blank');
+            snack('Draft staged — review + send on the GAW tab', 'success');
+          } catch (err) {
+            snack('Compose-new error: ' + (err && err.message || err), 'error');
+          }
+        })();
+        return;
+      }
     });
     // v10.16.10: store handler ref on panel element so the toggle-close
     // path in the re-open branch can detach it without waiting for ESC.
@@ -21436,14 +21487,31 @@ Analyze this comment against the community rules. Then write a brief, profession
         const n = (typeof STATE !== 'undefined' && STATE && typeof STATE.unread === 'number') ? STATE.unread : 0;
         if (n > 0) {
           inboxBtn.dataset.count = String(n);
-          inboxBtn.style.color = 'var(--bb-amber, #ff9933)';
+          // v10.16.26: color-shift on operator-overload signal. <=20 unread =
+          // amber (normal triage), 21-50 = amber-warn (catching up), >50 = red
+          // (overloaded; lead should redistribute or escalate). Tooltip
+          // reflects the severity tier so the operator knows what they're
+          // looking at without color alone (a11y friendly).
+          if (n > 50) {
+            inboxBtn.style.color = '#ff3b3b';
+            inboxBtn.title = n + ' unread modmail (BACKLOG) \u2014 click to open panel; consider asking lead for help';
+            inboxBtn.dataset.overload = '1';
+          } else if (n > 20) {
+            inboxBtn.style.color = '#ffd84d';
+            inboxBtn.title = n + ' unread modmail (catching up) \u2014 click to open panel';
+            inboxBtn.dataset.overload = '';
+          } else {
+            inboxBtn.style.color = 'var(--bb-amber, #ff9933)';
+            inboxBtn.title = n + ' unread modmail \u2014 click to open panel';
+            inboxBtn.dataset.overload = '';
+          }
           if (n > __lastInboxUnread) {
             inboxBtn.classList.add('gam-inbox-arrived');
             setTimeout(()=>inboxBtn.classList.remove('gam-inbox-arrived'), 2400);
           }
-          inboxBtn.title = n + ' unread modmail \u2014 click to open chat panel';
         } else {
           delete inboxBtn.dataset.count;
+          inboxBtn.dataset.overload = '';
           inboxBtn.style.color = '';
           inboxBtn.title = 'Modmail inbox \u2014 click to open chat panel';
         }
@@ -29527,6 +29595,72 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         } catch (_) {}
       }
       setTimeout(_doPrefill, 800);
+    } catch (_) {}
+  })();
+
+  // v10.16.26: compose-new auto-fill IIFE. Fires on /modmail/compose page
+  // loads. Reads the gam_modmail_compose_new draft staged by the modmail
+  // panel's NEW button + auto-fills the recipient + subject + body fields
+  // on GAW's compose form. Operator reviews and clicks GAW's Send. Same
+  // architectural pattern as v10.15.7 _gamModmailPrefillCheck -- no worker
+  // dependency, uses the operator's existing authenticated cookies.
+  // 15-min TTL on the draft so a forgotten/aged staging doesn't auto-fill
+  // weeks later. Cleared after fill to prevent re-paste on page reload.
+  (function _gamModmailComposeAutoFill() {
+    try {
+      if (!/^\/modmail\/compose\b/.test(location.pathname)) return;
+      function _doFill() {
+        try {
+          chrome.storage.session.get('gam_modmail_compose_new', function(out) {
+            try {
+              const draft = out && out.gam_modmail_compose_new;
+              if (!draft || !draft.body) return;
+              // TTL guard: 15 minutes
+              if (!draft.ts || (Date.now() - draft.ts) > 15 * 60 * 1000) {
+                try { chrome.storage.session.remove('gam_modmail_compose_new'); } catch (_) {}
+                return;
+              }
+              // Find the form fields. GAW compose form selectors with
+              // defensive fallbacks. Retry up to 7x across 6s if the
+              // form hasn't rendered yet.
+              const toInput  = document.querySelector('input[name="to"], input#to, input[name="recipient"]');
+              const subjInput = document.querySelector('input[name="subject"], input#subject');
+              const bodyTa   = document.querySelector('textarea[name="message"], textarea[name="body"], textarea#body, form#compose textarea, form textarea');
+              if (!bodyTa) {
+                // Form not rendered yet -- retry
+                const retries = (_doFill._retries = (_doFill._retries || 0) + 1);
+                if (retries < 7) { setTimeout(_doFill, 850); return; }
+                console.warn('[gam-modmail-compose-new] form textarea not found after 7 retries');
+                return;
+              }
+              if (toInput && draft.recipient) {
+                toInput.value = draft.recipient;
+                try { toInput.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+              }
+              if (subjInput && draft.subject) {
+                subjInput.value = draft.subject;
+                try { subjInput.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+              }
+              bodyTa.value = draft.body;
+              try { bodyTa.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+              try { (toInput || bodyTa).focus(); } catch (_) {}
+              // Clear stage so reload doesn't re-paste
+              try { chrome.storage.session.remove('gam_modmail_compose_new'); } catch (_) {}
+              // Flash a confirmation badge so operator knows it's staged
+              try {
+                var badge = document.createElement('div');
+                badge.id = 'gam-mm-compose-badge';
+                badge.textContent = 'MODTOOLS PRE-FILLED · review + click Send';
+                badge.style.cssText = 'position:fixed;top:60px;right:20px;z-index:9999990;background:#ff9933;color:#0a0a0b;padding:6px 12px;font:700 11px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;text-transform:uppercase;border-radius:3px;box-shadow:0 2px 8px rgba(0,0,0,0.55);transition:opacity 300ms ease-out';
+                document.body.appendChild(badge);
+                setTimeout(function() { badge.style.opacity = '0'; setTimeout(function() { if (badge.parentNode) badge.remove(); }, 400); }, 4500);
+              } catch (_) {}
+              try { console.log('[gam-modmail-compose-new] auto-filled compose form for', draft.recipient); } catch (_) {}
+            } catch (e) { try { console.warn('[gam-modmail-compose-new] error', e); } catch (_) {} }
+          });
+        } catch (_) {}
+      }
+      setTimeout(_doFill, 800);
     } catch (_) {}
   })();
 
