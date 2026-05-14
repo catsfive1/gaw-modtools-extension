@@ -3482,6 +3482,21 @@ const RPC_HANDLERS = {
     allowed_callers: [RPC_CALLER_POPUP],
     async handler() { return await _rpcWorkerCall('GET', '/admin/audit/health', undefined, { asLead: true }); }
   },
+  // v10.16.29: remote AI key rotation (lead-only). Lead pastes new key →
+  // worker stores in KV → all mods proxy through worker → new key live
+  // for everyone without redeploy.
+  adminAiKeyStatus: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('GET', '/admin/ai-key/status', undefined, { asLead: true }); }
+  },
+  adminAiKeyRotate: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      const provider = String(args && args.provider || '');
+      const key = String(args && args.key || '');
+      return await _rpcWorkerCall('POST', '/admin/ai-key/rotate', { provider, key }, { asLead: true });
+    }
+  },
   adminDisableMod: {
     allowed_callers: [RPC_CALLER_POPUP],
     async handler() {

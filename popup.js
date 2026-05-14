@@ -7001,6 +7001,101 @@ async function __maintRunNow() {
   }
 }
 
+// v10.16.29: AI provider key rotation wiring (lead-only).
+// Architecture: worker proxies all AI calls + stores rotated keys in KV.
+// Lead pastes new key → /admin/ai-key/rotate → KV update → all mods'
+// next AI call uses the new key transparently (env.XAI_API_KEY is patched
+// at request entry by the worker). No mod-side update, no redeploy.
+async function __aiKeyLoadStatus() {
+  const stEl = $('aiKeyStatus');
+  if (!stEl) return;
+  stEl.textContent = 'loading...';
+  stEl.className = 'pop-token-status';
+  try {
+    const r = await popupRpc('adminAiKeyStatus');
+    if (!r || !r.ok || !r.data || !r.data.ok) {
+      stEl.className = 'pop-token-status err';
+      stEl.textContent = 'fetch failed: ' + (r && (r.error || r.status) || '?');
+      return;
+    }
+    const providers = r.data.providers || {};
+    const envFb = providers._env_fallback || {};
+    const parts = [];
+    ['xai', 'openai', 'anthropic'].forEach(p => {
+      const meta = providers[p];
+      const envOk = (p === 'xai') ? !!envFb.xai : false;
+      if (meta && meta.rotated_at) {
+        const ago = Math.floor((Date.now() - meta.rotated_at) / (24 * 3600 * 1000));
+        parts.push(p + ': ' + (meta.key_prefix || '?') + '…' + (meta.key_suffix || '?') + ' (rotated ' + ago + 'd ago)');
+      } else if (envOk) {
+        parts.push(p + ': env-fallback (legacy)');
+      } else {
+        parts.push(p + ': not set');
+      }
+    });
+    stEl.textContent = parts.join(' · ');
+  } catch (e) {
+    stEl.className = 'pop-token-status err';
+    stEl.textContent = 'error: ' + (e && e.message || e);
+  }
+}
+async function __aiKeyRotate() {
+  const provSel = $('aiKeyProvider');
+  const provider = (provSel && provSel.value) || 'xai';
+  const result = $('aiKeyResult');
+  if (!result) return;
+  result.className = 'pop-token-status';
+  try {
+    const key = await __popupAskText({
+      title: '🔑 Rotate ' + provider + ' API key',
+      label: 'Paste new ' + provider + ' API key (16-256 alphanumeric / _ / -). All mods will use this on their next AI call. Old key is invalidated immediately.',
+      placeholder: 'sk-... / xai-... / etc',
+      max: 260,
+      validate: (v) => {
+        if (!v) return 'key required';
+        return /^[A-Za-z0-9_\-]{16,256}$/.test(v) ? '' : 'shape invalid (16-256 alphanumeric/_-)';
+      }
+    });
+    if (!key) { result.textContent = 'cancelled'; return; }
+    const ok = await __popupConfirm({
+      title: 'Rotate ' + provider + ' key for the whole team?',
+      body: 'Every mod\'s next AI call (Llama fallback / Grok / etc) will use this new key.\n\n' +
+            'Old key value is immediately invalidated on the worker side.\n\n' +
+            'Prefix: ' + key.slice(0, 4) + '…' + key.slice(-4) + ' (length ' + key.length + ')\n\n' +
+            'Continue?',
+      okLabel: 'Rotate',
+      cancelLabel: 'Cancel'
+    });
+    if (!ok) { result.textContent = 'cancelled'; return; }
+    result.textContent = 'rotating...';
+    const r = await popupRpc('adminAiKeyRotate', { provider, key });
+    if (!r || !r.ok || !r.data || !r.data.ok) {
+      result.className = 'pop-token-status err';
+      let msg = 'rotate rejected';
+      if (r && r.status) msg += ' (HTTP ' + r.status + ')';
+      if (r && r.data && r.data.error) msg += ' — ' + r.data.error;
+      else if (r && r.error) msg += ' — ' + r.error;
+      result.textContent = msg;
+      return;
+    }
+    result.className = 'pop-token-status ok';
+    result.textContent = '✓ rotated — ' + provider + ' key ' + r.data.key_prefix + '…' + r.data.key_suffix + ' is now live for the team';
+    try { await __aiKeyLoadStatus(); } catch (_) {}
+  } catch (e) {
+    result.className = 'pop-token-status err';
+    result.textContent = 'rotate error: ' + (e && e.message || e);
+  }
+}
+(function __aiKeyWire() {
+  const rotBtn = $('aiKeyRotateBtn');
+  if (rotBtn) rotBtn.addEventListener('click', () => withLoading(rotBtn, 'rotating...', __aiKeyRotate));
+  const refBtn = $('aiKeyRefreshBtn');
+  if (refBtn) refBtn.addEventListener('click', () => withLoading(refBtn, '...', __aiKeyLoadStatus));
+  // Auto-load when the details element opens (lazy)
+  const det = $('gam-lead-ai-keys');
+  if (det) det.addEventListener('toggle', () => { if (det.open) __aiKeyLoadStatus(); });
+})();
+
 (function __maintWireAutonomous() {
   const saveBtn = $('maintAutoSave');
   if (saveBtn) {

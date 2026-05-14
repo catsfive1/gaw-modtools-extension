@@ -12092,6 +12092,41 @@ Analyze this comment against the community rules. Then write a brief, profession
     addToggle('Hide Sidebar', 'hideSidebar', 'Remove GAW\'s right sidebar — more room for content.', v=>{
       document.body.classList.toggle('gam-hide-sidebar', v);
     });
+    // v10.16.29: status-bar orientation. Default horizontal-bottom; lead/mod
+    // can park the bar on the left or right edge to use vertical screen-
+    // space. Live-toggles via data-orientation attribute on #gam-status-bar.
+    {
+      const _orRow = el('div', { cls:'gam-settings-row' });
+      const _orId = 'gam-set-status-bar-orientation';
+      const _orCur = String(getSetting('gam_status_bar_orientation', 'horizontal-bottom'));
+      _orRow.innerHTML =
+        '<div class="gam-settings-info">' +
+          '<label class="gam-settings-lbl" for="' + _orId + '">Status bar orientation</label>' +
+          '<div class="gam-settings-desc">Park the status bar on the bottom (default), left edge, or right edge. Vertical mode uses your screen\'s unused vertical space; ticker is hidden in vertical mode (icons only). Live-applies.</div>' +
+        '</div>' +
+        '<select id="' + _orId + '" style="padding:3px 6px;background:#050507;color:#e8e6e1;border:1px solid #3d3a35;font:11px ui-monospace,monospace">' +
+          '<option value="horizontal-bottom"' + (_orCur === 'horizontal-bottom' ? ' selected' : '') + '>Horizontal (bottom)</option>' +
+          '<option value="vertical-left"'    + (_orCur === 'vertical-left'    ? ' selected' : '') + '>Vertical (left edge)</option>' +
+          '<option value="vertical-right"'   + (_orCur === 'vertical-right'   ? ' selected' : '') + '>Vertical (right edge)</option>' +
+        '</select>';
+      _orRow.querySelector('#' + _orId).addEventListener('change', function(e) {
+        const v = String(e.target.value || 'horizontal-bottom');
+        setSetting('gam_status_bar_orientation', v);
+        try {
+          const bar = document.getElementById('gam-status-bar');
+          if (bar) bar.dataset.orientation = v;
+          // Update body padding live
+          document.body.style.paddingBottom = '';
+          document.body.style.paddingLeft = '';
+          document.body.style.paddingRight = '';
+          if (v === 'vertical-left') document.body.style.paddingLeft = '48px';
+          else if (v === 'vertical-right') document.body.style.paddingRight = '48px';
+          else document.body.style.paddingBottom = '56px';
+        } catch (_) {}
+        try { snack('Bar orientation: ' + v, 'good'); } catch (_) {}
+      });
+      c.appendChild(_orRow);
+    }
     addToggle('Sus Marker', 'susMarkerEnabled', 'Paint \u2717 next to watchlisted / cloud-flagged usernames sitewide.', v=>{
       if (v) startSusMarker(); else document.querySelectorAll('.gam-sus-x').forEach(n=>n.remove());
     });
@@ -14591,7 +14626,18 @@ Analyze this comment against the community rules. Then write a brief, profession
         </div>`;
       }).join('') : `<div class="gam-t-dr-empty">No rules. Add one below or use \u26A1 on a user row.</div>`;
 
+      // v10.16.29: sweep button moved from BOTTOM to TOP (Commander explicit
+      // ask: 'Move the RUN ALL RULES NOW button on /USERS to the top'). The
+      // sweep is the primary auto-DR action \u2014 burying it below 6+ rule rows
+      // + the add-row meant operators scrolled past it on every visit.
+      // Top placement makes it always-visible the moment the rules section
+      // renders. Style amped slightly (amber prominence) to match its
+      // promoted status.
       rulesEl.innerHTML = `
+        <div class="gam-t-dr-sweep gam-t-dr-sweep-top">
+          <button class="gam-t-dr-sweep-btn gam-t-dr-sweep-btn-top" id="gam-dr-sweep-btn" title="Apply every enabled Auto-DR rule to every username in your roster right now. Matches get queued to Death Row instantly. Already-queued users are skipped.">\u26A1 Run all rules now</button>
+          <span class="gam-t-dr-sweep-hint" id="gam-dr-sweep-hint"></span>
+        </div>
         ${ruleRows}
         <div class="gam-t-dr-add" id="gam-dr-add-row">
           <input class="gam-t-dr-add-pat" id="gam-dr-add-pat" type="text" placeholder="regex or *wildcard* pattern..." spellcheck="false">
@@ -14603,11 +14649,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           </select>
           <button class="gam-t-dr-add-btn" id="gam-dr-add-btn">\u26A1 Add</button>
         </div>
-        <div class="gam-t-dr-hint" id="gam-dr-pat-hint"></div>
-        <div class="gam-t-dr-sweep">
-          <button class="gam-t-dr-sweep-btn" id="gam-dr-sweep-btn" title="Apply every enabled Auto-DR rule to every username in your roster right now. Matches get queued to Death Row instantly. Already-queued users are skipped.">\u26A1 Run all rules now</button>
-          <span class="gam-t-dr-sweep-hint" id="gam-dr-sweep-hint"></span>
-        </div>`;
+        <div class="gam-t-dr-hint" id="gam-dr-pat-hint"></div>`;
 
       // v8.1 ux empty-state: when no rules, swap the plain-text empty div for
       // an icon+headline+CTA card. CTA focuses the add-rule pattern input.
@@ -21666,9 +21708,31 @@ Analyze this comment against the community rules. Then write a brief, profession
       chatBtn_v980,
       tickerEl
     );
+    // v10.16.29: status-bar orientation. Default horizontal-bottom. Lead/mod
+    // can flip to vertical-left or vertical-right via GEAR. Sets a
+    // data-orientation attribute that CSS keys off. The vertical mode
+    // stacks icons in a column and parks on the left or right edge --
+    // operator gets to use the vertical screen-space that's currently
+    // unused on widescreens. Commander explicit ask:
+    //   "This bar could be converted to a floating DIV or something
+    //    vertical... we are not using our horizontal space enough"
+    try {
+      const orient = getSetting('gam_status_bar_orientation', 'horizontal-bottom');
+      bar.dataset.orientation = orient;
+    } catch (_) { bar.dataset.orientation = 'horizontal-bottom'; }
     document.body.appendChild(bar);
     // v10.6.2 HOTFIX UIUX-03 P1: prevent bar from occluding feed content
-    try { document.body.style.paddingBottom = '56px'; } catch(_) {}
+    // v10.16.29: pad based on orientation -- bottom-bar needs bottom-padding,
+    // side-bars need left/right padding to keep the GAW content visible.
+    try {
+      const orient = bar.dataset.orientation;
+      document.body.style.paddingBottom = '';
+      document.body.style.paddingLeft = '';
+      document.body.style.paddingRight = '';
+      if (orient === 'vertical-left') document.body.style.paddingLeft = '48px';
+      else if (orient === 'vertical-right') document.body.style.paddingRight = '48px';
+      else document.body.style.paddingBottom = '56px';
+    } catch(_) {}
 
     // v10.15.0 D-22 (RALPH-FIRSTRUN-V14 R-V14-1): first-run status-bar tour.
     // The single biggest unfixed TTFS lever per the v10.14 ralph audit. Walks
@@ -22938,6 +23002,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 /* v7.0.1: on-demand Auto-DR sweep button */
 .gam-t-dr-sweep{display:flex;align-items:center;gap:8px;margin-top:6px;padding:4px 0 2px}
 .gam-t-dr-sweep-btn{background:rgba(240,64,64,.12);border:1px solid rgba(240,64,64,.3);border-radius:4px;color:${C.RED};font-size:10px;font-weight:700;padding:4px 8px;cursor:pointer;flex-shrink:0;transition:all .1s;letter-spacing:.2px}
+/* v10.16.29: when sweep button is at TOP of rules section, amp the prominence.
+   Larger padding + amber primary instead of muted red so it's the obvious
+   primary action when the panel first renders. */
+.gam-t-dr-sweep-top{margin-top:0;margin-bottom:8px;padding:0 0 6px;border-bottom:1px solid ${C.BORDER}}
+.gam-t-dr-sweep-btn-top{background:rgba(255,153,51,0.15);border:1px solid var(--bb-amber);color:var(--bb-amber);font-size:11px;padding:6px 12px;letter-spacing:.4px}
+.gam-t-dr-sweep-btn-top:hover{background:rgba(255,153,51,0.25);box-shadow:0 0 8px rgba(255,153,51,0.3)}
 .gam-t-dr-sweep-btn:hover:not(:disabled){background:rgba(240,64,64,.22);border-color:${C.RED}}
 .gam-t-dr-sweep-btn:disabled{opacity:.5;cursor:progress}
 .gam-t-dr-sweep-hint{font-size:9px;color:${C.TEXT3};flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -23512,6 +23582,57 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   gap: var(--bb-s3) !important;
   box-shadow: 0 1px 0 0 var(--bb-line), 0 0 0 1px rgba(255,153,51,0.04) !important;
   letter-spacing: 0.02em;
+}
+
+/* v10.16.29: VERTICAL ORIENTATION (Commander explicit ask: 'This bar could
+   be converted to a floating DIV or something vertical... we are not using
+   our horizontal space enough'). Sets via bar.dataset.orientation. Default
+   horizontal-bottom rule stays above; the data-attribute selectors below
+   override layout properties for vertical-left + vertical-right. Icons
+   stack via flex-direction:column. Separators become horizontal lines.
+   Ticker drops max-width and gets full column width with normal wrap. */
+#gam-status-bar[data-orientation="vertical-left"],
+#gam-status-bar[data-orientation="vertical-right"] {
+  position: fixed !important;
+  top: 8px !important;
+  bottom: 8px !important;
+  left: auto !important;
+  right: auto !important;
+  transform: none !important;
+  height: auto !important;
+  width: 40px !important;
+  min-width: 0 !important;
+  max-width: 40px !important;
+  flex-direction: column !important;
+  padding: var(--bb-s3) 0 !important;
+  gap: var(--bb-s2) !important;
+  overflow-y: auto !important;
+  overflow-x: visible !important;
+  border-radius: 4px !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+}
+#gam-status-bar[data-orientation="vertical-left"]  { left: 8px !important; }
+#gam-status-bar[data-orientation="vertical-right"] { right: 8px !important; }
+/* Separators rotate 90deg in vertical mode -- becomes thin horizontal line. */
+#gam-status-bar[data-orientation="vertical-left"] .gam-bar-sep,
+#gam-status-bar[data-orientation="vertical-right"] .gam-bar-sep {
+  width: 18px !important;
+  height: 1px !important;
+  margin: var(--bb-s2) 0 !important;
+}
+/* Spacer expands vertically. */
+#gam-status-bar[data-orientation="vertical-left"] .gam-bar-spacer,
+#gam-status-bar[data-orientation="vertical-right"] .gam-bar-spacer {
+  flex: 1 1 auto !important;
+  min-height: 8px !important;
+  min-width: 0 !important;
+}
+/* Ticker becomes rotated narrow column at bottom -- or just hide it on
+   vertical since it's a horizontal-orientation surface. Hide is simpler. */
+#gam-status-bar[data-orientation="vertical-left"] .gam-bar-ticker,
+#gam-status-bar[data-orientation="vertical-right"] .gam-bar-ticker {
+  display: none !important;
 }
 
 /* ── Iter 3 ── Bar separators: thin tonal lines, NOT pipes */

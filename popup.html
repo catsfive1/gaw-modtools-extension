@@ -914,6 +914,31 @@
 
       </details><!-- /#gam-lead-deepdive -->
 
+      <!-- v10.16.29: Remote AI key rotation (lead-only). Lead pastes new key
+           → POST to /admin/ai-key/rotate → worker stores in KV → ALL mods
+           use the new key on next AI call (worker proxies all AI). No
+           per-mod update needed; no extension reload. -->
+      <details id="gam-lead-ai-keys" class="gam-lead-sub" style="margin-top:8px">
+        <summary>🔑 AI provider keys (remote rotation)</summary>
+        <div style="padding:8px 12px;color:var(--bb-ink-dim);font-size:11px;line-height:1.5">
+          <div style="margin-bottom:8px">
+            Paste a new key. Worker stores it encrypted; all mods' next AI call uses the new key (worker proxies all AI). No mod-side update.
+          </div>
+          <div id="aiKeyStatus" class="pop-token-status" style="font-size:10px;margin-bottom:6px">loading...</div>
+          <div class="pop-tools" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <label for="aiKeyProvider" style="font-size:10px;color:var(--bb-ink-dim)">Provider:</label>
+            <select id="aiKeyProvider" style="padding:3px 6px;background:var(--bb-sunken);color:var(--bb-ink);border:1px solid var(--bb-line-hot);font:inherit;font-size:11px">
+              <option value="xai">xAI (Grok)</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
+            <button id="aiKeyRotateBtn" class="pop-btn pop-btn-ghost" style="font-size:11px;padding:4px 10px">🔄 Rotate</button>
+            <button id="aiKeyRefreshBtn" class="pop-btn pop-btn-ghost" style="font-size:10px;padding:3px 8px;color:var(--bb-ink-dim)">↻</button>
+          </div>
+          <div id="aiKeyResult" class="pop-token-status" style="font-size:10px;margin-top:6px"></div>
+        </div>
+      </details>
+
           </div><!-- /#leadOnlyTools -->
         </div><!-- /#leadSection -->
 
