@@ -22645,7 +22645,12 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-chip--risk-low      { color:var(--chip-fg-green); }
 .gam-chip--risk-medium   { color:var(--chip-fg-amber); }
 .gam-chip--risk-high     { color:var(--chip-fg-red); }
-.gam-chip--risk-critical { background:var(--chip-bg-red); color:#fff; animation: gam-chip-pulse 2s infinite; }
+/* v10.16.28 (QA-UI-8 P0): PRM-gate the chip-pulse animation. Critical-risk
+   chips were animating unconditionally for reduce-motion users. */
+.gam-chip--risk-critical { background:var(--chip-bg-red); color:#fff; }
+@media (prefers-reduced-motion: no-preference){
+  .gam-chip--risk-critical { animation: gam-chip-pulse 2s infinite; }
+}
 @keyframes gam-chip-pulse { 0%,100%{opacity:1} 50%{opacity:.55} }
 .gam-chip--verification-verified   { color:var(--chip-fg-green); }
 .gam-chip--verification-unverified { color:var(--chip-fg-neutral); }
@@ -22711,7 +22716,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-repeat-label{font-size:9px;color:#f5a623;text-transform:uppercase;letter-spacing:1px;border-left:2px solid #f5a623;padding-left:6px;margin:8px 0 4px;}
 .gam-repeat-history{margin-top:2px;}
 @keyframes gam-halo-pulse{0%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}50%{box-shadow:0 0 0 6px rgba(245,166,35,.35)}100%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}}
-.gam-repeat-halo--pulse{animation:gam-halo-pulse 600ms ease-out 1;}
+/* v10.16.28 (QA-UI-8 P0): PRM-gate the halo pulse. */
+@media (prefers-reduced-motion: no-preference){
+  .gam-repeat-halo--pulse{animation:gam-halo-pulse 600ms ease-out 1;}
+}
 .gam-at-wrap{padding:8px 14px;font:11px ui-monospace,SFMono-Regular,Consolas,monospace}
 .gam-at-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:${C.TEXT2};font-size:10px;font-variant-numeric:tabular-nums;letter-spacing:.3px}
 .gam-at-spark{display:flex;align-items:flex-end;gap:1px;height:16px}
@@ -24315,8 +24323,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
 }
-#gam-status-bar .gam-ticker-pulse {
-  animation: gam-ticker-pulse-kf 1.5s ease-in-out infinite;
+/* v10.16.28 (QA-UI-8 P0): PRM-gate the ticker pulse. */
+@media (prefers-reduced-motion: no-preference){
+  #gam-status-bar .gam-ticker-pulse {
+    animation: gam-ticker-pulse-kf 1.5s ease-in-out infinite;
+  }
 }
 
 /* Inbox icon with count badge */
@@ -24344,8 +24355,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   60%  { transform: scale(1.05); color: var(--bb-amber); }
   100% { transform: scale(1);   color: var(--bb-amber); }
 }
-#gam-status-bar .gam-inbox-arrived {
-  animation: gam-inbox-arrived-kf 0.7s ease-in-out 3;
+/* v10.16.28 (QA-UI-8 P0): PRM-gate the inbox-arrived animation (includes
+   transform:scale which vestibular users specifically cite as triggering). */
+@media (prefers-reduced-motion: no-preference){
+  #gam-status-bar .gam-inbox-arrived {
+    animation: gam-inbox-arrived-kf 0.7s ease-in-out 3;
+  }
 }
 
 /* v9.8.0 — Custom delegated tooltip. Replaces native title= on bar icons.
@@ -26861,6 +26876,257 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   setInterval(() => { try { autoUnstickyTick(); } catch(e){ _logError('sticky', ERR_SEV.LOW, e, { op: 'autoUnstickyTick-interval' }); } }, 4 * 60 * 1000); // v10.11 C2: Cat D
   // Initial run on load (small delay to let DOM settle)
   setTimeout(() => { try { autoUnstickyTick(); } catch(e){ _logError('sticky', ERR_SEV.LOW, e, { op: 'autoUnstickyTick-initial' }); } }, 8000); // v10.11 C2: Cat D
+
+  // ╔══════════════════════════════════════════════════════════════════╗
+  // ║ v10.16.28: CLICK-CLOCK SCHEDULED UNSTICKY                        ║
+  // ║ Commander ask: 'click on a CLOCK next to a sticky and select     ║
+  // ║ an "unsticky in..." time period (10h/12h/14h/24h)'.              ║
+  // ║                                                                  ║
+  // ║ Architecture: pure client-side, lead-or-mod. State in            ║
+  // ║ chrome.storage.local.gam_scheduled_unstickies = {                ║
+  // ║   [thingId]: { execute_at, delay_label, scheduled_at, by }       ║
+  // ║ }. 60s polling tick fires apiSticky when execute_at <= now.      ║
+  // ║ Respects _autoUnstickyTitleExempted (GENERAL CHAT etc).          ║
+  // ║                                                                  ║
+  // ║ DOM injection: MutationObserver-driven, finds .post.sticky       ║
+  // ║ posts without a [data-gam-clock] marker and adds a clock         ║
+  // ║ button next to the title. Click → popover menu with 4 delay      ║
+  // ║ presets. Selection writes to local + flips clock to amber        ║
+  // ║ "⏰ scheduled in Nh" countdown. Re-click → cancel option.        ║
+  // ╚══════════════════════════════════════════════════════════════════╝
+  const SCHEDULED_UNSTICKY_KEY = 'gam_scheduled_unstickies';
+  const SCHED_PRESETS = [
+    { label: '10h', ms: 10 * 60 * 60 * 1000 },
+    { label: '12h', ms: 12 * 60 * 60 * 1000 },
+    { label: '14h', ms: 14 * 60 * 60 * 1000 },
+    { label: '24h', ms: 24 * 60 * 60 * 1000 }
+  ];
+
+  async function _schedGet() {
+    try {
+      const out = await chrome.storage.local.get(SCHEDULED_UNSTICKY_KEY);
+      return (out && out[SCHEDULED_UNSTICKY_KEY]) || {};
+    } catch (_) { return {}; }
+  }
+  async function _schedSet(map) {
+    try { await chrome.storage.local.set({ [SCHEDULED_UNSTICKY_KEY]: map }); } catch (_) {}
+  }
+
+  function _schedFmtRemaining(ms) {
+    if (ms <= 0) return 'now';
+    const h = Math.floor(ms / (60 * 60 * 1000));
+    const m = Math.floor((ms % (60 * 60 * 1000)) / 60_000);
+    if (h >= 1) return h + 'h' + (m > 0 ? ' ' + m + 'm' : '');
+    return m + 'm';
+  }
+
+  async function _scheduleUnstickyFor(thingId, delayMs, delayLabel, postEl) {
+    if (!thingId || delayMs <= 0) return;
+    const map = await _schedGet();
+    map[String(thingId)] = {
+      execute_at: Date.now() + delayMs,
+      delay_label: String(delayLabel || ''),
+      scheduled_at: Date.now(),
+      by: 'self'
+    };
+    await _schedSet(map);
+    snack('Unsticky scheduled in ' + delayLabel, 'success');
+    _schedUpdateClockUI(postEl, thingId, map[String(thingId)]);
+  }
+
+  async function _cancelScheduledUnsticky(thingId, postEl) {
+    if (!thingId) return;
+    const map = await _schedGet();
+    if (map[String(thingId)]) {
+      delete map[String(thingId)];
+      await _schedSet(map);
+      snack('Scheduled unsticky cancelled', 'info');
+      _schedUpdateClockUI(postEl, thingId, null);
+    }
+  }
+
+  function _schedUpdateClockUI(postEl, thingId, entry) {
+    if (!postEl) postEl = document.querySelector('.post.sticky[data-id="' + thingId + '"]');
+    if (!postEl) return;
+    const btn = postEl.querySelector('[data-gam-clock-btn="1"]');
+    if (!btn) return;
+    if (entry && entry.execute_at) {
+      const remaining = entry.execute_at - Date.now();
+      btn.textContent = '⏰ ' + _schedFmtRemaining(remaining);
+      btn.style.color = 'var(--bb-amber, #ff9933)';
+      btn.style.borderColor = 'var(--bb-amber, #ff9933)';
+      btn.title = 'Scheduled to unsticky in ' + _schedFmtRemaining(remaining) + ' — click to cancel';
+      btn.dataset.gamClockState = 'scheduled';
+    } else {
+      btn.textContent = '🕐';
+      btn.style.color = '';
+      btn.style.borderColor = '';
+      btn.title = 'Schedule unsticky… (10h/12h/14h/24h)';
+      btn.dataset.gamClockState = 'idle';
+    }
+  }
+
+  function _schedShowMenu(btn, thingId, postEl) {
+    // Tear down any existing menu first
+    document.querySelectorAll('.gam-sched-menu').forEach(m => m.remove());
+    const menu = el('div', { cls: 'gam-sched-menu', style: { position:'absolute',background:'#1a1c20',border:'1px solid #3d3a35',borderRadius:'4px',padding:'4px',boxShadow:'0 4px 12px rgba(0,0,0,0.6)',zIndex:'9999996',display:'flex',flexDirection:'column',gap:'2px',minWidth:'120px',font:'600 11px ui-monospace,JetBrains Mono,monospace'} });
+    // Position next to the button
+    try {
+      const rect = btn.getBoundingClientRect();
+      menu.style.left = (rect.left + window.scrollX) + 'px';
+      menu.style.top  = (rect.bottom + window.scrollY + 4) + 'px';
+    } catch (_) {}
+    const isScheduled = btn.dataset.gamClockState === 'scheduled';
+    if (isScheduled) {
+      const cancelBtn = el('button', { style: { background:'transparent',color:'#ff6b6b',border:'1px solid #ff3b3b',padding:'4px 8px',cursor:'pointer',textAlign:'left',letterSpacing:'0.04em',textTransform:'uppercase' } }, '✖ Cancel schedule');
+      cancelBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        menu.remove();
+        await _cancelScheduledUnsticky(thingId, postEl);
+      });
+      menu.appendChild(cancelBtn);
+    } else {
+      const header = el('div', { style: { color:'#9b9892',fontSize:'10px',letterSpacing:'0.06em',textTransform:'uppercase',padding:'4px 8px 6px',borderBottom:'1px solid #2a2825',marginBottom:'2px' } }, 'Unsticky in…');
+      menu.appendChild(header);
+      SCHED_PRESETS.forEach(p => {
+        const b = el('button', { style: { background:'transparent',color:'#e8e6e1',border:'none',padding:'4px 8px',cursor:'pointer',textAlign:'left',letterSpacing:'0.04em',fontSize:'11px'} }, p.label);
+        b.addEventListener('mouseenter', () => { b.style.background = 'rgba(255,153,51,0.12)'; b.style.color = 'var(--bb-amber)'; });
+        b.addEventListener('mouseleave', () => { b.style.background = 'transparent'; b.style.color = '#e8e6e1'; });
+        b.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          menu.remove();
+          await _scheduleUnstickyFor(thingId, p.ms, p.label, postEl);
+        });
+        menu.appendChild(b);
+      });
+    }
+    document.body.appendChild(menu);
+    // Click-outside-to-dismiss
+    setTimeout(() => {
+      const dismiss = (ev) => {
+        if (!menu.contains(ev.target)) {
+          menu.remove();
+          document.removeEventListener('click', dismiss, true);
+        }
+      };
+      document.addEventListener('click', dismiss, true);
+    }, 50);
+  }
+
+  async function _schedInjectClocks() {
+    if (!isMod || !isMod()) return; // mods only (lead OR regular)
+    const map = await _schedGet();
+    document.querySelectorAll('.post.sticky[data-id]').forEach(postEl => {
+      if (postEl.dataset.gamClock === '1') return;
+      const thingId = postEl.getAttribute('data-id');
+      if (!thingId) return;
+      // Find a good injection point -- prefer the title bar / action strip area
+      const titleEl = postEl.querySelector('a.title');
+      if (!titleEl) return;
+      const btn = el('button', {
+        cls: 'gam-sched-clock',
+        'data-gam-clock-btn': '1',
+        'aria-label': 'Schedule unsticky for this post',
+        style: {
+          background: 'transparent',
+          border: '1px solid #3d3a35',
+          color: '#9b9892',
+          padding: '2px 8px',
+          marginLeft: '8px',
+          cursor: 'pointer',
+          font: '600 10px ui-monospace,JetBrains Mono,monospace',
+          letterSpacing: '0.04em',
+          borderRadius: '3px',
+          verticalAlign: 'middle'
+        }
+      }, '🕐');
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        _schedShowMenu(btn, thingId, postEl);
+      });
+      // Inject after the title
+      try { titleEl.insertAdjacentElement('afterend', btn); } catch (_) {
+        try { titleEl.parentNode.insertBefore(btn, titleEl.nextSibling); } catch (__){}
+      }
+      postEl.dataset.gamClock = '1';
+      // Reflect existing schedule state if present
+      const existing = map[String(thingId)];
+      if (existing) _schedUpdateClockUI(postEl, thingId, existing);
+    });
+  }
+
+  async function _schedExecuteTick() {
+    try {
+      const map = await _schedGet();
+      const now = Date.now();
+      let fired = 0;
+      let pruned = 0;
+      for (const [thingId, entry] of Object.entries(map)) {
+        if (!entry) { delete map[thingId]; pruned++; continue; }
+        // Expire stale schedules >72h past their execute_at
+        if (entry.execute_at && now - entry.execute_at > 72 * 60 * 60 * 1000) {
+          delete map[thingId];
+          pruned++;
+          continue;
+        }
+        if (entry.execute_at && entry.execute_at <= now) {
+          // Find the sticky in DOM to check title-exemption
+          const postEl = document.querySelector('.post.sticky[data-id="' + thingId + '"]');
+          const titleText = postEl ? (postEl.querySelector('a.title')?.textContent || '').trim() : '';
+          if (_autoUnstickyTitleExempted(titleText)) {
+            try { _diagLog('sticky', 'scheduled unsticky SKIPPED (title exempt) id=' + thingId + ' title="' + titleText.slice(0, 80) + '"'); } catch (_) {}
+            delete map[thingId];
+            pruned++;
+            continue;
+          }
+          try {
+            const r = await apiSticky(thingId);
+            if (r && r.ok) {
+              fired++;
+              try {
+                logAction({
+                  type: 'unsticky',
+                  contentId: thingId,
+                  source: 'scheduled-clock:' + (entry.delay_label || ''),
+                  ts: new Date().toISOString(),
+                  url: location.href
+                });
+              } catch (_) {}
+              if (postEl) {
+                try { postEl.classList.remove('stickied', 'sticky'); } catch (_) {}
+              }
+            }
+          } catch (e) {
+            try { _diagLog('sticky', 'scheduled unsticky FAILED id=' + thingId + ' err=' + (e && e.message || e)); } catch (_) {}
+          }
+          delete map[thingId];
+        }
+      }
+      if (fired > 0 || pruned > 0) {
+        await _schedSet(map);
+        if (fired > 0) { try { snack(fired + ' scheduled unsticky/s fired', 'info'); } catch (_) {} }
+      }
+      // Also refresh visible clock countdowns
+      try {
+        document.querySelectorAll('.post.sticky[data-id]').forEach(postEl => {
+          const tid = postEl.getAttribute('data-id');
+          if (tid && map[tid]) _schedUpdateClockUI(postEl, tid, map[tid]);
+        });
+      } catch (_) {}
+    } catch (_) {}
+  }
+
+  // Inject clocks on initial load + when new stickies appear
+  setTimeout(_schedInjectClocks, 1500);
+  // Re-scan on SPA navigation + scroll-induced new content
+  try {
+    const _schedObs = new MutationObserver(() => { _schedInjectClocks(); });
+    _schedObs.observe(document.body, { childList: true, subtree: true });
+  } catch (_) {}
+  // Execution tick every 60s + initial check after 5s
+  setInterval(_schedExecuteTick, 60 * 1000);
+  setTimeout(_schedExecuteTick, 5000);
 
   // QUICK STICKY KEYS (v8.4.0) -- FOXY-style hover-and-press.
   // Hover any post and press:
