@@ -2403,11 +2403,17 @@ input[type="checkbox"]:checked::after {
 }
 
 /* Inline status — right side of the row */
+/* v10.16.27 (QA-UI-2 P0): max-width:120px;white-space:nowrap with no
+   overflow:hidden meant text like "Token age: 74d — WARN" bled past the
+   container instead of being clipped or wrapped. Now: overflow:hidden +
+   text-overflow:ellipsis truncates inside the 120px budget. */
 .pop-maint-action-status {
   font: 400 10px/1 var(--bb-font) !important;
   font-variant-numeric: tabular-nums;
   color: var(--bb-ink-dim) !important;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   flex-shrink: 0;
   max-width: 120px;
   text-align: right;
@@ -2596,10 +2602,14 @@ input[type="checkbox"]:checked::after {
 }
 
 /* Lapsed mods chip — hidden until JS shows it */
+/* v10.16.27 (QA-UI-2 P1): added flex-wrap:wrap + row-gap so the threshold
+   label+input row (5 children at 380px body width) drops below the action
+   buttons instead of getting pushed off the right edge. */
 #lapsedModsChip {
   display: none;
   align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   padding: 4px 8px;
   background: var(--bb-amber-bg);
   border: 1px solid var(--bb-amber-dim);

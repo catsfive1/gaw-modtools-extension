@@ -2888,15 +2888,27 @@
     const o = opts || {};
     return new Promise(function(resolve){
       try {
+        // v10.16.27 (QA-UI-5 HIGH): drop backdrop from INT_MAX-1 (2147483646)
+        // down to 9999994 -- one below the .gam-modal tier of 9999995. The
+        // old INT_MAX-1 value put the backdrop ABOVE the panel's nominal
+        // z-index (9999995 from .gam-modal class). The panel survived only
+        // because DOM-order kept it painted last; any future reparenting
+        // or dynamic z-override would have flipped the stacking and made
+        // the backdrop occlude the dialog. Now: deterministic ordering --
+        // backdrop 9999994 < panel 9999995 in the same tier.
         const backdrop = el('div', {
           cls: 'gam-modal-backdrop gam-v72-asktext-backdrop',
           style: { position:'fixed', left:'0', top:'0', right:'0', bottom:'0',
-            background:'rgba(0,0,0,0.55)', zIndex:'2147483646',
+            background:'rgba(0,0,0,0.55)', zIndex:'9999994',
             display:'flex', alignItems:'center', justifyContent:'center' }
         });
+        // v10.16.27 (QA-UI-4 P0): add aria-labelledby so SR announces the
+        // dialog with its title (not just "dialog"). Title gets a unique
+        // ID per modal instance.
+        const _askTitleId = 'gam-asktext-title-' + Date.now() + '-' + Math.floor(Math.random()*1e6);
         // v10.15.10 R4: a11y baseline (was __uxOn()-gated; ungated to match v10.15.5 focus-trap policy).
         // SR announces askText popovers as modals now.
-        const __axPanel = { tabindex: '-1', role: 'dialog', 'aria-modal': 'true' };
+        const __axPanel = { tabindex: '-1', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': _askTitleId };
         const panel = el('div', {
           cls: 'gam-modal gam-v72-asktext',
           style: { background:'#1a1c20', color:'#e4e4e4', borderRadius:'8px',
@@ -2906,6 +2918,7 @@
           ...__axPanel
         });
         const title = el('div', {
+          id: _askTitleId,
           style: { fontSize:'14px', fontWeight:'700', marginBottom:'8px', color:'#4A9EFF' }
         }, String(o.title || 'Input required'));
         const labelRow = el('label', {
@@ -9051,8 +9064,20 @@
         }
       } catch (err){
         console.error('[ModTools] Intel fetch error', err);
+        // v10.16.27 (QA-UI-6 HIGH): also clear the score element's loading
+        // class + show error message. Pre-fix only the summary element was
+        // updated; the score element stayed pinned in "loading..." forever
+        // on any async failure -- operator had no signal anything went wrong.
         const sEl = root.querySelector('#gam-mc-intel-summary');
-        if (sEl) sEl.innerHTML = `<div class="gam-mc-empty">Fetch error (see console).</div>`;
+        if (sEl) {
+          sEl.classList.remove('gam-mc-loading');
+          sEl.innerHTML = `<div class="gam-mc-empty">Fetch error (see console).</div>`;
+        }
+        const scEl = root.querySelector('#gam-mc-intel-score');
+        if (scEl) {
+          scEl.classList.remove('gam-mc-loading');
+          scEl.innerHTML = `<div class="gam-mc-empty-dense">Score unavailable — fetch error.</div>`;
+        }
       }
     })();
 
@@ -12082,7 +12107,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         '<label class="gam-settings-lbl">Status-bar tour</label>' +
         '<div class="gam-settings-desc">Replay the 7-stop first-run orientation tour. Useful when explaining the bar to a new mod or after a UI change.</div>' +
         '</div>' +
-        '<button class="pop-btn pop-btn-ghost" id="gam-replay-tour-btn" style="min-height:32px;padding:6px 14px;font:600 11px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase">Replay</button>';
+        '<button class="pop-btn pop-btn-ghost" id="gam-replay-tour-btn" style="min-height:32px;padding:6px 14px;font:600 11px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;flex-shrink:0">Replay</button>';
       _tourRow.querySelector('#gam-replay-tour-btn').addEventListener('click', function() {
         try { closeSettings && closeSettings(); } catch (_) {}
         try {
@@ -12135,7 +12160,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         '<div class="gam-settings-info">' +
         '<label class="gam-settings-lbl">Auto-unsticky thresholds</label>' +
         '<div class="gam-settings-desc">Maximum sticky age (hours) OR upvote count that triggers auto-unsticky. Either threshold matched fires.</div>' +
-        '<div style="display:flex;gap:8px;margin-top:6px;align-items:center">' +
+        '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;align-items:center">' +
           '<label style="font-size:10px;color:#9b9892">max hrs</label>' +
           '<input id="' + idH + '" type="number" min="1" max="240" value="' + curH + '" style="width:60px;padding:3px 6px;background:#050507;color:#e8e6e1;border:1px solid #3d3a35;font:11px ui-monospace,monospace;font-variant-numeric:tabular-nums">' +
           '<label style="font-size:10px;color:#9b9892;margin-left:8px">min upvotes</label>' +
@@ -12229,7 +12254,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           '<div class="gam-settings-info">' +
           '<label class="gam-settings-lbl">Auto-unsticky thresholds</label>' +
           '<div class="gam-settings-desc">Post must exceed BOTH max age (hours) AND min upvotes to be queued. Worker reads these on each cron tick -- changes sync to worker on save.</div>' +
-          '<div style="display:flex;gap:8px;margin-top:6px;align-items:center">' +
+          '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;align-items:center">' +
             '<label style="font-size:10px;color:#9b9892">max age hrs</label>' +
             '<input id="' + _auIdH + '" type="number" min="1" max="240" value="' + _auCurH + '" style="width:60px;padding:3px 6px;background:#050507;color:#e8e6e1;border:1px solid #3d3a35;font:11px ui-monospace,monospace;font-variant-numeric:tabular-nums">' +
             '<label style="font-size:10px;color:#9b9892;margin-left:8px">min upvotes</label>' +
@@ -18048,20 +18073,42 @@ Analyze this comment against the community rules. Then write a brief, profession
         e.stopPropagation();
         (async () => {
           try {
-            const recipient = window.prompt('Recipient GAW username (no u/ prefix):', '');
-            if (!recipient || !/^[A-Za-z0-9_-]{2,32}$/.test(recipient.trim())) {
-              if (recipient !== null) snack('Compose cancelled: invalid username shape', 'warn');
-              return;
-            }
-            const subject = window.prompt('Subject (optional, max 200 chars):', '') || '';
-            const body = window.prompt('Message body (max 4000 chars). You can edit on GAW before sending:', '') || '';
-            if (!body.trim()) {
-              snack('Compose cancelled: body required', 'warn');
-              return;
-            }
+            // v10.16.27 (QA-UI-7 HIGH): replaced 3 back-to-back window.prompt
+            // calls with idiomatic askTextModal chain. window.prompt blocks
+            // the page, looks like a phishing banner, and can't edit
+            // multi-line body comfortably. askTextModal already used
+            // throughout modtools.js (10+ call sites) -- proper styled
+            // modal, focus trap, ESC dismiss, validation, multiline support.
+            const recipient = await askTextModal({
+              title: '✉ Compose new modmail',
+              label: 'Recipient GAW username (no u/ prefix)',
+              placeholder: 'e.g. catsfive',
+              max: 32,
+              validate: (v) => {
+                if (!v) return 'username required';
+                return /^[A-Za-z0-9_-]{2,32}$/.test(v) ? '' : 'invalid username shape';
+              }
+            });
+            if (!recipient) return; // cancelled
+            const subject = await askTextModal({
+              title: '✉ Subject',
+              label: 'Subject line (optional, max 200 chars). Cancel to send without one.',
+              placeholder: 'e.g. Following up on your appeal',
+              max: 200
+            });
+            // subject can be empty (optional) -- only treat null as cancel
+            const body = await askTextModal({
+              title: '✉ Message body',
+              label: 'Body (you can edit further on GAW before sending). Max 4000 chars.',
+              placeholder: 'Type your message...',
+              multiline: true,
+              max: 4000,
+              validate: (v) => v && v.trim() ? '' : 'body required'
+            });
+            if (!body) return; // cancelled
             const draft = {
-              recipient: recipient.trim(),
-              subject: String(subject).slice(0, 200),
+              recipient: String(recipient).trim(),
+              subject: String(subject || '').slice(0, 200),
               body: String(body).slice(0, 4000),
               ts: Date.now()
             };
@@ -21495,7 +21542,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           if (n > 50) {
             inboxBtn.style.color = '#ff3b3b';
             inboxBtn.title = n + ' unread modmail (BACKLOG) \u2014 click to open panel; consider asking lead for help';
-            inboxBtn.dataset.overload = '1';
+            inboxBtn.dataset.overload = '1'; // v10.16.27: kept for future CSS hook (no current consumer)
           } else if (n > 20) {
             inboxBtn.style.color = '#ffd84d';
             inboxBtn.title = n + ' unread modmail (catching up) \u2014 click to open panel';
@@ -23272,9 +23319,19 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-settings-section{font-size:9px;font-weight:800;color:${C.TEXT3};text-transform:uppercase;letter-spacing:1px;padding:14px 0 5px;border-top:1px solid ${C.BORDER};margin-top:6px;display:flex;align-items:center;gap:6px;break-after:avoid-column;-webkit-column-break-after:avoid}
 .gam-settings-section::after{content:'';flex:1;height:1px;background:${C.BORDER};opacity:.5}
 .gam-settings-section:first-child{border-top:none;margin-top:0;padding-top:0}
-.gam-settings-row{display:flex;align-items:center;gap:14px;padding:7px 10px;border-radius:5px;transition:background .1s;break-inside:avoid;-webkit-column-break-inside:avoid}
+/* v10.16.27: collapse-resistant flex layout. Inside the column-count:2
+   parent, when a row's control (dropdown / number input / wide toggle)
+   has a large natural width AND the label has a long description, the
+   row's info column got squeezed below ~80px and text wrapped char-by-
+   char. Commander screenshot showed 'Default AI Engine' label rendering
+   'Defaul' / 't AI' / 'Engine'. Fix: flex-wrap:wrap so the control drops
+   to a second line when the row can't fit it alongside the info; info
+   gets min-width:180px so it always has enough room for label + 1-line
+   description; gap:8px (row) 14px (col) keeps wrapped rows visually
+   coherent. Same pattern that fixed the rotation roster in v10.16.19. */
+.gam-settings-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:7px 10px;border-radius:5px;transition:background .1s;break-inside:avoid;-webkit-column-break-inside:avoid}
 .gam-settings-row:hover{background:rgba(255,255,255,.04)}
-.gam-settings-info{flex:1;min-width:0}
+.gam-settings-info{flex:1 1 180px;min-width:180px}
 .gam-settings-lbl{display:block;font-size:12px;font-weight:600;color:${C.TEXT};cursor:pointer;user-select:none;letter-spacing:-.1px}
 .gam-settings-desc{font-size:10px;color:${C.TEXT3};margin-top:2px;line-height:1.4}
 .gam-settings-select{background:${C.BG2};border:1px solid ${C.BORDER};color:${C.TEXT};padding:4px 8px;border-radius:4px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;cursor:pointer;outline:none;min-width:130px}
@@ -24188,9 +24245,16 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   justify-content: flex-start !important;
   text-align: left !important;
   /* v9.8.0 - widened so ticker has room to display its full status text */
+  /* v10.16.27 (QA-UI-3 CRITICAL): min-width:720px was clipping the right
+     half of the bar off-screen on sub-720px viewports (half-screen Chrome,
+     tablet portrait at 768px-scrollbar, mobile). Bar is position:fixed so
+     no horizontal scroll fallback. Now: max-width:95vw stays; min-width
+     dropped to auto; overflow-x:auto for graceful degradation; on tight
+     widths the ticker compresses (see .gam-bar-ticker flex-shrink fix). */
   max-width: 95vw !important;
   width: auto !important;
-  min-width: 720px;
+  min-width: 0;
+  overflow-x: auto;
 }
 #gam-status-bar .gam-bar-spacer {
   flex: 1 1 auto;
@@ -24200,11 +24264,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 }
 
 /* Ticker: status MESSAGE on the far right, left-justified text per Commander */
+/* v10.16.27 (QA-UI-3 HIGH): dropped flex-shrink:0 + lowered min-width so the
+   ticker compresses with ellipsis on narrow viewports instead of crushing
+   neighboring icons or forcing the bar wider than 95vw. Operator can still
+   read the ticker via tooltip on hover. */
 #gam-status-bar .gam-bar-ticker {
-  flex-shrink: 0;
+  flex-shrink: 1;
+  flex-basis: auto;
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
+  min-width: 80px;
   max-width: 200px;
   /* v10.13.0 W1 (P0-08 / R-04 / UIUX2-09 B1): the original "font" shorthand
      pinned font-weight:600 !important, which clobbered the JS severity-weight
