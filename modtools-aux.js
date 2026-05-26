@@ -1872,3 +1872,364 @@
   console.log('[modtools-aux Wave 4 v10.16.40] registered ' + registered + ' palette commands (top-50 completion) + Alt+J/K queue nav + learning-log capture');
 })();
 
+/* ============================================================================
+ * Wave 5 (v10.17.0) -- GOD MODE search modal
+ *
+ * Surfaces the worker's /gaw/search?godmode=1 endpoint with a rich-grammar
+ * modal. Grammar supported by the worker (parseGodmodeQuery):
+ *   "phrase"                 -> FTS5 phrase
+ *   author:NAME              -> WHERE author = ?
+ *   community:NAME           -> WHERE community = ?
+ *   score:>50 / <=10 / =0    -> WHERE score OP ?
+ *   date:YYYY-MM-DD..YYYY-MM-DD (either end optional)
+ *   removed:0|1              -> WHERE is_removed = ?
+ *   -term                    -> FTS5 NOT term
+ *   bare term + trailing *   -> FTS5 prefix match
+ *
+ * Closes the gap named in docs/150_RULES_AUDIT.md row 20: "Worker /gaw/search
+ * exists; not surfaced in popup. v11 candidate" + FIREHOSE.md feature #2.
+ * ============================================================================ */
+(function _gamAuxWave5GodMode() {
+  'use strict';
+  if (window._gamAuxWave5Init) return;
+  window._gamAuxWave5Init = true;
+  if (typeof window._gamCmdkRegister !== 'function') return;
+
+  const Z_BACKDROP = 9999990;
+  const Z_MODAL    = 9999995;
+  const AMBER      = '#ff9933';
+  const DARK_BG    = '#0a0a0b';
+  const DARK_PANEL = '#141416';
+  const DARK_LINE  = '#2a2a2e';
+  const TXT        = '#d4d4d8';
+  const TXT_DIM    = '#71717a';
+  const MONO       = 'ui-monospace, JetBrains Mono, Menlo, Consolas, monospace';
+
+  // Shared RPC dispatch (same shape as Wave 2 _auxRpc)
+  async function _gmRpc(name, args) {
+    try {
+      return await chrome.runtime.sendMessage({ type: 'rpc', name, args: args || {} });
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e) };
+    }
+  }
+
+  const _gmSnack = (msg, type) => {
+    try { if (typeof window.snack === 'function') return window.snack(msg, type); } catch (_) {}
+    console.log('[GOD MODE]', msg);
+  };
+
+  function _gmEsc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function _gmFormatDate(epochSec) {
+    if (!epochSec) return '';
+    try {
+      const d = new Date(epochSec * 1000);
+      const now = Date.now();
+      const ageMs = now - d.getTime();
+      const ageHr = ageMs / 3600000;
+      if (ageHr < 1) return Math.round(ageMs / 60000) + 'm';
+      if (ageHr < 24) return Math.round(ageHr) + 'h';
+      if (ageHr < 24 * 7) return Math.round(ageHr / 24) + 'd';
+      return d.toISOString().slice(0, 10);
+    } catch (_) { return ''; }
+  }
+
+  function _gmCloseModal() {
+    const m = document.getElementById('gam-godmode-modal');
+    const b = document.getElementById('gam-godmode-backdrop');
+    if (m) m.remove();
+    if (b) b.remove();
+    document.removeEventListener('keydown', _gmKeyHandler, true);
+  }
+
+  function _gmKeyHandler(e) {
+    if (e.key === 'Escape') { e.preventDefault(); _gmCloseModal(); }
+  }
+
+  async function _gmRunSearch() {
+    const qInput = document.getElementById('gam-godmode-q');
+    const resultsEl = document.getElementById('gam-godmode-results');
+    const metaEl = document.getElementById('gam-godmode-meta');
+    if (!qInput || !resultsEl) return;
+    const q = (qInput.value || '').trim();
+    if (!q || q.length < 2) {
+      resultsEl.innerHTML = '<div style="padding:14px;color:' + TXT_DIM + ';font:11px ' + MONO + '">Enter a query (>= 2 chars).</div>';
+      if (metaEl) metaEl.textContent = '';
+      return;
+    }
+    const scope = (document.querySelector('input[name="gam-godmode-scope"]:checked') || {}).value || 'both';
+    const sort = (document.querySelector('input[name="gam-godmode-sort"]:checked') || {}).value || 'date';
+
+    resultsEl.innerHTML = '<div style="padding:14px;color:' + TXT_DIM + ';font:11px ' + MONO + '">searching...</div>';
+    if (metaEl) metaEl.textContent = 'querying /gaw/search?godmode=1 ...';
+
+    const r = await _gmRpc('modSearch', { q, scope, limit: 100, godmode: true, sort });
+    if (!r || !r.ok) {
+      const err = (r && (r.error || r.body && r.body.error)) || 'unknown';
+      resultsEl.innerHTML = '<div style="padding:14px;color:#f04040;font:11px ' + MONO + '">' +
+        '<b>SEARCH FAILED</b><br>' + _gmEsc(String(err)) +
+        '<br><br><span style="color:' + TXT_DIM + '">Tip: check the grammar help above. If the error mentions FTS5, your query may need adjustment (e.g. very short terms, or no positive terms).</span>' +
+        '</div>';
+      if (metaEl) metaEl.textContent = 'error';
+      return;
+    }
+    // r.body is the worker response: { ok, posts, comments, godmode }
+    const body = (r.body && typeof r.body === 'object') ? r.body : r;
+    const posts = body.posts || [];
+    const comments = body.comments || [];
+    const total = posts.length + comments.length;
+    if (metaEl) {
+      metaEl.textContent = total + ' result' + (total !== 1 ? 's' : '') +
+        ' (' + posts.length + ' posts / ' + comments.length + ' comments)';
+    }
+    if (total === 0) {
+      resultsEl.innerHTML = '<div style="padding:14px;color:' + TXT_DIM + ';font:11px ' + MONO + '">No results.</div>';
+      return;
+    }
+
+    // Sorted view: posts first, then comments, both newest-first within group.
+    const rows = [];
+    posts.forEach(p => rows.push({ kind: 'post', ...p }));
+    comments.forEach(c => rows.push({ kind: 'comment', ...c }));
+
+    // v10.17.0: build rows with DOM API + textContent for all user-controlled
+    // fields. No row-level innerHTML. Eliminates the XSS surface entirely --
+    // even if the worker were ever compromised to return malicious strings,
+    // there's no path to script execution because nothing is parsed as HTML.
+    const frag = document.createDocumentFragment();
+    const mkSpan = (text, cssText) => {
+      const s = document.createElement('span');
+      if (cssText) s.style.cssText = cssText;
+      s.textContent = text == null ? '' : String(text);
+      return s;
+    };
+    rows.forEach(row => {
+      const el = document.createElement('a');
+      el.style.cssText = 'display:grid;grid-template-columns:48px 1fr 110px 60px 50px;gap:8px;padding:8px 10px;' +
+        'border-bottom:1px solid ' + DARK_LINE + ';color:' + TXT + ';' +
+        'text-decoration:none;font:11px ' + MONO + ';cursor:pointer;';
+      el.setAttribute('target', '_blank');
+      el.setAttribute('rel', 'noopener');
+      // Build href via URL constructor; protocol-locked to https + greatawakening.win
+      // host so a malicious slug cannot pivot the link to javascript:/data:/etc.
+      try {
+        const u = new URL('https://greatawakening.win/');
+        if (row.kind === 'post') {
+          const slug = row.slug ? String(row.slug) : String(row.id || '');
+          u.pathname = '/p/' + slug.replace(/[^A-Za-z0-9_-]/g, '') + '/x/c/';
+        } else {
+          u.pathname = '/p/' + String(row.post_id || '').replace(/[^0-9]/g, '') +
+            '/x/c/' + String(row.id || '').replace(/[^0-9]/g, '');
+          u.hash = 'context';
+        }
+        el.href = u.toString();
+      } catch (_) {
+        el.href = 'https://greatawakening.win/';
+      }
+      el.onmouseover = () => el.style.background = '#1a1a1d';
+      el.onmouseout  = () => el.style.background = '';
+
+      // Column 1: kind badge + removed badge
+      const badges = document.createElement('div');
+      const kBadge = document.createElement('span');
+      kBadge.style.cssText = 'display:inline-block;padding:1px 5px;border-radius:3px;font-weight:600;color:' + DARK_BG +
+        ';background:' + (row.kind === 'post' ? AMBER : '#4A9EFF');
+      kBadge.textContent = row.kind === 'post' ? 'POST' : 'COMM';
+      badges.appendChild(kBadge);
+      if (row.is_removed) {
+        const rBadge = document.createElement('span');
+        rBadge.style.cssText = 'display:inline-block;margin-left:4px;padding:1px 4px;background:#f04040;' +
+          'color:' + DARK_BG + ';border-radius:3px;font-weight:600';
+        rBadge.textContent = 'REM';
+        badges.appendChild(rBadge);
+      }
+      el.appendChild(badges);
+
+      // Column 2: title + snippet
+      const titleCol = document.createElement('div');
+      titleCol.style.cssText = 'overflow:hidden';
+      const titleEl = document.createElement('div');
+      titleEl.style.cssText = 'color:' + TXT + ';font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      const rawTitle = row.kind === 'post' ? (row.title || '(no title)') : (row.snippet || '');
+      titleEl.textContent = String(rawTitle).slice(0, 220);
+      titleCol.appendChild(titleEl);
+      if (row.kind === 'post' && row.snippet) {
+        const snipEl = document.createElement('div');
+        snipEl.style.cssText = 'color:' + TXT_DIM + ';margin-top:3px;font-size:10px;line-height:1.4';
+        const raw = String(row.snippet);
+        snipEl.textContent = raw.slice(0, 240) + (raw.length > 240 ? '...' : '');
+        titleCol.appendChild(snipEl);
+      }
+      el.appendChild(titleCol);
+
+      // Column 3: author
+      el.appendChild(mkSpan('@' + (row.author || ''),
+        'color:' + AMBER + ';overflow:hidden;text-overflow:ellipsis;white-space:nowrap'));
+
+      // Column 4: community
+      el.appendChild(mkSpan(row.community || '-', 'color:' + TXT_DIM));
+
+      // Column 5: score + date (numeric, defensively coerced)
+      const scoreCol = document.createElement('div');
+      scoreCol.style.cssText = 'color:' + TXT_DIM + ';text-align:right';
+      const safeScore = (typeof row.score === 'number' && Number.isFinite(row.score))
+        ? String(row.score | 0)
+        : '-';
+      scoreCol.appendChild(document.createTextNode(safeScore));
+      scoreCol.appendChild(document.createElement('br'));
+      const dateSpan = document.createElement('span');
+      dateSpan.style.cssText = 'font-size:10px';
+      dateSpan.textContent = _gmFormatDate(row.created_at);
+      scoreCol.appendChild(dateSpan);
+      el.appendChild(scoreCol);
+
+      frag.appendChild(el);
+    });
+    // Clear previous results without using innerHTML
+    while (resultsEl.firstChild) resultsEl.removeChild(resultsEl.firstChild);
+    resultsEl.appendChild(frag);
+  }
+
+  function _gmOpenModal(seedQuery) {
+    if (document.getElementById('gam-godmode-modal')) return; // already open
+
+    const backdrop = document.createElement('div');
+    backdrop.id = 'gam-godmode-backdrop';
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px);' +
+      'z-index:' + Z_BACKDROP + ';';
+    backdrop.onclick = _gmCloseModal;
+
+    const modal = document.createElement('div');
+    modal.id = 'gam-godmode-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', 'GOD MODE search');
+    modal.style.cssText = 'position:fixed;top:5vh;left:50%;transform:translateX(-50%);' +
+      'width:min(960px,95vw);max-height:90vh;display:flex;flex-direction:column;' +
+      'background:' + DARK_PANEL + ';border:1px solid ' + AMBER + ';border-radius:8px;' +
+      'box-shadow:0 20px 60px rgba(0,0,0,0.6);z-index:' + Z_MODAL + ';' +
+      'font:12px ' + MONO + ';color:' + TXT + ';';
+
+    modal.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;' +
+        'border-bottom:1px solid ' + DARK_LINE + ';background:' + DARK_BG + '">' +
+        '<div style="color:' + AMBER + ';font-weight:700;letter-spacing:.5px">' +
+          '&#x1F50D; GOD MODE &middot; firehose search' +
+        '</div>' +
+        '<button id="gam-godmode-close" class="gam-btn" style="' +
+          'background:transparent;border:1px solid ' + DARK_LINE + ';color:' + TXT + ';' +
+          'padding:4px 10px;border-radius:4px;cursor:pointer;min-height:32px;min-width:32px;font:600 12px ' + MONO + '">' +
+          '×</button>' +
+      '</div>' +
+
+      '<div style="padding:10px 14px;border-bottom:1px solid ' + DARK_LINE + '">' +
+        '<div style="display:flex;gap:8px;align-items:center">' +
+          '<input id="gam-godmode-q" type="text" autofocus placeholder=\'trump pelosi -fauci author:catsfive community:GreatAwakening score:>50 date:2026-01-01..\' style="' +
+            'flex:1;padding:8px 10px;background:' + DARK_BG + ';color:' + TXT + ';' +
+            'border:1px solid ' + DARK_LINE + ';border-radius:4px;font:12px ' + MONO + ';min-height:32px;outline:none">' +
+          '<button id="gam-godmode-go" class="gam-btn" style="' +
+            'background:' + AMBER + ';color:' + DARK_BG + ';border:0;padding:8px 14px;border-radius:4px;' +
+            'cursor:pointer;font:700 12px ' + MONO + ';min-height:32px;letter-spacing:.5px">SEARCH</button>' +
+        '</div>' +
+        '<div style="margin-top:8px;color:' + TXT_DIM + ';font-size:10px;line-height:1.5">' +
+          '<b style="color:' + TXT + '">Grammar:</b> ' +
+          '<code style="color:' + AMBER + '">"phrase"</code> &middot; ' +
+          '<code style="color:' + AMBER + '">author:NAME</code> &middot; ' +
+          '<code style="color:' + AMBER + '">community:NAME</code> &middot; ' +
+          '<code style="color:' + AMBER + '">score:&gt;50</code> &middot; ' +
+          '<code style="color:' + AMBER + '">date:2026-01-01..2026-03-01</code> &middot; ' +
+          '<code style="color:' + AMBER + '">removed:1</code> &middot; ' +
+          '<code style="color:' + AMBER + '">-term</code> &middot; ' +
+          '<code style="color:' + AMBER + '">term*</code> (prefix)' +
+        '</div>' +
+        '<div style="margin-top:10px;display:flex;gap:18px;align-items:center;flex-wrap:wrap">' +
+          '<div style="display:flex;gap:10px;align-items:center"><b style="color:' + TXT_DIM + ';font-size:10px;text-transform:uppercase;letter-spacing:.5px">Scope:</b>' +
+            '<label style="cursor:pointer"><input type="radio" name="gam-godmode-scope" value="both" checked> both</label>' +
+            '<label style="cursor:pointer"><input type="radio" name="gam-godmode-scope" value="posts"> posts</label>' +
+            '<label style="cursor:pointer"><input type="radio" name="gam-godmode-scope" value="comments"> comments</label>' +
+          '</div>' +
+          '<div style="display:flex;gap:10px;align-items:center"><b style="color:' + TXT_DIM + ';font-size:10px;text-transform:uppercase;letter-spacing:.5px">Sort:</b>' +
+            '<label style="cursor:pointer"><input type="radio" name="gam-godmode-sort" value="date" checked> date</label>' +
+            '<label style="cursor:pointer"><input type="radio" name="gam-godmode-sort" value="rank"> rank (BM25)</label>' +
+            '<label style="cursor:pointer"><input type="radio" name="gam-godmode-sort" value="score"> score</label>' +
+          '</div>' +
+          '<div id="gam-godmode-meta" style="margin-left:auto;color:' + TXT_DIM + ';font-size:10px"></div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div id="gam-godmode-results" style="flex:1;overflow-y:auto;min-height:200px;max-height:60vh"></div>' +
+
+      '<div style="padding:8px 14px;border-top:1px solid ' + DARK_LINE + ';background:' + DARK_BG + ';' +
+        'color:' + TXT_DIM + ';font-size:10px;display:flex;justify-content:space-between;align-items:center">' +
+        '<div>ESC closes &middot; Enter submits &middot; click any row to open in GAW</div>' +
+        '<div style="color:' + AMBER + ';opacity:.6">v10.17.0 godmode</div>' +
+      '</div>';
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(modal);
+
+    // Wire interactions
+    const closeBtn = document.getElementById('gam-godmode-close');
+    if (closeBtn) closeBtn.onclick = _gmCloseModal;
+
+    const goBtn = document.getElementById('gam-godmode-go');
+    if (goBtn) goBtn.onclick = _gmRunSearch;
+
+    const qIn = document.getElementById('gam-godmode-q');
+    if (qIn) {
+      qIn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); _gmRunSearch(); }
+      });
+      if (seedQuery) qIn.value = seedQuery;
+      setTimeout(() => qIn.focus(), 50);
+    }
+
+    document.addEventListener('keydown', _gmKeyHandler, true);
+
+    if (seedQuery) _gmRunSearch();
+  }
+
+  // Expose on window for other modules + status-bar wiring.
+  window._gamOpenGodMode = _gmOpenModal;
+
+  // Register palette command(s)
+  const wave5 = [
+    {
+      label: 'GOD MODE: Search firehose (rich grammar)',
+      kw: 'god mode search firehose advanced query author community score date removed prefix',
+      icon: '🔍',
+      fn: () => _gmOpenModal()
+    },
+    {
+      label: 'GOD MODE: Search by author (open prompt)',
+      kw: 'god mode search author user posts comments by',
+      icon: '👤',
+      fn: async () => {
+        try {
+          const a = (typeof window._gamAuxAsk === 'function')
+            ? await window._gamAuxAsk('Author username to search:', { defaultValue: '' })
+            : (window.prompt && window.prompt('Author username to search:'));
+          if (!a) return;
+          _gmOpenModal('author:' + String(a).trim());
+        } catch (e) { _gmSnack('open prompt failed: ' + (e && e.message || e), 'err'); }
+      }
+    },
+    {
+      label: 'GOD MODE: Search removed posts (last 7d)',
+      kw: 'god mode removed posts deleted last week firehose archive',
+      icon: '🗑',
+      fn: () => {
+        const d = new Date(Date.now() - 7 * 86400 * 1000).toISOString().slice(0, 10);
+        _gmOpenModal('removed:1 date:' + d + '..');
+      }
+    }
+  ];
+  let waveRegistered = 0;
+  wave5.forEach(c => { if (window._gamCmdkRegister(c)) waveRegistered++; });
+  console.log('[modtools-aux Wave 5 v10.17.0] registered ' + waveRegistered + ' GOD MODE palette commands; window._gamOpenGodMode() also available');
+})();
+

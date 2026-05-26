@@ -2413,7 +2413,15 @@ const RPC_HANDLERS = {
       const q = encodeURIComponent(String(args && args.q || ''));
       const scope = encodeURIComponent(String(args && args.scope || 'both'));
       const limit = Math.min(200, Math.max(1, parseInt(args && args.limit, 10) || 50));
-      return await _rpcWorkerCall('GET', '/gaw/search?q=' + q + '&scope=' + scope + '&limit=' + limit, undefined);
+      // v10.17.0 GOD MODE: forward optional ?godmode=1 + ?sort= params when
+      // the caller passes them. Worker preserves v9.6.0 behavior when absent.
+      const godmode = (args && args.godmode) ? '1' : '';
+      const sort = String(args && args.sort || '').toLowerCase();
+      const validSort = (sort === 'rank' || sort === 'score' || sort === 'date') ? sort : '';
+      let path = '/gaw/search?q=' + q + '&scope=' + scope + '&limit=' + limit;
+      if (godmode) path += '&godmode=1';
+      if (validSort) path += '&sort=' + validSort;
+      return await _rpcWorkerCall('GET', path, undefined);
     }
   },
   modPresencePing: {
