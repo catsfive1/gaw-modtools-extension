@@ -2424,6 +2424,18 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('GET', path, undefined);
     }
   },
+  // v10.17.2: firehose crawler observability (lead-only on worker side via
+  // requireLeadAuth -- non-leads will get a 403 surfaced to the caller).
+  modAdminFirehoseKeywords: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const limit  = Math.min(50, Math.max(1, parseInt(args && args.limit, 10)  || 10));
+      const sample = Math.min(50, Math.max(1, parseInt(args && args.sample, 10) || 10));
+      return await _rpcWorkerCall('GET',
+        '/admin/firehose/keywords?limit=' + limit + '&sample=' + sample,
+        undefined);
+    }
+  },
   modPresencePing: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
     // AF-15 (Rule 43): no required fields; passthrough.

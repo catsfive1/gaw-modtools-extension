@@ -1905,6 +1905,16 @@
   const TXT_DIM    = '#71717a';
   const MONO       = 'ui-monospace, JetBrains Mono, Menlo, Consolas, monospace';
 
+  // v10.17.1: selection state for bulk actions on result set.
+  // Keyed `${kind}:${id}` so post and comment with same numeric id never collide.
+  const _gmSelected = new Map(); // key -> { kind, id, author, url, title }
+  const _gmRowKey = (kind, id) => kind + ':' + String(id);
+
+  // Last-search context (for "rerun" + saved-queries v2)
+  let _gmLastQuery = null;
+  let _gmLastScope = 'both';
+  let _gmLastSort  = 'date';
+
   // Shared RPC dispatch (same shape as Wave 2 _auxRpc)
   async function _gmRpc(name, args) {
     try {
@@ -1944,7 +1954,264 @@
     const b = document.getElementById('gam-godmode-backdrop');
     if (m) m.remove();
     if (b) b.remove();
+    _gmSelected.clear();
     document.removeEventListener('keydown', _gmKeyHandler, true);
+  }
+
+  // v10.17.1: refresh the bulk-action bar based on _gmSelected.size.
+  // Bar is INSERTED below the results (above footer) when N>0, REMOVED when 0.
+  function _gmRefreshBulkBar() {
+    const n = _gmSelected.size;
+    const existing = document.getElementById('gam-godmode-bulkbar');
+    const modal = document.getElementById('gam-godmode-modal');
+    if (n === 0) {
+      if (existing) existing.remove();
+      // Also uncheck any visible "select all" if all currently visible rows match no selection
+      const sa = document.getElementById('gam-godmode-selectall');
+      if (sa) sa.checked = false;
+      return;
+    }
+    if (existing) {
+      const cnt = existing.querySelector('[data-gm-selcount]');
+      if (cnt) cnt.textContent = String(n) + ' selected';
+      return;
+    }
+    if (!modal) return;
+    const bar = document.createElement('div');
+    bar.id = 'gam-godmode-bulkbar';
+    bar.style.cssText = 'display:flex;gap:8px;align-items:center;padding:8px 14px;' +
+      'border-top:1px solid ' + AMBER + ';background:#1a1a1d;color:' + TXT + ';' +
+      'font:11px ' + MONO + ';';
+    const lbl = document.createElement('div');
+    lbl.setAttribute('data-gm-selcount', '1');
+    lbl.style.cssText = 'color:' + AMBER + ';font-weight:700;min-width:90px';
+    lbl.textContent = String(n) + ' selected';
+    bar.appendChild(lbl);
+
+    const btn = (label, color, fn) => {
+      const b = document.createElement('button');
+      b.className = 'gam-btn';
+      b.style.cssText = 'background:' + (color || DARK_BG) + ';color:' + TXT + ';' +
+        'border:1px solid ' + DARK_LINE + ';padding:5px 10px;border-radius:4px;cursor:pointer;' +
+        'font:600 11px ' + MONO + ';min-height:28px;white-space:nowrap;';
+      b.textContent = label;
+      b.onclick = fn;
+      return b;
+    };
+
+    bar.appendChild(btn('Open in tabs', DARK_BG, () => _gmBulkOpenTabs()));
+    bar.appendChild(btn('Copy authors', DARK_BG, () => _gmBulkCopy('author')));
+    bar.appendChild(btn('Copy URLs',    DARK_BG, () => _gmBulkCopy('url')));
+    bar.appendChild(btn('Clear',        '#3a1818', () => {
+      _gmSelected.clear();
+      document.querySelectorAll('input[data-gm-rowcheckbox]').forEach(c => { c.checked = false; });
+      _gmRefreshBulkBar();
+    }));
+
+    // Insert ABOVE the footer (which is the last child of modal)
+    const footer = modal.children[modal.children.length - 1];
+    if (footer) modal.insertBefore(bar, footer);
+    else modal.appendChild(bar);
+  }
+
+  // v10.17.1: selection-toolbar action. Toggles checkbox state on every
+  // visible row + fires its own onchange so _gmSelected stays consistent.
+  function _gmSelectVisible(mode) {
+    const cbs = document.querySelectorAll('#gam-godmode-results input[data-gm-rowcheckbox]');
+    let changed = 0;
+    cbs.forEach(cb => {
+      let target;
+      if (mode === 'all')        target = true;
+      else if (mode === 'none')  target = false;
+      else if (mode === 'invert') target = !cb.checked;
+      else return;
+      if (cb.checked !== target) {
+        cb.checked = target;
+        if (typeof cb.onchange === 'function') cb.onchange();
+        changed++;
+      }
+    });
+    if (changed > 0) _gmSnack(mode + ': ' + changed + ' row' + (changed !== 1 ? 's' : ''), 'info');
+  }
+
+  function _gmBulkOpenTabs() {
+    const n = _gmSelected.size;
+    if (n === 0) return;
+    if (n > 25) {
+      const ok = window.confirm('Opening ' + n + ' tabs. Browser may slow. Continue?');
+      if (!ok) return;
+    }
+    let opened = 0;
+    _gmSelected.forEach(v => {
+      try { window.open(v.url, '_blank', 'noopener'); opened++; } catch (_) {}
+    });
+    _gmSnack('opened ' + opened + ' tab' + (opened !== 1 ? 's' : ''), 'ok');
+  }
+
+  // v10.17.1 stub -- filled in by saved-queries layer (task 13). Safe no-op
+  // until then so _gmRunSearch can call it unconditionally.
+  function _gmPushRecentQuery(q, scope, sort) {
+    try {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
+      chrome.storage.local.get('gam_godmode_recent', (data) => {
+        const list = Array.isArray(data && data.gam_godmode_recent) ? data.gam_godmode_recent.slice() : [];
+        // Dedup: drop any prior identical query/scope/sort triple
+        const filtered = list.filter(e => !(e.q === q && e.scope === scope && e.sort === sort));
+        filtered.unshift({ q, scope, sort, ts: Math.floor(Date.now() / 1000) });
+        // Cap at 20
+        const capped = filtered.slice(0, 20);
+        chrome.storage.local.set({ gam_godmode_recent: capped });
+      });
+    } catch (_) {}
+  }
+
+  // v10.17.1: prompt for name, save current query as a named preset.
+  async function _gmSaveCurrentAsPreset() {
+    const qIn = document.getElementById('gam-godmode-q');
+    const q = qIn ? (qIn.value || '').trim() : '';
+    if (!q || q.length < 2) { _gmSnack('enter a query first', 'warn'); return; }
+    const scope = (document.querySelector('input[name="gam-godmode-scope"]:checked') || {}).value || 'both';
+    const sort  = (document.querySelector('input[name="gam-godmode-sort"]:checked') || {}).value  || 'date';
+    let name = null;
+    try {
+      if (typeof window._gamAuxAsk === 'function') {
+        name = await window._gamAuxAsk('Save query as. Name (1-40 chars):', { defaultValue: q.slice(0, 40) });
+      } else {
+        name = window.prompt('Save query as. Name (1-40 chars):', q.slice(0, 40));
+      }
+    } catch (e) { return; }
+    if (!name) return;
+    name = String(name).trim().slice(0, 40);
+    if (!name) return;
+    try {
+      if (!chrome || !chrome.storage || !chrome.storage.local) {
+        _gmSnack('chrome.storage unavailable', 'err'); return;
+      }
+      chrome.storage.local.get('gam_godmode_saved', (data) => {
+        const list = Array.isArray(data && data.gam_godmode_saved) ? data.gam_godmode_saved.slice() : [];
+        // Replace any existing entry with the same name
+        const filtered = list.filter(e => e.name !== name);
+        filtered.unshift({ name, q, scope, sort, added_at: Math.floor(Date.now() / 1000) });
+        // Cap at 30
+        const capped = filtered.slice(0, 30);
+        chrome.storage.local.set({ gam_godmode_saved: capped }, () => {
+          _gmSnack('saved "' + name + '"', 'ok');
+          _gmRefreshPresets();
+        });
+      });
+    } catch (e) { _gmSnack('save failed: ' + (e && e.message || e), 'err'); }
+  }
+
+  // v10.17.1: render the presets/recent strip below the input.
+  // Reads chrome.storage.local for saved (gam_godmode_saved) and recent
+  // (gam_godmode_recent). Saved chips get a star prefix; recent get a clock.
+  // Click loads + runs. Hover shows X for delete (saved only -- recent auto-evicts).
+  function _gmRefreshPresets() {
+    const strip = document.getElementById('gam-godmode-presets');
+    if (!strip) return;
+    try {
+      if (!chrome || !chrome.storage || !chrome.storage.local) return;
+      chrome.storage.local.get(['gam_godmode_saved', 'gam_godmode_recent'], (data) => {
+        const saved  = Array.isArray(data && data.gam_godmode_saved)  ? data.gam_godmode_saved  : [];
+        const recent = Array.isArray(data && data.gam_godmode_recent) ? data.gam_godmode_recent : [];
+        // Drop recent entries that match a saved query exactly (dedupe noise)
+        const savedKeys = new Set(saved.map(s => s.q + '|' + (s.scope || 'both') + '|' + (s.sort || 'date')));
+        const recentFiltered = recent.filter(r => !savedKeys.has(r.q + '|' + (r.scope || 'both') + '|' + (r.sort || 'date')));
+
+        // Clear strip
+        while (strip.firstChild) strip.removeChild(strip.firstChild);
+        if (!saved.length && !recentFiltered.length) {
+          strip.style.minHeight = '0';
+          return;
+        }
+        strip.style.minHeight = '26px';
+
+        const mkChip = (label, fullText, isSaved, payload) => {
+          const chip = document.createElement('span');
+          chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:2px 8px;' +
+            'border:1px solid ' + DARK_LINE + ';border-radius:12px;background:' + DARK_BG + ';' +
+            'color:' + (isSaved ? AMBER : TXT) + ';font:600 10px ' + MONO + ';cursor:pointer;' +
+            'max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+          chip.title = fullText;
+          chip.textContent = (isSaved ? '★ ' : '⏱ ') + label;
+          chip.onclick = () => {
+            const qIn = document.getElementById('gam-godmode-q');
+            if (qIn) qIn.value = payload.q || '';
+            const scopeRadio = document.querySelector('input[name="gam-godmode-scope"][value="' + (payload.scope || 'both') + '"]');
+            if (scopeRadio) scopeRadio.checked = true;
+            const sortRadio = document.querySelector('input[name="gam-godmode-sort"][value="' + (payload.sort || 'date') + '"]');
+            if (sortRadio) sortRadio.checked = true;
+            _gmRunSearch();
+          };
+          // Delete X on saved chips only (hover-revealed)
+          if (isSaved) {
+            const x = document.createElement('span');
+            x.textContent = '×';
+            x.style.cssText = 'opacity:.5;margin-left:4px;cursor:pointer;font-weight:700';
+            x.title = 'Delete saved preset';
+            x.onclick = (e) => {
+              e.stopPropagation();
+              try {
+                chrome.storage.local.get('gam_godmode_saved', (d2) => {
+                  const ls = Array.isArray(d2 && d2.gam_godmode_saved) ? d2.gam_godmode_saved.slice() : [];
+                  const filtered = ls.filter(s => s.name !== payload.name);
+                  chrome.storage.local.set({ gam_godmode_saved: filtered }, () => {
+                    _gmSnack('deleted "' + payload.name + '"', 'info');
+                    _gmRefreshPresets();
+                  });
+                });
+              } catch (_) {}
+            };
+            chip.appendChild(x);
+          }
+          return chip;
+        };
+
+        // Saved first
+        saved.slice(0, 12).forEach(s => {
+          const label = (s.name || s.q || '').slice(0, 30);
+          const full = s.name + ' → ' + s.q + ' (' + (s.scope || 'both') + '/' + (s.sort || 'date') + ')';
+          strip.appendChild(mkChip(label, full, true, s));
+        });
+        // Then recent (cap at 6 visible)
+        recentFiltered.slice(0, 6).forEach(r => {
+          const label = (r.q || '').slice(0, 30);
+          const full = r.q + ' (' + (r.scope || 'both') + '/' + (r.sort || 'date') + ')';
+          strip.appendChild(mkChip(label, full, false, r));
+        });
+      });
+    } catch (_) {}
+  }
+
+  async function _gmBulkCopy(mode) {
+    const lines = [];
+    if (mode === 'author') {
+      const seen = new Set();
+      _gmSelected.forEach(v => { if (v.author && !seen.has(v.author)) { seen.add(v.author); lines.push(v.author); } });
+    } else if (mode === 'url') {
+      _gmSelected.forEach(v => { lines.push(v.url); });
+    }
+    const text = lines.join('\n');
+    let ok = false;
+    try {
+      if (navigator.clipboard && document.hasFocus()) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      }
+    } catch (_) {}
+    if (!ok) {
+      // Fallback: textarea + execCommand
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch (_) {}
+    }
+    _gmSnack(ok ? ('copied ' + lines.length + ' ' + mode + (lines.length !== 1 ? 's' : '')) : 'copy failed', ok ? 'ok' : 'err');
   }
 
   function _gmKeyHandler(e) {
@@ -1964,6 +2231,14 @@
     }
     const scope = (document.querySelector('input[name="gam-godmode-scope"]:checked') || {}).value || 'both';
     const sort = (document.querySelector('input[name="gam-godmode-sort"]:checked') || {}).value || 'date';
+
+    // v10.17.1: clear selection on every new search (different results = different scope)
+    _gmSelected.clear();
+    _gmRefreshBulkBar();
+    _gmLastQuery = q;
+    _gmLastScope = scope;
+    _gmLastSort  = sort;
+    _gmPushRecentQuery(q, scope, sort);
 
     resultsEl.innerHTML = '<div style="padding:14px;color:' + TXT_DIM + ';font:11px ' + MONO + '">searching...</div>';
     if (metaEl) metaEl.textContent = 'querying /gaw/search?godmode=1 ...';
@@ -2009,14 +2284,18 @@
       return s;
     };
     rows.forEach(row => {
-      const el = document.createElement('a');
-      el.style.cssText = 'display:grid;grid-template-columns:48px 1fr 110px 60px 50px;gap:8px;padding:8px 10px;' +
+      // v10.17.1: row is now a div (not anchor) so the checkbox click can be
+      // separated from row click. URL is built once, stored on the el via
+      // data attribute, and opened on row-click via window.open.
+      const el = document.createElement('div');
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.style.cssText = 'display:grid;grid-template-columns:28px 48px 1fr 110px 60px 50px;gap:8px;padding:8px 10px;' +
         'border-bottom:1px solid ' + DARK_LINE + ';color:' + TXT + ';' +
-        'text-decoration:none;font:11px ' + MONO + ';cursor:pointer;';
-      el.setAttribute('target', '_blank');
-      el.setAttribute('rel', 'noopener');
-      // Build href via URL constructor; protocol-locked to https + greatawakening.win
+        'font:11px ' + MONO + ';cursor:pointer;align-items:center;';
+      // Build URL via URL constructor; protocol-locked to https + greatawakening.win
       // host so a malicious slug cannot pivot the link to javascript:/data:/etc.
+      let rowUrl = 'https://greatawakening.win/';
       try {
         const u = new URL('https://greatawakening.win/');
         if (row.kind === 'post') {
@@ -2027,14 +2306,53 @@
             '/x/c/' + String(row.id || '').replace(/[^0-9]/g, '');
           u.hash = 'context';
         }
-        el.href = u.toString();
-      } catch (_) {
-        el.href = 'https://greatawakening.win/';
-      }
+        rowUrl = u.toString();
+      } catch (_) {}
+      el.dataset.gmUrl = rowUrl;
+      el.onclick = (e) => {
+        // Don't open URL when the click was on the checkbox or its cell
+        if (e.target && (e.target.tagName === 'INPUT' || e.target.dataset.gmCheckboxCell)) return;
+        window.open(rowUrl, '_blank', 'noopener');
+      };
+      el.onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          if (e.target && e.target.tagName === 'INPUT') return; // checkbox handles space itself
+          e.preventDefault();
+          window.open(rowUrl, '_blank', 'noopener');
+        }
+      };
       el.onmouseover = () => el.style.background = '#1a1a1d';
       el.onmouseout  = () => el.style.background = '';
 
-      // Column 1: kind badge + removed badge
+      // Column 1: checkbox (selection)
+      const cbCell = document.createElement('div');
+      cbCell.dataset.gmCheckboxCell = '1';
+      cbCell.style.cssText = 'display:flex;justify-content:center;align-items:center';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.setAttribute('data-gm-rowcheckbox', '1');
+      cb.style.cssText = 'cursor:pointer;width:16px;height:16px;accent-color:' + AMBER;
+      const rowKey = _gmRowKey(row.kind, row.id);
+      cb.checked = _gmSelected.has(rowKey);
+      cb.onclick = (e) => e.stopPropagation();
+      cb.onchange = () => {
+        if (cb.checked) {
+          _gmSelected.set(rowKey, {
+            kind: row.kind,
+            id: String(row.id),
+            author: String(row.author || ''),
+            url: rowUrl,
+            title: String(row.title || row.snippet || '').slice(0, 200)
+          });
+        } else {
+          _gmSelected.delete(rowKey);
+        }
+        _gmRefreshBulkBar();
+      };
+      cbCell.appendChild(cb);
+      el.appendChild(cbCell);
+
+      // Column 2: kind badge + removed badge
       const badges = document.createElement('div');
       const kBadge = document.createElement('span');
       kBadge.style.cssText = 'display:inline-block;padding:1px 5px;border-radius:3px;font-weight:600;color:' + DARK_BG +
@@ -2093,6 +2411,9 @@
     // Clear previous results without using innerHTML
     while (resultsEl.firstChild) resultsEl.removeChild(resultsEl.firstChild);
     resultsEl.appendChild(frag);
+
+    // v10.17.1: refresh presets strip so the just-pushed recent query appears
+    _gmRefreshPresets();
   }
 
   function _gmOpenModal(seedQuery) {
@@ -2131,10 +2452,15 @@
           '<input id="gam-godmode-q" type="text" autofocus placeholder=\'trump pelosi -fauci author:catsfive community:GreatAwakening score:>50 date:2026-01-01..\' style="' +
             'flex:1;padding:8px 10px;background:' + DARK_BG + ';color:' + TXT + ';' +
             'border:1px solid ' + DARK_LINE + ';border-radius:4px;font:12px ' + MONO + ';min-height:32px;outline:none">' +
+          '<button id="gam-godmode-save" class="gam-btn" title="Save current query as a preset" style="' +
+            'background:' + DARK_BG + ';color:' + AMBER + ';border:1px solid ' + DARK_LINE + ';padding:8px 10px;' +
+            'border-radius:4px;cursor:pointer;font:700 12px ' + MONO + ';min-height:32px">&#x2605;</button>' +
           '<button id="gam-godmode-go" class="gam-btn" style="' +
             'background:' + AMBER + ';color:' + DARK_BG + ';border:0;padding:8px 14px;border-radius:4px;' +
             'cursor:pointer;font:700 12px ' + MONO + ';min-height:32px;letter-spacing:.5px">SEARCH</button>' +
         '</div>' +
+        '<div id="gam-godmode-presets" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;' +
+          'min-height:0"></div>' +
         '<div style="margin-top:8px;color:' + TXT_DIM + ';font-size:10px;line-height:1.5">' +
           '<b style="color:' + TXT + '">Grammar:</b> ' +
           '<code style="color:' + AMBER + '">"phrase"</code> &middot; ' +
@@ -2161,12 +2487,28 @@
         '</div>' +
       '</div>' +
 
+      '<div id="gam-godmode-seltools" style="display:flex;gap:8px;align-items:center;padding:6px 14px;' +
+        'border-bottom:1px solid ' + DARK_LINE + ';background:#0e0e10;color:' + TXT_DIM + ';font-size:10px;' +
+        'min-height:32px">' +
+        '<span style="color:' + TXT_DIM + '">Select:</span>' +
+        '<button id="gam-godmode-selall" class="gam-btn" style="' +
+          'background:' + DARK_BG + ';color:' + TXT + ';border:1px solid ' + DARK_LINE + ';padding:3px 8px;' +
+          'border-radius:3px;cursor:pointer;font:600 10px ' + MONO + '">all visible</button>' +
+        '<button id="gam-godmode-selinv" class="gam-btn" style="' +
+          'background:' + DARK_BG + ';color:' + TXT + ';border:1px solid ' + DARK_LINE + ';padding:3px 8px;' +
+          'border-radius:3px;cursor:pointer;font:600 10px ' + MONO + '">invert</button>' +
+        '<button id="gam-godmode-selnone" class="gam-btn" style="' +
+          'background:' + DARK_BG + ';color:' + TXT + ';border:1px solid ' + DARK_LINE + ';padding:3px 8px;' +
+          'border-radius:3px;cursor:pointer;font:600 10px ' + MONO + '">none</button>' +
+        '<span style="margin-left:auto;color:' + TXT_DIM + '">checkbox to select rows; bulk-action bar appears below</span>' +
+      '</div>' +
+
       '<div id="gam-godmode-results" style="flex:1;overflow-y:auto;min-height:200px;max-height:60vh"></div>' +
 
       '<div style="padding:8px 14px;border-top:1px solid ' + DARK_LINE + ';background:' + DARK_BG + ';' +
         'color:' + TXT_DIM + ';font-size:10px;display:flex;justify-content:space-between;align-items:center">' +
-        '<div>ESC closes &middot; Enter submits &middot; click any row to open in GAW</div>' +
-        '<div style="color:' + AMBER + ';opacity:.6">v10.17.0 godmode</div>' +
+        '<div>ESC closes &middot; Enter submits &middot; click any row to open in GAW &middot; Ctrl/Cmd+click checkbox to toggle</div>' +
+        '<div style="color:' + AMBER + ';opacity:.6">v10.17.1 godmode</div>' +
       '</div>';
 
     document.body.appendChild(backdrop);
@@ -2188,13 +2530,252 @@
       setTimeout(() => qIn.focus(), 50);
     }
 
+    // v10.17.1: selection toolbar wiring
+    const selAll = document.getElementById('gam-godmode-selall');
+    if (selAll) selAll.onclick = () => _gmSelectVisible('all');
+    const selInv = document.getElementById('gam-godmode-selinv');
+    if (selInv) selInv.onclick = () => _gmSelectVisible('invert');
+    const selNone = document.getElementById('gam-godmode-selnone');
+    if (selNone) selNone.onclick = () => _gmSelectVisible('none');
+
+    // v10.17.1: save button + presets strip
+    const saveBtn = document.getElementById('gam-godmode-save');
+    if (saveBtn) saveBtn.onclick = _gmSaveCurrentAsPreset;
+    _gmRefreshPresets();
+
     document.addEventListener('keydown', _gmKeyHandler, true);
 
     if (seedQuery) _gmRunSearch();
   }
 
+  // ============== v10.17.2: Firehose Crawl Health modal ==============
+  function _gmCloseHealthModal() {
+    const m = document.getElementById('gam-godmode-health-modal');
+    const b = document.getElementById('gam-godmode-health-backdrop');
+    if (m) m.remove();
+    if (b) b.remove();
+  }
+
+  function _gmFhFormatAge(epoch) {
+    if (!epoch) return 'never';
+    const ageS = Math.floor(Date.now() / 1000) - Number(epoch);
+    if (ageS < 60) return ageS + 's';
+    if (ageS < 3600) return Math.floor(ageS / 60) + 'm';
+    if (ageS < 86400) return Math.floor(ageS / 3600) + 'h';
+    return Math.floor(ageS / 86400) + 'd';
+  }
+
+  async function _gmOpenHealthModal() {
+    if (document.getElementById('gam-godmode-health-modal')) return;
+
+    const backdrop = document.createElement('div');
+    backdrop.id = 'gam-godmode-health-backdrop';
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px);' +
+      'z-index:' + Z_BACKDROP + ';';
+    backdrop.onclick = _gmCloseHealthModal;
+
+    const modal = document.createElement('div');
+    modal.id = 'gam-godmode-health-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', 'Firehose Crawl Health');
+    modal.style.cssText = 'position:fixed;top:5vh;left:50%;transform:translateX(-50%);' +
+      'width:min(880px,95vw);max-height:90vh;display:flex;flex-direction:column;' +
+      'background:' + DARK_PANEL + ';border:1px solid ' + AMBER + ';border-radius:8px;' +
+      'box-shadow:0 20px 60px rgba(0,0,0,0.6);z-index:' + Z_MODAL + ';' +
+      'font:12px ' + MONO + ';color:' + TXT + ';';
+
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 14px;' +
+      'border-bottom:1px solid ' + DARK_LINE + ';background:' + DARK_BG;
+    const hdrTitle = document.createElement('div');
+    hdrTitle.style.cssText = 'color:' + AMBER + ';font-weight:700;letter-spacing:.5px';
+    hdrTitle.textContent = '\u{1F525} FIREHOSE CRAWL HEALTH';
+    hdr.appendChild(hdrTitle);
+    const hdrActions = document.createElement('div');
+    hdrActions.style.cssText = 'display:flex;gap:6px';
+    const refreshBtn = document.createElement('button');
+    refreshBtn.className = 'gam-btn';
+    refreshBtn.style.cssText = 'background:' + DARK_BG + ';color:' + AMBER + ';border:1px solid ' + DARK_LINE +
+      ';padding:4px 10px;border-radius:4px;cursor:pointer;min-height:28px;font:600 11px ' + MONO;
+    refreshBtn.textContent = '↻ Refresh';
+    refreshBtn.onclick = () => _gmFhLoad();
+    hdrActions.appendChild(refreshBtn);
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'gam-btn';
+    closeBtn.style.cssText = 'background:transparent;border:1px solid ' + DARK_LINE + ';color:' + TXT +
+      ';padding:4px 10px;border-radius:4px;cursor:pointer;min-height:28px;min-width:32px;font:600 11px ' + MONO;
+    closeBtn.textContent = '×';
+    closeBtn.onclick = _gmCloseHealthModal;
+    hdrActions.appendChild(closeBtn);
+    hdr.appendChild(hdrActions);
+    modal.appendChild(hdr);
+
+    const body = document.createElement('div');
+    body.id = 'gam-godmode-health-body';
+    body.style.cssText = 'flex:1;overflow-y:auto;padding:12px 14px';
+    body.textContent = 'Loading...';
+    modal.appendChild(body);
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(modal);
+
+    _gmFhLoad();
+  }
+
+  async function _gmFhLoad() {
+    const body = document.getElementById('gam-godmode-health-body');
+    if (!body) return;
+    while (body.firstChild) body.removeChild(body.firstChild);
+    body.textContent = 'Loading from /admin/firehose/keywords...';
+
+    const r = await _gmRpc('modAdminFirehoseKeywords', { limit: 10, sample: 10 });
+    if (!r || !r.ok) {
+      while (body.firstChild) body.removeChild(body.firstChild);
+      const err = document.createElement('div');
+      err.style.cssText = 'color:#f04040;padding:10px;background:#2a1010;border-radius:4px';
+      const errText = (r && (r.error || r.body && r.body.error)) || 'unknown';
+      err.textContent = 'FAILED: ' + String(errText);
+      body.appendChild(err);
+      const hint = document.createElement('div');
+      hint.style.cssText = 'color:' + TXT_DIM + ';margin-top:8px;font-size:11px';
+      hint.textContent = 'Endpoint is lead-only (requireLeadAuth). Non-leads get 403. ' +
+        'If migration 045 is not applied, you will get 503.';
+      body.appendChild(hint);
+      return;
+    }
+    const data = (r.body && typeof r.body === 'object') ? r.body : r;
+    while (body.firstChild) body.removeChild(body.firstChild);
+
+    const sum = data.summary || {};
+    const mkKpi = (label, value, color) => {
+      const tile = document.createElement('div');
+      tile.style.cssText = 'background:' + DARK_BG + ';border:1px solid ' + DARK_LINE + ';' +
+        'border-radius:6px;padding:8px 10px;text-align:center';
+      const v = document.createElement('div');
+      v.style.cssText = 'color:' + (color || AMBER) + ';font-weight:700;font-size:18px';
+      v.textContent = String(value == null ? '0' : value);
+      tile.appendChild(v);
+      const l = document.createElement('div');
+      l.style.cssText = 'color:' + TXT_DIM + ';font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-top:2px';
+      l.textContent = label;
+      tile.appendChild(l);
+      return tile;
+    };
+
+    const kpi = document.createElement('div');
+    kpi.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px';
+    kpi.appendChild(mkKpi('terms', sum.total_terms || 0));
+    kpi.appendChild(mkKpi('crawled', sum.crawled || 0, '#3dd68c'));
+    kpi.appendChild(mkKpi('never crawled', sum.never_crawled || 0, '#f0a040'));
+    kpi.appendChild(mkKpi('errored', sum.errored || 0, (sum.errored > 0) ? '#f04040' : TXT_DIM));
+    body.appendChild(kpi);
+
+    const kpi2 = document.createElement('div');
+    kpi2.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px';
+    kpi2.appendChild(mkKpi('posts found', sum.posts_found_total || 0, '#3dd68c'));
+    kpi2.appendChild(mkKpi('total crawls', sum.total_crawls || 0));
+    kpi2.appendChild(mkKpi('avg yield/crawl', sum.avg_yield_per_crawl || 0, '#4A9EFF'));
+    body.appendChild(kpi2);
+
+    if (data.last_tick) {
+      const lt = data.last_tick;
+      const ltBox = document.createElement('div');
+      ltBox.style.cssText = 'background:#0e0e10;border:1px solid ' + DARK_LINE + ';border-radius:4px;' +
+        'padding:8px 10px;margin-bottom:14px;font-size:11px';
+      const ltTitle = document.createElement('div');
+      ltTitle.style.cssText = 'color:' + AMBER + ';font-weight:600;margin-bottom:3px';
+      ltTitle.textContent = 'Last cron tick (' + _gmFhFormatAge(lt.ts) + ' ago)';
+      ltBox.appendChild(ltTitle);
+      const ltRow = document.createElement('div');
+      ltRow.style.cssText = 'color:' + TXT + ';font-size:11px';
+      ltRow.textContent = 'in=' + (lt.rows_in || 0) +
+        ' / new=' + (lt.rows_new || 0) +
+        ' / upd=' + (lt.rows_updated || 0) +
+        ' / dur=' + Math.round((lt.duration_ms || 0) / 1000) + 's' +
+        (lt.error ? ' / err=' + lt.error : '');
+      ltBox.appendChild(ltRow);
+      body.appendChild(ltBox);
+    }
+
+    const mkTable = (title, rows, cols) => {
+      const sec = document.createElement('div');
+      sec.style.cssText = 'margin-bottom:14px';
+      const t = document.createElement('div');
+      t.style.cssText = 'color:' + AMBER + ';font-weight:600;text-transform:uppercase;letter-spacing:.5px;' +
+        'font-size:11px;margin-bottom:4px';
+      t.textContent = title + ' (' + rows.length + ')';
+      sec.appendChild(t);
+      if (!rows.length) {
+        const e = document.createElement('div');
+        e.style.cssText = 'color:' + TXT_DIM + ';font-size:11px;padding:4px 0';
+        e.textContent = '(none)';
+        sec.appendChild(e);
+        return sec;
+      }
+      const tbl = document.createElement('table');
+      tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:11px';
+      const trH = document.createElement('tr');
+      cols.forEach(c => {
+        const th = document.createElement('th');
+        th.style.cssText = 'text-align:left;color:' + TXT_DIM + ';border-bottom:1px solid ' + DARK_LINE +
+          ';padding:3px 6px;font-weight:600';
+        th.textContent = c.label;
+        trH.appendChild(th);
+      });
+      tbl.appendChild(trH);
+      rows.forEach(r => {
+        const tr = document.createElement('tr');
+        cols.forEach(c => {
+          const td = document.createElement('td');
+          td.style.cssText = 'padding:3px 6px;border-bottom:1px solid #1a1a1d;color:' + TXT;
+          td.textContent = c.fmt ? c.fmt(r) : String(r[c.key] == null ? '' : r[c.key]);
+          tr.appendChild(td);
+        });
+        tbl.appendChild(tr);
+      });
+      sec.appendChild(tbl);
+      return sec;
+    };
+
+    body.appendChild(mkTable('Most productive (by posts_found_total)', data.most_productive || [], [
+      { label: 'term',     key: 'term' },
+      { label: 'cat',      key: 'category' },
+      { label: 'wt',       fmt: r => String(r.weight || 0) },
+      { label: 'crawls',   key: 'crawl_count' },
+      { label: 'found',    key: 'posts_found_total' },
+      { label: 'last new', key: 'posts_new_last_run' },
+      { label: 'last',     fmt: r => _gmFhFormatAge(r.last_crawled_at) }
+    ]));
+
+    body.appendChild(mkTable('Recently crawled', data.recently_crawled || [], [
+      { label: 'term',     key: 'term' },
+      { label: 'crawls',   key: 'crawl_count' },
+      { label: 'found',    key: 'posts_found_total' },
+      { label: 'last new', key: 'posts_new_last_run' },
+      { label: 'ago',      fmt: r => _gmFhFormatAge(r.last_crawled_at) }
+    ]));
+
+    body.appendChild(mkTable('Errored (last_error IS NOT NULL)', data.errored || [], [
+      { label: 'term',  key: 'term' },
+      { label: 'cat',   key: 'category' },
+      { label: 'error', fmt: r => String(r.last_error || '').slice(0, 80) }
+    ]));
+
+    body.appendChild(mkTable('Never-crawled sample', data.never_crawled_sample || [], [
+      { label: 'term', key: 'term' },
+      { label: 'cat',  key: 'category' },
+      { label: 'wt',   fmt: r => String(r.weight || 0) }
+    ]));
+
+    const gen = document.createElement('div');
+    gen.style.cssText = 'color:' + TXT_DIM + ';font-size:10px;margin-top:8px;text-align:right';
+    gen.textContent = 'generated ' + _gmFhFormatAge(data.generated_at) + ' ago';
+    body.appendChild(gen);
+  }
+
   // Expose on window for other modules + status-bar wiring.
   window._gamOpenGodMode = _gmOpenModal;
+  window._gamOpenFirehoseHealth = _gmOpenHealthModal;
 
   // Register palette command(s)
   const wave5 = [
@@ -2226,10 +2807,57 @@
         const d = new Date(Date.now() - 7 * 86400 * 1000).toISOString().slice(0, 10);
         _gmOpenModal('removed:1 date:' + d + '..');
       }
+    },
+    {
+      label: 'GOD MODE: Firehose crawl health (lead-only)',
+      kw: 'god mode firehose health crawl stats observability keywords lead admin',
+      icon: '🔥',
+      fn: () => _gmOpenHealthModal()
     }
   ];
   let waveRegistered = 0;
   wave5.forEach(c => { if (window._gamCmdkRegister(c)) waveRegistered++; });
-  console.log('[modtools-aux Wave 5 v10.17.0] registered ' + waveRegistered + ' GOD MODE palette commands; window._gamOpenGodMode() also available');
+
+  // v10.17.1: Inject 🔍 GOD MODE icon into the existing #gam-status-bar.
+  // Mirrors the v10.3 BRIG chip pattern (modtools.js:31185+): setTimeout +
+  // querySelector for the spacer, with MutationObserver fallback if the bar
+  // hasn't been built yet (race: aux loads before _buildStatusBar runs).
+  function _gmInjectStatusBarIcon() {
+    if (document.getElementById('gam-godmode-bar-icon')) return; // idempotent
+    const bar = document.getElementById('gam-status-bar');
+    if (!bar) return false;
+    const btn = document.createElement('button');
+    btn.id = 'gam-godmode-bar-icon';
+    btn.className = 'gam-bar-icon';
+    btn.title = 'GOD MODE search (firehose) — Ctrl+Shift+P → "god mode"';
+    btn.textContent = '\u{1F50D}'; // magnifier
+    btn.style.cursor = 'pointer';
+    btn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      try { _gmOpenModal(); } catch (e) { console.error('[godmode] open failed', e); }
+    });
+    const spacer = bar.querySelector('.gam-bar-spacer');
+    if (spacer) bar.insertBefore(btn, spacer);
+    else bar.appendChild(btn);
+    return true;
+  }
+  // Try immediately + on a few staggered delays; fall back to MutationObserver
+  // if the bar still isn't there after 3 sec.
+  if (!_gmInjectStatusBarIcon()) {
+    let tries = 0;
+    const iv = setInterval(() => {
+      tries++;
+      if (_gmInjectStatusBarIcon() || tries >= 6) clearInterval(iv);
+    }, 500);
+    // Mutation observer as the long-tail safety net (SPA navigation, late bar build)
+    const obs = new MutationObserver(() => {
+      if (_gmInjectStatusBarIcon()) obs.disconnect();
+    });
+    obs.observe(document.documentElement, { childList: true, subtree: true });
+    // Auto-disconnect after 30 sec to bound the observer's life
+    setTimeout(() => { try { obs.disconnect(); } catch (_) {} }, 30000);
+  }
+
+  console.log('[modtools-aux Wave 5 v10.17.1] registered ' + waveRegistered + ' GOD MODE palette commands; status-bar icon scheduled; window._gamOpenGodMode() also available');
 })();
 
