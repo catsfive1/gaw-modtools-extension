@@ -297,6 +297,24 @@ try {
 } catch {}
 
 if (-not $NoPause) {
+
+# --- Retrofit ending block (ps1-retrofit-endingblock.ps1 v1) ---
+# Conditionally executed: only if $logVar appears to be a log buffer.
+try {
+    if (($log -is [System.Collections.IList]) -or ($log -is [string])) {
+        $__rlogText = if ($log -is [string]) { $log } else { $log -join "`r`n" }
+        $__rlogFile = Join-Path 'D:\AI\_PROJECTS\logs' ('verify-v8-1-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
+        if (-not (Test-Path 'D:\AI\_PROJECTS\logs')) { New-Item -ItemType Directory -Path 'D:\AI\_PROJECTS\logs' -Force | Out-Null }
+        $__rlogText | Out-File -FilePath $__rlogFile -Encoding UTF8
+        $__rlogText | Set-Clipboard
+        Write-Host "[log persisted: $__rlogFile]" -ForegroundColor DarkGray
+        Write-Host '[FULL DEBUG LOG COPIED TO CLIPBOARD]' -ForegroundColor Green
+    }
+    [Console]::Beep(659, 160); Start-Sleep -Milliseconds 100
+    [Console]::Beep(523, 160); Start-Sleep -Milliseconds 100
+    [Console]::Beep(784, 800)
+} catch {}
+# --- end retrofit ending block ---
     try { Read-Host 'Press Enter to exit' | Out-Null } catch {}
 }
 

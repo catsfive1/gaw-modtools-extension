@@ -56,6 +56,9 @@ const AUTO_POLL_PERIOD_MIN = 1; // 1 minute -- worker cron runs every 5 min so 1
 // v10.11 T2 (REDTEAM-1): inactivity lock alarm -- fires every 5 min and checks elapsed idle time.
 const INACTIVITY_LOCK_ALARM = 'gam_inactivity_lock';
 const INACTIVITY_LOCK_PERIOD_MIN = 5;
+// v10.16.34 (Grok #16) proactive alerts -- endpoint may not exist yet; 404 is silently swallowed.
+const AI_PROACTIVE_ALARM = 'gam_ai_proactive';
+const AI_PROACTIVE_PERIOD_MIN = 10;
 // Storage / log shape constants kept in sync with popup.js + modtools.js.
 const MAINT_DIAG_KEY = 'gam_diag_log';
 const MAINT_DIAG_MAX = 500;
@@ -480,11 +483,14 @@ function _initOnce() {
   return _initReady;
 }
 
-// v10.12.1 PA.4: gam_settings write coalescer — debounce non-critical writes to
-// avoid read-modify-write amplification on rapid successive setting changes.
+// v10.12.1 PA.4 (rev. v10.13 — eviction-safe): gam_settings writes go through
+// an in-flight Promise chain instead of setTimeout. MV3 service workers can
+// evict mid-setTimeout, losing buffered patches. A pending await holds the SW
+// alive until the write lands; that's the MV3-correct shape for sub-second
+// coalescing. Empirical amplification is still bounded because rapid successive
+// setSetting() calls all share the same in-flight Promise via the buffer.
 let _settingsWriteBuffer = null;
-let _settingsWriteTimer = null;
-const SETTINGS_WRITE_DEBOUNCE_MS = 300;
+let _settingsWriteInflight = null;
 
 async function _settingsCoalescedSet(patch) {
   if (!_settingsWriteBuffer) {
@@ -494,28 +500,32 @@ async function _settingsCoalescedSet(patch) {
     } catch (_) { _settingsWriteBuffer = {}; }
   }
   Object.assign(_settingsWriteBuffer, patch);
-  if (_settingsWriteTimer) { clearTimeout(_settingsWriteTimer); }
-  _settingsWriteTimer = setTimeout(async function() {
-    var toWrite = _settingsWriteBuffer;
-    _settingsWriteBuffer = null;
-    _settingsWriteTimer = null;
-    try { await chrome.storage.local.set({ gam_settings: toWrite }); } catch (e) {
-      try { console.warn('[ModTools PA.4] settings-coalesce write failed:', e && e.message || e); } catch (_) {}
-    }
-  }, SETTINGS_WRITE_DEBOUNCE_MS);
-}
-
-// Force-flush on critical writes (token rotation, auth flow)
-async function _settingsCoalescedFlush() {
-  if (_settingsWriteTimer) {
-    clearTimeout(_settingsWriteTimer);
-    _settingsWriteTimer = null;
-    if (_settingsWriteBuffer) {
+  if (!_settingsWriteInflight) {
+    _settingsWriteInflight = (async function() {
+      // Yield once via microtask + macrotask so subsequent same-tick patches coalesce.
+      await new Promise(function(resolve) { Promise.resolve().then(resolve); });
       var toWrite = _settingsWriteBuffer;
       _settingsWriteBuffer = null;
+      _settingsWriteInflight = null;
       try { await chrome.storage.local.set({ gam_settings: toWrite }); } catch (e) {
-        try { console.warn('[ModTools PA.4] settings-coalesce flush failed:', e && e.message || e); } catch (_) {}
+        try { console.warn('[ModTools PA.4] settings-coalesce write failed:', e && e.message || e); } catch (_) {}
       }
+    })();
+  }
+  return _settingsWriteInflight;
+}
+
+// Force-flush on critical writes (token rotation, auth flow).
+// With Promise-chain coalescing, awaiting the in-flight write IS the flush.
+async function _settingsCoalescedFlush() {
+  if (_settingsWriteInflight) {
+    try { await _settingsWriteInflight; } catch (_) {}
+  } else if (_settingsWriteBuffer) {
+    // Edge case: buffer present but no in-flight (shouldn't happen with the above shape).
+    var toWrite = _settingsWriteBuffer;
+    _settingsWriteBuffer = null;
+    try { await chrome.storage.local.set({ gam_settings: toWrite }); } catch (e) {
+      try { console.warn('[ModTools PA.4] settings-coalesce flush failed:', e && e.message || e); } catch (_) {}
     }
   }
 }
@@ -735,6 +745,21 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('[ModTools] Installed:', details.reason);
   await _recordSwBoot(details.reason || 'install');
 
+  // v10.16.30 (Grok #34): register the uninstall feedback URL. The worker's
+  // /uninstall endpoint accepts ONLY version + reason params -- no token, no
+  // user, no identifying info. Privacy-safe; intent is aggregate "we lost N
+  // installs this week" diagnostic and a chance to ask why. If the worker
+  // doesn't have the endpoint deployed yet, Chrome still opens the URL on
+  // uninstall and the worker just returns 404 -- benign.
+  try {
+    const __ver = chrome.runtime.getManifest().version;
+    chrome.runtime.setUninstallURL(WORKER_BASE + '/uninstall?v=' + encodeURIComponent(__ver), () => {
+      if (chrome.runtime.lastError) {
+        try { console.warn('[ModTools v10.16.30] setUninstallURL:', chrome.runtime.lastError.message); } catch (_) {}
+      }
+    });
+  } catch (e) { try { console.warn('[ModTools v10.16.30] setUninstallURL throw:', e.message); } catch (_) {} }
+
   // AF-09 (Rule 27): on version update, invalidate the gam_profile_intel cache.
   // Session storage (gam_modmail_drafts) is auto-cleared by SW termination on update.
   // gam_profile_intel persists across updates and must be purged explicitly
@@ -787,6 +812,8 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     chrome.alarms.create(AUTO_POLL_ALARM, { delayInMinutes: AUTO_POLL_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: AUTO_POLL_PERIOD_MIN });
     // v10.11 T2 (REDTEAM-1): inactivity lock alarm.
     chrome.alarms.create(INACTIVITY_LOCK_ALARM, { delayInMinutes: INACTIVITY_LOCK_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: INACTIVITY_LOCK_PERIOD_MIN });
+    // v10.16.34 (Grok #16) proactive alerts -- endpoint may not exist yet; 404 silently swallowed.
+    chrome.alarms.create(AI_PROACTIVE_ALARM, { delayInMinutes: AI_PROACTIVE_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: AI_PROACTIVE_PERIOD_MIN });
   } catch (e) { console.warn('[ModTools] alarm create failed', e); }
   // v8.6.9: AWAIT __ensureSessionAccess so subsequent storage calls don't
   // fire before the session-area access level is set. Pre-fix race: the
@@ -851,6 +878,11 @@ chrome.runtime.onStartup?.addListener(async () => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get INACTIVITY_LOCK_ALARM:', chrome.runtime.lastError.message); return; }
       if (!a) chrome.alarms.create(INACTIVITY_LOCK_ALARM, { delayInMinutes: INACTIVITY_LOCK_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: INACTIVITY_LOCK_PERIOD_MIN });
     });
+    // v10.16.34 (Grok #16) proactive alerts alarm resurrection.
+    chrome.alarms.get(AI_PROACTIVE_ALARM, (a) => {
+      if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get AI_PROACTIVE_ALARM:', chrome.runtime.lastError.message); return; }
+      if (!a) chrome.alarms.create(AI_PROACTIVE_ALARM, { delayInMinutes: AI_PROACTIVE_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: AI_PROACTIVE_PERIOD_MIN });
+    });
   } catch (e) {}
   // v8.6.9: AWAIT both bootstrap calls so the SW is fully ready before
   // any incoming RPC handler fires.
@@ -863,6 +895,35 @@ chrome.runtime.onStartup?.addListener(async () => {
   try { await _diagMigrateFromStorage(); } catch (e) {}
   // AF-08 (Rule 24): verify settings checksum on startup.
   try { await _maintSettingsChecksumVerify(); } catch (e) {}
+});
+
+// v10.16.30 (Grok #8): zero secretCache + session storage when the SW is
+// about to be unloaded by Chrome. Defense-in-depth -- chrome.storage.session
+// is auto-wiped by browser restart per MV3 spec, but Chrome's "suspended SW"
+// state is not the same as restart, and the cache can persist in memory if
+// the SW is later resurrected without going through onStartup. This handler
+// guarantees the in-memory cache is empty across the suspend boundary.
+chrome.runtime.onSuspend?.addListener(() => {
+  try {
+    secretCache = { workerModToken: '', leadModToken: '' };
+    if (chrome.storage && chrome.storage.session) {
+      // Fire-and-forget: onSuspend is a "best effort" hook; Chrome may not
+      // wait for the promise. The wipe is opportunistic insurance.
+      chrome.storage.session.remove('gam_settings').catch(() => {});
+    }
+    console.log('[ModTools v10.16.30] onSuspend: secretCache zeroed');
+  } catch (e) { try { console.warn('[ModTools v10.16.30] onSuspend wipe failed:', e.message); } catch (_) {} }
+});
+
+// v10.16.30 (Grok #8 paired): if Chrome cancels the suspension (user activity,
+// keepalive RPC), re-hydrate from chrome.storage.local so the next RPC has a
+// valid token. Without this we'd silently 401 on the first call after a
+// cancelled suspend.
+chrome.runtime.onSuspendCanceled?.addListener(() => {
+  try {
+    loadSecrets().catch(() => {});
+    console.log('[ModTools v10.16.30] onSuspendCanceled: re-hydrating secretCache');
+  } catch (_) {}
 });
 
 // v7.2 CHUNK 14: also arm on module load so a freshly-reloaded SW never
@@ -1821,6 +1882,18 @@ async function _autoActionReportFailure(id, status, errMsg) {
   });
 }
 
+// v10.16.34 (Grok #16) proactive alerts -- endpoint may not exist yet; 404 is silently swallowed.
+async function _aiProactiveAlertsPoll() {
+  try {
+    const r = await _rpcWorkerCall('GET', '/ai/proactive-alerts', undefined);
+    const alerts = (r && r.ok && Array.isArray(r.data)) ? r.data : [];
+    await chrome.storage.local.set({ gam_ai_proactive_alerts: alerts });
+  } catch (_) {
+    // best-effort; never noise on missing endpoint
+    try { await chrome.storage.local.set({ gam_ai_proactive_alerts: [] }); } catch (_2) {}
+  }
+}
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   // AF-05 (Rule 14): health heartbeat -- check vault + storage every 5 min.
   if (alarm.name === HEALTH_ALARM) { await _healthCheck(); return; }
@@ -1835,6 +1908,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === MAINT_DIAG_ROTATE_ALARM)  { await _maintDiagRotate();    return; }
   if (alarm.name === MAINT_INTEL_EVICT_ALARM)  { await _maintIntelEvict();    return; }
   if (alarm.name === MAINT_WEEKLY_ALARM)       { await _maintWeeklyRun();     return; }
+  // v10.16.34 (Grok #16) proactive alerts -- endpoint may not exist yet; 404 is silently swallowed.
+  if (alarm.name === AI_PROACTIVE_ALARM)       { await _aiProactiveAlertsPoll(); return; }
   if (alarm.name !== ALARM_NAME) return;
   try {
     const resp = await fetch(VERSION_JSON_URL, { cache: 'no-store' });
@@ -2275,6 +2350,17 @@ async function _rpcWorkerCall(method, path, body, opts) {
     if (secretCache.workerModToken) headers.set('X-Mod-Token', secretCache.workerModToken);
     if (o.asLead && secretCache.leadModToken) headers.set('X-Lead-Token', secretCache.leadModToken);
     if (body !== undefined && body !== null) headers.set('Content-Type', 'application/json');
+    // v10.16.30 (Grok #17): every RPC carries the extension version so the
+    // worker can correlate audit rows with client build. Worker reads it
+    // opportunistically (no enforcement) -- intent is diagnostic, not gating.
+    try {
+      const __extVer = chrome.runtime.getManifest().version;
+      if (__extVer) headers.set('X-Extension-Version', __extVer);
+    } catch (_) {}
+    // v10.16.30 (Grok #27): replay-protection input header. Worker may
+    // enforce a +/-5min window in a future hardening pass; today it is
+    // a forward-compat signal.
+    headers.set('X-Client-TS', String(Date.now()));
     const r = await fetch(WORKER_BASE + path, {
       method: method || (body === undefined ? 'GET' : 'POST'),
       headers: headers,
@@ -2783,6 +2869,57 @@ const RPC_HANDLERS = {
           : []
       };
       return await _rpcWorkerCall('POST', '/modmail/ai-reply-for-thread', payload);
+    }
+  },
+
+  // v10.16.34 -- AI endpoints (Grok #16) -----------------------------------------
+  // Three thin pass-throughs. Worker enforces auth + rate limits server-side.
+  aiExplain: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    schema: {
+      username:    { type: 'string', required: true, max: 64 },
+      context:     { type: 'string', max: 32 },
+      target_type: { type: 'string', max: 16 }
+    },
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/ai/explain', {
+        username:    String(args && args.username || '').slice(0, 64),
+        context:     String(args && args.context || '').slice(0, 32),
+        target_type: String(args && args.target_type || '').slice(0, 16)
+      });
+    }
+  },
+  aiSummarizeThread: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    schema: {
+      thread_id: { type: 'string', max: 64 },
+      content:   { type: 'string', required: true, max: 16000 }
+    },
+    async handler(args) {
+      const content = String(args && args.content || '').slice(0, 16000);
+      if (!content) return { ok: false, status: 0, error: 'content required' };
+      const body = { content };
+      if (args && args.thread_id) body.thread_id = String(args.thread_id).slice(0, 64);
+      return await _rpcWorkerCall('POST', '/ai/summarize-thread', body);
+    }
+  },
+  aiSuggestAction: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    schema: {
+      username:        { type: 'string', required: true, max: 64 },
+      context_summary: { type: 'string', max: 2000 }
+    },
+    async handler(args) {
+      const username = String(args && args.username || '').slice(0, 64);
+      if (!username) return { ok: false, status: 0, error: 'username required' };
+      const body = {
+        username,
+        context_summary: String(args && args.context_summary || '').slice(0, 2000)
+      };
+      if (Array.isArray(args && args.recent_actions)) {
+        body.recent_actions = args.recent_actions.slice(0, 50);
+      }
+      return await _rpcWorkerCall('POST', '/ai/suggest-action', body);
     }
   },
 

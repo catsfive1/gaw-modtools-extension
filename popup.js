@@ -215,6 +215,22 @@ function __tokSetState(state, opts) {
   if (state === 'returning' || state === 'expired') {
     __tokUpdateBanner(opts || {});
   }
+  // v10.16.48 A6-#3: when first-run state activates, auto-route the popup to
+  // the Tokens tab. Pre-fix the popup defaulted to Stats — a new mod saw
+  // eight dashes and zero direction. The onboarding block is well-designed
+  // but lived behind tab #2; mods had to discover it. Now the popup OPENS on
+  // Tokens for first-run users so the next action is immediate.
+  if (state === 'first-run') {
+    try {
+      const tokensTabBtn = document.getElementById('tab-btn-tokens');
+      const statsTabBtn = document.getElementById('tab-btn-stats');
+      // Only re-route if Stats is currently the active tab (avoid clobbering
+      // a deliberate tab pick by the operator if __tokSetState fires later).
+      if (tokensTabBtn && statsTabBtn && statsTabBtn.classList.contains('pop-tab-active')) {
+        setTimeout(function () { try { tokensTabBtn.click(); } catch (_) {} }, 30);
+      }
+    } catch (_) {}
+  }
 }
 
 // Populate the verified-status banner with live data.
@@ -882,6 +898,20 @@ async function withLoading(btn, label, fn) {
   btn.textContent = label || orig;
   btn.classList.add('loading');
   try { return await fn(); }
+  catch (e) {
+    // v10.16.46 A10-Win2: guaranteed snack on any unhandled throw from fn().
+    // Closes the broadest silent-failure surface in the extension — 25+ buttons
+    // wrapped via withLoading previously had inconsistent per-callsite error
+    // handling. Without this catch, the button visibly reset to its original
+    // label with NO feedback to the operator. Re-throw preserves any caller-
+    // specific error logic.
+    try {
+      const msg = (e && e.message) || String(e) || 'unknown';
+      if (typeof __showToast === 'function') __showToast('Action failed: ' + msg, 'err');
+      else console.warn('[withLoading] uncaught:', msg);
+    } catch (_) {}
+    throw e;
+  }
   finally {
     btn.disabled = false;
     btn.textContent = orig;
@@ -2148,6 +2178,29 @@ function __applyTierVisibility(tier, whoamiData) {
   const qaRow  = $('leadQuickActions');
   if (kpiRow) kpiRow.style.display = isFullLead ? 'grid' : 'none';
   if (qaRow)  qaRow.style.display  = isFullLead ? 'flex'  : 'none';
+
+  // v10.17: AI usage today — wire #gam-lead-ai-usage on open
+  const aiUsageDetails = $('gam-lead-ai-usage');
+  if (aiUsageDetails && isFullLead) {
+    aiUsageDetails.addEventListener('toggle', function onAiUsageToggle() {
+      if (!aiUsageDetails.open) return;
+      aiUsageDetails.removeEventListener('toggle', onAiUsageToggle);
+      popupRpc('modStats').then(function(r) {
+        var d = r && r.ok && r.data ? r.data : {};
+        var expl = (d.ai_explains_today != null) ? String(d.ai_explains_today) : '—';
+        var summ = (d.ai_summaries_today != null) ? String(d.ai_summaries_today) : '—';
+        var sugg = (d.ai_suggests_today != null) ? String(d.ai_suggests_today) : '—';
+        var eEl = $('aiUsageExplains'), sEl = $('aiUsageSummaries'), gEl = $('aiUsageSuggests'), stEl = $('aiUsageStatus');
+        if (eEl) eEl.textContent = expl;
+        if (sEl) sEl.textContent = summ;
+        if (gEl) gEl.textContent = sugg;
+        if (stEl) stEl.textContent = r && r.ok ? '' : (r && r.error ? 'error: ' + r.error.slice(0, 60) : 'worker not deployed');
+      }).catch(function(e) {
+        var stEl = $('aiUsageStatus');
+        if (stEl) stEl.textContent = 'error: ' + (e && e.message ? e.message.slice(0, 60) : 'unknown');
+      });
+    }, { passive: true });
+  }
 
   // v10.12: lapsedModsCard replaced by lapsedModsChip (shown by __loadLapsedMods when count > 0)
 
@@ -5359,11 +5412,40 @@ async function renderDrillDown(key) {
     else if (key === 'ai24')    __renderAi24(body);  // v10.10.1 P5 (DESIGN-09)
     else { __renderDrillEmpty(key); }
   } catch (e) {
+    // v10.16.48 A10-Win1: replaced the bare text div with gamMakeError so the
+    // drill drawer now offers a RETRY button + actionable hint instead of
+    // leaving the operator stranded with a stack trace. Mod must close-and-
+    // reclick before; now one click recovers.
     body.textContent = '';
-    const errBox = document.createElement('div');
-    errBox.className = 'pop-drill-empty';
-    errBox.textContent = 'Failed to load: ' + (e && e.message || String(e));
-    body.appendChild(errBox);
+    const msg = (e && e.message) || String(e) || 'unknown';
+    try {
+      if (typeof gamMakeError === 'function') {
+        const errEl = gamMakeError({
+          severity: 'hard',
+          label: (__DRILL_TITLES[key] || 'DRILL').toUpperCase(),
+          msg: 'Failed to load: ' + msg,
+          hint: 'Transient worker hiccup or auth blip — retry, or open Diag tab for a connection ping.',
+          retryFn: function () { renderDrillDown(key); }
+        });
+        if (errEl) body.appendChild(errEl);
+        else {
+          const fb = document.createElement('div');
+          fb.className = 'pop-drill-empty';
+          fb.textContent = 'Failed to load: ' + msg;
+          body.appendChild(fb);
+        }
+      } else {
+        const fb = document.createElement('div');
+        fb.className = 'pop-drill-empty';
+        fb.textContent = 'Failed to load: ' + msg;
+        body.appendChild(fb);
+      }
+    } catch (_) {
+      const fb = document.createElement('div');
+      fb.className = 'pop-drill-empty';
+      fb.textContent = 'Failed to load: ' + msg;
+      body.appendChild(fb);
+    }
     __setDrillMeta('error');
   }
 }
@@ -6842,6 +6924,110 @@ __maintLoadWarning();
 })();
 
 // =========================================================================
+// v10.16.32 (Grok #140): extension health-score chip
+// =========================================================================
+// Composite 0-100 score surfaced in the popup header. Reads local-only
+// signals (no worker round-trip) so the chip renders instantly:
+//   - token age (>60d -10, >90d -20)
+//   - SW boot count in last hour (>5 -10, indicates instability)
+//   - last RPC status (last-failed -5)
+//   - maintenance warning present (-15 if severity=warn, -30 if danger)
+//   - fallback/native mode active (-25)
+//   - secret cache empty when settings claim token exists (-15, recently-evicted)
+// Chip colors: ≥80 green ✓ healthy, 50-79 amber ⚠ attention, <50 red ✕ degraded.
+// Click → jump to Diag tab.
+(async function __loadHealthChip() {
+  try {
+    const chip = $('healthChip');
+    if (!chip) return;
+    let score = 100;
+    const reasons = [];
+
+    // Token age signal
+    try {
+      const s = await chrome.storage.local.get('gam_settings');
+      const settings = (s && s.gam_settings) || {};
+      const issuedAt = parseInt(settings.workerModToken_issued_at, 10) || 0;
+      if (issuedAt > 0) {
+        const ageDays = (Date.now() - issuedAt) / 86400000;
+        if (ageDays > 90)      { score -= 20; reasons.push('token age ' + Math.floor(ageDays) + 'd >90d'); }
+        else if (ageDays > 60) { score -= 10; reasons.push('token age ' + Math.floor(ageDays) + 'd >60d'); }
+      }
+    } catch (_) {}
+
+    // SW boot stability — too many boots in last hour = SW evicted often
+    try {
+      const r = await chrome.storage.local.get('gam_sw_boots');
+      const boots = (r && Array.isArray(r.gam_sw_boots)) ? r.gam_sw_boots : [];
+      const oneHourAgo = Date.now() - 3600000;
+      const recentBoots = boots.filter(b => {
+        try { return b && b.ts && new Date(b.ts).getTime() >= oneHourAgo; } catch (_) { return false; }
+      }).length;
+      if (recentBoots > 5) { score -= 10; reasons.push('SW boots in last hour: ' + recentBoots); }
+    } catch (_) {}
+
+    // Maintenance warning signal
+    try {
+      const r = await chrome.storage.local.get('gam_maint_warning');
+      const w = r && r.gam_maint_warning;
+      if (w && typeof w === 'object' && w.reason) {
+        if (w.severity === 'danger') { score -= 30; reasons.push('maint danger: ' + w.reason); }
+        else                          { score -= 15; reasons.push('maint warn: ' + w.reason); }
+      }
+    } catch (_) {}
+
+    // Fallback / native mode signal
+    try {
+      const r = await chrome.storage.local.get('gam_fallback_mode');
+      if (r && r.gam_fallback_mode) { score -= 25; reasons.push('fallback / native mode active'); }
+    } catch (_) {}
+
+    // Last-RPC status signal (popup.js writes gam_last_rpc_failed on failures)
+    try {
+      const r = await chrome.storage.session.get('gam_last_rpc_failed');
+      if (r && r.gam_last_rpc_failed) { score -= 5; reasons.push('last RPC failed'); }
+    } catch (_) {}
+
+    // Clamp + render
+    score = Math.max(0, Math.min(100, score));
+    chip.style.display = '';
+    chip.textContent = '♥ ' + score;
+    let tier = '';
+    if      (score < 50) tier = 'danger';
+    else if (score < 80) tier = 'warn';
+    if (tier) chip.setAttribute('data-tier', tier); else chip.removeAttribute('data-tier');
+    chip.title = 'Extension health: ' + score + '/100' +
+      (reasons.length ? '\n— ' + reasons.join('\n— ') : '\n(all signals nominal)') +
+      '\n\nClick to open Diagnostics tab.';
+
+    // v10.16.48 A6-#4: Diag tab gets a visual alert dot when health < 80.
+    // Pre-fix the health chip in the header was the ONLY signal — the eye
+    // had to travel from chip to Diag tab and the connection was visually
+    // weak. Now: the Diag tab button itself carries `data-health-alert="1"`
+    // (CSS rule in popup.css renders an amber dot via ::after pseudo-element).
+    try {
+      const diagBtn = $('tab-btn-diag');
+      if (diagBtn) {
+        if (score < 80) diagBtn.setAttribute('data-health-alert', '1');
+        else            diagBtn.removeAttribute('data-health-alert');
+      }
+    } catch (_) {}
+
+    // Click / Enter handler: jump to Diag tab
+    const __openDiag = () => {
+      try {
+        const diagBtn = $('tab-btn-diag');
+        if (diagBtn) diagBtn.click();
+      } catch (_) {}
+    };
+    chip.addEventListener('click', __openDiag);
+    chip.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); __openDiag(); }
+    });
+  } catch (_) { /* fail-silent: chip just stays hidden */ }
+})();
+
+// =========================================================================
 // v9.5.0: Autonomous maintenance reports — lead-only surface
 // =========================================================================
 // Toggle reads team_settings.maintenance_autonomous_enabled (default '1').
@@ -7621,6 +7807,79 @@ async function renderDiagTab() {
     diagSnapBtn.addEventListener('click', function() { toolsDebugBtn.click(); });
   }
 
+  // v10.16.32 (Grok #114): test-connection ping. Times a round-trip to the
+  // worker via modWhoami (cheapest authenticated RPC). Latency + status →
+  // result span. Disables button while in-flight, re-enables on completion.
+  var diagPingBtn = $('diagPingBtn');
+  var diagPingResult = $('diagPingResult');
+  if (diagPingBtn && diagPingResult) {
+    diagPingBtn.addEventListener('click', async function() {
+      diagPingBtn.disabled = true;
+      diagPingResult.style.color = 'var(--bb-ink-dim)';
+      diagPingResult.textContent = '… probing';
+      var t0 = performance.now();
+      try {
+        var r = await popupRpc('modWhoami');
+        var ms = Math.round(performance.now() - t0);
+        if (r && r.ok) {
+          diagPingResult.style.color = 'var(--bb-green)';
+          var who = r.data && r.data.username ? r.data.username : '(unknown)';
+          diagPingResult.textContent = '✓ ok ' + ms + 'ms · as ' + who;
+        } else {
+          diagPingResult.style.color = 'var(--bb-red)';
+          var st = r && r.status ? r.status : '?';
+          var err = r && (r.error || r.text) ? (r.error || r.text).slice(0, 80) : 'no detail';
+          diagPingResult.textContent = '✕ HTTP ' + st + ' ' + ms + 'ms · ' + err;
+        }
+      } catch (e) {
+        var ms2 = Math.round(performance.now() - t0);
+        diagPingResult.style.color = 'var(--bb-red)';
+        diagPingResult.textContent = '✕ throw ' + ms2 + 'ms · ' + (e && e.message ? e.message.slice(0, 80) : 'unknown');
+      } finally {
+        diagPingBtn.disabled = false;
+      }
+    });
+  }
+
+  // v10.17: AI smoke-test buttons — Explain / Summarize / Suggest
+  (function() {
+    var smokeResult = $('diagAiSmokeResult');
+    function showSmokeResult(text, ok) {
+      if (!smokeResult) return;
+      smokeResult.style.display = 'block';
+      smokeResult.style.color = ok ? 'var(--bb-green)' : 'var(--bb-red)';
+      smokeResult.textContent = text;
+    }
+    function makeSmokeHandler(btnId, rpcName, args, label) {
+      var btn = $(btnId);
+      if (!btn) return;
+      btn.addEventListener('click', async function() {
+        btn.disabled = true;
+        if (smokeResult) { smokeResult.style.display = 'block'; smokeResult.textContent = '... probing'; smokeResult.style.color = 'var(--bb-ink-dim)'; }
+        var t0 = performance.now();
+        try {
+          var r = await popupRpc(rpcName, args);
+          var ms = Math.round(performance.now() - t0);
+          if (r && r.ok) {
+            var preview = r.data && typeof r.data === 'object' ? JSON.stringify(r.data).slice(0, 200) : String(r.data || '').slice(0, 200);
+            showSmokeResult('[' + label + '] ok ' + ms + 'ms  ' + preview, true);
+          } else {
+            var err = r && (r.error || r.text) ? (r.error || r.text).slice(0, 120) : 'no detail';
+            showSmokeResult('[' + label + '] FAIL ' + ms + 'ms  HTTP ' + (r && r.status ? r.status : '?') + '  ' + err, false);
+          }
+        } catch (e) {
+          var ms2 = Math.round(performance.now() - t0);
+          showSmokeResult('[' + label + '] throw ' + ms2 + 'ms  ' + (e && e.message ? e.message.slice(0, 120) : 'unknown'), false);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    }
+    makeSmokeHandler('diagAiExplainBtn', 'aiExplain', { username: 'catsfive', context: 'mod-console', target_type: 'user' }, 'Explain');
+    makeSmokeHandler('diagAiSumBtn', 'aiSummarizeThread', { content: 'User reports a brigade -- 5 accounts all created today are downvoting one thread.' }, 'Summarize');
+    makeSmokeHandler('diagAiSugBtn', 'aiSuggestAction', { username: 'catsfive', context_summary: 'User posted off-topic memes in /p/123456.' }, 'Suggest');
+  })();
+
   // --- Section 4: Storage + audit ---
   try {
     var total = await new Promise(function(resolve, reject) {
@@ -7740,3 +7999,376 @@ var DRAFT_TTL_MACRO_MS   = 24 * 60 * 60 * 1000;  // 24 hours
 // =============================================================================
 // END E.3.4
 // =============================================================================
+
+// ====================== GAW MOD Pro Tier — popup patchset v1.0 (additive — appended at EOF) ======================
+// ============================================================================
+// GAW MOD Pro Tier - popup.js ADDITIVE SNIPPET
+// ============================================================================
+// PURPOSE: Wires up the additive markup from popup-pro-badge.html.snippet:
+//   1. On popup open  -> GET /stripe/status, toggle #pro-badge vs #upgrade-cta
+//   2. On CTA click   -> POST /stripe/checkout, open Stripe URL in new tab,
+//                        start 3s polling loop (max 100 polls = 5 minutes)
+//   3. Polling        -> stops on { pro: true } | timeout | popup close
+//   4. refreshProStatus() helper -> idempotent re-run of (1)
+//
+// PASTE LOCATION:
+//   Append this entire block to the BOTTOM of modtools-ext/popup/popup.js,
+//   AFTER any existing init code. The IIFE keeps all symbols scoped so
+//   nothing leaks into the global namespace or collides with existing names.
+//
+// CONSTRAINTS (CLAUDE.md sections 2, 3, 8):
+//   - Vanilla DOM API only (no fetch wrappers, no libraries)
+//   - Purely additive (no existing IDs/classes touched)
+//   - Uses existing chrome.storage.local keys: 'mod_token', 'worker_url'
+//   - Uses existing 'tabs' permission for chrome.tabs.create
+// ============================================================================
+
+(function initGawProTier() {
+  'use strict';
+
+  // --------------------------------------------------------------------------
+  // Constants
+  // --------------------------------------------------------------------------
+  const POLL_INTERVAL_MS = 3000;       // 3 seconds between polls
+  const POLL_MAX_ATTEMPTS = 100;       // 100 * 3s = 300s = 5 minutes
+  const LOG_TAG = '[gaw-pro]';
+
+  // --------------------------------------------------------------------------
+  // Module state (scoped to this IIFE)
+  // --------------------------------------------------------------------------
+  let pollIntervalId = null;
+  let pollAttempts = 0;
+
+  // --------------------------------------------------------------------------
+  // Tiny logger - brief, Discord-style. NEVER throws.
+  // --------------------------------------------------------------------------
+  function log(msg, extra) {
+    try {
+      if (extra !== undefined) {
+        console.log(LOG_TAG, msg, extra);
+      } else {
+        console.log(LOG_TAG, msg);
+      }
+    } catch (_) { /* console unavailable - swallow */ }
+  }
+
+  function warn(msg, extra) {
+    try {
+      if (extra !== undefined) {
+        console.warn(LOG_TAG, msg, extra);
+      } else {
+        console.warn(LOG_TAG, msg);
+      }
+    } catch (_) { /* swallow */ }
+  }
+
+  // --------------------------------------------------------------------------
+  // Storage helpers - Promise wrappers around chrome.storage.local.get
+  // --------------------------------------------------------------------------
+  function getStorage(keys) {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get(keys, (result) => {
+          if (chrome.runtime && chrome.runtime.lastError) {
+            warn('storage.get error', chrome.runtime.lastError.message);
+            resolve({});
+            return;
+          }
+          resolve(result || {});
+        });
+      } catch (err) {
+        warn('storage.get threw', err && err.message);
+        resolve({});
+      }
+    });
+  }
+
+  async function getWorkerContext() {
+    const data = await getStorage(['mod_token', 'worker_url']);
+    return {
+      token: data.mod_token || '',
+      baseUrl: (data.worker_url || '').replace(/\/+$/, ''), // strip trailing /
+    };
+  }
+
+  // --------------------------------------------------------------------------
+  // DOM helpers - safe lookups (return null if missing, don't blow up popup)
+  // --------------------------------------------------------------------------
+  function el(id) {
+    return document.getElementById(id);
+  }
+
+  function show(id, isVisible) {
+    const node = el(id);
+    if (!node) return;
+    if (isVisible) {
+      node.removeAttribute('hidden');
+    } else {
+      node.setAttribute('hidden', '');
+    }
+  }
+
+  function setStatusText(text) {
+    const node = el('upgrade-cta-status');
+    if (!node) return;
+    if (text) {
+      node.textContent = text;
+      node.removeAttribute('hidden');
+    } else {
+      node.textContent = '';
+      node.setAttribute('hidden', '');
+    }
+  }
+
+  function applyProClass(isPro) {
+    const badge = el('pro-badge');
+    if (!badge) return;
+    if (isPro) {
+      badge.classList.add('is-pro');
+    } else {
+      badge.classList.remove('is-pro');
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Network: GET /stripe/status
+  // Returns: { pro: boolean, status: string } | null on error
+  // --------------------------------------------------------------------------
+  async function fetchStripeStatus() {
+    const { token, baseUrl } = await getWorkerContext();
+    if (!token || !baseUrl) {
+      warn('missing token or worker_url - skipping status check');
+      return null;
+    }
+
+    try {
+      const res = await fetch(baseUrl + '/stripe/status', {
+        method: 'GET',
+        headers: {
+          'x-mod-token': token,
+          'accept': 'application/json',
+        },
+      });
+
+      if (res.status === 401) {
+        warn('status 401 - token rejected');
+        return null;
+      }
+      if (!res.ok) {
+        warn('status non-OK', res.status);
+        return null;
+      }
+
+      const data = await res.json();
+      // Contract is { pro: boolean, status: string }. Defensive coerce.
+      return {
+        pro: data && data.pro === true,
+        status: (data && typeof data.status === 'string') ? data.status : '',
+      };
+    } catch (err) {
+      warn('status network error', err && err.message);
+      return null;
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Network: POST /stripe/checkout
+  // Returns: { url: string } | null on error
+  // --------------------------------------------------------------------------
+  async function createCheckoutSession() {
+    const { token, baseUrl } = await getWorkerContext();
+    if (!token || !baseUrl) {
+      warn('missing token or worker_url - cannot start checkout');
+      return null;
+    }
+
+    try {
+      const res = await fetch(baseUrl + '/stripe/checkout', {
+        method: 'POST',
+        headers: {
+          'x-mod-token': token,
+          'accept': 'application/json',
+        },
+      });
+
+      if (!res.ok) {
+        warn('checkout non-OK', res.status);
+        return null;
+      }
+
+      const data = await res.json();
+      if (!data || typeof data.url !== 'string' || !data.url) {
+        warn('checkout response missing url field');
+        return null;
+      }
+      return { url: data.url };
+    } catch (err) {
+      warn('checkout network error', err && err.message);
+      return null;
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // DELIVERABLE 4: refreshProStatus()
+  // Idempotent. Called on popup open and after polling success.
+  // Re-fetches /stripe/status and updates the UI accordingly.
+  // --------------------------------------------------------------------------
+  async function refreshProStatus() {
+    const result = await fetchStripeStatus();
+
+    // Network failure / 401 -> do NOT block the popup. Leave both hidden.
+    if (result === null) {
+      show('pro-badge', false);
+      show('upgrade-cta', false);
+      return;
+    }
+
+    if (result.pro) {
+      // Pro user: show gold badge, hide upgrade CTA
+      show('pro-badge', true);
+      applyProClass(true);
+      show('upgrade-cta', false);
+      log('pro tier active');
+    } else {
+      // Free user: hide badge, show upgrade CTA
+      show('pro-badge', false);
+      applyProClass(false);
+      show('upgrade-cta', true);
+      log('free tier - showing upgrade CTA');
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // DELIVERABLE 3: polling loop
+  // Cancellable via stopPolling(). Runs at most POLL_MAX_ATTEMPTS times.
+  // On { pro: true } -> calls refreshProStatus() then stops.
+  // On timeout -> stops, leaves UI as-is, logs timeout.
+  // --------------------------------------------------------------------------
+  function stopPolling(reason) {
+    if (pollIntervalId !== null) {
+      clearInterval(pollIntervalId);
+      pollIntervalId = null;
+      log('polling stopped', reason || 'unspecified');
+    }
+    pollAttempts = 0;
+  }
+
+  function startPolling() {
+    // Guard: never run two pollers concurrently
+    if (pollIntervalId !== null) {
+      log('polling already active - not starting another');
+      return;
+    }
+    pollAttempts = 0;
+    log('polling started (every ' + POLL_INTERVAL_MS + 'ms, max ' + POLL_MAX_ATTEMPTS + ')');
+    setStatusText('Waiting for payment confirmation...');
+
+    pollIntervalId = setInterval(async () => {
+      pollAttempts += 1;
+
+      if (pollAttempts > POLL_MAX_ATTEMPTS) {
+        stopPolling('timeout after ' + POLL_MAX_ATTEMPTS + ' attempts');
+        setStatusText('Timed out - reopen the popup after payment.');
+        return;
+      }
+
+      const result = await fetchStripeStatus();
+      // Network errors during polling are non-fatal - just keep trying
+      if (result === null) {
+        return;
+      }
+
+      if (result.pro) {
+        stopPolling('pro tier confirmed');
+        setStatusText('');
+        await refreshProStatus();
+      }
+    }, POLL_INTERVAL_MS);
+  }
+
+  // --------------------------------------------------------------------------
+  // DELIVERABLE 2: "Upgrade to Pro" click handler
+  // Creates Stripe Checkout session, opens it in a new tab, starts polling.
+  // --------------------------------------------------------------------------
+  async function onUpgradeClick(evt) {
+    if (evt && typeof evt.preventDefault === 'function') {
+      evt.preventDefault();
+    }
+
+    const button = el('upgrade-cta-button');
+    if (button) {
+      button.disabled = true;
+    }
+    setStatusText('Opening Stripe Checkout...');
+
+    const checkout = await createCheckoutSession();
+
+    if (!checkout) {
+      setStatusText('Could not start checkout. Try again in a moment.');
+      if (button) {
+        button.disabled = false;
+      }
+      return;
+    }
+
+    // Open Stripe Checkout in a new tab. Uses existing 'tabs' permission.
+    try {
+      chrome.tabs.create({ url: checkout.url });
+      log('checkout tab opened');
+    } catch (err) {
+      warn('chrome.tabs.create failed', err && err.message);
+      setStatusText('Could not open checkout tab.');
+      if (button) {
+        button.disabled = false;
+      }
+      return;
+    }
+
+    // Re-enable button (user may want to retry if they close Stripe tab)
+    if (button) {
+      button.disabled = false;
+    }
+
+    // Kick off the polling loop immediately
+    startPolling();
+  }
+
+  // --------------------------------------------------------------------------
+  // DELIVERABLE 1: bind handlers + run initial status check on popup open
+  // --------------------------------------------------------------------------
+  function wireUp() {
+    const button = el('upgrade-cta-button');
+    if (button) {
+      button.addEventListener('click', onUpgradeClick);
+    } else {
+      warn('#upgrade-cta-button not found - HTML snippet may not be pasted');
+    }
+
+    // Ensure polling is cancelled if the popup window unloads (popup closed).
+    // chrome extension popups fire 'unload' when the user clicks away.
+    window.addEventListener('unload', () => stopPolling('popup unload'));
+
+    // Initial status check
+    refreshProStatus();
+  }
+
+  // Defer until DOM ready so element lookups succeed regardless of
+  // where this snippet was pasted relative to other init code.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wireUp, { once: true });
+  } else {
+    wireUp();
+  }
+
+  // Expose refreshProStatus on window so other parts of popup.js (or future
+  // additions) can re-sync after, e.g., a manual token change.
+  // Namespaced to avoid collisions.
+  window.gawPro = Object.freeze({
+    refreshProStatus: refreshProStatus,
+  });
+})();
+
+// ============================================================================
+// END OF popup-pro-badge.js.snippet
+// ============================================================================
+// ====================== END GAW MOD Pro Tier — popup patchset v1.0 ======================

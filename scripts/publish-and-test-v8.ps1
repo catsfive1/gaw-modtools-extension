@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     GAW ModTools v8.0 one-shot publish + test pipeline.
 

@@ -682,6 +682,7 @@
             // MutationObserver re-attached above takes over.
             let sweepN = 0;
             const sweepIv = setInterval(()=>{
+              if (document.visibilityState === 'hidden') return; // v10.16.44 UI/UX+perf: pause work on hidden tab (agent feedback from 10x loop)
               if (++sweepN > 5) { clearInterval(sweepIv); return; }
               if (!/^\/u\/[^/]+(?:\/(?:posts|comments|saved|upvoted|downvoted))?\/?$/.test(location.pathname)) {
                 clearInterval(sweepIv); return;
@@ -5530,6 +5531,295 @@
       }
     }, true);
   })();
+
+  // v10.16.33 (Grok top-50 #25) — COMMAND PALETTE (Ctrl+Shift+P) — VS-Code-style
+  // unified action launcher. Existing Ctrl+K is the SEARCH palette (content
+  // search); this is a separate dedicated ACTION palette so muscle memory
+  // doesn't collide. Lists every major ModTools action with fuzzy substring
+  // filtering on label OR keywords. Enter executes, Esc closes, ↑↓ navigate.
+  // Registry is extensible: any feature can call window._gamCmdkRegister to
+  // add an action without touching this file.
+  (function _initActionPalette() {
+    let _apEl = null;
+    let _apInput = null;
+    let _apList = null;
+    let _apIdx = 0;
+    let _apFiltered = [];
+
+    // Action registry — pre-populated with high-frequency mod actions.
+    // Each: { label, kw (keywords for filter), icon, fn (handler) }.
+    const _apRegistry = [
+      {
+        label: 'Open Mod Console',
+        kw: 'mc console mod user profile',
+        icon: '🎛',
+        fn: () => {
+          const btn = document.querySelector('#gam-mc-open-btn, .gam-mc-trigger, [data-action="open-mod-console"]');
+          if (btn) btn.click();
+          else snack('Mod Console trigger not found on this page', 'warn');
+        }
+      },
+      {
+        label: 'Open Modmail Panel',
+        kw: 'modmail messages inbox dm pm',
+        icon: '✉',
+        fn: () => {
+          const btn = document.querySelector('.gam-mm-bar-btn, #gam-mm-bar-open, [data-action="open-modmail"]');
+          if (btn) btn.click();
+          else if (location.pathname !== '/modmail') location.href = 'https://greatawakening.win/modmail';
+        }
+      },
+      {
+        label: 'Open Death Row queue',
+        kw: 'dr death row ban queue scheduled',
+        icon: '☠',
+        fn: () => {
+          const btn = document.querySelector('#gam-dr-trigger, [data-gam-open="dr"], .gam-bar-btn[data-section="dr"]');
+          if (btn) btn.click();
+          else snack('Death Row queue button not found on this page', 'warn');
+        }
+      },
+      {
+        label: 'Open Auto-Action queue',
+        kw: 'aaq auto action queue pending bans unstickies',
+        icon: '⚙',
+        fn: () => {
+          const btn = document.querySelector('#gam-aaq-trigger, [data-gam-open="aaq"]');
+          if (btn) btn.click();
+          else snack('Auto-action queue not found on this page', 'warn');
+        }
+      },
+      {
+        label: 'Toggle Status Bar visibility',
+        kw: 'status bar hide show toggle bottom',
+        icon: '▭',
+        fn: () => {
+          const bar = document.getElementById('gam-status-bar');
+          if (bar) bar.style.display = (bar.style.display === 'none') ? '' : 'none';
+        }
+      },
+      {
+        label: 'Open Help / shortcuts panel',
+        kw: 'help shortcuts kbd keyboard cheatsheet onboarding',
+        icon: '?',
+        fn: () => {
+          // Existing Ctrl+Shift+H hotkey opens help; synthesize that event.
+          const ev = new KeyboardEvent('keydown', { key: 'H', code: 'KeyH', ctrlKey: true, shiftKey: true, bubbles: true });
+          document.dispatchEvent(ev);
+        }
+      },
+      {
+        label: 'Search posts + comments (open search palette)',
+        kw: 'search find posts comments content ctrl+k',
+        icon: '🔍',
+        fn: () => {
+          const ev = new KeyboardEvent('keydown', { key: 'k', code: 'KeyK', ctrlKey: true, bubbles: true });
+          document.dispatchEvent(ev);
+        }
+      },
+      {
+        label: 'Investigate user (open Profile Intel)',
+        kw: 'intel profile drawer user investigate ai analysis',
+        icon: '🔬',
+        fn: async () => {
+          const u = window.prompt('Username to investigate:', '');
+          if (!u || !u.trim()) return;
+          const safe = u.trim().replace(/[^A-Za-z0-9_-]/g, '');
+          if (!safe) { snack('Invalid username', 'warn'); return; }
+          // Open the user's profile page; the Intel Drawer auto-opens via the
+          // existing per-profile init flow.
+          location.href = 'https://greatawakening.win/u/' + safe;
+        }
+      },
+      {
+        label: 'Run all Death Row rules NOW',
+        kw: 'dr rules sweep run all execute auto-dr',
+        icon: '▶',
+        fn: () => {
+          const btn = document.querySelector('.gam-t-dr-sweep-btn-top, .gam-t-dr-sweep-btn, [data-action="dr-run-all"]');
+          if (btn) btn.click();
+          else snack('Run-all-rules button only available on /users page', 'warn');
+        }
+      },
+      {
+        label: 'Refresh team settings + roster',
+        kw: 'refresh settings roster sync update',
+        icon: '↻',
+        fn: async () => {
+          try {
+            if (typeof rpcCall === 'function') {
+              const r = await rpcCall('modSettingsRead', {});
+              if (r && r.ok) snack('Team settings refreshed', 'ok');
+              else snack('Refresh failed: ' + (r && r.error || 'unknown'), 'err');
+            }
+          } catch (e) { snack('Refresh threw: ' + (e && e.message || e), 'err'); }
+        }
+      },
+      {
+        label: 'Copy debug snapshot (current page)',
+        kw: 'debug snapshot clipboard diagnostics info copy',
+        icon: '📋',
+        fn: () => {
+          const payload = [
+            '[GAW ModTools — page snapshot]',
+            'when: ' + new Date().toISOString(),
+            'ext_version: ' + (typeof VERSION !== 'undefined' ? VERSION : 'unknown'),
+            'page_url: ' + location.href,
+            'ua: ' + navigator.userAgent,
+            'title: ' + document.title
+          ].join('\n');
+          try { navigator.clipboard.writeText(payload); snack('Snapshot copied to clipboard', 'ok'); }
+          catch (_) { snack('Clipboard write failed', 'err'); }
+        }
+      },
+      {
+        label: 'Open extension popup (Diagnostics tab)',
+        kw: 'popup diag diagnostics health ping options',
+        icon: '⚕',
+        fn: () => {
+          try { chrome.runtime.sendMessage({ type: 'gam.openPopupDiag' }, () => {}); }
+          catch (_) {}
+          snack('Click the ModTools toolbar icon, then go to Diag tab', 'info');
+        }
+      },
+      {
+        label: 'Reload this page',
+        kw: 'reload refresh f5',
+        icon: '↺',
+        fn: () => { location.reload(); }
+      },
+      {
+        label: 'Reload extension (orphan recovery)',
+        kw: 'reload extension orphan refresh chrome',
+        icon: '⟲',
+        fn: () => {
+          snack('Click chrome://extensions and hit the reload arrow on ModTools', 'info');
+        }
+      }
+    ];
+
+    // Public registration API for future features.
+    window._gamCmdkRegister = function(actionObj) {
+      try {
+        if (!actionObj || typeof actionObj.fn !== 'function' || !actionObj.label) return false;
+        _apRegistry.push({
+          label: String(actionObj.label),
+          kw: String(actionObj.kw || ''),
+          icon: actionObj.icon || '•',
+          fn: actionObj.fn
+        });
+        return true;
+      } catch (_) { return false; }
+    };
+
+    function _apEnsure() {
+      if (_apEl) return;
+      _apEl = document.createElement('div');
+      _apEl.id = 'gam-cmdk-palette';
+      _apEl.setAttribute('role', 'dialog');
+      _apEl.setAttribute('aria-modal', 'true');
+      _apEl.setAttribute('aria-label', 'ModTools command palette');
+      _apEl.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999990;background:rgba(0,0,0,0.55);backdrop-filter:blur(2px);display:none;align-items:flex-start;justify-content:center;padding-top:80px;font:13px ui-monospace,JetBrains Mono,monospace';
+      _apEl.innerHTML =
+        '<div id="gam-cmdk-card" style="background:#0a0a0b;border:1px solid var(--bb-amber,#ff9933);width:min(560px,92vw);max-height:65vh;display:flex;flex-direction:column;box-shadow:0 12px 48px rgba(0,0,0,0.7),0 0 0 1px rgba(255,153,51,0.15);border-radius:4px;overflow:hidden">' +
+          '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(255,153,51,0.25);background:linear-gradient(180deg,#13130f 0%,#0a0a0b 100%)">' +
+            '<span style="color:var(--bb-amber,#ff9933);font-weight:700;font-size:11px;letter-spacing:0.12em;text-transform:uppercase">CMD</span>' +
+            '<input id="gam-cmdk-input" type="text" placeholder="Type a command or filter…" aria-label="Filter commands" autocomplete="off" spellcheck="false" style="flex:1;background:transparent;border:none;outline:none;color:#e8e6e1;font:13px ui-monospace,JetBrains Mono,monospace">' +
+            '<span style="color:#7a7672;font-size:10px;letter-spacing:0.06em">ESC to close</span>' +
+          '</div>' +
+          '<div id="gam-cmdk-list" role="listbox" aria-label="Available commands" style="overflow-y:auto;padding:6px 0;max-height:calc(65vh - 50px)"></div>' +
+          '<div style="padding:6px 14px;border-top:1px solid rgba(255,153,51,0.12);color:#7a7672;font-size:10px;letter-spacing:0.04em;display:flex;justify-content:space-between">' +
+            '<span>↑↓ navigate · ↵ execute</span>' +
+            '<span>Ctrl+Shift+P</span>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(_apEl);
+      _apInput = _apEl.querySelector('#gam-cmdk-input');
+      _apList = _apEl.querySelector('#gam-cmdk-list');
+      // Click outside card to close
+      _apEl.addEventListener('mousedown', (ev) => {
+        if (ev.target === _apEl) _apClose();
+      });
+      _apInput.addEventListener('input', () => { _apIdx = 0; _apRender(); });
+      _apInput.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') { ev.preventDefault(); _apClose(); return; }
+        if (ev.key === 'ArrowDown') { ev.preventDefault(); _apIdx = Math.min(_apFiltered.length - 1, _apIdx + 1); _apRender(); return; }
+        if (ev.key === 'ArrowUp')   { ev.preventDefault(); _apIdx = Math.max(0, _apIdx - 1); _apRender(); return; }
+        // v10.16.46 A7-P1-6: Tab/Shift+Tab also navigate (was un-trapped, focus escaped palette).
+        if (ev.key === 'Tab' && !ev.shiftKey)  { ev.preventDefault(); _apIdx = Math.min(_apFiltered.length - 1, _apIdx + 1); _apRender(); return; }
+        if (ev.key === 'Tab' && ev.shiftKey)   { ev.preventDefault(); _apIdx = Math.max(0, _apIdx - 1); _apRender(); return; }
+        if (ev.key === 'Enter')     { ev.preventDefault(); _apExecuteCurrent(); return; }
+      });
+    }
+
+    function _apMatch(q, item) {
+      if (!q) return true;
+      const hay = (item.label + ' ' + (item.kw || '')).toLowerCase();
+      const needles = q.toLowerCase().split(/\s+/).filter(Boolean);
+      return needles.every(n => hay.indexOf(n) !== -1);
+    }
+
+    function _apRender() {
+      if (!_apList) return;
+      const q = (_apInput && _apInput.value || '').trim();
+      _apFiltered = _apRegistry.filter(item => _apMatch(q, item));
+      if (_apIdx >= _apFiltered.length) _apIdx = Math.max(0, _apFiltered.length - 1);
+      _apList.innerHTML = '';
+      if (_apFiltered.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:14px 16px;color:#7a7672;font-style:italic';
+        empty.textContent = 'No commands match "' + q + '"';
+        _apList.appendChild(empty);
+        return;
+      }
+      _apFiltered.forEach((item, i) => {
+        const row = document.createElement('div');
+        row.setAttribute('role', 'option');
+        row.setAttribute('aria-selected', i === _apIdx ? 'true' : 'false');
+        row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid ' + (i === _apIdx ? 'var(--bb-amber,#ff9933)' : 'transparent') + ';background:' + (i === _apIdx ? 'rgba(255,153,51,0.07)' : 'transparent');
+        /* v10.16.46 A7-P1-7: long labels overflow → ellipsis (was unbounded, wrapped + broke row rhythm). */
+        row.innerHTML = '<span style="color:var(--bb-amber,#ff9933);width:16px;text-align:center;font-size:14px;flex:0 0 16px">' + (item.icon || '•') + '</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + item.label.replace(/</g,'&lt;') + '</span>';
+        row.addEventListener('mouseenter', () => { _apIdx = i; _apRender(); });
+        row.addEventListener('mousedown', (ev) => { ev.preventDefault(); _apIdx = i; _apExecuteCurrent(); });
+        _apList.appendChild(row);
+      });
+    }
+
+    function _apExecuteCurrent() {
+      const item = _apFiltered[_apIdx];
+      if (!item) return;
+      _apClose();
+      try { Promise.resolve(item.fn()).catch(e => { try { snack('Command failed: ' + (e && e.message || e), 'err'); } catch(_){} }); }
+      catch (e) { try { snack('Command threw: ' + (e && e.message || e), 'err'); } catch(_){} }
+    }
+
+    function _apOpen() {
+      _apEnsure();
+      _apEl.style.display = 'flex';
+      _apInput.value = '';
+      _apIdx = 0;
+      _apRender();
+      // Focus on next tick so the keypress that opened the palette doesn't land in the input
+      setTimeout(() => { try { _apInput.focus(); _apInput.select(); } catch (_) {} }, 0);
+    }
+
+    function _apClose() {
+      if (_apEl) _apEl.style.display = 'none';
+    }
+
+    // Global hotkey: Ctrl+Shift+P / Cmd+Shift+P
+    document.addEventListener('keydown', function(e) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (!e.shiftKey) return;
+      if (e.key !== 'P' && e.key !== 'p') return;
+      // Don't fire if a modal is already open (askText, preflight, etc.) — let user finish that flow.
+      if (document.querySelector('.gam-modal[style*="display:flex"], .gam-preflight-wrap, #gam-asktext-modal')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      _apOpen();
+    }, true);
+  })();
+
   function getDeathRowPending(){ return getDeathRow().filter(d=>d.status==='waiting'); }
   function getDeathRowReady(){ return getDeathRow().filter(d=>d.status==='waiting' && Date.now()>=d.executeAt); }
   function markDeathRowExecuted(username){
@@ -5781,7 +6071,7 @@
       state.titleEl = el('h2', {cls: 'gam-drawer-title'}, '');
       state.markBtnEl = el('button', {cls: 'gam-drawer-mark-precedent', 'aria-label': 'Mark as precedent', hidden: 'hidden'}, '\u2605');
       state.markBtnEl.addEventListener('click', e => { e.stopPropagation(); _openMarkPrecedentModal(); });
-      state.closeBtnEl = el('button', {cls: 'gam-drawer-close', 'aria-label': 'Close'}, 'x');
+      state.closeBtnEl = el('button', {cls: 'gam-drawer-close', 'aria-label': 'Close'}, '×');
       state.closeBtnEl.addEventListener('click', () => close());
 
       state.headerEl = el('header', {cls: 'gam-drawer-header'}, state.chipsEl, state.titleEl, state.markBtnEl, state.closeBtnEl);
@@ -7673,13 +7963,71 @@
         '<span style="font-size:14px">↻</span>' +
         '<span><b>ModTools updated.</b> The extension was reloaded — refresh this page to reconnect.</span>' +
         '<span style="flex:1"></span>' +
+        '<button id="gam-ext-orphaned-copy" style="background:transparent;border:1px solid #7a7672;color:#ffd84d;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase" title="Copy debug details to clipboard">📋 Copy</button>' +
         '<button id="gam-ext-orphaned-reload" style="background:var(--bb-amber);border:none;color:#0a0a0b;padding:4px 12px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Reload page</button>' +
         '<button id="gam-ext-orphaned-dismiss" style="background:transparent;border:1px solid #7a7672;color:#9b9892;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Dismiss</button>'; /* v.next a11y: border 2.5:1 -> 4.1:1 */
       document.body.appendChild(b);
       const reload = b.querySelector('#gam-ext-orphaned-reload');
       const dismiss = b.querySelector('#gam-ext-orphaned-dismiss');
+      const copy = b.querySelector('#gam-ext-orphaned-copy');
       if (reload) reload.addEventListener('click', () => { try { location.reload(); } catch(_){} });
       if (dismiss) dismiss.addEventListener('click', () => { try { b.remove(); } catch(_){} });
+      // v10.16.32 (Grok #96): copy-debug button. Produces a paste-back-to-Commander
+      // payload so the operator never has to manually scrape error info from the
+      // console. Uses the 3-layer fallback per CLAUDE.md §9 (DevTools copy() →
+      // navigator.clipboard.writeText → textarea+execCommand fallback).
+      if (copy) copy.addEventListener('click', () => {
+        try {
+          const pad = (n) => String(n).padStart(2, '0');
+          const now = new Date();
+          const ts = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate()) +
+                     ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+          // chrome.runtime.id deliberately accessed inside try so an invalidated
+          // context throws and we report it as 'INVALIDATED' rather than crash.
+          let runtimeId = 'unknown';
+          try { runtimeId = chrome.runtime && chrome.runtime.id ? chrome.runtime.id : 'EMPTY'; }
+          catch (e) { runtimeId = 'INVALIDATED (' + (e && e.message || 'unknown') + ')'; }
+          const payload =
+            '[GAW ModTools — extension orphan]\n' +
+            'when: ' + ts + '\n' +
+            'ext_version: ' + (typeof VERSION !== 'undefined' ? VERSION : 'unknown') + '\n' +
+            'runtime_id: ' + runtimeId + '\n' +
+            'page_url: ' + location.href + '\n' +
+            'ua: ' + navigator.userAgent + '\n' +
+            'reason: extension context invalidated (Chrome reloaded the SW while this content script was alive)\n' +
+            'fix: refresh this page (the Reload button does this)';
+          // 3-layer clipboard fallback
+          const __doCopy = (text) => {
+            // Layer 1: navigator.clipboard (preferred)
+            try {
+              if (navigator.clipboard && document.hasFocus()) {
+                navigator.clipboard.writeText(text);
+                return 'clipboard API';
+              }
+            } catch (_) {}
+            // Layer 2: legacy textarea + execCommand
+            try {
+              const ta = document.createElement('textarea');
+              ta.value = text;
+              ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+              document.body.appendChild(ta);
+              ta.focus(); ta.select();
+              const ok = document.execCommand('copy');
+              document.body.removeChild(ta);
+              if (ok) return 'execCommand fallback';
+            } catch (_) {}
+            return null;
+          };
+          const via = __doCopy(payload);
+          // Visual feedback on the button
+          const orig = copy.textContent;
+          copy.textContent = via ? '✓ Copied' : '✕ failed';
+          copy.style.background = via ? 'rgba(61,214,140,0.18)' : 'rgba(240,64,64,0.18)';
+          setTimeout(() => {
+            try { copy.textContent = orig; copy.style.background = 'transparent'; } catch (_) {}
+          }, 1800);
+        } catch (_) {}
+      });
     } catch(_){}
   }
   function _gamIsExtOrphanedMsg(s){
@@ -7705,11 +8053,34 @@
     const o = opts || {};
     const hasAction = !!(o.actionLabel && typeof o.onAction === 'function');
     const hasCountdown = typeof o.actionDurationMs === 'number' && o.actionDurationMs > 0;
-    const durationMs = hasCountdown ? o.actionDurationMs : 2200;
+    // v10.16.43 B5-#1: snack timing tier by type. 2.2s for ok/info is fine
+    // but ERROR and WARN need to survive long enough for the operator to
+    // process them. Pre-fix every snack auto-dismissed at 2.2s regardless
+    // of severity — error toasts vanished before the mod could read them.
+    const _snackDurByType = { info: 2200, ok: 2200, success: 2200, warn: 4000, warning: 4000, err: 6000, error: 6000 };
+    const durationMs = hasCountdown ? o.actionDurationMs : (_snackDurByType[String(type || '').toLowerCase()] || 2200);
     // v8.1 ux: announce via aria-live region (flag-gated inside __announce).
     try { __announce(type === 'error' ? 'error' : 'polite', msg); } catch(e){}
-    const old=document.getElementById('gam-snack'); if(old) old.remove();
-    const s=el('div',{id:'gam-snack', cls:`gam-snack gam-snack-${type}`});
+    // v10.16.48 A5: snack stack (max 4, append not replace). Pre-fix EVERY new
+    // snack removed any existing one — a burst of actions (ban + note + DR add
+    // firing in 200ms) created 3 snacks but only the LAST was ever seen. Error
+    // snacks (6s) were the worst victims — a success fired 80ms later wiped
+    // the error before it could be read. Now: stack up to 4, each vertically
+    // offset by 48px, oldest removed first if cap exceeded.
+    const _STACK_MAX = 4;
+    const _STACK_GAP = 6;
+    const _STACK_ROW = 42; // approx snack height incl gap
+    const existingStack = Array.from(document.querySelectorAll('.gam-snack[data-stack="1"]'));
+    while (existingStack.length >= _STACK_MAX) {
+      const oldest = existingStack.shift();
+      try {
+        if (oldest._gamCountdownInterval) clearInterval(oldest._gamCountdownInterval);
+        if (oldest._gamDismissTimer) clearTimeout(oldest._gamDismissTimer);
+        if (oldest._gamSnackEsc) { try { document.removeEventListener('keydown', oldest._gamSnackEsc, true); } catch(_){} }
+        oldest.remove();
+      } catch (_) {}
+    }
+    const s=el('div',{cls:`gam-snack gam-snack-${type}`, 'data-stack':'1'});
     // v10.13.1 W3: snack is now a flex row so optional action btn sits beside the message.
     s.style.display = 'flex';
     s.style.alignItems = 'center';
@@ -7780,6 +8151,30 @@
       }
     } catch(e){}
     document.body.appendChild(s);
+    // v10.16.48 A5: re-stack ALL visible snacks bottom-up after the append.
+    // newest at the BOTTOM (closest to default 14px / collision-adjusted base),
+    // older ones float up by row-height per index. The collision-with-status-
+    // bar offset above set `s.style.bottom` only if needed; we preserve that
+    // base and add the per-index stack offset on top of it.
+    try {
+      const stackItems = Array.from(document.querySelectorAll('.gam-snack[data-stack="1"]'));
+      // Determine base bottom from the newest item (this one). Parse '14px' or
+      // a previously-set collision value.
+      let baseBottom = 14;
+      try {
+        const explicitBottom = parseFloat(s.style.bottom);
+        if (Number.isFinite(explicitBottom) && explicitBottom > 0) baseBottom = explicitBottom;
+      } catch (_) {}
+      // Re-position oldest at top, newest at bottom (so the latest snack is
+      // always at the same visual location — operators don't have to track
+      // moving toasts).
+      // stackItems is in DOM-insertion order: [oldest, ..., newest]. Reverse
+      // walk: newest gets baseBottom; each older one gets baseBottom + idx*row.
+      const reversed = stackItems.slice().reverse();
+      reversed.forEach(function(item, idx) {
+        item.style.bottom = (baseBottom + idx * (_STACK_ROW + _STACK_GAP)) + 'px';
+      });
+    } catch (_) {}
     requestAnimationFrame(()=>s.classList.add('gam-snack-show'));
     // v10.13.5 P0-D (RALPH AUDIT FOCUS-TRAPS B.3 + DAILYMOD F4): when the
     // snack carries an action button (e.g. DR Cancel-All UNDO), the action
@@ -8797,10 +9192,142 @@
             <div id="gam-intel-ai-err" class="gam-mc-banner gam-mc-banner-red" style="display:none"></div>
           </div>
           <div id="gam-mc-modnote-mount"></div>
+          <!-- v10.17.0: AI Explain button -->
+          <div id="gam-mc-ai-explain-wrap" style="margin-top:8px;position:relative">
+            <button id="gam-mc-ai-explain-btn" class="gam-btn" title="Ask AI why this user is suspicious (Llama, 80% cheaper than Grok)" style="background:rgba(255,153,51,0.08);border:1px solid rgba(255,153,51,0.35);color:var(--bb-amber,#ff9933);width:100%">✨ AI Explain</button>
+          </div>
           <div class="gam-mc-intel-tip">\u{1F4A1} Hovering any username anywhere on GAW now shows this same intel instantly.</div>
         </div>
       </div>
     `;
+
+    // v10.17.0: AI Explain button handler
+    try {
+      (function _wireAiExplainBtn() {
+        const _aeBtn = root.querySelector('#gam-mc-ai-explain-btn');
+        const _aeWrap = root.querySelector('#gam-mc-ai-explain-wrap');
+        if (!_aeBtn || !_aeWrap) return;
+        let _aePopover = null;
+        function _aeClosePopover() {
+          if (_aePopover && _aePopover.parentNode) _aePopover.parentNode.removeChild(_aePopover);
+          _aePopover = null;
+          document.removeEventListener('click', _aeOutsideClick, true);
+        }
+        function _aeOutsideClick(ev) {
+          if (_aePopover && !_aePopover.contains(ev.target) && ev.target !== _aeBtn) _aeClosePopover();
+        }
+        _aeBtn.addEventListener('click', async function _aeClick() {
+          // If popover already open, dismiss it
+          if (_aePopover) { _aeClosePopover(); return; }
+          _aeBtn.disabled = true;
+          _aeBtn.textContent = '⟳ analyzing…';
+          let res = null;
+          try {
+            res = await rpcCall('aiExplain', { username: username, context: 'mod-console', target_type: 'user' });
+          } catch (err) {
+            _aeBtn.disabled = false; _aeBtn.textContent = '✨ AI Explain';
+            try { snack('AI Explain failed: ' + (err && err.message || err), 'err'); } catch(_) {}
+            return;
+          }
+          _aeBtn.disabled = false; _aeBtn.textContent = '✨ AI Explain';
+          if (!res || !res.ok) {
+            const errCode = (res && res.error) || (res && res.data && res.data.error) || 'unknown';
+            if (errCode === 'unknown_rpc') {
+              try { snack('AI Explain not yet deployed', 'warn'); } catch(_) {}
+            } else {
+              try { snack('AI Explain failed: ' + errCode, 'err'); } catch(_) {}
+            }
+            return;
+          }
+          const d = (res.data && res.data.data) || res.data || {};
+          const conf = typeof d.confidence === 'number' ? d.confidence : null;
+          const confColor = conf === null ? '#9b9892' : conf >= 80 ? '#44dd66' : conf >= 50 ? 'var(--bb-amber,#ff9933)' : '#ff4444';
+          // v10.16.47 A8-P0-2: always render the chip, even when confidence is
+          // null. Pre-fix the empty label hid the chip entirely — operator
+          // got AI text with zero reliability signal. Now: 'CONF UNKNOWN'
+          // makes it explicit that the AI returned without a self-rated score.
+          const confLabel = conf === null ? 'CONF UNKNOWN' : conf + '%';
+          const citations = Array.isArray(d.citations) ? d.citations : [];
+          const explanation = d.explanation || d.text || '(no explanation returned)';
+          // Build popover
+          const pop = document.createElement('div');
+          pop.style.cssText = 'position:absolute;top:calc(100% + 4px);left:0;width:380px;max-height:300px;overflow-y:auto;background:#0a0a0b;border:1px solid var(--bb-amber,#ff9933);border-radius:4px;box-shadow:0 8px 24px rgba(0,0,0,0.6);z-index:99999999;padding:10px 12px;font-size:12px;color:#e8e6e1;line-height:1.5;box-sizing:border-box';
+          const closeX = document.createElement('button');
+          closeX.textContent = '✕';
+          closeX.style.cssText = 'position:absolute;top:6px;right:8px;background:transparent;border:none;color:#9b9892;cursor:pointer;font-size:14px;line-height:1;padding:0';
+          closeX.addEventListener('click', _aeClosePopover);
+          const header = document.createElement('div');
+          header.style.cssText = 'font-weight:700;color:var(--bb-amber,#ff9933);margin-bottom:6px;padding-right:20px;font-size:13px';
+          header.textContent = '✨ AI Explanation';
+          const chipWrap = document.createElement('div');
+          chipWrap.style.cssText = 'margin-bottom:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap';
+          // v10.16.47 A8-P0-2: always render the confidence chip (chipWrap was
+          // previously gated by `conf !== null` and the label was empty when
+          // unknown — chip vanished completely). Now: chip ALWAYS appears with
+          // 'CONF UNKNOWN' as fallback so operator never gets AI text with
+          // zero reliability signal.
+          const chip = document.createElement('span');
+          chip.style.cssText = 'background:rgba(0,0,0,0.3);border:1px solid ' + confColor + ';color:' + confColor + ';border-radius:3px;padding:1px 6px;font-size:10px;font-weight:700;letter-spacing:0.06em';
+          chip.textContent = 'Confidence: ' + confLabel;
+          chipWrap.appendChild(chip);
+          // v10.16.48 A8-P0-1: thumbs-down feedback button. Fire-and-forget
+          // RPC (`aiFeedback`) on click; replaces the button with 'Noted' for
+          // 2s. Worker stubs as a D1 insert (no model retraining initially).
+          // Pre-fix the system learned nothing from bad AI outputs — operator
+          // could close or regenerate but had no signal to send back.
+          const thumbDown = document.createElement('button');
+          thumbDown.type = 'button';
+          thumbDown.textContent = '👎 wrong';
+          thumbDown.title = 'Tell the AI this output was incorrect — helps tune future suggestions';
+          thumbDown.style.cssText = 'background:transparent;border:1px solid #7a7672;color:#9b9892;border-radius:3px;padding:1px 6px;font-size:10px;font-weight:600;letter-spacing:0.03em;cursor:pointer;font-family:inherit';
+          thumbDown.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            try {
+              rpcCall('aiFeedback', {
+                surface: 'mc-ai-explain',
+                username: username,
+                verdict: 'bad',
+                confidence: conf,
+                model: d.model || null
+              }).catch(function () {});
+            } catch (_) {}
+            thumbDown.textContent = '✓ Noted';
+            thumbDown.style.color = '#44dd66';
+            thumbDown.style.borderColor = '#44dd66';
+            thumbDown.disabled = true;
+            setTimeout(function () {
+              try { thumbDown.textContent = '👎 wrong'; thumbDown.style.color = '#9b9892'; thumbDown.style.borderColor = '#7a7672'; thumbDown.disabled = false; } catch (_) {}
+            }, 2000);
+          });
+          chipWrap.appendChild(thumbDown);
+          const body = document.createElement('div');
+          body.style.cssText = 'margin-bottom:8px;white-space:pre-wrap';
+          body.textContent = explanation;
+          pop.appendChild(closeX);
+          pop.appendChild(header);
+          pop.appendChild(chipWrap);
+          pop.appendChild(body);
+          if (citations.length > 0) {
+            const cHead = document.createElement('div');
+            cHead.style.cssText = 'font-weight:700;color:#9b9892;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:4px';
+            cHead.textContent = 'Citations:';
+            pop.appendChild(cHead);
+            const cList = document.createElement('ul');
+            cList.style.cssText = 'margin:0;padding-left:16px;color:#9b9892;font-size:11px';
+            citations.forEach(function(c) {
+              const li = document.createElement('li');
+              li.textContent = String(c);
+              cList.appendChild(li);
+            });
+            pop.appendChild(cList);
+          }
+          _aeWrap.style.position = 'relative';
+          _aeWrap.appendChild(pop);
+          _aePopover = pop;
+          setTimeout(function() { document.addEventListener('click', _aeOutsideClick, true); }, 0);
+        });
+      })();
+    } catch(_aeErr) { /* never crash init */ }
 
     // v6.1.2: Mods-only team-synced note field.
     // Piggybacks on /profiles/{read,write} — no new worker endpoints.
@@ -9418,6 +9945,33 @@ Analyze this comment against the community rules. Then write a brief, profession
     const modmailCb = root.querySelector('#mc-ban-modmail');
     const goBtn = root.querySelector('#mc-ban-go');
     const customHistWrap = root.querySelector('#mc-ban-custom-hist-wrap');
+    // v10.16.47 A3-P0-1: gate BAN button until violation is picked. Pre-fix
+    // a fat-finger Ctrl+Enter with empty violation slipped past the !subject
+    // !message guard (the URL prefix is always pre-filled). Now: button is
+    // disabled while vSel.value is empty; re-enabled on any change. Tooltip
+    // tells the operator why it's disabled. Also: visually mark the default
+    // selected duration so the operator can see what they'll fire on Submit
+    // without keyboard-pressing first.
+    try {
+      if (goBtn && vSel) {
+        const _updateBanGate = function() {
+          const ok = !!(vSel.value && String(vSel.value).trim());
+          goBtn.disabled = !ok;
+          goBtn.title = ok ? '' : 'Pick a violation type first (BAN disabled until then)';
+          goBtn.style.opacity = ok ? '' : '0.5';
+          goBtn.style.cursor = ok ? '' : 'not-allowed';
+        };
+        vSel.addEventListener('change', _updateBanGate);
+        _updateBanGate(); // initial state
+      }
+      if (durRow) {
+        // selectedDuration defaults to 1 (24h, see L10130 area). Mark it active.
+        const _defaultDur = durRow.querySelector('[data-v="1"]');
+        if (_defaultDur && !_defaultDur.classList.contains('gam-mc-dur-active')) {
+          _defaultDur.classList.add('gam-mc-dur-active');
+        }
+      }
+    } catch (_) {}
     // v8.1 ux: link template-rendered labels to their inputs by field position.
     try {
       const __lbls = root.querySelectorAll('.gam-mc-field > label');
@@ -11430,7 +11984,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         // v10.16.17: filter row -- positioned above the select-all header.
         const drFilterRow = el('div', { style:{display:'flex',alignItems:'center',gap:'8px',padding:'4px 6px',fontSize:'10px',color:'#9b9892'} });
         drFilterRow.appendChild(el('label', { 'for':'gam-dr-filter', style:{textTransform:'uppercase',letterSpacing:'0.04em',fontWeight:'600'} }, 'Filter by age:'));
-        const drFilterSel = el('select', { id:'gam-dr-filter', 'aria-label':'Filter death-row queue by queued-time age', style:{background:'#0a0a0b',color:'#e8e6e1',border:'1px solid #2a2825',padding:'2px 6px',font:'10px ui-monospace,monospace',cursor:'pointer'} });
+        const drFilterSel = el('select', { id:'gam-dr-filter', 'aria-label':'Filter death-row queue by queued-time age', style:{background:C.BG,color:C.TEXT,border:'1px solid '+C.LINE,padding:'2px 6px',font:'10px ui-monospace,monospace',cursor:'pointer'} });
         ['all|All','gt1h|Queued >1h ago','gt6h|Queued >6h ago','gt24h|Queued >24h ago'].forEach(opt => {
           const [v, t] = opt.split('|');
           const o = document.createElement('option');
@@ -11905,7 +12459,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       ['Ctrl+Shift+B', 'Mod Console \u2192 Ban tab on hovered post'],
       ['Ctrl+Shift+R', 'Mod Console \u2192 Message tab'],
       ['Ctrl+Shift+X', 'Mod Console \u2192 Quick tab (Remove)'],
-      ['Ctrl+Shift+P', 'Mod Console \u2192 Intel tab'],
+      // v10.16.43 B5-#8 fix: Ctrl+Shift+P was reassigned to Command Palette in v10.16.33.
+      ['Ctrl+Shift+P', 'Command Palette (action launcher)'],
       ['Ctrl+Shift+W', 'Toggle watch on hovered user'],
       ['Ctrl+Shift+C', 'Copy permalink of hovered post'],
       ['Ctrl+Shift+L', 'Mod Log + Death Row'],
@@ -16011,6 +16566,16 @@ Analyze this comment against the community rules. Then write a brief, profession
   const _m2AutoRemovedIds = new Set();
   function _autoRemoveQueueSusDrItems() {
     if (!IS_QUEUE_PAGE) return;
+    // v10.16.37 KILL-1 (Commander "kill the eater"): the IS_QUEUE_PAGE check
+    // above uses a STALE const captured at IIFE startup. If GAW SPA-navigates
+    // from /queue to /u/<name>, IS_QUEUE_PAGE stays true and this function
+    // fires apiRemove() on posts on the profile page when their authors
+    // happen to be on the SUS/DR list. That's how the mod's profile posts
+    // were getting silently server-removed. The dynamic _isProfileViewNow()
+    // helper re-evaluates location.pathname EVERY call and reliably returns
+    // true on /u/<name> regardless of SPA-nav history. Belt-and-suspenders
+    // with KILL-2 (observer disconnect on nav).
+    if (typeof _isProfileViewNow === 'function' && _isProfileViewNow()) return;
     if (!getSetting('autoRemoveSusDr', false)) return;
     const drSet = new Set((lsGet(K.DEATHROW, []) || []).map(function(d) { return String(d && d.username || '').toLowerCase(); }));
     document.querySelectorAll('.post[data-id], .comment[data-id]').forEach(function(item) {
@@ -17012,7 +17577,9 @@ Analyze this comment against the community rules. Then write a brief, profession
    chunk as code, hit data as an undeclared identifier, and threw
    ReferenceError on every chat-icon click since v9.3.11. Six versions
    to find -- bug is invisible in source until the parser sees it. */
-#gam-mc-panel[data-dock]{position:fixed;top:0;bottom:0;max-width:95vw;background:${C.BG};z-index:9999988;display:flex;flex-direction:column;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};transition:transform .2s ease-out,width .2s ease-out}
+#gam-mc-panel[data-dock]{position:fixed;top:0;bottom:0;max-width:95vw;background:${C.BG};z-index:9999988;display:flex;flex-direction:column;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};transition:transform .2s ease-out,width .2s ease-out;padding-bottom:56px;box-sizing:border-box}
+/* v10.16.38 STOP-BUTTON-FIX P0 (Mod Console): the panel's bottom:0 spanned the full viewport, but #gam-status-bar (position:fixed; bottom:14px; height:28px = 42px footprint) sits ABOVE the panel z-index. Bottom-pinned panel buttons (send, action strip) painted UNDER the status bar capsule — visually they "broke across" the bar lines. 56px clearance gives the bar room without overlap. PRM-gate the slide transition too. */
+@media (prefers-reduced-motion: reduce) { #gam-mc-panel[data-dock]{transition:none} }
 #gam-mc-panel[data-width="sm"]{width:320px}
 #gam-mc-panel[data-width="md"]{width:480px}
 /* v10.3: Commander-3rd-time-asked: lg width is 90vw (was 640px). Caps
@@ -18051,8 +18618,19 @@ Analyze this comment against the community rules. Then write a brief, profession
       '</div>' +
       // BODY -- 3-column flex row
       '<div style="flex:1 1 auto;display:flex;overflow:hidden">' +
-        // COL 1: thread list
-        '<div id="gam-mmp-list" style="width:240px;flex-shrink:0;border-right:1px solid #2a2f38;overflow-y:auto;background:#0f1114">loading...</div>' +
+        // COL 1: thread list (v10.16.47 A1-Win1: now wraps a status-filter
+        // rail + the scrollable list). Filter is client-side over currentThreads
+        // — no worker schema change needed. Tab change toggles row visibility
+        // by data-status attribute set in _renderRow.
+        '<div style="width:240px;flex-shrink:0;border-right:1px solid #2a2f38;background:#0f1114;display:flex;flex-direction:column;overflow:hidden">' +
+          '<div id="gam-mmp-filter" role="tablist" aria-label="Modmail status filter" style="display:flex;border-bottom:1px solid #2a2f38;flex-shrink:0">' +
+            '<button data-mmp-filter="all" role="tab" aria-selected="true" style="flex:1;background:rgba(255,153,51,0.10);border:none;border-right:1px solid #2a2f38;color:var(--bb-amber);padding:5px 4px;cursor:pointer;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">ALL</button>' +
+            '<button data-mmp-filter="new" role="tab" aria-selected="false" style="flex:1;background:transparent;border:none;border-right:1px solid #2a2f38;color:#9b9892;padding:5px 4px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">NEW</button>' +
+            '<button data-mmp-filter="awaiting" role="tab" aria-selected="false" style="flex:1;background:transparent;border:none;border-right:1px solid #2a2f38;color:#9b9892;padding:5px 4px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">AWT</button>' +
+            '<button data-mmp-filter="resolved" role="tab" aria-selected="false" style="flex:1;background:transparent;border:none;color:#9b9892;padding:5px 4px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">RES</button>' +
+          '</div>' +
+          '<div id="gam-mmp-list" style="flex:1;overflow-y:auto">loading...</div>' +
+        '</div>' +
         // COL 2: intel strip + messages
         '<div id="gam-mmp-center" style="flex:1;display:flex;flex-direction:column;overflow:hidden;background:#181b20">' +
           '<div id="gam-mmp-intel" style="height:40px;flex-shrink:0;border-bottom:1px solid #2a2f38;display:flex;align-items:center;gap:8px;padding:0 12px;color:#9b9892;font-size:10px">Select a thread</div>' +
@@ -18103,6 +18681,43 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       // v9.24.0 - REFRESH on the full panel also forces firehose now.
       if (e.target.closest('[data-refresh]')) { e.stopPropagation(); loadList(true); return; }
+      // v10.16.47 A1-Win1: status filter rail. Client-side row visibility
+      // toggle via data-status attribute set in _renderRow. ALL = show all;
+      // NEW/AWT/RES = show only matching. Active tab highlighted with amber
+      // background; aria-selected mirrored for screen readers. Pre-fix the
+      // panel had no filter at all — mods doing triage scrolled past resolved
+      // noise to find actionable items.
+      const _filtBtn = e.target.closest('[data-mmp-filter]');
+      if (_filtBtn) {
+        e.stopPropagation();
+        const mode = _filtBtn.getAttribute('data-mmp-filter');
+        const rail = _filtBtn.parentElement;
+        if (rail) {
+          rail.querySelectorAll('[data-mmp-filter]').forEach(function(b) {
+            const active = b === _filtBtn;
+            b.setAttribute('aria-selected', active ? 'true' : 'false');
+            b.style.background = active ? 'rgba(255,153,51,0.10)' : 'transparent';
+            b.style.color = active ? 'var(--bb-amber)' : '#9b9892';
+            b.style.fontWeight = active ? '700' : '600';
+          });
+        }
+        const listEl = panel.querySelector('#gam-mmp-list');
+        if (listEl) {
+          let shown = 0, total = 0;
+          listEl.querySelectorAll('[data-thread-id]').forEach(function(r) {
+            total++;
+            const st = (r.dataset.status || 'new');
+            const match = (mode === 'all') ||
+              (mode === 'new' && st === 'new') ||
+              (mode === 'awaiting' && (st === 'awaiting' || st === 'claimed')) ||
+              (mode === 'resolved' && (st === 'resolved' || st === 'archived' || st === 'replied'));
+            r.style.display = match ? '' : 'none';
+            if (match) shown++;
+          });
+          try { console.log('[modtools v10.16.47] mmp filter=' + mode + ' shown=' + shown + '/' + total); } catch(_){}
+        }
+        return;
+      }
       // v10.16.26: COMPOSE NEW -- prompts for recipient + subject + body,
       // stages the draft in chrome.storage.session under gam_modmail_compose_new
       // with 15-min TTL, then opens GAW /modmail/compose in a new tab.
@@ -18251,16 +18866,50 @@ Analyze this comment against the community rules. Then write a brief, profession
     const _userRiskCache = new Map();
     let _riskFetchInFlight = false;
 
+    // v10.16.47 A1: relative-time helper (shared with row + intel strip).
+    function _mmpRelAge(tsRaw) {
+      if (!tsRaw) return '';
+      let ts = 0;
+      try {
+        if (typeof tsRaw === 'number') ts = tsRaw > 1e12 ? tsRaw : tsRaw * 1000;
+        else { ts = Date.parse(String(tsRaw)); if (isNaN(ts)) return ''; }
+      } catch (_) { return ''; }
+      const s = Math.floor((Date.now() - ts) / 1000);
+      if (s < 60)    return s + 's';
+      if (s < 3600)  return Math.floor(s / 60) + 'm';
+      if (s < 86400) return Math.floor(s / 3600) + 'h';
+      const d = Math.floor(s / 86400);
+      return d < 30 ? (d + 'd') : (Math.floor(d / 30) + 'mo');
+    }
+
     function _renderRow(t) {
       const row = document.createElement('div');
-      row.style.cssText = 'min-height:48px;border-bottom:1px solid #2a2825;padding:8px 12px;cursor:pointer;transition:background-color 80ms';
+      // v10.16.47 A1-Win1: bold-unread visual treatment + data-status attribute
+      // for client-side filter to read. New/awaiting rows get a subtle red-tint
+      // background + red left border + bold subject so actionable items pre-
+      // attentively pop vs the resolved/archived backdrop. Pre-fix every row
+      // rendered identically regardless of state — operator had no scan signal.
+      const _st = String(t.status || 'new').toLowerCase();
+      const _unread = (_st === 'new' || _st === 'awaiting');
+      row.style.cssText = 'min-height:48px;border-bottom:1px solid #2a2825;padding:8px 12px;cursor:pointer;transition:background-color 80ms' +
+        (_unread ? ';background:rgba(255,59,59,0.05);border-left:3px solid #ff3b3b;padding-left:9px' : '');
       row.dataset.threadId = t.thread_id;
-      row.addEventListener('mouseenter', () => row.style.background = '#1c1c20');
-      row.addEventListener('mouseleave', () => { if (row.dataset.selected !== '1') row.style.background = ''; });
+      row.dataset.status = _st;
+      row.addEventListener('mouseenter', () => { if (row.dataset.selected !== '1') row.style.background = '#1c1c20'; });
+      row.addEventListener('mouseleave', () => {
+        if (row.dataset.selected === '1') return;
+        row.style.background = _unread ? 'rgba(255,59,59,0.05)' : '';
+      });
       row.addEventListener('click', () => {
-        list.querySelectorAll('[data-thread-id]').forEach(r => { r.dataset.selected = ''; r.style.background = ''; r.style.borderLeft = ''; r.style.paddingLeft = ''; });
+        list.querySelectorAll('[data-thread-id]').forEach(r => {
+          r.dataset.selected = '';
+          const ru = (r.dataset.status === 'new' || r.dataset.status === 'awaiting');
+          r.style.background = ru ? 'rgba(255,59,59,0.05)' : '';
+          r.style.borderLeft = ru ? '3px solid #ff3b3b' : '';
+          r.style.paddingLeft = ru ? '9px' : '';
+        });
         row.dataset.selected = '1';
-        row.style.background = 'rgba(255,153,51,0.10)';
+        row.style.background = 'rgba(255,153,51,0.12)';
         row.style.borderLeft = '3px solid var(--bb-amber)';
         row.style.paddingLeft = '9px';
         renderDetail(t);
@@ -18270,10 +18919,22 @@ Analyze this comment against the community rules. Then write a brief, profession
       const who = document.createElement('span');
       who.style.cssText = 'color:#66ccff;font-weight:600;font-size:11px;flex:0 0 auto';
       who.textContent = 'u/' + (t.first_user || '?');
+      // v10.16.47 A1-Win3: status as a filled pill (background tint + matching
+      // foreground), not plain colored text. Gives the status its own scannable
+      // shape distinct from the username — the eye can column-scan by status
+      // without parsing each row's text.
       const status = document.createElement('span');
-      const sc = { new:'#ff3b3b', claimed:'#ffd84d', replied:'#66ccff', resolved:'#44dd66', awaiting:'#9b9892', archived:'#5a5752' };
-      status.style.cssText = 'color:' + (sc[t.status] || '#9b9892') + ';font-size:9px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600';
-      status.textContent = t.status || 'new';
+      const sc = {
+        new:      { fg: '#ff6b6b', bg: 'rgba(255,59,59,0.18)' },
+        claimed:  { fg: '#ffd84d', bg: 'rgba(255,216,77,0.16)' },
+        replied:  { fg: '#66ccff', bg: 'rgba(102,204,255,0.14)' },
+        resolved: { fg: '#44dd66', bg: 'rgba(68,221,102,0.14)' },
+        awaiting: { fg: '#ffaa55', bg: 'rgba(255,170,85,0.14)' },
+        archived: { fg: '#9b9892', bg: 'rgba(155,152,146,0.14)' }
+      };
+      const pillSt = sc[_st] || { fg: '#9b9892', bg: 'rgba(155,152,146,0.14)' };
+      status.style.cssText = 'color:' + pillSt.fg + ';background:' + pillSt.bg + ';font-size:9px;letter-spacing:0.06em;text-transform:uppercase;font-weight:700;padding:1px 5px;border-radius:2px;line-height:1.4';
+      status.textContent = _st;
       head.appendChild(who); head.appendChild(status);
       // v10.15.9: risk-chip placeholder, populated async by _applyRiskChips.
       const chips = document.createElement('span');
@@ -18281,8 +18942,31 @@ Analyze this comment against the community rules. Then write a brief, profession
       chips.dataset.riskUser = t.first_user || '';
       chips.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-left:auto;flex:0 0 auto';
       head.appendChild(chips);
+      // v10.16.47 A1-Win2: relative-time chip right-aligned (zero-width when
+      // unknown). Hover gives full timestamp via title attr. Pre-fix the panel
+      // had ZERO temporal signal — operator opening after an hour had no idea
+      // which threads were fresh vs stale without clicking into each.
+      const ageStr = _mmpRelAge(t.last_seen || t.updated_at || t.created_at);
+      if (ageStr) {
+        const ageEl = document.createElement('span');
+        ageEl.style.cssText = 'color:#7a7672;font-size:9px;font-weight:600;flex:0 0 auto;letter-spacing:0.03em';
+        ageEl.textContent = ageStr;
+        try {
+          const ageSource = t.last_seen || t.updated_at || t.created_at;
+          const tsParse = typeof ageSource === 'number'
+            ? (ageSource > 1e12 ? ageSource : ageSource * 1000)
+            : (ageSource ? Date.parse(String(ageSource)) : 0);
+          if (tsParse) ageEl.title = new Date(tsParse).toLocaleString();
+        } catch (_) {}
+        head.appendChild(ageEl);
+      }
       const subj = document.createElement('div');
-      subj.style.cssText = 'color:#e8e6e1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:2px';
+      // v10.16.47 A1-Win2: bold-on-unread subject + bumped to 12px from 11px.
+      // Pre-fix subject vs preview had 1px size delta + same weight, providing
+      // no scannable hierarchy. Bold-on-unread is the primary scan signal now.
+      subj.style.cssText = 'color:' + (_unread ? '#ffffff' : '#e8e6e1') +
+        ';font-size:12px;font-weight:' + (_unread ? '700' : '500') +
+        ';overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:2px';
       subj.textContent = t.subject || '(no subject)';
       const preview = document.createElement('div');
       preview.style.cssText = 'color:#9b9892;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
@@ -18505,13 +19189,21 @@ Analyze this comment against the community rules. Then write a brief, profession
           '<div style="color:var(--bb-amber);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px">Most recent message</div>' +
           '<div style="background:#0a0a0b;border:1px solid #2a2825;padding:10px;color:#e8e6e1;font-size:11px;line-height:1.5;white-space:pre-wrap">' + escapeHtml(t.last_body || '(empty)') + '</div>' +
         '</div>' +
-        '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">' +
-          '<button data-open="' + escapeHtml(t.thread_id) + '" style="background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Open thread on GAW</button>' +
+        // v10.16.38 STOP-BUTTON-FIX P0 (Modmail): row was flex-wrap:wrap with
+        // no min-height + no margin. Three buttons with long labels wrapped to
+        // a second line and the second line OVERLAPPED the message-body div
+        // below in the 2-col panel at 1280-1399px viewport width. Adding
+        // row-gap so wrapped buttons clear the next section; margin-bottom
+        // gives the body div breathing room.
+        '<div style="display:flex;gap:8px;row-gap:8px;margin-top:12px;margin-bottom:6px;flex-wrap:wrap">' +
+          '<button data-open="' + escapeHtml(t.thread_id) + '" style="background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap">Open thread on GAW</button>' +
           // v10.16.16: Mark Resolved -- close the thread without a reply.
           // Hidden when already resolved/archived so the operator doesn't
           // double-mark and so the panel doesn't look stale.
           (t.status === 'resolved' || t.status === 'archived' ? '' :
-            '<button data-mark-resolved="' + escapeHtml(t.thread_id) + '" title="Mark this thread as resolved without sending a reply -- removes it from active triage" style="background:transparent;border:1px solid #44dd66;color:#44dd66;padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">✓ Mark resolved</button>') +
+            '<button data-mark-resolved="' + escapeHtml(t.thread_id) + '" title="Mark this thread as resolved without sending a reply -- removes it from active triage" style="background:transparent;border:1px solid #44dd66;color:#44dd66;padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap">✓ Mark resolved</button>') +
+          // v10.17.0: AI TL;DR button
+          '<button data-ai-tldr="' + escapeHtml(t.thread_id) + '" title="Generate AI summary of this thread (TL;DR + key points + sentiment)" style="background:rgba(255,153,51,0.08);border:1px solid rgba(255,153,51,0.35);color:var(--bb-amber,#ff9933);padding:6px 14px;cursor:pointer;font:600 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap">✨ TL;DR</button>' +
         '</div>';
 
       // v10.16.4: surface risk chips in the detail header from cache.
@@ -18561,7 +19253,26 @@ Analyze this comment against the community rules. Then write a brief, profession
           e.stopPropagation();
           const id = _mrBtn.getAttribute('data-mark-resolved');
           if (!id) return;
-          if (!confirm('Mark this thread as resolved without replying?\n\nThread will move off the active triage list. The original sender is NOT notified.')) return;
+          // v10.16.43 B1-#9 fix: replace native window.confirm() with the
+          // styled askTextModal pattern used everywhere else. The OS dialog
+          // broke the Bloomberg terminal aesthetic on every Mark Resolved.
+          let _confirmed = false;
+          try {
+            if (typeof askTextModal === 'function') {
+              const _ans = await askTextModal({
+                title: 'Mark thread resolved?',
+                body: 'Thread will move off the active triage list. The original sender is NOT notified.\n\nType "ok" to confirm.',
+                placeholder: 'ok',
+                cta: 'Mark resolved'
+              });
+              _confirmed = !!(_ans && String(_ans).trim().toLowerCase() === 'ok');
+            } else {
+              _confirmed = window.confirm('Mark this thread as resolved without replying?\n\nThread will move off the active triage list. The original sender is NOT notified.');
+            }
+          } catch (_) {
+            _confirmed = window.confirm('Mark this thread as resolved?');
+          }
+          if (!_confirmed) return;
           _mrBtn.disabled = true;
           _mrBtn.textContent = '✓ Marking...';
           try {
@@ -18595,6 +19306,106 @@ Analyze this comment against the community rules. Then write a brief, profession
           }
         });
       }
+
+      // v10.17.0: AI TL;DR button handler
+      try {
+        (function _wireAiTldrBtn() {
+          const _tldrBtn = detail.querySelector('[data-ai-tldr]');
+          if (!_tldrBtn) return;
+          let _tldrCard = null;
+          function _tldrRemoveCard() {
+            if (_tldrCard && _tldrCard.parentNode) _tldrCard.parentNode.removeChild(_tldrCard);
+            _tldrCard = null;
+          }
+          _tldrBtn.addEventListener('click', async function _tldrClick() {
+            // If card visible, remove it (allows regenerate on next click)
+            if (_tldrCard) { _tldrRemoveCard(); return; }
+            _tldrBtn.disabled = true;
+            _tldrBtn.textContent = '⟳ summarizing…';
+            // Gather thread content from rendered DOM
+            let _content = '';
+            try {
+              const msgEls = detail.querySelectorAll('[style*="pre-wrap"], [style*="pre_wrap"]');
+              const parts = [];
+              msgEls.forEach(function(el) { parts.push((el.textContent || '').trim()); });
+              _content = parts.join('\n\n').slice(0, 16000);
+            } catch(_) { _content = (t.last_body || '').slice(0, 16000); }
+            if (!_content) _content = (t.last_body || '').slice(0, 16000);
+            let res = null;
+            try {
+              res = await rpcCall('aiSummarizeThread', { thread_id: t.thread_id, content: _content });
+            } catch (err) {
+              _tldrBtn.disabled = false; _tldrBtn.textContent = '✨ TL;DR';
+              try { snack('TL;DR failed: ' + (err && err.message || err), 'err'); } catch(_) {}
+              return;
+            }
+            _tldrBtn.disabled = false; _tldrBtn.textContent = '✨ TL;DR';
+            if (!res || !res.ok) {
+              const errMsg = (res && res.error) || (res && res.data && res.data.error) || 'unknown';
+              try { snack('TL;DR failed: ' + errMsg, 'err'); } catch(_) {}
+              return;
+            }
+            const d = (res.data && res.data.data) || res.data || {};
+            const sentiment = (d.sentiment || 'neutral').toLowerCase();
+            const urgency = (d.urgency || 'low').toLowerCase();
+            const sentColor = sentiment === 'positive' ? '#44dd66' : sentiment === 'hostile' ? '#ff4444' : sentiment === 'negative' ? 'var(--bb-amber,#ff9933)' : '#9b9892';
+            const urgColor = urgency === 'high' ? '#ff4444' : urgency === 'med' || urgency === 'medium' ? 'var(--bb-amber,#ff9933)' : '#44dd66';
+            const tldrText = d.tldr || d.summary || d.text || '(no summary returned)';
+            const keyPoints = Array.isArray(d.key_points) ? d.key_points : [];
+            // Build card
+            const card = document.createElement('div');
+            card.style.cssText = 'background:rgba(255,153,51,0.06);border-left:3px solid var(--bb-amber,#ff9933);padding:8px 12px;margin-bottom:12px;position:relative;font-size:12px;color:#e8e6e1;line-height:1.5;border-radius:0 3px 3px 0';
+            const cardClose = document.createElement('button');
+            cardClose.textContent = '✕';
+            cardClose.style.cssText = 'position:absolute;top:6px;right:8px;background:transparent;border:none;color:#9b9892;cursor:pointer;font-size:13px;line-height:1;padding:0';
+            cardClose.addEventListener('click', function() { _tldrRemoveCard(); });
+            const cardHeader = document.createElement('div');
+            cardHeader.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;padding-right:20px';
+            const cardTitle = document.createElement('span');
+            cardTitle.style.cssText = 'font-weight:700;color:var(--bb-amber,#ff9933);font-size:13px';
+            cardTitle.textContent = '✨ AI Summary';
+            const sentChip = document.createElement('span');
+            sentChip.style.cssText = 'border:1px solid ' + sentColor + ';color:' + sentColor + ';border-radius:3px;padding:1px 5px;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:capitalize';
+            sentChip.textContent = sentiment;
+            const urgChip = document.createElement('span');
+            urgChip.style.cssText = 'border:1px solid ' + urgColor + ';color:' + urgColor + ';border-radius:3px;padding:1px 5px;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:capitalize';
+            urgChip.textContent = urgency + ' urgency';
+            const regenLink = document.createElement('a');
+            regenLink.href = '#';
+            regenLink.style.cssText = 'font-size:10px;color:#9b9892;text-decoration:underline;cursor:pointer;margin-left:auto';
+            regenLink.textContent = 'Regenerate';
+            regenLink.addEventListener('click', function(ev) { ev.preventDefault(); _tldrRemoveCard(); _tldrBtn.click(); });
+            cardHeader.appendChild(cardTitle);
+            cardHeader.appendChild(sentChip);
+            cardHeader.appendChild(urgChip);
+            cardHeader.appendChild(regenLink);
+            const tldrPara = document.createElement('div');
+            tldrPara.style.cssText = 'margin-bottom:' + (keyPoints.length ? '6px' : '0');
+            tldrPara.textContent = tldrText;
+            card.appendChild(cardClose);
+            card.appendChild(cardHeader);
+            card.appendChild(tldrPara);
+            if (keyPoints.length > 0) {
+              const kpHead = document.createElement('div');
+              kpHead.style.cssText = 'font-weight:700;color:#9b9892;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:3px';
+              kpHead.textContent = 'Key points:';
+              card.appendChild(kpHead);
+              const kpList = document.createElement('ul');
+              kpList.style.cssText = 'margin:0;padding-left:16px;color:#9b9892;font-size:11px';
+              keyPoints.forEach(function(kp) {
+                const li = document.createElement('li');
+                li.textContent = String(kp);
+                kpList.appendChild(li);
+              });
+              card.appendChild(kpList);
+            }
+            // Insert card above the detail content (before first child of detail)
+            if (detail.firstChild) { detail.insertBefore(card, detail.firstChild); }
+            else { detail.appendChild(card); }
+            _tldrCard = card;
+          });
+        })();
+      } catch(_tldrErr) { /* never crash detail render */ }
 
       // Render AI candidates from cache OR fire fresh
       const aiHost = panel.querySelector('#gam-mmp-ai-host');
@@ -18679,6 +19490,13 @@ Analyze this comment against the community rules. Then write a brief, profession
             // stage and pastes into the reply textarea, user reviews + hits
             // Send). Keeps a human-in-the-loop confirmation step. The old
             // "Copy + open thread" path remains for mods who want raw clipboard.
+            // v10.16.50 A2-Win1: ⚡ Send directly — primary path. Eliminates
+            // the tab-switch friction (Pre-fill + open: 5 actions; Send directly: 2).
+            // CS calls apiSendModMessage() which POSTs to /submit_modmessage on
+            // greatawakening.win using the operator's session cookie. Confirms
+            // first via _gamAuxConfirm (destructive — AI text gets sent as-is).
+            // Falls back to ✉ Pre-fill + open on failure.
+            '<button data-send-direct="' + escapeHtml(rp.body) + '" style="background:#f04040;border:1px solid #f04040;color:#0a0a0b;padding:4px 10px;cursor:pointer;font:700 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase" title="POST this AI reply directly to GAW (no tab open). Confirms first.">⚡ Send directly</button>' +
             '<button data-prefill-body="' + escapeHtml(rp.body) + '" style="background:var(--bb-amber);border:1px solid var(--bb-amber);color:#0a0a0b;padding:4px 10px;cursor:pointer;font:700 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">✉ Pre-fill + open</button>' +
             '<button data-use-body="' + escapeHtml(rp.body) + '" style="background:transparent;border:1px solid #44dd66;color:#44dd66;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Copy + open thread</button>' +
           '</div>' +
@@ -18716,6 +19534,70 @@ Analyze this comment against the community rules. Then write a brief, profession
       // via the same selector chain at L12778, focuses + flashes an "AI
       // pre-filled" badge, and clears the stage. User reviews + clicks the
       // real Send. Tracked via modmailTrackResponse same as Copy+open path.
+      //
+      // v10.16.50 A2-Win1: ⚡ Send directly handler — collapses 5 actions to 2.
+      // Pre-fix the reply flow was: select thread → click Pre-fill → tab opens
+      // → review → Send → close tab. Now: click ⚡ → confirm → done. Uses the
+      // existing apiSendModMessage (which POSTs from the CS using the operator's
+      // GAW session cookie — no worker change required). Tracks via
+      // modmailTrackResponse same as Pre-fill path. Falls back to Pre-fill on
+      // failure so the operator never loses the reply they wanted to send.
+      host.querySelectorAll('[data-send-direct]').forEach((btn, idx) => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const body = btn.getAttribute('data-send-direct');
+          const tone = (replies[idx] && replies[idx].tone) || null;
+          const previewSnippet = String(body).slice(0, 200) + (String(body).length > 200 ? '…' : '');
+          let ok = false;
+          try {
+            if (typeof window._gamAuxConfirm === 'function') {
+              ok = await window._gamAuxConfirm(
+                'Send this ' + (tone || 'reply') + ' directly to u/' + (t.first_user || '?') + '?\n\n' +
+                'Subject: ' + (t.subject || '(no subject)') + '\n\n' +
+                'Body:\n' + previewSnippet + '\n\n' +
+                'This bypasses the GAW review step. Make sure the text is correct.',
+                { okLabel: 'Send now', cancelLabel: 'Cancel', danger: true }
+              );
+            } else {
+              ok = window.confirm('Send AI reply directly? Bypasses GAW review step.');
+            }
+          } catch (_) {}
+          if (!ok) return;
+          btn.disabled = true;
+          const origText = btn.textContent;
+          btn.textContent = '⟳ sending…';
+          try {
+            const r = await apiSendModMessage(t.first_user || '', t.subject || '', body, {
+              thread_id: t.thread_id, ai_used: 1, ai_tone: tone
+            });
+            if (r && r.ok) {
+              btn.textContent = '✓ sent';
+              btn.style.background = '#44dd66';
+              btn.style.borderColor = '#44dd66';
+              try { snack('✓ Reply sent directly to u/' + t.first_user + ' (tracked)', 'success'); } catch (_) {}
+              try {
+                t.status = 'replied';
+                const rowSel = panel.querySelector('[data-thread-id="' + t.thread_id + '"]');
+                if (rowSel) rowSel.dataset.status = 'replied';
+              } catch (_) {}
+            } else {
+              btn.disabled = false;
+              btn.textContent = origText;
+              const errMsg = (r && (r.error || r.status)) || 'unknown';
+              try { snack('Direct send failed (' + errMsg + ') — falling back to pre-fill + open', 'warn'); } catch (_) {}
+              try {
+                const key = 'gam_modmail_prefill_' + t.thread_id;
+                await chrome.storage.session.set({ [key]: { body: body, ts: Date.now() } });
+              } catch (_) {}
+              window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
+            }
+          } catch (err) {
+            btn.disabled = false;
+            btn.textContent = origText;
+            try { snack('Direct send threw: ' + (err && err.message || err), 'err'); } catch (_) {}
+          }
+        });
+      });
       host.querySelectorAll('[data-prefill-body]').forEach((btn, idx) => {
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
@@ -18785,8 +19667,87 @@ Analyze this comment against the community rules. Then write a brief, profession
       })();
     }
 
-    loadList();
+    // v10.16.42 (Commander 2026-05-16 bug): "The modmail inbox shows some old
+    // modmails and none of the actual open/new modmails are listed. The UI
+    // should at least go get new modmails the moment the user refreshes GAW."
+    //
+    // Root cause: loadList() (no arg) reads from D1 cache via modmailRecent.
+    // If D1 was last populated by firehose >5min ago, the panel shows stale
+    // threads. The empty-array auto-firehose at L18922 doesn't fire when D1
+    // has SOME data (just old data), so the staleness goes undetected.
+    //
+    // Fix: on every panel open, check `gam_modmail_last_backfill_ts`. If it's
+    // >5min stale OR missing, force a firehose pass before reading D1. This
+    // makes "open the panel" semantically equivalent to "fetch fresh data."
+    (async function _mmpFreshOnOpen() {
+      try {
+        // v10.16.43 A4-P1 double-fire guard: page-load firehose + panel-open
+        // firehose were racing. Both saw stale TTL, both fired ~6 worker reqs.
+        if (window.__GAM_MODMAIL_CRAWL_IN_FLIGHT) { loadList(); return; }
+        const k = 'gam_modmail_last_backfill_ts';
+        const r = await chrome.storage.local.get(k);
+        const last = (r && r[k]) || 0;
+        const stale = !last || (Date.now() - last) > 5 * 60 * 1000;
+        if (stale) {
+          // v10.16.43 A1-Bug3 race fix: write timestamp AFTER firehose completes,
+          // not before. Pre-fix the timestamp was written immediately while
+          // the crawl was mid-flight — a re-open within seconds saw a "fresh"
+          // stamp and skipped the firehose, but D1 still had stale data.
+          window.__GAM_MODMAIL_CRAWL_IN_FLIGHT = true;
+          try {
+            await loadList(true); // forceFirehose
+            await chrome.storage.local.set({ [k]: Date.now() });
+          } finally {
+            window.__GAM_MODMAIL_CRAWL_IN_FLIGHT = false;
+          }
+          return;
+        }
+      } catch (_) { try { window.__GAM_MODMAIL_CRAWL_IN_FLIGHT = false; } catch(__){} }
+      loadList();
+    })();
   }
+
+  // v10.16.42: ON GAW PAGE LOAD (not just panel open), schedule a background
+  // modmail firehose if D1 is >5min stale. Commander explicit ask:
+  // "The UI should at least go get new modmails the moment the user
+  // refreshes GAW. This should be a given."
+  //
+  // Runs once per modtools.js init (every GAW page load / SPA arrival is a
+  // fresh content-script context per Chrome MV3). Non-blocking — fires in
+  // setTimeout so initial GAW render is unaffected. By the time the operator
+  // opens the modmail panel, D1 is already fresh.
+  (function _gamModmailRefreshOnPageLoad() {
+    try {
+      // Only proceed if the user is a mod (firehose RPC is mod-gated).
+      if (typeof isMod !== 'function' || !isMod()) return;
+      setTimeout(async () => {
+        try {
+          // v10.16.43 A4-P1 double-fire guard: same flag the panel-open path
+          // checks. Panel-open wins if races (user-visible).
+          if (window.__GAM_MODMAIL_CRAWL_IN_FLIGHT) return;
+          const k = 'gam_modmail_last_backfill_ts';
+          const r = await chrome.storage.local.get(k);
+          const last = (r && r[k]) || 0;
+          const stale = !last || (Date.now() - last) > 5 * 60 * 1000;
+          if (!stale) {
+            try { console.log('[modtools v10.16.42] modmail D1 fresh (<5min) — skipping page-load firehose'); } catch (_) {}
+            return;
+          }
+          try { console.log('[modtools v10.16.43] modmail D1 stale (>5min) — running background firehose on page load'); } catch (_) {}
+          if (typeof window.__GAM_BACKFILL_MODMAIL === 'function') {
+            window.__GAM_MODMAIL_CRAWL_IN_FLIGHT = true;
+            try {
+              await window.__GAM_BACKFILL_MODMAIL({ maxPages: 3 });
+              await chrome.storage.local.set({ [k]: Date.now() });
+              try { console.log('[modtools v10.16.43] background modmail firehose complete — panel will open fresh'); } catch (_) {}
+            } finally {
+              window.__GAM_MODMAIL_CRAWL_IN_FLIGHT = false;
+            }
+          }
+        } catch (e) { try { console.warn('[modtools v10.16.43] page-load firehose failed:', e && e.message); } catch (_) {} window.__GAM_MODMAIL_CRAWL_IN_FLIGHT = false; }
+      }, 3500); // 3.5s after page load so we don't compete with GAW's own initial render
+    } catch (_) {}
+  })();
 
   // v9.14.0 - dedicated MODMAIL popover (Commander #44 UI separation,
   // #47 ambient AI ready replies). Lists last N modmail threads. Per
@@ -19858,7 +20819,7 @@ Analyze this comment against the community rules. Then write a brief, profession
               const existing = getSetting('autoTardRules', []) || [];
               if (existing.some(function(r){ return r && r.pattern === pat; })) {
                 drRuleBtn.textContent = '✓ EXISTS';
-                drRuleBtn.style.borderColor = '#7a7672'; drRuleBtn.style.color = '#9b9892'; /* v.next a11y: border 2.5:1 -> 4.1:1; text 2.5:1 -> 6.5:1 */
+                drRuleBtn.style.borderColor = '#a09890'; drRuleBtn.style.color = '#c8c5c0'; /* v10.16.46 A4-P0-2: a11y contrast — border 4.1:1, text 6.5:1 (was 2.5:1 both) */
                 try { snack('Pattern already in autoTardRules: ' + pat, 'info'); } catch(_){}
                 return;
               }
@@ -20122,16 +21083,63 @@ Analyze this comment against the community rules. Then write a brief, profession
     hdr.appendChild(title); hdr.appendChild(closeBtn);
     pop.appendChild(hdr);
 
-    // Sort bar with Cancel All
+    // Sort bar with sort order select + Cancel All
+    // Feature: Smart sort by risk (#26) -- persists via lsGet/lsSet
+    const _DR_SORT_KEY = 'gam_dr_sort_order';
+    // v10.16.43 B3-#1: default 'risk' (high → low). Operator's first
+    // triage question is "who's highest risk?" not "who was queued first."
+    let _drSortOrder = lsGet(_DR_SORT_KEY, 'risk');
+
+    function _applyDrSort(entries) {
+      const copy = entries.slice();
+      try {
+        if (_drSortOrder === 'risk') {
+          const sevScore = function(e) {
+            const r = (e.reason || '').toLowerCase();
+            if (r.indexOf('perm') !== -1) return 3;
+            if (r.indexOf('7d') !== -1 || r.indexOf('7 day') !== -1) return 2;
+            if (r.indexOf('24h') !== -1 || r.indexOf('1 day') !== -1) return 1;
+            return 0;
+          };
+          copy.sort(function(a, b) {
+            const ageDiff = (a.account_age_days || 99999) - (b.account_age_days || 99999);
+            if (ageDiff !== 0) return ageDiff;
+            const sevDiff = sevScore(b) - sevScore(a);
+            if (sevDiff !== 0) return sevDiff;
+            return (b.queuedAt || 0) - (a.queuedAt || 0);
+          });
+        } else if (_drSortOrder === 'newest') {
+          copy.sort(function(a, b) { return (b.queuedAt || 0) - (a.queuedAt || 0); });
+        } else if (_drSortOrder === 'oldest') {
+          copy.sort(function(a, b) { return (a.queuedAt || 0) - (b.queuedAt || 0); });
+        }
+      } catch(_e) { /* fall back silently */ }
+      return copy;
+    }
+
     const sortBar = document.createElement('div');
     sortBar.style.cssText = 'background:#0e0e11;border-bottom:1px solid #2a2825;padding:3px 10px;display:flex;align-items:center;gap:8px;font-size:9px;color:#9b9892;letter-spacing:0.06em';
     const sortLabel = document.createElement('span');
-    sortLabel.textContent = 'FIRES FIRST';
+    sortLabel.textContent = 'ORDER:';
+    const sortSel = document.createElement('select');
+    sortSel.style.cssText = 'background:#131316;border:1px solid #2a2825;color:#9b9892;font:9px ui-monospace,monospace;padding:1px 3px;cursor:pointer;outline:none';
+    [['insertion','Insertion (queued order)'],['risk','User risk (high to low) — default'],['newest','Trigger age (newest first)'],['oldest','Trigger age (oldest first)']].forEach(function(pair) {
+      const opt = document.createElement('option');
+      opt.value = pair[0]; opt.textContent = pair[1];
+      if (pair[0] === _drSortOrder) opt.selected = true;
+      sortSel.appendChild(opt);
+    });
+    sortSel.addEventListener('change', function() {
+      _drSortOrder = sortSel.value;
+      lsSet(_DR_SORT_KEY, _drSortOrder);
+      const fresh = getDeathRow().filter(function(d) { return d && d.status === 'waiting'; });
+      _renderDrBands(_applyDrSort(fresh));
+    });
     const cancelAllBtn = document.createElement('button');
     // v10.13.1 W3 (W1 deferred): 8px -> 9px (off-grid snap to type-scale charter).
     cancelAllBtn.style.cssText = 'background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:1px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;margin-left:auto;transition:background 80ms';
     cancelAllBtn.textContent = 'Cancel All';
-    sortBar.appendChild(sortLabel); sortBar.appendChild(cancelAllBtn);
+    sortBar.appendChild(sortLabel); sortBar.appendChild(sortSel); sortBar.appendChild(cancelAllBtn);
     pop.appendChild(sortBar);
 
     // Body (scrollable)
@@ -20212,7 +21220,33 @@ Analyze this comment against the community rules. Then write a brief, profession
 
         // Line 1: skull + username + countdown
         const line1 = document.createElement('div');
-        line1.style.cssText = 'display:flex;align-items:center;gap:5px';
+        // v10.16.38 STOP-BUTTON-FIX P0: min-width:0 lets flex children with
+        // overflow:hidden actually shrink. Without it Chrome refuses to shrink
+        // the username (uLink flex:1) below its content width, defeating
+        // the ellipsis and pushing other elements off-row.
+        line1.style.cssText = 'display:flex;align-items:center;gap:5px;min-width:0';
+        // Feature: heatmap chips (#29) -- account-age dot + violation-severity dot
+        const heatWrap = document.createElement('span');
+        heatWrap.style.cssText = 'display:inline-flex;align-items:center;gap:2px;margin-right:3px';
+        const ageDot = document.createElement('span');
+        ageDot.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0';
+        const ageDays = entry.account_age_days;
+        if (typeof ageDays === 'number') {
+          ageDot.style.background = ageDays < 7 ? '#ff3b3b' : ageDays < 30 ? '#ffd84d' : '#30c85e';
+          ageDot.title = ageDays + 'd old account';
+        } else {
+          ageDot.style.background = '#3d3a35';
+          ageDot.title = 'Account age unknown';
+        }
+        const sevDot = document.createElement('span');
+        sevDot.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0';
+        const _rl = (reason || '').toLowerCase();
+        if (_rl.indexOf('perm') !== -1) { sevDot.style.background = '#ff3b3b'; sevDot.title = 'Perm ban'; }
+        else if (_rl.indexOf('7d') !== -1 || _rl.indexOf('7 day') !== -1) { sevDot.style.background = '#ffd84d'; sevDot.title = '7d ban'; }
+        else if (reason) { sevDot.style.background = '#30c85e'; sevDot.title = reason.slice(0, 40); }
+        else { sevDot.style.background = '#3d3a35'; sevDot.title = 'No reason'; }
+        heatWrap.appendChild(ageDot); heatWrap.appendChild(sevDot);
+
         const skullEl = document.createElement('span');
         skullEl.textContent = '\u{1F480}';
         const uLink = document.createElement('a');
@@ -20221,12 +21255,21 @@ Analyze this comment against the community rules. Then write a brief, profession
         uLink.rel = 'noopener';
         uLink.style.cssText = 'color:#ffd84d;font-weight:700;text-decoration:none;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
         uLink.textContent = username;
+        // Feature: investigate button (#42) -- opens user profile in new tab
+        const invBtn = document.createElement('a');
+        invBtn.href = 'https://greatawakening.win/u/' + encodeURIComponent(username);
+        invBtn.target = '_blank';
+        invBtn.rel = 'noopener';
+        invBtn.title = 'Investigate user';
+        invBtn.style.cssText = 'display:inline-flex;align-items:center;color:#9b9892;text-decoration:none;font-size:11px;padding:0 2px;flex-shrink:0';
+        invBtn.textContent = chr(0x1F52C);
+        invBtn.addEventListener('click', function(e) { e.stopPropagation(); });
         const cdEl = document.createElement('span');
         cdEl.className = 'gam-dr-countdown';
         // v10.13.1 W3 P0-15: track band for tick-time crossing detection
         _cdMap[username] = { cdEl: cdEl, executeAt: executeAt, band: fmt.band };
         _updateCountdown(username, cdEl, executeAt);
-        line1.appendChild(skullEl); line1.appendChild(uLink); line1.appendChild(cdEl);
+        line1.appendChild(heatWrap); line1.appendChild(skullEl); line1.appendChild(uLink); line1.appendChild(invBtn); line1.appendChild(cdEl);
         row.appendChild(line1);
 
         // Line 2: reason (truncated)
@@ -20239,9 +21282,18 @@ Analyze this comment against the community rules. Then write a brief, profession
 
         // Line 3: queued time + action buttons
         const line3 = document.createElement('div');
-        line3.style.cssText = 'display:flex;align-items:center;gap:5px;padding-left:17px;margin-top:1px';
+        // v10.16.38 STOP-BUTTON-FIX P0: min-width:0 + overflow:hidden lets the
+        // flex:1 qAgoEl actually shrink, so the Cancel + FIRE NOW (max state
+        // "CONFIRM ▶ 3s" = 12 chars, ~90px) buttons never get pushed off the
+        // right edge of the 380px-min popover row. This was Commander's
+        // "STOP button breaks boundaries and shows across some lines" bug.
+        line3.style.cssText = 'display:flex;align-items:center;gap:5px;padding-left:17px;margin-top:1px;min-width:0;overflow:hidden';
         const qAgoEl = document.createElement('span');
-        qAgoEl.style.cssText = 'color:#9b9892;font-size:9px;flex:1';
+        // qAgoEl was flex:1 only; without min-width:0 + overflow guards Chrome
+        // refuses to shrink it below content width, pushing buttons off-row.
+        qAgoEl.style.cssText = 'color:#9b9892;font-size:9px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        // v10.16.40: ellipsis-hidden text recoverable on hover.
+        if (queuedAt) qAgoEl.title = 'queued ' + new Date(queuedAt).toLocaleString();
         qAgoEl.textContent = queuedAt ? ('queued ' + timeAgo(new Date(queuedAt).toISOString())) : '';
         line3.appendChild(qAgoEl);
 
@@ -20315,7 +21367,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (bands.deferred.length) { addBandHeader('deferred', 'DEFERRED'); bands.deferred.forEach(addEntry); }
     }
 
-    _renderDrBands(drList);
+    _renderDrBands(_applyDrSort(drList));
     pop.appendChild(body);
 
     // Live countdown ticker — 1s interval
@@ -22513,7 +23565,15 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-input:focus,.gam-textarea:focus,.gam-select:focus{border-color:${C.ACCENT}}
 .gam-textarea{resize:vertical;min-height:72px;font-family:inherit}
 
-.gam-btn{padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font:12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:opacity .15s,transform .1s,background .15s;letter-spacing:.2px}
+/* v10.16.39 STOP-BUTTON-FIX SYSTEMIC ROOT CAUSE: the .gam-btn base was missing
+   white-space:nowrap. EVERY button using .gam-btn (and there are ~17 chip
+   classes inheriting via the WCAG selector at L23095) could wrap its label
+   across multiple lines if its container narrowed. v10.16.38 fixed 5 specific
+   instances (DR FIRE, MC panel, Modmail row, Status bar Propose, Popup header)
+   but the underlying class still allowed wrap. This rule + the Iter 11 override
+   below (L24479) is the actual systemic kill so no future button can re-introduce
+   the bug class. */
+.gam-btn{padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font:12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:opacity .15s,transform .1s,background .15s;letter-spacing:.2px;white-space:nowrap}
 .gam-btn:hover{opacity:.9}
 .gam-btn:active{transform:scale(.98)}
 .gam-btn:disabled{opacity:.5;cursor:not-allowed}
@@ -22551,7 +23611,11 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-mc-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:${C.TEXT2};margin-bottom:6px}
 .gam-mc-empty{padding:12px;background:${C.BG2};border:1px dashed ${C.BORDER};border-radius:4px;color:${C.TEXT3};font-size:12px;text-align:center}
 .gam-mc-loading{padding:12px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT2};font-size:12px;font-style:italic}
-.gam-mc-loading::before{content:'';display:inline-block;width:10px;height:10px;border:2px solid ${C.ACCENT};border-top-color:transparent;border-radius:50%;margin-right:8px;animation:gam-spin 1s linear infinite;vertical-align:middle}
+/* v10.16.39 PRM gate: spinner animation was running for vestibular-disorder users */
+.gam-mc-loading::before{content:'';display:inline-block;width:10px;height:10px;border:2px solid ${C.ACCENT};border-top-color:transparent;border-radius:50%;margin-right:8px;vertical-align:middle}
+@media (prefers-reduced-motion: no-preference){
+  .gam-mc-loading::before{animation:gam-spin 1s linear infinite}
+}
 @keyframes gam-spin{to{transform:rotate(360deg)}}
 
 /* v9.4.0: stat tile padding 10→8, value 20→18 — same readability with
@@ -22622,7 +23686,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 /* v9.4.0: bumped max-height 320→480 so the standard ~10-item menu fits
    without scrolling on common 1080p+ displays. Scrollbar only spawns for
    pathological lists (e.g., custom violation templates >18 items). */
-.gam-strip-menu{display:none;position:absolute;top:100%;left:0;margin-top:4px;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.6);min-width:220px;max-height:480px;overflow-y:auto;z-index:9999990;padding:4px}
+/* v10.16.39 z-index fix: was 9999990 (same as #gam-backdrop) — strip menu could
+   render behind the modal backdrop on DOM-order races. Bumped to 9999993 — still
+   below modal (9999995) but above backdrop (9999990). */
+.gam-strip-menu{display:none;position:absolute;top:100%;left:0;margin-top:4px;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.6);min-width:220px;max-height:480px;overflow-y:auto;z-index:9999993;padding:4px}
 .gam-strip-menu-open{display:block}
 .gam-strip-item{display:block;padding:6px 10px;font-size:11px;color:${C.TEXT};cursor:pointer;border-radius:4px;text-decoration:none!important;transition:background .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gam-strip-item:hover{background:${C.BG3};color:${C.TEXT}!important}
@@ -22754,13 +23821,25 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-drawer-section h3 { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:${C.AMBER}; margin:0 0 6px; padding-bottom:4px; border-bottom:1px solid ${C.BORDER}; }
 .gam-drawer-section p { margin:4px 0; font-size:12px; line-height:1.45; }
 .gam-drawer-section button { font:inherit; }
-.gam-skeleton { height:12px; background:linear-gradient(90deg,${C.BG2},${C.BORDER2},${C.BG2}); background-size:200% 100%; animation:gam-shimmer 1.2s infinite; border-radius:3px; margin:4px 0; }
+/* v10.16.39 PRM gate: skeleton shimmer was running for vestibular-disorder users */
+.gam-skeleton { height:12px; background:linear-gradient(90deg,${C.BG2},${C.BORDER2},${C.BG2}); background-size:200% 100%; border-radius:3px; margin:4px 0; }
+@media (prefers-reduced-motion: no-preference){
+  .gam-skeleton { animation:gam-shimmer 1.2s infinite; }
+}
 @keyframes gam-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 /* v10.13.2 W5 (UIUX2-31): copyWithPulse() success flash — green tint fades to transparent over 800ms */
 @keyframes gam-copy-flash { 0%{background-color:rgba(61,214,140,0.22)} 100%{background-color:transparent} }
 @media (prefers-reduced-motion: reduce) { .gam-copy-flash { animation:none !important; } }
 /* v10.13.2 W5: snack action button (W3 ext) — Bloomberg ghost at rest, amber fill on hover */
-.gam-snack-action { background:transparent; border:1px solid var(--bb-amber); color:var(--bb-amber); padding:2px 8px; cursor:pointer; font:700 9px ui-monospace,'JetBrains Mono',monospace; letter-spacing:0.06em; text-transform:uppercase; transition:background 80ms,color 80ms; flex-shrink:0; pointer-events:auto; }
+/* v10.16.40: 9px font was below readable threshold on high-DPI; bumped to 10px (on-grid) + padding to 4/10 to keep 32px WCAG tap target. */
+.gam-snack-action { background:transparent; border:1px solid var(--bb-amber); color:var(--bb-amber); padding:4px 10px; cursor:pointer; font:700 10px ui-monospace,'JetBrains Mono',monospace; letter-spacing:0.06em; text-transform:uppercase; transition:background 80ms,color 80ms; flex-shrink:0; pointer-events:auto; white-space:nowrap; }
+/* v10.16.40 STOP-BUTTON-FIX utility class (named guard): apply to any flex
+   container whose children risk overflowing when one expands. Use sparingly
+   on rows that hold a button which changes label mid-state (e.g., FIRE NOW →
+   CONFIRM ▶ 3s). The default .gam-btn nowrap shipped in v10.16.39 already
+   prevents text wrap; this utility prevents row-level overflow. */
+.gam-stop-safe-flex { min-width: 0 !important; overflow: hidden !important; }
+.gam-stop-safe-flex > * { min-width: 0; }
 .gam-snack-action:hover { background:var(--bb-amber); color:#0a0a0b; }
 .gam-muted { color:${C.TEXT3}; font-style:italic; font-size:11px; }
 .gam-nba-gen { background:${C.ACCENT}; color:#fff; border:none; border-radius:4px; padding:5px 12px; cursor:pointer; font-size:11px; font-weight:600; transition:opacity .15s; }
@@ -22859,7 +23938,11 @@ Analyze this comment against the community rules. Then write a brief, profession
    so it sits in the upper-right quadrant where it doesn't overlap the
    reply textarea (which lives in the bottom half of the page). */
 @keyframes gam-mm-hints-in { from { opacity:0; transform:translate(8px,-50%) } to { opacity:1; transform:translate(0,-50%) } }
-#gam-mm-hints{position:fixed;right:12px;top:30%;transform:translateY(-50%);z-index:9999970;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;animation:gam-mm-hints-in .35s ease-out}
+/* v10.16.39 PRM gate: slide-in entrance animation skipped under reduce-motion */
+#gam-mm-hints{position:fixed;right:12px;top:30%;transform:translateY(-50%);z-index:9999970;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}
+@media (prefers-reduced-motion: no-preference){
+  #gam-mm-hints{animation:gam-mm-hints-in .35s ease-out}
+}
 #gam-mm-hints[data-collapsed="1"] .gam-mm-hints-body{display:none}
 #gam-mm-hints[data-collapsed="0"] .gam-mm-hints-tab{display:none}
 .gam-mm-hints-tab{width:28px;height:28px;border-radius:14px;background:rgba(74,158,255,.92);color:#fff;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;transition:transform .12s}
@@ -23634,6 +24717,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 #gam-status-bar[data-orientation="vertical-right"] .gam-bar-ticker {
   display: none !important;
 }
+/* v10.16.38 STOP-BUTTON-FIX P0 (status bar): the "Propose Lock" / "Propose Ban"
+   / "Propose Remove" buttons inserted by the second-mod-review module render
+   as multi-word text inside .gam-bar-icon. In vertical orientation the bar
+   is only 40px wide, but overflow-x is explicitly visible, so these text
+   buttons paint BEYOND the bar and break across GAW content lines. Hide the
+   propose buttons in vertical mode (the proposal feature is still reachable
+   from the Mod Console + the post page itself). Same treatment as the ticker. */
+#gam-status-bar[data-orientation="vertical-left"] .gam-propose-btn,
+#gam-status-bar[data-orientation="vertical-right"] .gam-propose-btn {
+  display: none !important;
+}
 
 /* ── Iter 3 ── Bar separators: thin tonal lines, NOT pipes */
 #gam-status-bar .gam-bar-sep {
@@ -23817,6 +24911,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 }
 
 /* ── Iter 11 ── Buttons: square, 1px border, no gradients, popping on hover */
+/* v10.16.39 STOP-BUTTON-FIX (systemic): white-space:nowrap added to seal the
+   button-wrap bug class; min-height bumped from 28px to 32px !important to
+   restore the WCAG 2.5.5 floor that the L23095 base rule sets (was being
+   silently downgraded here because Iter 11 lacks !important). */
 .pop-btn,
 .gam-btn,
 .gam-modal button:not(.gam-modal-close):not(.gam-bar-icon) {
@@ -23830,7 +24928,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   text-transform: uppercase;
   cursor: pointer;
   transition: background-color 100ms, border-color 100ms, color 100ms;
-  min-height: 28px;
+  white-space: nowrap !important;
+  min-height: 32px !important;
 }
 .pop-btn:hover,
 .gam-btn:hover {
@@ -26874,7 +27973,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     const title = String(rawTitle || '').toLowerCase().trim();
     if (!title) return false;
     // Hardcoded permanent exceptions (cannot be removed by anyone).
-    const HARDCODED = ['general chat'];
+    // v10.16.41: added 'daily chat' per Commander explicit ask.
+    const HARDCODED = ['general chat', 'daily chat'];
     for (const pat of HARDCODED) {
       if (title.indexOf(pat) !== -1) return true;
     }
@@ -26924,6 +28024,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     const _personalLeadMode = !!getSetting('auto_unsticky_lead_personal_only', false) && isLeadMod();
     if (!getSetting('autoUnstickyEnabled', false) && !_personalLeadMode) return;
     if (document.visibilityState === 'hidden') return;
+    // v10.16.37 KILL-1b (Commander "kill the eater"): NEVER fire apiSticky()
+    // on a mod's profile page. Pre-fix this tick ran every 4 minutes on every
+    // page including /u/<modname>; if the mod had old stickied posts visible
+    // (their own community stickies surfaced in their post history), this
+    // function would call the toggle endpoint and STRIP THE STICKY STATUS
+    // server-side. The mod would view their own profile and watch their
+    // pinned posts silently lose their sticky markers. _isProfileViewNow()
+    // re-evaluates location.pathname every call so SPA-nav doesn't break it.
+    if (typeof _isProfileViewNow === 'function' && _isProfileViewNow()) return;
     const COOLDOWN_MS = 6 * 60 * 60 * 1000;
     const maxHours = Number(getSetting('autoUnstickyMaxHours', 12)) || 12;
     const upvoteThreshold = Number(getSetting('autoUnstickyUpvoteThreshold', 110)) || 110;
@@ -26965,6 +28074,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       const _titleText = _titleEl ? (_titleEl.textContent || '').trim() : '';
       if (_autoUnstickyTitleExempted(_titleText)) {
         try { _diagLog('sticky', 'auto-unsticky SKIPPED (title exempt) id=' + id + ' title="' + _titleText.slice(0, 80) + '"'); } catch (_) {}
+        continue;
+      }
+      // v10.16.41: per-post immunity. Overrides title patterns + schedules.
+      // Mod marked this specific post 🛡 IMMUNE — autoUnstickyTick must never
+      // toggle it regardless of age, upvotes, title, or scheduled fire-time.
+      // _immuneIsSync is safe because _immuneLoad() runs at IIFE init and
+      // chrome.storage.onChanged keeps the cache fresh.
+      if (_immuneIsSync(id)) {
+        try { _diagLog('sticky', 'auto-unsticky SKIPPED (post immune) id=' + id + ' title="' + _titleText.slice(0, 80) + '"'); } catch (_) {}
         continue;
       }
       // Candidate -- toggle and record
@@ -27054,6 +28172,231 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     snack('Unsticky scheduled in ' + delayLabel, 'success');
     _schedUpdateClockUI(postEl, thingId, map[String(thingId)]);
   }
+
+  // ╔══════════════════════════════════════════════════════════════════╗
+  // ║  v10.16.41: PER-POST AUTO-UNSTICKY IMMUNITY                      ║
+  // ║                                                                   ║
+  // ║  Storage: chrome.storage.local.gam_unsticky_immune_posts =        ║
+  // ║    { [thingId]: { added_at, added_by, title } }                   ║
+  // ║                                                                   ║
+  // ║  3-gate enforcement (parity with title-exemption defense-in-depth)║
+  // ║    1. autoUnstickyTick — skips immune posts before apiSticky      ║
+  // ║    2. _gamAutoUnstickyCsScanner — skips immune before worker queue║
+  // ║    3. _schedExecuteTick — skips immune at fire-time even if mod   ║
+  // ║       had pre-scheduled an unsticky (immunity overrides schedule) ║
+  // ║                                                                   ║
+  // ║  In-memory cache (_immuneCache) refreshed on storage.onChanged    ║
+  // ║  so hot paths can synchronously check without await.              ║
+  // ╚══════════════════════════════════════════════════════════════════╝
+  const IMMUNE_UNSTICKY_KEY = 'gam_unsticky_immune_posts';
+  let _immuneCache = null; // null = not yet loaded; Map<string, entry> once loaded
+
+  async function _immuneLoad() {
+    try {
+      const out = await chrome.storage.local.get(IMMUNE_UNSTICKY_KEY);
+      const obj = (out && out[IMMUNE_UNSTICKY_KEY]) || {};
+      _immuneCache = new Map(Object.entries(obj));
+      return _immuneCache;
+    } catch (_) {
+      _immuneCache = new Map();
+      return _immuneCache;
+    }
+  }
+  async function _immuneEnsure() {
+    if (_immuneCache === null) return await _immuneLoad();
+    return _immuneCache;
+  }
+  function _immuneIsSync(thingId) {
+    // Synchronous best-effort lookup. Returns false if cache not yet loaded
+    // (caller should await _immuneEnsure() once at startup); the hot paths
+    // (autoUnstickyTick, CS scanner, schedExecuteTick) all do.
+    if (!_immuneCache || !thingId) return false;
+    return _immuneCache.has(String(thingId));
+  }
+  async function _immuneAdd(thingId, title) {
+    if (!thingId) return false;
+    const map = await _immuneEnsure();
+    map.set(String(thingId), {
+      added_at: Date.now(),
+      added_by: 'self',
+      title: String(title || '').slice(0, 200)
+    });
+    const obj = Object.fromEntries(map);
+    try { await chrome.storage.local.set({ [IMMUNE_UNSTICKY_KEY]: obj }); } catch (_) {}
+    return true;
+  }
+  async function _immuneRemove(thingId) {
+    if (!thingId) return false;
+    const map = await _immuneEnsure();
+    if (!map.has(String(thingId))) return false;
+    map.delete(String(thingId));
+    const obj = Object.fromEntries(map);
+    try { await chrome.storage.local.set({ [IMMUNE_UNSTICKY_KEY]: obj }); } catch (_) {}
+    return true;
+  }
+  async function _immuneToggle(thingId, title) {
+    const map = await _immuneEnsure();
+    if (map.has(String(thingId))) {
+      await _immuneRemove(thingId);
+      return false; // now NOT immune
+    }
+    await _immuneAdd(thingId, title);
+    return true; // now immune
+  }
+  async function _immuneList() {
+    const map = await _immuneEnsure();
+    return Array.from(map.entries()).map(([thingId, entry]) => ({
+      thingId,
+      title: (entry && entry.title) || '',
+      added_at: (entry && entry.added_at) || 0
+    }));
+  }
+  async function _immuneClearAll() {
+    _immuneCache = new Map();
+    try { await chrome.storage.local.remove(IMMUNE_UNSTICKY_KEY); } catch (_) {}
+  }
+  // Keep cache fresh across SPA navigations + other tabs that mark immunity.
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local') return;
+      if (!changes[IMMUNE_UNSTICKY_KEY]) return;
+      const next = changes[IMMUNE_UNSTICKY_KEY].newValue || {};
+      _immuneCache = new Map(Object.entries(next));
+    });
+  } catch (_) {}
+  // Eagerly hydrate the cache so the very first tick has correct data.
+  _immuneLoad().catch(() => {});
+
+  // Inject a 🛡 IMMUNE button next to the 🕐 clock on every sticky.
+  // Runs from the same MutationObserver as _schedInjectClocks (called below).
+  function _immuneInjectButtons() {
+    if (!isMod || !isMod()) return;
+    document.querySelectorAll('.post.sticky[data-id]').forEach(postEl => {
+      if (postEl.dataset.gamImmune === '1') return;
+      const thingId = postEl.getAttribute('data-id');
+      if (!thingId) return;
+      const titleEl = postEl.querySelector('a.title');
+      if (!titleEl) return;
+      const isImmune = _immuneIsSync(thingId);
+      const btn = el('button', {
+        cls: 'gam-immune-btn',
+        'data-gam-immune-btn': '1',
+        'aria-label': isImmune ? 'Remove auto-unsticky immunity from this post' : 'Mark this post immune to auto-unsticky',
+        title: isImmune
+          ? '🛡 IMMUNE — auto-unsticky will NEVER touch this post (click to unmark)'
+          : 'Mark this post IMMUNE — auto-unsticky will never touch it (overrides title patterns + schedules)',
+        style: {
+          background: isImmune ? 'rgba(255,153,51,0.18)' : 'transparent',
+          border: '1px solid ' + (isImmune ? '#ff9933' : '#3d3a35'),
+          color: isImmune ? '#ff9933' : '#9b9892',
+          padding: '2px 8px',
+          marginLeft: '6px',
+          cursor: 'pointer',
+          font: '600 10px ui-monospace,JetBrains Mono,monospace',
+          letterSpacing: '0.04em',
+          borderRadius: '3px',
+          verticalAlign: 'middle',
+          whiteSpace: 'nowrap'
+        }
+      }, isImmune ? '🛡 IMMUNE' : '🛡');
+      btn.addEventListener('click', async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const titleText = (postEl.querySelector('a.title') || {}).textContent || '';
+        const nowImmune = await _immuneToggle(thingId, titleText);
+        // Update THIS button + any sibling on the same post
+        btn.textContent = nowImmune ? '🛡 IMMUNE' : '🛡';
+        btn.style.background = nowImmune ? 'rgba(255,153,51,0.18)' : 'transparent';
+        btn.style.borderColor = nowImmune ? '#ff9933' : '#3d3a35';
+        btn.style.color = nowImmune ? '#ff9933' : '#9b9892';
+        btn.setAttribute('aria-label', nowImmune
+          ? 'Remove auto-unsticky immunity from this post'
+          : 'Mark this post immune to auto-unsticky');
+        btn.title = nowImmune
+          ? '🛡 IMMUNE — auto-unsticky will NEVER touch this post (click to unmark)'
+          : 'Mark this post IMMUNE — auto-unsticky will never touch it';
+        // If scheduling exists on the post, leave the schedule entry alone —
+        // immunity overrides at fire-time. (Don't surprise the operator by
+        // clearing their schedule; they may toggle immunity off later.)
+        snack(nowImmune ? '🛡 Marked IMMUNE — auto-unsticky cannot touch this post' : 'Immunity removed', nowImmune ? 'success' : 'info');
+        try {
+          if (typeof logAction === 'function') {
+            logAction({
+              type: nowImmune ? 'unsticky_immune_set' : 'unsticky_immune_clear',
+              id: thingId,
+              title: titleText.slice(0, 100),
+              source: 'sticky-shield-button'
+            });
+          }
+        } catch (_) {}
+      });
+      try { titleEl.insertAdjacentElement('afterend', btn); } catch (_) {
+        try { titleEl.parentNode.insertBefore(btn, titleEl.nextSibling); } catch (__) {}
+      }
+      postEl.dataset.gamImmune = '1';
+    });
+  }
+  // Expose for any external trigger (e.g. cmd palette).
+  window._gamImmuneList = _immuneList;
+  window._gamImmuneClearAll = _immuneClearAll;
+  window._gamImmuneInjectButtons = _immuneInjectButtons;
+
+  // v10.16.41: register a palette command (Ctrl+Shift+P) for managing
+  // immune posts without needing to find each sticky in the feed.
+  try {
+    if (typeof window._gamCmdkRegister === 'function') {
+      window._gamCmdkRegister({
+        label: 'Manage auto-unsticky immune posts',
+        kw: 'immune unsticky shield protected daily chat manage',
+        icon: '🛡',
+        fn: async () => {
+          const entries = await _immuneList();
+          if (!entries.length) {
+            snack('No posts are currently marked immune. Click 🛡 next to any sticky to mark it.', 'info');
+            return;
+          }
+          // Build a small text list — operator picks an action.
+          const lines = entries
+            .sort((a, b) => (b.added_at || 0) - (a.added_at || 0))
+            .map((e, i) => (i + 1) + '. id=' + e.thingId + ' · ' + (e.title || '(no title)').slice(0, 60));
+          const choice = window.prompt(
+            '🛡 IMMUNE POSTS (' + entries.length + ' total):\n\n' + lines.join('\n') +
+            '\n\nEnter:\n  - a number to REMOVE that entry\n  - "clear" to remove ALL\n  - blank to cancel',
+            ''
+          );
+          if (!choice || !choice.trim()) return;
+          const c = choice.trim().toLowerCase();
+          if (c === 'clear') {
+            if (window.confirm('Remove immunity from ALL ' + entries.length + ' post(s)?')) {
+              await _immuneClearAll();
+              // Refresh buttons on visible stickies
+              document.querySelectorAll('.post.sticky[data-id]').forEach(p => delete p.dataset.gamImmune);
+              document.querySelectorAll('[data-gam-immune-btn="1"]').forEach(b => b.remove());
+              _immuneInjectButtons();
+              snack('Cleared immunity from ' + entries.length + ' post(s)', 'success');
+            }
+            return;
+          }
+          const idx = parseInt(c, 10) - 1;
+          if (idx < 0 || idx >= entries.length) {
+            snack('Invalid choice', 'error');
+            return;
+          }
+          const target = entries[idx];
+          await _immuneRemove(target.thingId);
+          // Refresh button if the post is on this page
+          const postEl = document.querySelector('.post.sticky[data-id="' + target.thingId + '"]');
+          if (postEl) {
+            delete postEl.dataset.gamImmune;
+            const oldBtn = postEl.querySelector('[data-gam-immune-btn="1"]');
+            if (oldBtn) oldBtn.remove();
+            _immuneInjectButtons();
+          }
+          snack('Removed immunity from post ' + target.thingId, 'success');
+        }
+      });
+    }
+  } catch (_) {}
 
   async function _cancelScheduledUnsticky(thingId, postEl) {
     if (!thingId) return;
@@ -27201,6 +28544,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
             pruned++;
             continue;
           }
+          // v10.16.41: per-post immunity check at fire-time. If a mod later
+          // marked this post 🛡 IMMUNE after scheduling an unsticky, immunity
+          // wins. The schedule entry is cleared so it won't keep retrying.
+          if (_immuneIsSync(thingId)) {
+            try { _diagLog('sticky', 'scheduled unsticky SKIPPED (post immune) id=' + thingId + ' title="' + titleText.slice(0, 80) + '"'); } catch (_) {}
+            delete map[thingId];
+            pruned++;
+            continue;
+          }
           try {
             const r = await apiSticky(thingId);
             if (r && r.ok) {
@@ -27239,10 +28591,14 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
 
   // Inject clocks on initial load + when new stickies appear
-  setTimeout(_schedInjectClocks, 1500);
+  // v10.16.41: also inject 🛡 IMMUNE button (parallel injection — same observer fires both)
+  setTimeout(() => { _schedInjectClocks(); _immuneInjectButtons(); }, 1500);
   // Re-scan on SPA navigation + scroll-induced new content
   try {
-    const _schedObs = new MutationObserver(() => { _schedInjectClocks(); });
+    const _schedObs = new MutationObserver(() => {
+      _schedInjectClocks();
+      _immuneInjectButtons();
+    });
     _schedObs.observe(document.body, { childList: true, subtree: true });
   } catch (_) {}
   // Execution tick every 60s + initial check after 5s
@@ -29955,6 +31311,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
                 try { console.log('[gam-auto-unsticky-cs] SKIPPED exempt title:', title.slice(0, 80)); } catch (_) {}
                 return;
               }
+              // v10.16.41: per-post immunity check. Same defense-in-depth as
+              // the title-exemption guard — immune posts are never even
+              // proposed to the worker queue, so no team member's execution
+              // can fire on them. The 🛡 button per post is the operator's
+              // way of marking a specific sticky off-limits to auto-unsticky.
+              if (typeof _immuneIsSync === 'function' && _immuneIsSync(thingId)) {
+                try { console.log('[gam-auto-unsticky-cs] SKIPPED immune post id=' + thingId + ' title:', title.slice(0, 80)); } catch (_) {}
+                return;
+              }
               stickies.push({ thingId: thingId, votes: votes, ageH: ageH, createdAt: createdAt, title: title });
             } catch (_) { /* skip malformed sticky */ }
           });
@@ -30052,6 +31417,73 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         } catch (_) {}
       }
       setTimeout(_doPrefill, 800);
+    } catch (_) {}
+  })();
+
+  // v10.16.43 (Commander explicit ask 2026-05-22): Ctrl+Enter submits modmail
+  // reply on GAW's native /modmail/thread/<id> + /modmail/compose pages.
+  //
+  // The Mod Console (#gam-mc-panel) already had Ctrl+Enter at modtools.js:8954
+  // for its 3 textareas (ban / note / message), but the actual modmail REPLY
+  // happens on GAW's own /modmail/thread page after the "Pre-fill + open" hands
+  // the draft off. Commander finishes the reply in GAW's textarea → wants
+  // Ctrl+Enter to submit instead of reaching for the mouse.
+  //
+  // Surface: any /modmail/* page. Listener is capture-phase + document-scoped
+  // so it fires before GAW's own textarea handler. Defensive: only triggers
+  // when (a) target is a textarea inside a form on a /modmail/ path AND
+  // (b) Ctrl OR Meta is held AND (c) key is Enter. Idempotent via guard.
+  (function _gamModmailCtrlEnterSubmit() {
+    try {
+      if (!/^\/modmail\b/.test(location.pathname)) return;
+      if (window._gamMmCtrlEnterArmed) return;
+      window._gamMmCtrlEnterArmed = true;
+      document.addEventListener('keydown', function(e) {
+        try {
+          if (!(e.ctrlKey || e.metaKey)) return;
+          if (e.key !== 'Enter' && e.key !== '\n' && e.key !== '\r') return;
+          if (e.shiftKey || e.altKey) return; // leave Ctrl+Shift+Enter etc. alone
+          var t = e.target;
+          if (!t || t.tagName !== 'TEXTAREA') return;
+          // Must be inside a form (the modmail reply / compose form).
+          var form = t.closest && t.closest('form');
+          if (!form) return;
+          // Find the submit button. GAW's modmail forms ship a <button> or
+          // <input type="submit">. Try multiple selectors in priority order.
+          var btn = form.querySelector('button[type="submit"]')
+                 || form.querySelector('input[type="submit"]')
+                 || form.querySelector('button.submit, button.send, button.btn-primary');
+          // Fallback: any button with text "Send" or "Submit" inside the form.
+          if (!btn) {
+            var allBtns = form.querySelectorAll('button');
+            for (var i = 0; i < allBtns.length; i++) {
+              var bt = (allBtns[i].textContent || '').trim().toLowerCase();
+              if (bt === 'send' || bt === 'submit' || bt === 'reply' || bt === 'send reply') {
+                btn = allBtns[i];
+                break;
+              }
+            }
+          }
+          if (!btn || btn.disabled) return;
+          e.preventDefault();
+          e.stopPropagation();
+          // Flash a tiny confirmation chip so the operator knows Ctrl+Enter
+          // is what fired (not GAW's native UI).
+          try {
+            var chip = document.createElement('div');
+            chip.textContent = 'Ctrl+Enter → SEND';
+            chip.style.cssText = 'position:fixed;top:60px;right:20px;z-index:9999990;background:#3dd68c;color:#0a0a0b;padding:5px 10px;font:700 10px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.08em;text-transform:uppercase;border-radius:3px;box-shadow:0 2px 8px rgba(0,0,0,0.5);transition:opacity 300ms ease-out';
+            document.body.appendChild(chip);
+            setTimeout(function() { chip.style.opacity = '0'; setTimeout(function() { if (chip.parentNode) chip.remove(); }, 350); }, 1200);
+          } catch (_) {}
+          // Click the submit button → GAW's native form handler takes over.
+          btn.click();
+          try { console.log('[gam-modmail-ctrl-enter] submitted form via Ctrl+Enter'); } catch (_) {}
+        } catch (err) {
+          try { console.warn('[gam-modmail-ctrl-enter] handler error', err); } catch (_) {}
+        }
+      }, true); // capture-phase so we beat any GAW handler on the textarea
+      try { console.log('[gam-modmail-ctrl-enter v10.16.43] armed on', location.pathname); } catch (_) {}
     } catch (_) {}
   })();
 

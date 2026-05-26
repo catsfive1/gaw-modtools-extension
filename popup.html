@@ -46,6 +46,20 @@
          when storage quota >80% or token age >60d. Click opens the Maintenance
          section. Hidden by default; shown when gam_maint_warning is present. -->
     <span id="maintWarningChip" class="pop-maint-chip" style="display:none" title="Maintenance attention needed"></span>
+    <!-- v10.16.32 Grok #140: extension health score chip. 0-100 composite of
+         token age + SW boot stability + last-RPC status + maintenance flags.
+         Hidden until __loadHealthChip computes a value. Click jumps to Diag tab. -->
+    <span id="healthChip" class="pop-health-chip" style="display:none" role="button" tabindex="0" aria-label="Extension health score" title="Click for diagnostics"></span>
+    <!-- P1-E fix (cat choir 2026-05-22): Pro badge moved from end-of-body INTO header.
+         Was rendering at document bottom, never visible to operator.
+         Same id (#pro-badge) so popup.js polling logic continues to find it. -->
+    <span
+      id="pro-badge"
+      hidden
+      title="GAW MOD Pro - active subscription"
+      aria-label="Pro tier active"
+      style="display:inline-block;margin-left:6px;padding:2px 8px;border-radius:10px;background:linear-gradient(135deg,#f5d76e 0%,#d4a017 100%);color:#1a1a1a;font-size:10px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;border:1px solid #b8860b;box-shadow:0 1px 2px rgba(0,0,0,0.3);vertical-align:middle;user-select:none"
+    >Pro</span>
   </div>
 
   <!-- M5 REDTEAM-3: main landmark wraps all interactive content for AT navigation -->
@@ -519,7 +533,7 @@
         <div id="firstRunWizardStep2" style="display:none;margin-top:12px">
           <div class="tok-onboard-headline" style="font-size:10.5px">Step 2 of 2</div>
           <div id="firstRunStep2Prompt" class="tok-onboard-body" style="margin-bottom:8px" aria-live="polite" aria-atomic="true"></div>
-          <input id="firstRunInput" type="password" placeholder="paste here" style="width:100%;background:#060709;border:1px solid var(--bb-line-hot);color:var(--bb-ink);padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;border-radius:4px;margin-bottom:8px;box-sizing:border-box">
+          <input id="firstRunInput" type="password" placeholder="paste here" aria-describedby="firstRunStep2Prompt" autocomplete="off" spellcheck="false" style="width:100%;background:#060709;border:1px solid var(--bb-line-hot);color:var(--bb-ink);padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;border-radius:4px;margin-bottom:8px;box-sizing:border-box">
           <div id="firstRunUsernameWrap" style="display:none;margin-bottom:8px">
             <label for="firstRunUsername" style="color:var(--bb-ink-dim);font-size:10px;text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:4px">Your GAW username</label>
             <input id="firstRunUsername" type="text" placeholder="e.g. catsfive" pattern="[A-Za-z0-9_-]{2,64}" maxlength="64" style="width:100%;background:#060709;border:1px solid var(--bb-line-hot);color:var(--bb-ink);padding:8px 10px;font:11px ui-monospace,JetBrains Mono,monospace;border-radius:4px;box-sizing:border-box">
@@ -594,6 +608,21 @@
              class="tok-cta-primary" style="margin-bottom:8px;text-decoration:none">
             &#x2197; Open greatawakening.win
           </a>
+          <!-- v10.16.48 A9 next-action briefing: the post-success moment is the
+               ONLY guaranteed-attention window for a new mod. Plant the three
+               most important discovery seeds here before they close the popup.
+               Pre-fix: success screen sent them to GAW with no first-action
+               guide; status-bar tour gated by gam_tour_seen_v1 may never fire
+               on a pre-loaded extension. -->
+          <div class="tok-onboard-briefing" style="background:rgba(255,153,51,0.06);border-left:3px solid var(--bb-amber);padding:8px 10px;margin-bottom:8px;border-radius:0 3px 3px 0">
+            <div style="font:700 9px ui-monospace,'JetBrains Mono',monospace;letter-spacing:0.08em;text-transform:uppercase;color:var(--bb-amber);margin-bottom:4px">You're in &mdash; hot-path</div>
+            <div style="font-size:10.5px;color:var(--bb-ink);line-height:1.45">
+              &bull; <kbd style="background:#1c1c20;border:1px solid #3a3a44;border-radius:2px;padding:0 4px;font-family:inherit;font-size:9.5px">Ctrl+Shift+P</kbd> &mdash; Command palette (every action)<br>
+              &bull; <kbd style="background:#1c1c20;border:1px solid #3a3a44;border-radius:2px;padding:0 4px;font-family:inherit;font-size:9.5px">Shift+?</kbd> &mdash; Keyboard shortcut cheatsheet<br>
+              &bull; <kbd style="background:#1c1c20;border:1px solid #3a3a44;border-radius:2px;padding:0 4px;font-family:inherit;font-size:9.5px">Ctrl+Shift+H</kbd> &mdash; Mod rules + site policy<br>
+              &bull; Status bar at the bottom of every GAW page houses DR queue + modmail
+            </div>
+          </div>
           <button id="firstRunDone" class="pop-btn pop-btn-ghost" style="width:100%">Done &#x2014; close setup</button>
         </div>
       </div><!-- /#tokStateFirstRun -->
@@ -640,8 +669,8 @@
           <div class="tok-mgmt-body">
             <div class="pop-token" style="border-top:none;padding:0 2px">
               <label for="tokenInput">Team Mod Token</label>
-              <div class="pop-token-hint">Paste to replace stored token.</div>
-              <input id="tokenInput" type="password" placeholder="paste replacement token">
+              <div id="tokenInputHint" class="pop-token-hint">Paste to replace stored token.</div>
+              <input id="tokenInput" type="password" placeholder="paste replacement token" aria-describedby="tokenInputHint" autocomplete="off" spellcheck="false">
               <button id="tokenSave" class="pop-btn pop-btn-ghost">Save</button>
               <div id="tokenStatus" class="pop-token-status"></div>
             </div>
@@ -667,10 +696,10 @@
             <span class="tok-lead-tag">LEAD</span>
           </div>
           <div class="pop-token" style="border-top:none;padding:4px 10px 8px">
-            <div class="pop-token-hint" style="grid-column:1/-1;color:var(--bb-warn)">
+            <div id="leadInputHint" class="pop-token-hint" style="grid-column:1/-1;color:var(--bb-warn)">
               Enables rotation roster, invite generation, and HUD.
             </div>
-            <input id="leadInput" type="password" placeholder="lead-mod token">
+            <input id="leadInput" type="password" placeholder="lead-mod token" aria-describedby="leadInputHint" autocomplete="off" spellcheck="false">
             <button id="leadSave" class="pop-btn pop-btn-ghost">Save</button>
             <div id="leadStatus" class="pop-token-status"></div>
           </div>
@@ -939,6 +968,29 @@
         </div>
       </details>
 
+      <!-- v10.17: AI usage today — lead-only stat tiles (Explains/Summaries/Suggests) -->
+      <details id="gam-lead-ai-usage" class="gam-lead-sub" style="margin-top:8px">
+        <summary>&#x1F4CA; AI usage today</summary>
+        <div style="padding:8px 12px;display:flex;gap:8px;flex-wrap:wrap">
+          <div class="gam-kpi-tile" style="flex:1;min-width:72px;text-align:center">
+            <div class="gam-kpi-label">EXPLAINS</div>
+            <div class="gam-kpi-value-row"><span id="aiUsageExplains" class="gam-kpi-val">&#8212;</span></div>
+            <div style="font-size:9px;color:var(--bb-ink-dim);margin-top:2px">Cap: 200/day</div>
+          </div>
+          <div class="gam-kpi-tile" style="flex:1;min-width:72px;text-align:center">
+            <div class="gam-kpi-label">SUMMARIES</div>
+            <div class="gam-kpi-value-row"><span id="aiUsageSummaries" class="gam-kpi-val">&#8212;</span></div>
+            <div style="font-size:9px;color:var(--bb-ink-dim);margin-top:2px">Cap: 200/day</div>
+          </div>
+          <div class="gam-kpi-tile" style="flex:1;min-width:72px;text-align:center">
+            <div class="gam-kpi-label">SUGGESTS</div>
+            <div class="gam-kpi-value-row"><span id="aiUsageSuggests" class="gam-kpi-val">&#8212;</span></div>
+            <div style="font-size:9px;color:var(--bb-ink-dim);margin-top:2px">Cap: 200/day</div>
+          </div>
+        </div>
+        <div id="aiUsageStatus" style="padding:0 12px 8px;font-size:10px;color:var(--bb-ink-dim)"></div>
+      </details>
+
           </div><!-- /#leadOnlyTools -->
         </div><!-- /#leadSection -->
 
@@ -998,6 +1050,21 @@
         <div class="pop-tools" style="padding:4px 12px 8px">
           <button id="diagSnapshotBtn" class="pop-btn pop-btn-ghost" style="font-size:11px">&#x1F9EA; Copy full snapshot to clipboard</button>
         </div>
+        <!-- v10.16.32 (Grok #114): test-connection ping. Times a round-trip to
+             the worker /version endpoint and surfaces ok/fail + latency ms. -->
+        <div class="pop-section-label" style="margin-top:8px">Connection probe</div>
+        <div class="pop-tools" style="padding:4px 12px 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <button id="diagPingBtn" class="pop-btn pop-btn-ghost" style="font-size:11px">&#x1F310; Ping worker</button>
+          <span id="diagPingResult" role="status" aria-live="polite" style="font:11px ui-monospace,JetBrains Mono,monospace;color:var(--bb-ink-dim)"></span>
+        </div>
+        <!-- v10.17 AI smoke tests: hit each AI RPC once and surface result inline -->
+        <div class="pop-section-label" style="margin-top:8px">AI smoke tests</div>
+        <div class="pop-tools" style="padding:4px 12px 4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <button id="diagAiExplainBtn" class="pop-btn pop-btn-ghost" style="font-size:11px">&#x1F9E0; Test AI Explain</button>
+          <button id="diagAiSumBtn" class="pop-btn pop-btn-ghost" style="font-size:11px">&#x1F4DD; Test AI Summarize</button>
+          <button id="diagAiSugBtn" class="pop-btn pop-btn-ghost" style="font-size:11px">&#x2696; Test AI Suggest</button>
+        </div>
+        <pre id="diagAiSmokeResult" role="status" aria-live="polite" style="margin:0 12px 8px;padding:4px 6px;font:11px ui-monospace,'JetBrains Mono',monospace;white-space:pre-wrap;word-break:break-all;background:var(--bb-sunken);border:1px solid var(--bb-line);border-radius:4px;min-height:18px;color:var(--bb-ink-dim);display:none"></pre>
       </div>
     </details>
   </div>
@@ -1016,5 +1083,49 @@
   </div>
 
   <script src="popup.js"></script>
+
+<!-- ====================== GAW MOD Pro Tier — popup patchset v1.0 (additive — hidden by default) ====================== -->
+<!-- P1-E fix (cat choir 2026-05-22): #pro-badge relocated INTO .pop-header (line ~53).
+     Duplicate ID would break the DOM; the original badge element removed from here.
+     The upgrade CTA <section> stays at end-of-body — it's a full-width banner, not a chip. -->
+
+<section id="upgrade-cta" hidden aria-label="Upgrade to GAW MOD Pro">
+  <button
+    type="button"
+    id="upgrade-cta-button"
+    style="
+      display: block;
+      width: 100%;
+      padding: 10px 14px;
+      margin: 8px 0;
+      border: 1px solid #b8860b;
+      border-radius: 6px;
+      background: linear-gradient(135deg, #f5d76e 0%, #d4a017 100%);
+      color: #1a1a1a;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      transition: filter 120ms ease;
+    "
+  >Upgrade to Pro</button>
+  <!-- v10.16.46 A6-#6: removed onmouseover/onmouseout inline handlers — silently
+       dead under script-src 'self' CSP. Hover effect is now CSS-only via
+       #upgrade-cta-btn:hover { filter:brightness(1.08); } below. -->
+  <p
+    id="upgrade-cta-status"
+    hidden
+    style="
+      margin: 4px 0 0;
+      font-size: 11px;
+      color: #888;
+      text-align: center;
+    "
+  ></p>
+</section>
+<!-- ====================== END GAW MOD Pro Tier — popup patchset v1.0 ====================== -->
+
 </body>
 </html>

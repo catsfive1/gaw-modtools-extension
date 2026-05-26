@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Stage and ZIP the extension for Chrome Web Store / direct distribution.
 .DESCRIPTION
@@ -51,7 +51,7 @@ try {
   $stage = Join-Path $env:TEMP ("gam-stage-" + [guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Path $stage | Out-Null
 
-  $includes = @('manifest.json','modtools.js','background.js','popup.html','popup.js','popup.css','LICENSE','README.md')
+  $includes = @('manifest.json','modtools.js','modtools-aux.js','background.js','popup.html','popup.js','popup.css','LICENSE','README.md')
   $copied = 0
   foreach ($name in $includes) {
     $src = Join-Path $RepoRoot $name
