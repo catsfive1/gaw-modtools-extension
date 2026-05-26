@@ -32,3 +32,6 @@ Thumbs.db
 # Logs
 logs/
 *.log
+
+# Claude Code session ephemera (sessions, state, paste cache, etc.)
+.claude/
