@@ -174,7 +174,7 @@ try {
     while ($attempts -lt 3) {
         $attempts++
         $raw = Read-Host "Paste LEAD token (attempt $attempts of 3)"
-        $leadPlain = ($raw -replace '[\x00-\x1F\x7F﻿]', '').Trim()
+        $leadPlain = ($raw -replace '[\x00-\x1F\x7F]', '').Trim()
         if ([string]::IsNullOrWhiteSpace($leadPlain)) {
             Say '    -> blank. Try again.' Red
             continue
