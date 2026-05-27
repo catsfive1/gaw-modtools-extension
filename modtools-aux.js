@@ -1051,6 +1051,58 @@
     return /^\/u\/[^/]+(?:\/(?:posts|comments|saved|upvoted|downvoted))?\/?$/.test(p);
   }
 
+  // v10.17.3 (the FINAL eater kill): CSS-with-!important veto. We could chase
+  // the upstream hider source-by-source forever (v10.16.37 thought it had killed
+  // it; v10.17.3 is hitting the same class of bug again, with the trailing-
+  // space-in-class evidence proving SOMETHING still adds `gam-age-hidden`).
+  // Instead of chasing, we VETO it at the CSS layer: on `body.gam-on-profile-page`
+  // every `.post[data-viewer]` is forced visible with !important, which beats
+  // any inline `display:none` or class-based hide rule. Irrevocable defense -
+  // even if a NEW hide-mechanism gets shipped tomorrow, this CSS still wins.
+  // The body class is toggled by _arm/_disarm so it stays scoped to profile
+  // pages and doesn't leak into community feeds where age-hide is intentional.
+  function _injectVetoStyle() {
+    if (document.getElementById('gam-profile-veto-style')) return;
+    try {
+      const css = [
+        '/* v10.17.3 profile-page hide veto -- the FINAL eater kill */',
+        // The viewer attribute is set by GAW on every .post when authenticated,
+        // so it's a reliable marker for "a real post element on a page the
+        // viewer can see". `display: revert` falls back to GAW's own stylesheet
+        // (typically `display: block` for .post divs); `visibility/opacity`
+        // restore in case those were the hide vector. !important on every
+        // declaration so inline style and lower-specificity CSS both lose.
+        'body.gam-on-profile-page .post[data-viewer],',
+        'body.gam-on-profile-page .post[data-author],',
+        'body.gam-on-profile-page .post[data-type="post"],',
+        'body.gam-on-profile-page .post[data-type="comment"] {',
+        '  display: revert !important;',
+        '  visibility: visible !important;',
+        '  opacity: 1 !important;',
+        '}',
+        // Belt-and-suspenders: even if the modtools-injected hide class survives
+        // the protector strip race, the CSS rule still vetoes the hide.
+        'body.gam-on-profile-page .post.gam-age-hidden,',
+        'body.gam-on-profile-page .post.gam-hidden,',
+        'body.gam-on-profile-page .post.gam-eaten,',
+        'body.gam-on-profile-page .post.gam-collapsed,',
+        'body.gam-on-profile-page .post[data-gam-age-hidden],',
+        'body.gam-on-profile-page .post[data-gam-hidden],',
+        'body.gam-on-profile-page .post[data-gam-eaten],',
+        'body.gam-on-profile-page .post[data-gam-filtered] {',
+        '  display: revert !important;',
+        '  visibility: visible !important;',
+        '  opacity: 1 !important;',
+        '}'
+      ].join('\n');
+      const style = document.createElement('style');
+      style.id = 'gam-profile-veto-style';
+      style.textContent = css;
+      (document.head || document.documentElement).appendChild(style);
+    } catch (_) {}
+  }
+  _injectVetoStyle();
+
   // Track our work for diagnostics (one-time console log per page load).
   let _unhideCount = 0;
   let _logged = false;
@@ -1134,6 +1186,8 @@
     try { if (_armState.sweepIv) clearInterval(_armState.sweepIv); } catch (_) {}
     try { if (_armState.navIv)   clearInterval(_armState.navIv); } catch (_) {}
     _armState = { obs: null, sweepIv: null, navIv: null, armed: false };
+    // v10.17.3: drop the body class so the CSS veto stops applying on non-profile pages
+    try { document.body && document.body.classList.remove('gam-on-profile-page'); } catch (_) {}
   }
 
   // Bootstrap: run synchronous sweep, then arm observer + interval.
@@ -1141,6 +1195,8 @@
     if (!_isProfileNow()) return;
     if (_armState.armed) return; // already armed for this profile-page session
     _armState.armed = true;
+    // v10.17.3: body class activates the CSS veto (forces .post visible with !important)
+    try { document.body && document.body.classList.add('gam-on-profile-page'); } catch (_) {}
 
     // Layer 1: immediate sweep — catches any pre-existing hides at IIFE init time.
     _sweep('init-sweep');
@@ -1224,7 +1280,7 @@
   // Re-arm on SPA navigation from non-profile to profile.
   window.addEventListener('popstate', () => { _arm(); }, true);
 
-  console.log('[modtools-aux PROFILE PROTECTOR v10.16.37] armed — will un-hide any posts ModTools tries to hide on /u/<name> pages');
+  console.log('[modtools-aux PROFILE PROTECTOR v10.17.3] armed + CSS veto active — .post[data-viewer] is force-visible with !important on body.gam-on-profile-page; inline display:none from any source is overridden');
 })();
 
 /* ============================================================================
