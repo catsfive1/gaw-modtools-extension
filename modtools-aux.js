@@ -1190,6 +1190,41 @@
     try { document.body && document.body.classList.remove('gam-on-profile-page'); } catch (_) {}
   }
 
+  // v10.17.4: self-verifying assertion. The entire v10.16.37 -> v10.17.3 saga
+  // has been "shipped a fix, please validate in your browser" -- and the bug
+  // kept coming back. This turns validation from a DevTools investigation into
+  // a single console line the operator reads in one glance. Fires once ~2.5s
+  // after arm (after the profile river settles), measures the COMPUTED style of
+  // every real post, and reports loudly. On FAIL it dumps the first offender +
+  // the winning display value so the fix is actionable cold (paste one line).
+  function _selfVerify() {
+    setTimeout(() => {
+      if (!_isProfileNow()) return;
+      try {
+        const posts = document.querySelectorAll('.post[data-viewer], .post[data-author]');
+        if (posts.length === 0) {
+          console.info('%c[GAM VETO SELF-CHECK] no .post elements yet (river still loading) -- will not assert', 'color:#888');
+          return;
+        }
+        let hidden = 0, firstBad = null;
+        posts.forEach(el => {
+          const cs = getComputedStyle(el);
+          const isHidden = cs.display === 'none' || cs.visibility === 'hidden' ||
+                           (parseFloat(cs.opacity) || 1) < 0.1;
+          if (isHidden) {
+            hidden++;
+            if (!firstBad) firstBad = { id: el.getAttribute('data-id') || '?', display: cs.display, vis: cs.visibility, op: cs.opacity };
+          }
+        });
+        if (hidden === 0) {
+          console.info('%c[GAM VETO SELF-CHECK PASS] ' + posts.length + ' posts on this profile, 0 computed-hidden. The /u/ hide bug is DEAD.', 'color:#3dd68c;font-weight:700;font-size:13px');
+        } else {
+          console.error('%c[GAM VETO SELF-CHECK FAIL] ' + posts.length + ' posts, ' + hidden + ' STILL computed-hidden. First offender: id=' + firstBad.id + ' display=' + firstBad.display + ' visibility=' + firstBad.vis + ' opacity=' + firstBad.op + ' -- paste this whole line to Claude.', 'color:#f04040;font-weight:700;font-size:13px');
+        }
+      } catch (_) {}
+    }, 2500);
+  }
+
   // Bootstrap: run synchronous sweep, then arm observer + interval.
   function _arm() {
     if (!_isProfileNow()) return;
@@ -1197,6 +1232,8 @@
     _armState.armed = true;
     // v10.17.3: body class activates the CSS veto (forces .post visible with !important)
     try { document.body && document.body.classList.add('gam-on-profile-page'); } catch (_) {}
+    // v10.17.4: schedule the one-glance PASS/FAIL console assertion
+    _selfVerify();
 
     // Layer 1: immediate sweep — catches any pre-existing hides at IIFE init time.
     _sweep('init-sweep');
@@ -1280,7 +1317,7 @@
   // Re-arm on SPA navigation from non-profile to profile.
   window.addEventListener('popstate', () => { _arm(); }, true);
 
-  console.log('[modtools-aux PROFILE PROTECTOR v10.17.3] armed + CSS veto active — .post[data-viewer] is force-visible with !important on body.gam-on-profile-page; inline display:none from any source is overridden');
+  console.log('[modtools-aux PROFILE PROTECTOR v10.17.4] armed + CSS veto active + self-verify scheduled — watch for the [GAM VETO SELF-CHECK PASS/FAIL] line ~2.5s after a /u/ page load');
 })();
 
 /* ============================================================================
