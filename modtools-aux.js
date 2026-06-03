@@ -1997,6 +1997,9 @@
   const TXT        = '#d4d4d8';
   const TXT_DIM    = '#71717a';
   const MONO       = 'ui-monospace, JetBrains Mono, Menlo, Consolas, monospace';
+  // v10.18.1: the standalone GOD MODE SEARCH app (served by the worker at /godmode).
+  // Discoverability wiring: the in-context modal + palette can escalate to it.
+  const GODMODE_APP_URL = 'https://gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev/godmode';
 
   // v10.17.1: selection state for bulk actions on result set.
   // Keyed `${kind}:${id}` so post and comment with same numeric id never collide.
@@ -2534,10 +2537,16 @@
         '<div style="color:' + AMBER + ';font-weight:700;letter-spacing:.5px">' +
           '&#x1F50D; GOD MODE &middot; firehose search' +
         '</div>' +
-        '<button id="gam-godmode-close" class="gam-btn" style="' +
-          'background:transparent;border:1px solid ' + DARK_LINE + ';color:' + TXT + ';' +
-          'padding:4px 10px;border-radius:4px;cursor:pointer;min-height:32px;min-width:32px;font:600 12px ' + MONO + '">' +
-          '×</button>' +
+        '<div style="display:flex;gap:6px;align-items:center">' +
+          '<button id="gam-godmode-fullapp" class="gam-btn" title="Open the full GOD MODE search app in a new tab" style="' +
+            'background:' + DARK_BG + ';border:1px solid ' + AMBER + ';color:' + AMBER + ';' +
+            'padding:4px 10px;border-radius:4px;cursor:pointer;min-height:32px;font:600 11px ' + MONO + '">' +
+            '⛶ FULL APP</button>' +
+          '<button id="gam-godmode-close" class="gam-btn" style="' +
+            'background:transparent;border:1px solid ' + DARK_LINE + ';color:' + TXT + ';' +
+            'padding:4px 10px;border-radius:4px;cursor:pointer;min-height:32px;min-width:32px;font:600 12px ' + MONO + '">' +
+            '×</button>' +
+        '</div>' +
       '</div>' +
 
       '<div style="padding:10px 14px;border-bottom:1px solid ' + DARK_LINE + '">' +
@@ -2610,6 +2619,18 @@
     // Wire interactions
     const closeBtn = document.getElementById('gam-godmode-close');
     if (closeBtn) closeBtn.onclick = _gmCloseModal;
+
+    // v10.18.1: escalate from the in-context modal to the standalone search app.
+    // Carries the current query so the full app opens pre-filled.
+    const fullAppBtn = document.getElementById('gam-godmode-fullapp');
+    if (fullAppBtn) fullAppBtn.onclick = () => {
+      let u = GODMODE_APP_URL;
+      try {
+        const q = (document.getElementById('gam-godmode-q') || {}).value;
+        if (q && q.trim()) u += '#q=' + encodeURIComponent(q.trim());
+      } catch (_) {}
+      window.open(u, '_blank', 'noopener');
+    };
 
     const goBtn = document.getElementById('gam-godmode-go');
     if (goBtn) goBtn.onclick = _gmRunSearch;
@@ -2906,6 +2927,12 @@
       kw: 'god mode firehose health crawl stats observability keywords lead admin',
       icon: '🔥',
       fn: () => _gmOpenHealthModal()
+    },
+    {
+      label: 'GOD MODE: Open full search app (new tab)',
+      kw: 'god mode full search app standalone firehose archive open tab website page',
+      icon: '⛶',
+      fn: () => { try { window.open(GODMODE_APP_URL, '_blank', 'noopener'); } catch (_) {} }
     }
   ];
   let waveRegistered = 0;
