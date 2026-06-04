@@ -19719,7 +19719,11 @@ Analyze this comment against the community rules. Then write a brief, profession
   (function _gamModmailRefreshOnPageLoad() {
     try {
       // Only proceed if the user is a mod (firehose RPC is mod-gated).
-      if (typeof isMod !== 'function' || !isMod()) return;
+      // v10.18.4: was `typeof isMod !== 'function'` -- isMod is a local const
+      // at line 29598 (boolean, not function), so the check ALWAYS early-returned
+      // here and silently disabled modmail refresh in production. detectModStatus()
+      // is the actual function declared at IIFE scope (line 27101).
+      if (typeof detectModStatus !== 'function' || !detectModStatus()) return;
       setTimeout(async () => {
         try {
           // v10.16.43 A4-P1 double-fire guard: same flag the panel-open path
@@ -28270,8 +28274,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // Inject a 🛡 IMMUNE button next to the 🕐 clock on every sticky.
   // Runs from the same MutationObserver as _schedInjectClocks (called below).
   function _immuneInjectButtons() {
-    if (!isMod || !isMod()) return;
-    document.querySelectorAll('.post.sticky[data-id]').forEach(postEl => {
+    // v10.18.4: `isMod` is undefined at this scope (the local const at line 29598
+    // is inside a different function). Was throwing ReferenceError every interval
+    // -- ~1-2 per second -- spamming gam_diag_log and breaking the inject pass.
+    // detectModStatus() is the IIFE-scoped function (line 27101).
+    if (typeof detectModStatus !== 'function' || !detectModStatus()) return;
+    document.querySelectorAll('.post.sticky[data-id], .post.stickied[data-id]').forEach(postEl => {
       if (postEl.dataset.gamImmune === '1') return;
       const thingId = postEl.getAttribute('data-id');
       if (!thingId) return;
@@ -28478,9 +28486,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
 
   async function _schedInjectClocks() {
-    if (!isMod || !isMod()) return; // mods only (lead OR regular)
+    // v10.18.4: same isMod ReferenceError fix as _immuneInjectButtons above.
+    if (typeof detectModStatus !== 'function' || !detectModStatus()) return; // mods only (lead OR regular)
     const map = await _schedGet();
-    document.querySelectorAll('.post.sticky[data-id]').forEach(postEl => {
+    document.querySelectorAll('.post.sticky[data-id], .post.stickied[data-id]').forEach(postEl => {
       if (postEl.dataset.gamClock === '1') return;
       const thingId = postEl.getAttribute('data-id');
       if (!thingId) return;

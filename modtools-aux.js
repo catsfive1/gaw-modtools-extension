@@ -3081,7 +3081,11 @@
   // stickies are visually "missing the red" the operator described.
   function _stickyHighlightCheck() {
     try {
-      var stickies = document.querySelectorAll('.post.sticky, .post[data-stickied="true"]');
+      // v10.18.4: GAW uses class="post stickied" (NOT .post.sticky); v10.18.3
+      // selector missed every sticky and falsely reported "0 stickies on page"
+      // in snapshots even when stickies were visibly present. Accept all three
+      // markers to be safe.
+      var stickies = document.querySelectorAll('.post.stickied, .post.sticky, .post[data-stickied="true"]');
       if (stickies.length === 0) return { stickies: 0, sample: [] };
       var sample = [];
       for (var i = 0; i < stickies.length && i < 20; i++) {

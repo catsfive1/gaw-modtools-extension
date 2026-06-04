@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GAW ModTools",
-  "version": "10.18.3",
+  "version": "10.18.4",
   "description": "Moderator toolkit for greatawakening.win: Mod Console, shared flags, audit log, Death Row queue, mod-to-mod chat, and self-heal Maintenance routines.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAramwewDgo9ovmIDjYX/McKKmQAg7RaI5lkRlNGngoim7+F2IhOfGuu55l1o/1elP3pKf4LRIl86NG98RG2jc78nCNJAtIDQdkpW/EmWAat5gwn7HV2s6Qq3R7lgsGV7rCzrvrln474CljoQ42Tugqn1E2pAdXl0r0Gk12BKAB/Sa9sabWKoMVHC0tyz3c2dDXyhdosqftC1CXGysEqCXMTl70835rO+SSp0wi3wURr4YAFWrMX0b0DO8vEUyQ+oAZ2M3jj7W4wCzMITA7ZLeXzHKAe57JQjptbAxOsLiD2vEFVJ64NfvjlDGKamOVvEw+8v0HS9de1s1tDkkQt131QIDAQAB",
   "icons": {
