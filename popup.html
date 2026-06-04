@@ -271,6 +271,18 @@
         </div>
         <div id="crawlStatus" class="pop-token-status" style="margin-top:4px;font-size:10px"></div>
       </div>
+      <!-- v10.18.2: GOD MODE Search launcher. Copies the team token to the
+           clipboard and opens the standalone /godmode app in a new tab.
+           Closes the "no copy my token button" gap named in the v10.18.1
+           handoff (docs/HANDOFF_FIREHOSE_GODMODE.md, §7 + open item #2). -->
+      <div class="gam-card-subsection">
+        <div class="gam-card-sub-label">GOD MODE Search</div>
+        <button id="godmodeBtn" class="pop-btn pop-btn-ghost"
+                title="Copies your mod token to the clipboard and opens the standalone GOD MODE Search app in a new tab. Paste the token into the destination page once -- it stays saved there. App URL: gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev/godmode">
+          &#x1F50D; Copy token + open GOD MODE
+        </button>
+        <div id="godmodeBtnStatus" class="pop-token-status" style="margin-top:4px;font-size:10px"></div>
+      </div>
     </div><!-- /.gam-card-body tools -->
   </div><!-- /#card-tools -->
 

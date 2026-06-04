@@ -3335,6 +3335,57 @@ $('dashBtn').addEventListener('click', async () => {
   }
 });
 
+// v10.18.2: GOD MODE Search launcher. Hand-off flow:
+//   1. ask SW for the team token via the popup-only popupRevealTeamToken RPC
+//   2. copyWithPulse (3-layer fallback) writes it to the clipboard + flashes the button
+//   3. chrome.tabs.create opens the standalone /godmode app in a new tab
+//   4. mod pastes once on the destination page (it persists to localStorage there)
+// Closes the friction gap named in HANDOFF_FIREHOSE_GODMODE.md §7 / open item #2.
+// Token never transits via URL or DOM text -- only the SW->popup channel + clipboard.
+const __GODMODE_APP_URL_POPUP = WORKER_BASE_POPUP + '/godmode';
+async function __runGodmodeHandoff() {
+  const btn = $('godmodeBtn');
+  const statusEl = $('godmodeBtnStatus');
+  if (statusEl) { statusEl.className = 'pop-token-status'; statusEl.textContent = 'fetching token...'; }
+  let token = '';
+  try {
+    const r = await popupRpc('popupRevealTeamToken', {});
+    if (r && r.ok && r.token) {
+      token = String(r.token);
+    } else {
+      const errMsg = (r && r.error) || 'no team token stored -- claim or paste a token first';
+      if (statusEl) { statusEl.className = 'pop-token-status err'; statusEl.textContent = errMsg; }
+      try { showPopupBanner('GOD MODE: ' + errMsg, 'error'); } catch (_) {}
+      return;
+    }
+  } catch (e) {
+    const errMsg = 'reveal failed: ' + (e && e.message || e);
+    if (statusEl) { statusEl.className = 'pop-token-status err'; statusEl.textContent = errMsg; }
+    return;
+  }
+  // Sequence matters: write clipboard BEFORE opening the tab. tabs.create steals
+  // focus, which would break Layer 2 (navigator.clipboard requires document.hasFocus).
+  try { await copyWithPulse(btn, token); } catch (_) {}
+  try {
+    if (statusEl) {
+      statusEl.className = 'pop-token-status ok';
+      statusEl.textContent = '✓ token copied -- opening GOD MODE in a new tab. Paste on the destination page once.';
+    }
+    chrome.tabs.create({ url: __GODMODE_APP_URL_POPUP });
+  } catch (e) {
+    if (statusEl) {
+      statusEl.className = 'pop-token-status err';
+      statusEl.textContent = 'open-tab failed: ' + (e && e.message || e);
+    }
+  } finally {
+    token = '';
+  }
+}
+(function __wireGodmodeBtn() {
+  const b = $('godmodeBtn');
+  if (b) b.addEventListener('click', __runGodmodeHandoff);
+})();
+
 function buildDashboardHtml(rep) {
   const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const userLink = u => `<a href="https://greatawakening.win/u/${encodeURIComponent(u)}/" target="_blank">${esc(u)}</a>`;

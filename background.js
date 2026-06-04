@@ -4097,6 +4097,34 @@ const RPC_HANDLERS = {
         return { ok: false, error: String(e && e.message || e) };
       }
     }
+  },
+
+  // v10.18.2: explicit user-gesture team-token reveal for the GOD MODE
+  // popup-launcher button. The standalone /godmode app is served from the
+  // workers.dev origin -- it cannot reach the SW vault directly, so the
+  // popup hands the token off via clipboard + new-tab open. POPUP-ONLY:
+  // content scripts and the worker can never invoke this. Every call is
+  // diag-logged so any future abuse path is forensically recoverable.
+  popupRevealTeamToken: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler() {
+      try {
+        if (!secretCache || !secretCache.workerModToken) {
+          try { await loadSecrets(); } catch (_) {}
+        }
+        var token = secretCache && secretCache.workerModToken;
+        if (!token) {
+          return { ok: false, error: 'no team token stored' };
+        }
+        try {
+          await _maintAppendDiag('tokens.reveal.popup', 'ok',
+            { ts: Date.now(), reason: 'godmode handoff', len: String(token).length });
+        } catch (_) {}
+        return { ok: true, token: String(token) };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    }
   }
 };
 
