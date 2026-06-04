@@ -1062,6 +1062,16 @@
         <div class="pop-tools" style="padding:4px 12px 8px">
           <button id="diagSnapshotBtn" class="pop-btn pop-btn-ghost" style="font-size:11px">&#x1F9EA; Copy full snapshot to clipboard</button>
         </div>
+        <!-- v10.18.3: SNAPSHOT FOR FIX -- rich page+DOM capture for visual-bug
+             cases where "Copy errors" is empty because the bug isn't an RPC
+             error. Runs in the active GAW tab; captures live computed-style
+             of every .post, the profile-protector self-check, sticky highlight
+             integrity, gam_diag_log tail, SW boot table, active alarms. -->
+        <div class="pop-section-label" style="margin-top:8px">Snapshot for fix (visual / DOM bugs)</div>
+        <div class="pop-tools" style="padding:4px 12px 4px;display:flex;flex-direction:column;gap:4px">
+          <button id="snapshotForFixBtn" class="pop-btn pop-btn-ghost" style="font-size:11px">&#x1FA7A; SNAPSHOT FOR FIX (page + DOM + state)</button>
+          <span id="snapshotForFixStatus" class="pop-token-status" style="font-size:10px"></span>
+        </div>
         <!-- v10.16.32 (Grok #114): test-connection ping. Times a round-trip to
              the worker /version endpoint and surfaces ok/fail + latency ms. -->
         <div class="pop-section-label" style="margin-top:8px">Connection probe</div>

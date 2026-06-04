@@ -2981,3 +2981,482 @@
   console.log('[modtools-aux Wave 5 v10.17.1] registered ' + waveRegistered + ' GOD MODE palette commands; status-bar icon scheduled; window._gamOpenGodMode() also available');
 })();
 
+
+/* ============================================================================
+ * Wave 6 (v10.18.3) -- SNAPSHOT FOR FIX
+ *
+ * One-click rich debug capture for "the UI is broken but Copy Errors is empty"
+ * class of bug. The existing "Copy errors to clipboard" surfaces the RPC error
+ * log -- which is empty when the bug is visual (CSS / DOM state / computed
+ * style mismatch). This Wave captures the layer that ACTUALLY matters for
+ * those bugs: live DOM forensics of every .post/.comment on the page, the
+ * profile-protector self-check re-run at button-press, the sticky-highlight
+ * computed-style check (homepage), gam_diag_log tail, gam_sw_boots tail,
+ * active alarms, gam_settings keys (token presence flag, not the token).
+ *
+ * Output: markdown blob copied to clipboard via 3-layer fallback +
+ * persisted to chrome.storage.local.gam_last_snapshot for recovery.
+ *
+ * Access points:
+ *  - Ctrl+Shift+P palette: "snapshot for fix"
+ *  - Popup Diag tab: 🩺 SNAPSHOT FOR FIX button
+ *  - Status-bar 🩺 icon (next to the 🔍 GOD MODE icon)
+ *  - window._gamSnapshotForFix() (programmatic)
+ *  - chrome.tabs.sendMessage({ type: 'gamSnapshotForFix' }) (popup -> tab)
+ *
+ * Closes the gap named 2026-06-04: "I see a visual bug, I have no way to
+ * tell Claude what's actually happening in the DOM without typing a wall
+ * of text." -- now: one click, paste, done.
+ * ============================================================================ */
+(function () {
+  'use strict';
+  var SNAPSHOT_VERSION = '10.18.3';
+
+  function _detectPageType() {
+    var p = (location.pathname || '');
+    if (/^\/u\/[^/]+\/?$/.test(p))   return 'profile-user';
+    if (p === '/' || p === '/hot' || p === '/new' || p === '/top' || p === '/rising') return 'home-feed';
+    if (p === '/queue' || p.indexOf('/queue/') === 0)   return 'mod-queue';
+    if (p === '/users' || p.indexOf('/users/') === 0)   return 'mod-users';
+    if (p === '/ban'   || p.indexOf('/ban/')   === 0)   return 'mod-ban';
+    if (p === '/modmail' || p.indexOf('/modmail/') === 0) return 'modmail';
+    if (p.indexOf('/p/') === 0)     return 'post-detail';
+    if (p === '/search')            return 'search';
+    return 'other';
+  }
+
+  // Re-run the v10.17.4 profile-protector assertion on demand. Replicates
+  // the inner logic of _selfVerify (modtools-aux.js:1200) without the 2.5s
+  // setTimeout so the snapshot captures the CURRENT state, not a fired-once
+  // historical result.
+  function _vetoSelfCheckLive() {
+    try {
+      var posts = document.querySelectorAll('.post[data-viewer], .post[data-author], .post[data-id]');
+      if (posts.length === 0) return { verdict: 'no-posts', posts: 0, hidden: 0, offenders: [] };
+      var hidden = 0;
+      var offenders = [];
+      for (var i = 0; i < posts.length; i++) {
+        var el = posts[i];
+        var cs = getComputedStyle(el);
+        var op = parseFloat(cs.opacity) || 1;
+        var isHidden = cs.display === 'none' || cs.visibility === 'hidden' || op < 0.1;
+        if (isHidden) {
+          hidden++;
+          if (offenders.length < 8) {
+            var dataAttrs = [];
+            for (var k = 0; k < el.attributes.length; k++) {
+              var a = el.attributes[k];
+              if (a.name.indexOf('data-') === 0) dataAttrs.push(a.name + '=' + a.value);
+            }
+            offenders.push({
+              id: el.getAttribute('data-id') || '?',
+              classes: el.className || '',
+              dataAttrs: dataAttrs.join(' '),
+              display: cs.display,
+              visibility: cs.visibility,
+              opacity: cs.opacity,
+              hasGamHideMarker: el.hasAttribute('data-gam-age-hidden') ||
+                                el.hasAttribute('data-gam-hidden') ||
+                                el.hasAttribute('data-gam-filtered') ||
+                                el.hasAttribute('data-gam-eaten')
+            });
+          }
+        }
+      }
+      return {
+        verdict: hidden === 0 ? 'PASS' : 'FAIL',
+        posts: posts.length,
+        hidden: hidden,
+        offenders: offenders,
+        bodyHasProfileClass: document.body && document.body.classList.contains('gam-on-profile-page'),
+        vetoStyleInjected: !!document.getElementById('gam-profile-veto-style')
+      };
+    } catch (e) {
+      return { verdict: 'error', error: String(e && e.message || e) };
+    }
+  }
+
+  // Sticky highlight integrity check. Looks at every .post.sticky on the page
+  // and reports its computed background / border-left so we can see WHICH
+  // stickies are visually "missing the red" the operator described.
+  function _stickyHighlightCheck() {
+    try {
+      var stickies = document.querySelectorAll('.post.sticky, .post[data-stickied="true"]');
+      if (stickies.length === 0) return { stickies: 0, sample: [] };
+      var sample = [];
+      for (var i = 0; i < stickies.length && i < 20; i++) {
+        var el = stickies[i];
+        var cs = getComputedStyle(el);
+        sample.push({
+          id: el.getAttribute('data-id') || '?',
+          classes: el.className || '',
+          backgroundColor: cs.backgroundColor,
+          borderLeftColor: cs.borderLeftColor,
+          borderLeftWidth: cs.borderLeftWidth,
+          borderLeftStyle: cs.borderLeftStyle,
+          boxShadow: cs.boxShadow,
+          dataStickied: el.getAttribute('data-stickied'),
+          gamClasses: (el.className || '').split(/\s+/).filter(function(c){return c.indexOf('gam-')===0;}).join(' ')
+        });
+      }
+      return { stickies: stickies.length, sample: sample };
+    } catch (e) {
+      return { error: String(e && e.message || e) };
+    }
+  }
+
+  // DOM forensics: every visible .post/.comment[data-id] up to cap, with
+  // computed display/visibility/opacity + ALL gam-* classes + ALL data-gam-*
+  // attrs. This is the data we need to see WHAT THE PAGE LOOKS LIKE LIVE.
+  function _domForensics(cap) {
+    cap = cap || 40;
+    try {
+      var nodes = document.querySelectorAll('.post[data-id], .comment[data-id], .thing[data-id]');
+      var out = [];
+      for (var i = 0; i < nodes.length && out.length < cap; i++) {
+        var el = nodes[i];
+        var cs = getComputedStyle(el);
+        var gamClasses = (el.className || '').split(/\s+/).filter(function(c){return c.indexOf('gam-')===0;});
+        var gamData = [];
+        for (var k = 0; k < el.attributes.length; k++) {
+          var a = el.attributes[k];
+          if (a.name.indexOf('data-gam-') === 0 || a.name.indexOf('gam-') === 0) gamData.push(a.name + '=' + a.value);
+        }
+        var isPost = el.classList.contains('post');
+        var isComment = el.classList.contains('comment');
+        out.push({
+          kind: isPost ? 'post' : (isComment ? 'comment' : 'thing'),
+          id: el.getAttribute('data-id') || '?',
+          author: el.getAttribute('data-author') || el.getAttribute('data-viewer') || '-',
+          type: el.getAttribute('data-type') || '-',
+          allClasses: (el.className || '').slice(0, 200),
+          gamClasses: gamClasses,
+          gamDataAttrs: gamData,
+          display: cs.display,
+          visibility: cs.visibility,
+          opacity: cs.opacity,
+          isSticky: el.classList.contains('sticky') || el.getAttribute('data-stickied') === 'true',
+          isRemoved: el.classList.contains('removed') || el.getAttribute('data-removed') === 'true'
+        });
+      }
+      return { sampledCount: out.length, totalElements: nodes.length, sample: out };
+    } catch (e) {
+      return { error: String(e && e.message || e) };
+    }
+  }
+
+  // Read the bits we need from extension storage.
+  async function _readStorageState() {
+    try {
+      var r = await chrome.storage.local.get(['gam_settings', 'gam_diag_log', 'gam_sw_boots']);
+      var settings = r.gam_settings || {};
+      var diagLog = (r.gam_diag_log || []).slice(-40);
+      var boots = (r.gam_sw_boots || []).slice(-10);
+      var settingsKeys = Object.keys(settings).sort();
+      var safeSettings = {
+        keyCount: settingsKeys.length,
+        keys: settingsKeys,
+        schemaVersion: settings.schema_version,
+        hasWorkerModToken: !!settings.workerModToken,
+        hasEncryptedToken: !!settings.workerModToken_encrypted,
+        isLeadMod: !!settings.isLeadMod,
+        platformHardening: settings['features.platformHardening'] === true,
+        uxPolish: settings['features.uxPolish'] === true
+      };
+      return { settings: safeSettings, diagLog: diagLog, recentBoots: boots };
+    } catch (e) {
+      return { error: String(e && e.message || e) };
+    }
+  }
+
+  async function _readSwState() {
+    try {
+      var r = await chrome.runtime.sendMessage({ type: 'rpc', name: 'snapshotSwState', args: {} });
+      if (r && r.ok && r.data) return r.data;
+      return { error: (r && r.error) || 'SW returned no data' };
+    } catch (e) {
+      return { error: String(e && e.message || e) };
+    }
+  }
+
+  function _esc(s) { return String(s == null ? '' : s).replace(/\|/g, '\\|'); }
+
+  function _formatMarkdown(p) {
+    var L = [];
+    L.push('# ModTools Snapshot for Fix -- ' + p.timestamp);
+    L.push('');
+    L.push('| | |');
+    L.push('|---|---|');
+    L.push('| Extension | v' + p.extVersion + ' (manifest v' + p.manifestVersion + ') |');
+    L.push('| Snapshot tool | v' + SNAPSHOT_VERSION + ' |');
+    L.push('| Page URL | `' + _esc(p.url) + '` |');
+    L.push('| Detected type | `' + p.pageType + '` |');
+    L.push('| User-Agent | `' + _esc(p.userAgent) + '` |');
+    L.push('| Worker version | ' + ((p.swState && p.swState.workerVersion) || 'unknown') + ' |');
+    L.push('');
+
+    // VETO SELF-CHECK
+    var v = p.vetoSelfCheck || {};
+    L.push('## Profile-protector veto self-check (live re-run)');
+    L.push('');
+    L.push('- **Verdict:** `' + (v.verdict || '?') + '`');
+    L.push('- **Posts examined:** ' + (v.posts || 0));
+    L.push('- **Computed-hidden:** ' + (v.hidden || 0));
+    L.push('- **Body has `gam-on-profile-page` class:** ' + (v.bodyHasProfileClass ? 'YES' : 'NO'));
+    L.push('- **`#gam-profile-veto-style` injected:** ' + (v.vetoStyleInjected ? 'YES' : 'NO'));
+    if (v.offenders && v.offenders.length) {
+      L.push('');
+      L.push('First ' + v.offenders.length + ' offenders:');
+      L.push('```');
+      v.offenders.forEach(function(o) {
+        L.push('id=' + o.id + '  display=' + o.display + '  visibility=' + o.visibility + '  opacity=' + o.opacity);
+        L.push('  classes:    ' + o.classes);
+        L.push('  data-attrs: ' + (o.dataAttrs || '(none)'));
+        L.push('  has-gam-hide-marker: ' + o.hasGamHideMarker);
+      });
+      L.push('```');
+    }
+    if (v.error) L.push('Error: ' + v.error);
+    L.push('');
+
+    // STICKY HIGHLIGHT
+    var s = p.stickyCheck || {};
+    L.push('## Sticky highlight check');
+    L.push('');
+    L.push('- **Stickies on page:** ' + (s.stickies || 0));
+    if (s.error) {
+      L.push('- Error: ' + s.error);
+    } else if ((s.sample || []).length) {
+      L.push('');
+      L.push('| id | bg | border-left | box-shadow | gam-* | data-stickied |');
+      L.push('|---|---|---|---|---|---|');
+      s.sample.forEach(function(o) {
+        L.push('| ' + _esc(o.id) + ' | ' + _esc(o.backgroundColor) + ' | ' +
+          _esc(o.borderLeftWidth + ' ' + o.borderLeftStyle + ' ' + o.borderLeftColor) + ' | ' +
+          _esc((o.boxShadow || '-').slice(0, 60)) + ' | ' + _esc(o.gamClasses || '-') + ' | ' +
+          _esc(o.dataStickied || '-') + ' |');
+      });
+    }
+    L.push('');
+
+    // DOM FORENSICS
+    var d = p.domForensics || {};
+    L.push('## DOM forensics');
+    L.push('');
+    L.push('- **Total `.post[data-id]` / `.comment[data-id]` / `.thing[data-id]`:** ' + (d.totalElements || 0));
+    L.push('- **Sampled (top ' + (d.sampledCount || 0) + '):**');
+    L.push('');
+    L.push('| kind | id | author | type | display | vis | op | sticky | rem | gam-classes | gam-data |');
+    L.push('|---|---|---|---|---|---|---|---|---|---|---|');
+    (d.sample || []).forEach(function(e) {
+      L.push('| ' + e.kind + ' | ' + _esc(e.id) + ' | ' + _esc(e.author) + ' | ' + _esc(e.type) +
+        ' | `' + e.display + '` | `' + e.visibility + '` | ' + e.opacity +
+        ' | ' + (e.isSticky ? 'Y' : '-') + ' | ' + (e.isRemoved ? 'Y' : '-') +
+        ' | ' + _esc((e.gamClasses || []).join(' ') || '-') +
+        ' | ' + _esc((e.gamDataAttrs || []).join(' ') || '-') + ' |');
+    });
+    L.push('');
+
+    // STORAGE STATE
+    var st = p.storage || {};
+    L.push('## Extension state');
+    L.push('');
+    if (st.error) {
+      L.push('Error reading storage: ' + st.error);
+    } else {
+      L.push('- **gam_settings keys (' + (st.settings && st.settings.keyCount || 0) + '):** `' + ((st.settings && st.settings.keys || []).join(', ') || '(none)') + '`');
+      L.push('- **schema_version:** ' + ((st.settings && st.settings.schemaVersion) || '?'));
+      L.push('- **hasWorkerModToken:** ' + (st.settings && st.settings.hasWorkerModToken));
+      L.push('- **hasEncryptedToken:** ' + (st.settings && st.settings.hasEncryptedToken));
+      L.push('- **isLeadMod:** ' + (st.settings && st.settings.isLeadMod));
+      L.push('- **platformHardening:** ' + (st.settings && st.settings.platformHardening));
+      L.push('- **uxPolish:** ' + (st.settings && st.settings.uxPolish));
+    }
+    L.push('');
+
+    // DIAG LOG
+    L.push('## gam_diag_log (last 40 entries)');
+    L.push('');
+    L.push('```');
+    if (st.diagLog && st.diagLog.length) {
+      st.diagLog.forEach(function(e) {
+        var msg = '';
+        if (typeof e.msg === 'string') msg = e.msg;
+        else if (e.msg != null) msg = JSON.stringify(e.msg);
+        else msg = JSON.stringify(e);
+        L.push('[' + (e.iso || '?') + '] (' + (e.cat || '?') + ') ' + msg.substring(0, 220));
+      });
+    } else {
+      L.push('(empty)');
+    }
+    L.push('```');
+    L.push('');
+
+    // SW STATE
+    var sw = p.swState || {};
+    L.push('## Service worker state');
+    L.push('');
+    if (sw.error) {
+      L.push('Error: ' + sw.error);
+    } else {
+      L.push('- **Worker version:** ' + (sw.workerVersion || 'unknown'));
+      L.push('- **Boot count (ring):** ' + (sw.bootCount || 0));
+      if (sw.lastBoot) {
+        L.push('- **Last boot:** ' + (sw.lastBoot.ts || '?') + ' (reason: ' + (sw.lastBoot.reason || '?') + ', v ' + (sw.lastBoot.v || '?') + ', tier ' + (sw.lastBoot.tier || '?') + ')');
+      }
+      if (sw.recentBoots && sw.recentBoots.length) {
+        L.push('');
+        L.push('Recent boots:');
+        L.push('```');
+        sw.recentBoots.slice().reverse().forEach(function(b) {
+          L.push('  ' + (b.ts || '?') + ' -- reason=' + (b.reason || '?') + '  v=' + (b.v || '?') + '  tier=' + (b.tier || '?'));
+        });
+        L.push('```');
+      }
+      if (sw.alarms && sw.alarms.length) {
+        L.push('');
+        L.push('Active alarms:');
+        L.push('```');
+        sw.alarms.forEach(function(a) {
+          L.push('  ' + a.name + ' -- next: ' + (a.nextIso || '?') + (a.periodInMinutes ? ' (every ' + a.periodInMinutes + ' min)' : ''));
+        });
+        L.push('```');
+      }
+    }
+    L.push('');
+
+    L.push('---');
+    L.push('Generated by SNAPSHOT FOR FIX v' + SNAPSHOT_VERSION + ' -- paste this entire document to Claude.');
+    return L.join('\n');
+  }
+
+  async function _writeClipboard(text) {
+    // Layer 1: DevTools-only copy() helper
+    try { if (typeof copy === 'function') { copy(text); return 'devtools'; } } catch (_) {}
+    // Layer 2: navigator.clipboard.writeText (requires document.hasFocus)
+    try {
+      if (navigator.clipboard && document.hasFocus()) {
+        await navigator.clipboard.writeText(text);
+        return 'clipboard-api';
+      }
+    } catch (_) {}
+    // Layer 3: legacy textarea + execCommand
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      var ok = document.execCommand('copy');
+      ta.parentNode && ta.parentNode.removeChild(ta);
+      if (ok) return 'execCommand';
+    } catch (_) {}
+    return null;
+  }
+
+  async function _gamSnapshotForFix() {
+    try {
+      var ts = new Date().toISOString();
+      var manifest = chrome.runtime.getManifest();
+      var payload = {
+        timestamp: ts,
+        extVersion: manifest.version,
+        manifestVersion: manifest.manifest_version,
+        url: location.href,
+        userAgent: navigator.userAgent,
+        pageType: _detectPageType(),
+        vetoSelfCheck: _vetoSelfCheckLive(),
+        stickyCheck: _stickyHighlightCheck(),
+        domForensics: _domForensics(40)
+      };
+      var pair = await Promise.all([_readStorageState(), _readSwState()]);
+      payload.storage = pair[0];
+      payload.swState = pair[1];
+
+      var markdown = _formatMarkdown(payload);
+
+      try {
+        await chrome.storage.local.set({
+          gam_last_snapshot: { ts: Date.now(), pageType: payload.pageType, url: payload.url, md: markdown }
+        });
+      } catch (_) {}
+
+      var copyMethod = await _writeClipboard(markdown);
+      var color = copyMethod ? '#3dd68c' : '#f04040';
+      var msg = copyMethod
+        ? '[SNAPSHOT v' + SNAPSHOT_VERSION + '] Captured + copied (via ' + copyMethod + ') -- paste to Claude. ' + (payload.vetoSelfCheck.verdict || '?') + ' / posts=' + (payload.domForensics.totalElements || 0) + ' / stickies=' + (payload.stickyCheck.stickies || 0)
+        : '[SNAPSHOT v' + SNAPSHOT_VERSION + '] Captured but CLIPBOARD COPY FAILED -- recovery: chrome.storage.local.gam_last_snapshot.md';
+      console.log('%c' + msg, 'color:' + color + ';font-weight:700;font-size:13px');
+
+      return { ok: !!copyMethod, copyMethod: copyMethod, length: markdown.length, markdown: markdown };
+    } catch (e) {
+      console.error('[SNAPSHOT v' + SNAPSHOT_VERSION + '] capture failed:', e);
+      return { ok: false, error: String(e && e.message || e) };
+    }
+  }
+
+  // Expose programmatic API
+  window._gamSnapshotForFix = _gamSnapshotForFix;
+
+  // Receive message from popup / SW
+  try {
+    chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
+      if (msg && msg.type === 'gamSnapshotForFix') {
+        _gamSnapshotForFix().then(function(r) {
+          try { sendResponse(r); } catch (_) {}
+        }).catch(function(e) {
+          try { sendResponse({ ok: false, error: String(e && e.message || e) }); } catch (_) {}
+        });
+        return true; // async response
+      }
+    });
+  } catch (_) {}
+
+  // Register palette command (if palette is up)
+  if (typeof window._gamCmdkRegister === 'function') {
+    try {
+      window._gamCmdkRegister({
+        label: 'Snapshot for fix -- capture page state + copy to clipboard',
+        kw: 'snapshot fix debug capture clipboard claude bug eaten hide visual sticky red dom computed style copy paste help broken',
+        icon: '\u{1FA7A}',
+        fn: function () { _gamSnapshotForFix(); }
+      });
+    } catch (_) {}
+  }
+
+  // Inject status-bar 🩺 icon (mirrors v10.17.1 GOD MODE icon pattern)
+  function _injectSnapshotBarIcon() {
+    if (document.getElementById('gam-snapshot-bar-icon')) return true;
+    var bar = document.getElementById('gam-status-bar');
+    if (!bar) return false;
+    var btn = document.createElement('button');
+    btn.id = 'gam-snapshot-bar-icon';
+    btn.className = 'gam-bar-icon';
+    btn.title = 'Snapshot page state for fix -- copies a debug report to clipboard (paste to Claude)';
+    btn.textContent = '\u{1FA7A}'; // stethoscope
+    btn.style.cursor = 'pointer';
+    btn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      _gamSnapshotForFix();
+    });
+    var spacer = bar.querySelector('.gam-bar-spacer');
+    if (spacer) bar.insertBefore(btn, spacer);
+    else bar.appendChild(btn);
+    return true;
+  }
+  if (!_injectSnapshotBarIcon()) {
+    var tries = 0;
+    var iv = setInterval(function () {
+      tries++;
+      if (_injectSnapshotBarIcon() || tries >= 6) clearInterval(iv);
+    }, 500);
+    var obs = new MutationObserver(function () {
+      if (_injectSnapshotBarIcon()) obs.disconnect();
+    });
+    obs.observe(document.documentElement, { childList: true, subtree: true });
+    setTimeout(function () { try { obs.disconnect(); } catch (_) {} }, 30000);
+  }
+
+  console.log('[modtools-aux Wave 6 v' + SNAPSHOT_VERSION + '] SNAPSHOT FOR FIX armed -- palette "snapshot for fix" / status-bar 🩺 / window._gamSnapshotForFix() / chrome.tabs.sendMessage({type:"gamSnapshotForFix"})');
+})();
+

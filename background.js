@@ -4099,6 +4099,64 @@ const RPC_HANDLERS = {
     }
   },
 
+  // v10.18.3: SW-side state for the SNAPSHOT FOR FIX debug capture.
+  // Returns alarms + live worker version + boot-log tail. Called by the
+  // content script's _gamSnapshotForFix() to merge with its DOM forensics.
+  // Both callers (content + popup) allowed -- the popup Diag tab button
+  // sends through the active GAW tab, but the popup itself may also invoke
+  // when no GAW tab is open (degraded but still useful).
+  snapshotSwState: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler() {
+      try {
+        var data = {
+          alarms: [],
+          workerVersion: null,
+          recentBoots: [],
+          bootCount: 0,
+          lastBoot: null
+        };
+        try {
+          var raw = await chrome.storage.local.get('gam_sw_boots');
+          var boots = (raw && Array.isArray(raw.gam_sw_boots)) ? raw.gam_sw_boots : [];
+          data.bootCount = boots.length;
+          data.lastBoot = boots.length > 0 ? boots[boots.length - 1] : null;
+          data.recentBoots = boots.slice(-10).map(function(b) {
+            return {
+              ts: b.ts || null,
+              reason: b.reason || '?',
+              v: b.v || '?',
+              tier: b.tier || '?',
+              boot_count: b.boot_count || 0
+            };
+          });
+        } catch (_) {}
+        try {
+          var al = await new Promise(function(res) {
+            try { chrome.alarms.getAll(function(a) { res(a || []); }); } catch (_) { res([]); }
+          });
+          data.alarms = (al || []).map(function(a) {
+            return {
+              name: a.name,
+              nextIso: a.scheduledTime ? new Date(a.scheduledTime).toISOString() : null,
+              periodInMinutes: a.periodInMinutes || null
+            };
+          });
+        } catch (_) {}
+        try {
+          var resp = await fetch(WORKER_BASE + '/version', { method: 'GET' });
+          if (resp && resp.ok) {
+            var j = await resp.json();
+            if (j && j.version) data.workerVersion = String(j.version);
+          }
+        } catch (_) {}
+        return { ok: true, data: data };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    }
+  },
+
   // v10.18.2: explicit user-gesture team-token reveal for the GOD MODE
   // popup-launcher button. The standalone /godmode app is served from the
   // workers.dev origin -- it cannot reach the SW vault directly, so the

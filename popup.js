@@ -3335,6 +3335,40 @@ $('dashBtn').addEventListener('click', async () => {
   }
 });
 
+// v10.18.3: SNAPSHOT FOR FIX popup wiring. Sends a `gamSnapshotForFix`
+// message to the active GAW tab; the Wave 6 IIFE in modtools-aux.js handles
+// it -- captures live page state, formats markdown, writes to clipboard,
+// persists to chrome.storage.local.gam_last_snapshot. Surfaces success /
+// failure inline in the Diag tab so the operator knows the clipboard has
+// the payload without having to switch tabs.
+(function __wireSnapshotForFixBtn() {
+  const b = $('snapshotForFixBtn');
+  if (!b) return;
+  b.addEventListener('click', async () => {
+    const st = $('snapshotForFixStatus');
+    if (st) { st.className = 'pop-token-status'; st.textContent = 'capturing live page state...'; }
+    try {
+      const r = await sendToActiveGawTab({ type: 'gamSnapshotForFix' });
+      if (!r) {
+        if (st) { st.className = 'pop-token-status err'; st.textContent = 'no response -- need an active GAW tab'; }
+        try { showPopupBanner('Snapshot: open a greatawakening.win tab first.', 'error'); } catch (_) {}
+        return;
+      }
+      if (r.ok) {
+        if (st) {
+          st.className = 'pop-token-status ok';
+          st.textContent = '✓ snapshot copied (' + r.copyMethod + ', ' + (r.length || 0) + ' chars) -- paste to Claude';
+        }
+      } else {
+        const msg = r.error || ('clipboard failed -- check chrome.storage.local.gam_last_snapshot');
+        if (st) { st.className = 'pop-token-status err'; st.textContent = msg; }
+      }
+    } catch (e) {
+      if (st) { st.className = 'pop-token-status err'; st.textContent = 'capture failed: ' + (e && e.message || e); }
+    }
+  });
+})();
+
 // v10.18.2: GOD MODE Search launcher. Hand-off flow:
 //   1. ask SW for the team token via the popup-only popupRevealTeamToken RPC
 //   2. copyWithPulse (3-layer fallback) writes it to the clipboard + flashes the button
