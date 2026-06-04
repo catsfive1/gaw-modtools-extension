@@ -168,6 +168,21 @@ function Find-Browser {
     return ''
 }
 
+# Map a browser executable path to its extensions-page URL.
+# v10.18.5 fix (storm-flagged P1): hardcoding `chrome://extensions` for every
+# browser meant Brave operators got nothing useful when the installer launched
+# the browser to that URL -- Brave does not alias the chrome:// scheme. The
+# leaf-name match below covers the same three browsers Find-Browser detects.
+function Get-ExtensionsUrl {
+    param([string]$browserPath)
+    if (-not $browserPath) { return 'chrome://extensions' }
+    $leaf = ''
+    try { $leaf = (Split-Path -Leaf $browserPath).ToLower() } catch { $leaf = '' }
+    if ($leaf -like 'brave*')  { return 'brave://extensions' }
+    if ($leaf -like 'msedge*' -or $leaf -like 'edge*') { return 'edge://extensions' }
+    return 'chrome://extensions'
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -294,19 +309,20 @@ try {
 
     $installOk = $true
 
-    # Open chrome://extensions in browser
+    # Open the extensions page in browser (per-browser URL scheme).
     Log '' 'Gray'
     Log 'Opening extensions page in browser...' 'Cyan'
+    $extUrl = Get-ExtensionsUrl $browserPath
     if ($browserPath) {
         try {
-            Start-Process $browserPath 'chrome://extensions'
-            Log 'Opened chrome://extensions' 'Green'
+            Start-Process $browserPath $extUrl
+            Log ('Opened ' + $extUrl) 'Green'
         } catch {
             Log ('WARN: could not open browser automatically: ' + $_.Exception.Message) 'Yellow'
-            Log '  -> Open your browser manually and go to: chrome://extensions' 'Yellow'
+            Log ('  -> Open your browser manually and go to: ' + $extUrl) 'Yellow'
         }
     } else {
-        Log '  -> Open Chrome/Brave/Edge manually and go to: chrome://extensions' 'Yellow'
+        Log '  -> Open Chrome/Brave/Edge manually and go to: chrome://extensions (Brave: brave://extensions, Edge: edge://extensions)' 'Yellow'
     }
 
     $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds, 1)
