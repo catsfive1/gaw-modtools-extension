@@ -15,6 +15,7 @@ so no per-version git commits — rollback is via Cloudflare deploy history).
 | v10.19.2 | `GET /raid/detect` raid alarms + dedup | ✅ | 44/44; 2 live-D1 bugs caught + fixed |
 | v10.19.2-fix | coarse `braidFamilyClass` grouping (fixes missed-raid bug) | ✅ | 75/75; operator's 7 names → 1 family → fires at 7 |
 | v10.19.x-int | Discord/Integrations routes (`GET\|POST /admin/integrations-config` + `/test`) — **shared** with the Settings Discord card | ✅ | 35/35 smoke incl. **secret-never-leaks** master assertion |
+| v10.19.3 | Raid notifications: `braidDispatchRaidAlert` (mod-chat `ALL` + Discord), wired into `handleRaidDetect` on the dedup gate (`!deduped` = one fire/raid) | ✅ | 28/28 smoke; 75/75 detect regression clean |
 
 **Extension versions shipped (manifest line, separate from worker):**
 
@@ -52,12 +53,18 @@ so no per-version git commits — rollback is via Cloudflare deploy history).
 
 ## Revised remaining plan
 
-- **v10.19.3 — Notifications (worker):** mod-chat `ALL` broadcast + Discord
-  `#ai-tools`. **Config surface now EXISTS** — the integrations routes are built +
-  smoke-tested (above). The raid dispatcher reads `discord_secret:raid_webhook` (KV,
-  `env.DISCORD_WEBHOOK` fallback) + the `discord_dropgun_id`/`discord_lonewulf_id`/
-  `discord_ai_tools_channel_id` rows from `team_settings`. Remaining: wire the alarm
-  in `braidDetectAlarms` to compose the embed + POST. No longer blocked.
+- **v10.19.3 — Notifications (worker): ✅ DONE.** `braidDispatchRaidAlert(env, incident)`
+  fires on the dedup gate (`braidIncidentDedup` → `deduped:false`, i.e. one fire per
+  raid per 60-min cooldown), dispatching BOTH channels best-effort (HI-4 — a webhook
+  outage never crashes `/raid/detect` nor suppresses the other channel):
+  (a) **mod-chat `ALL`** — server-side `mod_messages` insert, encrypted at rest via
+  `encField`, `from_mod='bot-raid-shield'`; (b) **Discord** — reads
+  `discord_secret:raid_webhook` (KV, `env.DISCORD_WEBHOOK` fallback) + the
+  `discord_dropgun_id`/`discord_lonewulf_id` rows, composes a `<@id>`-mention embed
+  (count/family/window/raid_id). The client banner + robot icon (channel (c)) is the
+  extension's job in v10.19.7, driven off the `/raid/detect` poll response.
+  **End-to-end send is verifiable only post-deploy (real webhook); the composition,
+  mention formatting, dedup-gating, and config-read are unit-verified (28/28).**
 - **Discord card UI + background.js RPC** (extension): the lead-only card that *writes*
   the integrations config via `adminIntegrationsRead/Write/Test` RPCs. Card degrades
   gracefully (async-load failure state) until the worker deploy lands.
