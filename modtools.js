@@ -12562,8 +12562,10 @@ Analyze this comment against the community rules. Then write a brief, profession
   function openSettings(){
     const c = el('div', { cls:'gam-settings-panel' });
     const settingDomId = key => `gam-set-${String(key).replace(/[^A-Za-z0-9_-]/g, '_')}`;
-
-    function addSection(label){ c.appendChild(el('div',{cls:'gam-settings-section'},label)); }
+    // v10.19.1: card machinery state. Rows append to _currentCardBody (the open
+    // card's body); _cards collects detached cards, sorted by (tier,order) at the end.
+    let _currentCardBody = c;
+    const _cards = [];
 
     function addToggle(label, key, desc, liveEffect){
       const id = settingDomId(key);
@@ -12582,7 +12584,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         setSetting(key, e.target.checked);
         if (liveEffect) liveEffect(e.target.checked);
       });
-      c.appendChild(row);
+      _currentCardBody.appendChild(row);
     }
 
     // v7.1.2: Feature toggle with optional lead Promote/Demote button. The row
@@ -12659,14 +12661,26 @@ Analyze this comment against the community rules. Then write a brief, profession
             }
           } catch(e){ snack('Promote error: ' + e.message, 'error'); }
           finally {
-            // Re-render the row: easiest path is closing + reopening settings.
-            closeAllPanels();
-            openSettings();
+            // v10.19.1: in-place row update -- no panel destroy, so scroll
+            // position + any open textarea edits survive a promote/demote.
+            try {
+              const _entry = _teamFeatures[key];
+              const _isTeam = !!(_entry && 'value' in _entry);
+              teamInfo.innerHTML = '';
+              if (_isTeam){
+                teamInfo.appendChild(el('span', { cls:'gam-team-flag-line' },
+                  `[TEAM=${JSON.stringify(_entry.value)} by ${_entry.set_by}]`));
+              }
+              btn.textContent = _isTeam ? '⬇ Demote from team' : '⬆ Promote to team';
+              btn.classList.toggle('gam-settings-promote-btn-demote', _isTeam);
+              btn.title = _isTeam ? 'Remove team override (each mod falls back to their own setting)' : 'Promote current value to every mod';
+              btn.disabled = false;
+            } catch(_e){ btn.disabled = false; }
           }
         });
         ctls.appendChild(btn);
       }
-      c.appendChild(row);
+      _currentCardBody.appendChild(row);
     }
 
     function addSelect(label, key, opts, desc, liveEffect){
@@ -12686,10 +12700,140 @@ Analyze this comment against the community rules. Then write a brief, profession
         setSetting(key, isNaN(asNum) || String(asNum) !== raw ? raw : asNum);
         if (liveEffect) liveEffect(raw);
       });
-      c.appendChild(row);
+      _currentCardBody.appendChild(row);
     }
 
-    addSection('\u{1F5A5}\u{FE0F} Display');
+    // ── v10.19.1 card machinery ──────────────────────────────────────────
+    // Cards are collected DETACHED + sorted by (tier,order) before append, so
+    // the SOURCE order of openCard() calls is irrelevant -- daily-driver cards
+    // (tier 0) always render open at the top, set-and-forget cards (tier 1)
+    // collapsed at the bottom. Expand/collapse state persists per-user in
+    // localStorage (gam_settings_card_collapse); POSITION never varies.
+    const K_CARD_COLLAPSE = 'gam_settings_card_collapse';
+    const _cardCollapse = (function(){ try { return lsGet(K_CARD_COLLAPSE, {}) || {}; } catch(_){ return {}; } })();
+    function openCard(id, label, tier, order, collapsedDefault, opts){
+      opts = opts || {};
+      const collapsed = (id in _cardCollapse) ? !!_cardCollapse[id] : !!collapsedDefault;
+      const card = el('div', { cls: 'gam-settings-card'
+        + (opts.danger ? ' gam-settings-card--danger' : '')
+        + (opts.lead ? ' gam-settings-card--lead' : '') });
+      const bodyId = 'gam-card-' + id + '-body';
+      const caret = el('span', { cls:'gam-card-caret' }, collapsed ? '▸' : '▾');
+      const hdr = el('button', {
+        cls: 'gam-settings-card-header' + (opts.danger ? ' gam-settings-card-header--danger' : ''),
+        type: 'button',
+        'aria-expanded': String(!collapsed),
+        'aria-controls': bodyId
+      }, caret, el('span', { cls:'gam-card-title' }, label));
+      const body = el('div', { cls:'gam-settings-card-body', id: bodyId });
+      if (collapsed) body.hidden = true;
+      hdr.addEventListener('click', function(){
+        const willOpen = body.hidden;
+        body.hidden = !willOpen;
+        hdr.setAttribute('aria-expanded', String(willOpen));
+        caret.textContent = willOpen ? '▾' : '▸';
+        _cardCollapse[id] = !willOpen;
+        try { lsSet(K_CARD_COLLAPSE, _cardCollapse); } catch(_){}
+        if (willOpen){ const f = body.querySelector('input,button,select,textarea'); if (f) f.focus(); }
+      });
+      card.appendChild(hdr);
+      card.appendChild(body);
+      _cards.push({ tier: tier|0, order: order|0, el: card });
+      _currentCardBody = body;
+    }
+    function closeCard(){ _currentCardBody = c; }
+
+    // v10.19.1: Discord / Integrations card (lead-only). Reads/writes the worker
+    // integrations config via the adminIntegrations* RPCs. The webhook URL is a
+    // server-side secret (worker KV) -- this card only ever SENDS it; the worker
+    // never echoes it back (GET returns a configured-boolean). Until the worker
+    // routes are deployed, the read fails gracefully and entry is still allowed.
+    function buildDiscordCard(host){
+      let _webhookDirty = false;
+      let _cooldownTimer = null;
+      const wrap = el('div', { cls:'gam-settings-row', style:{ flexDirection:'column', alignItems:'stretch' } });
+      wrap.innerHTML =
+        '<div class="gam-settings-info" style="min-width:0">' +
+          '<div class="gam-settings-desc" id="gam-disc-status" style="margin-bottom:8px">Loading integration config…</div>' +
+          '<label class="gam-settings-lbl" for="gam-disc-webhook">Raid alert webhook URL <span style="color:#9b9892;font-weight:400">(secret — stored server-side, never shown back)</span></label>' +
+          '<input id="gam-disc-webhook" type="text" disabled placeholder="Loading…" autocomplete="off" class="gam-disc-input">' +
+          '<label class="gam-settings-lbl" for="gam-disc-channel" style="margin-top:8px">#ai-tools channel ID</label>' +
+          '<input id="gam-disc-channel" type="text" disabled placeholder="Loading…" inputmode="numeric" class="gam-disc-input">' +
+          '<label class="gam-settings-lbl" for="gam-disc-dropgun" style="margin-top:8px">@dropgun Discord user ID</label>' +
+          '<input id="gam-disc-dropgun" type="text" disabled placeholder="Loading…" inputmode="numeric" class="gam-disc-input">' +
+          '<label class="gam-settings-lbl" for="gam-disc-lonewulf" style="margin-top:8px">@lonewulf Discord user ID</label>' +
+          '<input id="gam-disc-lonewulf" type="text" disabled placeholder="Loading…" inputmode="numeric" class="gam-disc-input">' +
+          '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">' +
+            '<button id="gam-disc-save" type="button" class="gam-settings-promote-btn" disabled>Save</button>' +
+            '<button id="gam-disc-test" type="button" class="gam-settings-promote-btn" disabled>Send test</button>' +
+          '</div>' +
+        '</div>';
+      host.appendChild(wrap);
+      const q = sel => wrap.querySelector(sel);
+      const statusEl = q('#gam-disc-status'), webhookEl = q('#gam-disc-webhook'),
+            channelEl = q('#gam-disc-channel'), dropgunEl = q('#gam-disc-dropgun'),
+            lonewulfEl = q('#gam-disc-lonewulf'), saveBtn = q('#gam-disc-save'), testBtn = q('#gam-disc-test');
+      webhookEl.addEventListener('input', function(){ _webhookDirty = true; });
+      function setStatus(t,col){ statusEl.textContent = t; statusEl.style.color = col || '#9b9892'; }
+      function enableInputs(on){ [webhookEl, channelEl, dropgunEl, lonewulfEl].forEach(function(i){ i.disabled = !on; }); saveBtn.disabled = !on; }
+      function applyCooldown(lastTs){
+        if (_cooldownTimer){ clearInterval(_cooldownTimer); _cooldownTimer = null; }
+        function tick(){
+          const remaining = 300 - Math.floor(Date.now()/1000 - (lastTs||0));
+          if (!lastTs || remaining <= 0){ testBtn.disabled = false; testBtn.textContent = 'Send test'; if (_cooldownTimer){ clearInterval(_cooldownTimer); _cooldownTimer = null; } return; }
+          testBtn.disabled = true; testBtn.textContent = 'Send test (' + remaining + 's)';
+        }
+        tick(); if (lastTs) _cooldownTimer = setInterval(tick, 1000);
+      }
+      function load(){
+        setStatus('Loading integration config…'); enableInputs(false); testBtn.disabled = true;
+        rpcCall('adminIntegrationsRead').then(function(r){
+          const d = r && r.data;
+          if (!r || !r.ok || !d || d.ok !== true){
+            setStatus('Could not load config (worker routes not deployed yet?). You can still enter + Save; values apply once the rollout lands.', '#f6ad55');
+            enableInputs(true);
+            webhookEl.placeholder = 'https://discord.com/api/webhooks/...';
+            channelEl.placeholder = '18-19 digit ID'; dropgunEl.placeholder = '18-19 digit ID'; lonewulfEl.placeholder = '18-19 digit ID';
+            return;
+          }
+          enableInputs(true);
+          webhookEl.value = ''; _webhookDirty = false;
+          webhookEl.placeholder = d.discord_raid_webhook_configured ? '•••••• (configured — type to replace)' : 'https://discord.com/api/webhooks/...';
+          channelEl.value = d.discord_ai_tools_channel_id || ''; channelEl.placeholder = '18-19 digit ID';
+          dropgunEl.value = d.discord_dropgun_id || ''; dropgunEl.placeholder = '18-19 digit ID';
+          lonewulfEl.value = d.discord_lonewulf_id || ''; lonewulfEl.placeholder = '18-19 digit ID';
+          testBtn.disabled = !d.discord_raid_webhook_configured;
+          applyCooldown(d.discord_test_last_ts || 0);
+          setStatus(d.discord_raid_webhook_configured ? 'Webhook configured — Bot Raid Shield will alert here.' : 'No webhook yet — paste one to enable raid alerts.', d.discord_raid_webhook_configured ? '#3dd68c' : '#9b9892');
+        }).catch(function(e){ setStatus('Load error: ' + (e && e.message || e), '#f6ad55'); enableInputs(true); });
+      }
+      saveBtn.addEventListener('click', function(){
+        const body = {};
+        if (_webhookDirty && webhookEl.value.trim()) body.discord_raid_webhook_url = webhookEl.value.trim();
+        if (channelEl.value.trim()) body.discord_ai_tools_channel_id = channelEl.value.trim();
+        if (dropgunEl.value.trim()) body.discord_dropgun_id = dropgunEl.value.trim();
+        if (lonewulfEl.value.trim()) body.discord_lonewulf_id = lonewulfEl.value.trim();
+        if (Object.keys(body).length === 0){ setStatus('Nothing to save.', '#9b9892'); return; }
+        saveBtn.disabled = true; setStatus('Saving…');
+        rpcCall('adminIntegrationsWrite', body).then(function(r){
+          const d = r && r.data;
+          if (r && r.ok && d && d.ok){ setStatus('Saved ✓', '#3dd68c'); try { snack('Discord config saved', 'good'); } catch(_){} load(); }
+          else { setStatus('Save failed: ' + ((d && d.error) || (r && r.error) || 'unknown'), '#f04040'); saveBtn.disabled = false; }
+        }).catch(function(e){ setStatus('Save error: ' + (e && e.message || e), '#f04040'); saveBtn.disabled = false; });
+      });
+      testBtn.addEventListener('click', function(){
+        testBtn.disabled = true; setStatus('Sending test…');
+        rpcCall('adminIntegrationsTest', { target:'discord_raid' }).then(function(r){
+          const d = r && r.data;
+          if (r && r.ok && d && d.ok){ setStatus('Test delivered to Discord ✓', '#3dd68c'); try { snack('Test delivered to Discord', 'good'); } catch(_){} applyCooldown(Math.floor(Date.now()/1000)); }
+          else if (d && d.retryAfter){ setStatus('Rate limited — try again in ' + d.retryAfter + 's', '#f6ad55'); applyCooldown(Math.floor(Date.now()/1000) - (300 - d.retryAfter)); }
+          else { setStatus('Test failed: ' + ((d && d.error) || (r && r.error) || 'unknown'), '#f04040'); testBtn.disabled = false; }
+        }).catch(function(e){ setStatus('Test error: ' + (e && e.message || e), '#f04040'); testBtn.disabled = false; });
+      });
+      load();
+    }
+
+    closeCard(); openCard('display', '\u{1F5A5}\u{FE0F} Display & Appearance', 1, 3, true);
     addToggle('Hide Sidebar', 'hideSidebar', 'Remove GAW\'s right sidebar — more room for content.', v=>{
       document.body.classList.toggle('gam-hide-sidebar', v);
     });
@@ -12726,7 +12870,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         } catch (_) {}
         try { snack('Bar orientation: ' + v, 'good'); } catch (_) {}
       });
-      c.appendChild(_orRow);
+      _currentCardBody.appendChild(_orRow);
     }
     addToggle('Sus Marker', 'susMarkerEnabled', 'Paint \u2717 next to watchlisted / cloud-flagged usernames sitewide.', v=>{
       if (v) startSusMarker(); else document.querySelectorAll('.gam-sus-x').forEach(n=>n.remove());
@@ -12752,10 +12896,12 @@ Analyze this comment against the community rules. Then write a brief, profession
           }
         } catch (_) {}
       });
-      c.appendChild(_tourRow);
+      _currentCardBody.appendChild(_tourRow);
     }
 
-    addSection('\u26A1 Moderation');
+    addToggle('Compact status bar (icon-only)', 'statusBarCompact', 'Hide the status-bar text labels (icons only). v10.19.1: decoupled from the modmail action bar -- this is now purely cosmetic.');
+
+    closeCard(); openCard('moderation', '\u26A1 Daily Moderation', 0, 1, false);
     addSelect('Console Position', 'modConsoleDock',
       [{value:'modal',label:'Center modal'},{value:'right',label:'Right panel'},{value:'left',label:'Left panel'}],
       'Where the Mod Console opens.'
@@ -12770,7 +12916,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       ()=>{ if(IS_USERS_PAGE && typeof refreshTriageConsole==='function') refreshTriageConsole(); }
     );
 
-    addSection('\u{1F916} AI & Cloud');
+    closeCard(); openCard('ai', '\u{1F916} AI & Analysis', 0, 2, false);
     addSelect('Default AI Engine', 'aiEngine',
       [{value:'llama3',label:'Llama 3 (free, via CF Worker)'},{value:'grok',label:'Grok / xAI (via CF Worker proxy)'}],
       'Which AI model to use for ban reply suggestions and sidebar conformity checks. Both engines are proxied through the team Cloudflare Worker; no API keys are stored in the extension.'
@@ -12782,7 +12928,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     // v9.12.0 - Auto-sticky management (Commander #15/#16). Disabled by default
     // since the underlying /sticky toggle bug is mitigated by client-side
     // cooldown but not eliminated. Lead must opt in.
-    addSection('\u{1F4CC} Auto-sticky management (lead)');
+    closeCard(); openCard('auto-sticky', '\u{1F4CC} Auto-Sticky Management', 1, 4, true);
     addToggle('Auto-unsticky old / popular posts', 'autoUnstickyEnabled',
       'Every 4 min on the home/community pages: unsticky any sticky older than maxHours OR with more than upvoteThreshold upvotes. Per-post 6h cooldown stored in chrome.storage.local prevents re-toggling. On by default.');
     // Threshold inputs as a custom row (no addToggle has number support)
@@ -12813,7 +12959,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         setSetting('autoUnstickyUpvoteThreshold', v);
         e.target.value = v;
       });
-      c.appendChild(row);
+      _currentCardBody.appendChild(row);
     }
     addToggle('AI scan modmail for sticky requests', 'aiStickyDetectorEnabled',
       'Periodically (every 10 min) scans recent modmails for "sticky pls" / "please sticky" / similar phrasings, asks Llama to confirm intent, surfaces detected requests as a one-click sticky list. No auto-action; lead approves each.');
@@ -12821,7 +12967,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     // v7.1.2: Features section. Each row reads from getFeatureEffective, so a
     // team override (lead-pushed) visibly dominates a local toggle. Lead mods
     // see a Promote/Demote button next to the toggle.
-    addSection('\u{1F680} Features');
+    closeCard(); openCard('features', '\u{1F680} Features', 1, 6, true);
     addFeatureToggle('Intel Drawer', 'features.drawer', false,
       'v7.0 Intel Drawer: keyboard-first subject overlay with precedent memory and AI next-best-action.');
     addFeatureToggle('Super-Mod Foundation', 'features.superMod', false,
@@ -12839,7 +12985,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     // Worker cron monitors GAW; dispatches queued actions to any open GAW
     // tab via SW. Thresholds mirror worker-side team_settings namespace.
     if (isLeadMod()) {
-      addSection('\u{1F501} Auto-Unsticky Monitoring');
+      closeCard(); openCard('auto-unsticky-mon', '\u{1F501} Auto-Unsticky Monitoring', 1, 5, true);
       // v10.14.3: Auto-unsticky thresholds. The worker cron reads team_settings
       // keys (autoUnstickyEnabled / autoUnstickyMaxHours / autoUnstickyUpvoteThreshold)
       // -- NOT the extension-side gam_settings keys directly. Pre-v10.14.3 the
@@ -12909,7 +13055,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           e.target.value = v;
           _syncAutoUnstickyToWorker('auto_unsticky_min_upvotes', v);
         });
-        c.appendChild(_auRow);
+        _currentCardBody.appendChild(_auRow);
       }
       // v10.16.24: Title-pattern exceptions. Lead-editable list of titles
       // that must NEVER be auto-unstickied regardless of age/upvote
@@ -12940,7 +13086,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           if (_auExStat) _auExStat.textContent = '✓ saved (' + lineCount + ' custom pattern' + (lineCount === 1 ? '' : 's') + ' + 1 hardcoded "GENERAL CHAT")';
           try { snack('Title exceptions saved (' + (lineCount + 1) + ' protected patterns total)', 'good'); } catch (_) {}
         });
-        c.appendChild(_auExRow);
+        _currentCardBody.appendChild(_auExRow);
       }
       // Status line: last-poll info + queued/executed counts. Clicking opens
       // the M3 recent-actions popover. Reads from modAutoActionRecent RPC.
@@ -12953,7 +13099,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           'Last poll: -- &middot; -- queued &middot; -- executed in 24h' +
           ' <span style="color:#4A9EFF;text-decoration:underline;cursor:pointer">[view recent]</span>' +
           '</span></div>';
-        c.appendChild(_auStatusRow);
+        _currentCardBody.appendChild(_auStatusRow);
         // Populate status line via RPC (fail-safe: --  if unavailable)
         (function() {
           function _auRelTime(ms) {
@@ -12986,10 +13132,30 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     // v10.9.0 M2 (ASK-053): auto-remove opt-in toggle
-    addSection('\u{1F6E1} Auto-Actions');
+    closeCard(); openCard('auto-actions', '\u{1F6E1} Auto-Actions', 1, 7, true);
     addToggle('Auto-Remove SUS/DR Queue Items', 'autoRemoveSusDr', 'When the queue page is open, automatically remove posts/comments from SUS-marked or Death Row users after a 1.5s undo window. OFF by default.');
-    addSection('\u{1F95A} Fun');
+    closeCard(); openCard('fun', '\u{1F95A} Fun', 1, 9, true);
     addToggle('Easter Eggs', 'easterEggsEnabled', 'Enable Q-themed easter eggs in the mod interface. \u{1F910}');
+
+    closeCard(); // close the final card
+
+    // v10.19.1: Discord / Integrations card (lead-only, set-and-forget). Net-new
+    // section for the raid-alert webhook + mod IDs -- the config Bot Raid Shield reads.
+    if (isLeadMod()){
+      openCard('discord', '\u{1F4E1} Discord / Integrations', 1, 8, true, { lead:true });
+      buildDiscordCard(_currentCardBody);
+      closeCard();
+    }
+
+    // v10.19.1: sort cards by (tier,order) and append. Daily-driver (tier 0) on
+    // top + open; set-and-forget (tier 1) collapsed at the bottom. This sort is
+    // the single ordering authority -- openCard() call order above is irrelevant.
+    _cards.sort(function(a,b){ return (a.tier - b.tier) || (a.order - b.order); }).forEach(function(x){ c.appendChild(x.el); });
+
+    // v10.19.1: single-column so the (tier,order) sort reads top-to-bottom (the
+    // old column-count:2 flow would scatter set-and-forget cards to the top of
+    // the right column, defeating the sink-to-bottom intent).
+    c.style.columnCount = '1';
 
     // v10.16.8: widened from 520px \u2192 720px to give each column ~340px of room
     // for the 2-col multi-column flow (see .gam-settings-panel CSS).
@@ -24578,6 +24744,22 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-settings-promote-btn:disabled{opacity:.5;cursor:wait}
 .gam-settings-promote-btn-demote{color:#f6ad55;border-color:#f6ad55}
 .gam-settings-promote-btn-demote:hover{background:#f6ad55;color:#1a202c}
+/* v10.19.1 settings cards */
+.gam-settings-card{border:1px solid ${C.BORDER};border-radius:7px;margin:0 0 8px;overflow:hidden;background:rgba(255,255,255,.012)}
+.gam-settings-card-header{display:flex;align-items:center;gap:8px;width:100%;padding:9px 11px;background:rgba(255,255,255,.03);border:0;border-bottom:1px solid transparent;color:${C.TEXT};font:700 11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;text-transform:uppercase;letter-spacing:.6px;cursor:pointer;text-align:left}
+.gam-settings-card-header:hover{background:rgba(255,255,255,.06)}
+.gam-settings-card-header[aria-expanded="true"]{border-bottom-color:${C.BORDER}}
+.gam-settings-card-header:focus-visible{outline:2px solid ${C.ACCENT};outline-offset:-2px}
+.gam-card-caret{font-size:9px;color:${C.TEXT3};flex-shrink:0;width:10px;text-align:center}
+.gam-card-title{flex:1}
+.gam-settings-card-header--danger{color:#ff6b6b}
+.gam-settings-card--danger{border-color:rgba(198,40,40,.45);border-left:3px solid #C62828}
+.gam-settings-card--lead{border-left:3px solid #E65100}
+.gam-settings-card-body{padding:3px 5px 7px}
+.gam-settings-card-body[hidden]{display:none}
+.gam-disc-input{width:100%;margin-top:4px;background:#050507;color:#e8e6e1;border:1px solid #3d3a35;padding:6px 8px;font:11px ui-monospace,monospace;border-radius:3px;box-sizing:border-box}
+.gam-disc-input:focus{border-color:${C.ACCENT};outline:none}
+.gam-disc-input:disabled{opacity:.5}
 /* v7.1.2 Bug Report modal */
 .gam-bug-report-body{display:flex;flex-direction:column;gap:10px;padding:4px 2px}
 .gam-bug-report-intro{font-size:12px;color:${C.TEXT2};line-height:1.45}

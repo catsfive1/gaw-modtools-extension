@@ -2407,6 +2407,21 @@ const RPC_HANDLERS = {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
     async handler() { return await _rpcWorkerCall('POST', '/mod/whoami', null); }
   },
+  // v10.19.1: Discord / Integrations config (lead-only). The worker enforces
+  // is_lead; these attach the lead token. The webhook is a server-side secret --
+  // the read never returns its value (configured-boolean only).
+  adminIntegrationsRead: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('GET', '/admin/integrations-config', undefined, { asLead: true }); }
+  },
+  adminIntegrationsWrite: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) { return await _rpcWorkerCall('POST', '/admin/integrations-config', args || {}, { asLead: true }); }
+  },
+  adminIntegrationsTest: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) { return await _rpcWorkerCall('POST', '/admin/integrations-config/test', args || { target: 'discord_raid' }, { asLead: true }); }
+  },
   modSearch: {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
     async handler(args) {
