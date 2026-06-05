@@ -14,6 +14,13 @@ so no per-version git commits — rollback is via Cloudflare deploy history).
 | v10.19.1 | SUS placement + global AI cap + T1 Llama adjudication | ✅ | 53/53; no-clobber verified on live local D1 |
 | v10.19.2 | `GET /raid/detect` raid alarms + dedup | ✅ | 44/44; 2 live-D1 bugs caught + fixed |
 | v10.19.2-fix | coarse `braidFamilyClass` grouping (fixes missed-raid bug) | ✅ | 75/75; operator's 7 names → 1 family → fires at 7 |
+| v10.19.x-int | Discord/Integrations routes (`GET\|POST /admin/integrations-config` + `/test`) — **shared** with the Settings Discord card | ✅ | 35/35 smoke incl. **secret-never-leaks** master assertion |
+
+**Extension versions shipped (manifest line, separate from worker):**
+
+| Ver | Scope | Status | Verification |
+|---|---|---|---|
+| v10.19.0 | Settings-reorg pre-conditions: 5 data-integrity fixes (2 missing settings keys, statusBarCompact default+migration, 2 render mismatches) | ✅ committed `ac71c79` | `node --check` PARSE OK |
 
 ## Key architecture decisions
 
@@ -29,13 +36,31 @@ so no per-version git commits — rollback is via Cloudflare deploy history).
    operator's literal `<descriptor><animal><3-digit>` attack.
 3. **HI-1 holds across every version:** AI writes only to `mod_user_sus`; only a
    human flush queues Death Row; there is no auto-ban path anywhere.
+4. **Discord webhook → worker-private KV, NOT D1 `team_settings`.** `GET /mod/settings`
+   (`handleModSettingsRead`) returns the *entire* `team_settings` table to any authed
+   mod — so storing the webhook URL there would leak the secret to every mod. The
+   webhook lives in KV (`discord_secret:raid_webhook`), mirroring the `ai_secret:<provider>`
+   precedent; only the non-secret Discord IDs (channel/dropgun/lonewulf) go in
+   `team_settings`. GET returns only a `discord_raid_webhook_configured` boolean.
+   The raid-alert dispatcher (v10.19.3) reads the webhook from this KV key, falling
+   back to `env.DISCORD_WEBHOOK`. **The spec said D1; KV is strictly more correct here.**
+5. **Dropped the spec's `X-Requested-By` CSRF header.** The routes auth via the
+   `x-mod-token` *header* (`lookupModFromToken`), which is inherently CSRF-immune (a
+   cross-origin page can't attach a custom auth header, and the browser won't auto-send
+   it the way it does cookies). Adding `X-Requested-By` would also require editing the
+   worker CORS allow-headers list + a preflight round-trip — for zero added safety.
 
 ## Revised remaining plan
 
 - **v10.19.3 — Notifications (worker):** mod-chat `ALL` broadcast + Discord
-  `#ai-tools`. **Depends on** the Discord config storage = the settings-reorg
-  "Discord / Integrations" card + its authed worker save-route. Build after the
-  settings storm lands (it defines that contract).
+  `#ai-tools`. **Config surface now EXISTS** — the integrations routes are built +
+  smoke-tested (above). The raid dispatcher reads `discord_secret:raid_webhook` (KV,
+  `env.DISCORD_WEBHOOK` fallback) + the `discord_dropgun_id`/`discord_lonewulf_id`/
+  `discord_ai_tools_channel_id` rows from `team_settings`. Remaining: wire the alarm
+  in `braidDetectAlarms` to compose the embed + POST. No longer blocked.
+- **Discord card UI + background.js RPC** (extension): the lead-only card that *writes*
+  the integrations config via `adminIntegrationsRead/Write/Test` RPCs. Card degrades
+  gracefully (async-load failure state) until the worker deploy lands.
 - **v10.19.5 — R6 "Report Bot Raid" intake** (worker route + family inference from
   pasted examples / loose pattern → seed the scorer).
 - **v10.19.6 — Disposition feedback + self-improvement loop** (worker route the UI
