@@ -2172,6 +2172,12 @@
     bar.appendChild(btn('Open in tabs', DARK_BG, () => _gmBulkOpenTabs()));
     bar.appendChild(btn('Copy authors', DARK_BG, () => _gmBulkCopy('author')));
     bar.appendChild(btn('Copy URLs',    DARK_BG, () => _gmBulkCopy('url')));
+    // v10.18.7 (storm P1, 2-dupe): bulk-act on the selected authors WITHOUT
+    // leaving the modal. Two storm agents independently flagged that the
+    // bulk-action bar stopped at "Copy authors" -- the mod still had to
+    // copy/paste/leave/re-navigate to act. This button mirrors the
+    // _smartBulkBan flow (already RPCs `addToDeathRow` via the same path).
+    bar.appendChild(btn('☠ Death Row (10m)', '#3a1818', () => _gmBulkDeathRow()));
     bar.appendChild(btn('Clear',        '#3a1818', () => {
       _gmSelected.clear();
       document.querySelectorAll('input[data-gm-rowcheckbox]').forEach(c => { c.checked = false; });
@@ -2216,6 +2222,60 @@
       try { window.open(v.url, '_blank', 'noopener'); opened++; } catch (_) {}
     });
     _gmSnack('opened ' + opened + ' tab' + (opened !== 1 ? 's' : ''), 'ok');
+  }
+
+  // v10.18.7 (storm P1, 2-dupe): bulk-queue the selected authors to Death Row
+  // via the existing addToDeathRow RPC (same path _smartBulkBan in wave4 uses).
+  // Dedups authors (a single user may have multiple selected rows), shows
+  // preview + confirm via _gamAuxConfirm, loops the RPC with a delayMs of
+  // 600000 (10 min) so the operator has a cancellable window via the DR
+  // popover. Reports queued count + first failures (if any) via snack.
+  async function _gmBulkDeathRow() {
+    const n = _gmSelected.size;
+    if (n === 0) { _gmSnack('Select rows first', 'warn'); return; }
+    // Unique-author set; skip empty authors.
+    const authors = [];
+    const seen = new Set();
+    _gmSelected.forEach(function(v){
+      const a = v && v.author ? String(v.author).trim() : '';
+      if (a && !seen.has(a)) { seen.add(a); authors.push(a); }
+    });
+    if (authors.length === 0) { _gmSnack('No author column on selected rows', 'warn'); return; }
+    // Sanitize for the worker contract: A-Z a-z 0-9 _ - only.
+    const safe = authors.map(function(a){ return a.replace(/[^A-Za-z0-9_-]/g, ''); }).filter(Boolean);
+    if (safe.length === 0) { _gmSnack('Authors contained no valid characters', 'warn'); return; }
+    const preview = safe.slice(0, 12);
+    const more = safe.length > preview.length ? ('\n  ...+' + (safe.length - preview.length) + ' more') : '';
+    let ok = false;
+    try {
+      if (typeof window._gamAuxConfirm === 'function') {
+        ok = await window._gamAuxConfirm(
+          'PREVIEW: queue ' + safe.length + ' author' + (safe.length !== 1 ? 's' : '') + ' to Death Row (10 min cancellable window)?\n\n  ' +
+          preview.join('\n  ') + more,
+          { okLabel: 'Queue to DR', danger: true }
+        );
+      } else {
+        ok = window.confirm('Queue ' + safe.length + ' authors to Death Row?');
+      }
+    } catch (_) { ok = false; }
+    if (!ok) return;
+    _gmSnack('Queueing ' + safe.length + ' to Death Row...', 'info');
+    let queued = 0;
+    let failed = 0;
+    for (var i = 0; i < safe.length; i++) {
+      const name = safe[i];
+      try {
+        const r = await chrome.runtime.sendMessage({
+          type: 'rpc',
+          name: 'addToDeathRow',
+          args: { username: name, delayMs: 600000, reason: 'bulk via GOD MODE search' }
+        });
+        if (r && r.ok) queued++;
+        else failed++;
+      } catch (_) { failed++; }
+    }
+    const tail = failed > 0 ? (' (' + failed + ' failed)') : '';
+    _gmSnack('Queued ' + queued + '/' + safe.length + ' to Death Row -- cancel via DR popover' + tail, queued > 0 ? 'ok' : 'err');
   }
 
   // v10.17.1 stub -- filled in by saved-queries layer (task 13). Safe no-op
