@@ -1639,6 +1639,10 @@
     autoUnstickyMaxHours: 12,
     autoUnstickyUpvoteThreshold: 100,
     autoUnstickyUpvoteHours: 8,
+    // v10.19.0: modmail sticky-request detector (consumed by the Settings toggle
+    // + the 10-min scan). Shipped in the UI but was never in DEFAULT_SETTINGS, so
+    // the Repair button couldn't restore it. Safe-OFF default; now Repair-aware.
+    aiStickyDetectorEnabled: false,
     quickStickyKeysEnabled: true,        // v8.4.0: hover post + S/U to (un)sticky (FOXY-style)
     lastTokenPromptAt: 0,                // v8.4.1: weekly debounce on token onboarding modal (unix-ms)
     sniffEnabled: false,                 // E7: endpoint sniffer off by default
@@ -1658,6 +1662,10 @@
     lastAiScanDate: '',
     // v5.1.9: whether auto-detect should silence UI for non-mods. User was nervous; default OFF.
     autoDetectHideUi: false,
+    // v10.19.0: queue auto-remove of SUS/DR users (consumed at the queue observer).
+    // Shipped in the UI but was never in DEFAULT_SETTINGS, so Repair couldn't
+    // restore it. Safe-OFF default; now Repair-aware.
+    autoRemoveSusDr: false,
     isLeadMod: false,
     leadModToken: '',
     // v5.2.1: hide GAW's right sidebar on all pages (for mod focus).
@@ -1666,7 +1674,11 @@
     // an individual mod wants it back.
     hideSidebar: true,
     // v5.2.1: compact icon-only status bar (hide text labels)
-    statusBarCompact: true,
+    // v10.19.0: default flipped true -> false. Compact mode had a latent bug --
+    // it suppressed the modmail action bar (the enhanceModmailRead guard, now
+    // removed). Default-off so fresh installs show the full bar; migration 3
+    // flips installs that materialized `true`.
+    statusBarCompact: false,
     // v5.2.2: Mod Console dock position. 'modal' (center overlay, default),
     // 'right' (vertical panel pinned to right edge), 'left' (pinned to left edge).
     modConsoleDock: 'modal',
@@ -4962,7 +4974,7 @@
   }
 
   // ── T11: Schema version + migration registry ─────────────────────
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
   const K_SCHEMA = 'gam_schema_version';
 
   // v10.5.1 AF-07 Rule 19: required keys + their expected types for gam_settings
@@ -4978,7 +4990,11 @@
     autoDeathRowRules:   'array',
     autoTardRules:       'array',
     'features.platformHardening': 'boolean',
-    'features.teamBoost':         'boolean'
+    'features.teamBoost':         'boolean',
+    // v10.19.0: were rendered in Settings but never shape-validated, so the
+    // popup Repair button couldn't restore them when a blob lost the key.
+    aiStickyDetectorEnabled:      'boolean',
+    autoRemoveSusDr:              'boolean'
   };
 
   // validateSettingsShape(obj) -- returns { ok:bool, missing:[], mistyped:[] }
@@ -5034,6 +5050,21 @@
         setSetting('hideSidebar', true);
         console.log('[ModTools] migration 2: hideSidebar forced ON (v8.2.2 default)');
       } catch(e){ console.warn('[ModTools] migration 2 failed', e); }
+    }
+
+    // Migration 3 (v10.19.0): force statusBarCompact OFF for installs that
+    // materialized `true`. Compact mode suppressed the modmail action bar via
+    // the enhanceModmailRead guard (now removed); DEFAULT is now false. We only
+    // touch installs whose effective value is currently true, so a mod who
+    // explicitly wants compact can re-enable it from Settings -> Appearance and
+    // it won't be re-flipped (one-shot, schema-gated).
+    if (current < 3){
+      try {
+        if (getSetting('statusBarCompact', false) === true){
+          setSetting('statusBarCompact', false);
+          console.log('[ModTools] migration 3: statusBarCompact forced OFF (v10.19.0)');
+        }
+      } catch(e){ console.warn('[ModTools] migration 3 failed', e); }
     }
 
     // Future migrations go here (increment SCHEMA_VERSION + add block)
@@ -12753,14 +12784,14 @@ Analyze this comment against the community rules. Then write a brief, profession
     // cooldown but not eliminated. Lead must opt in.
     addSection('\u{1F4CC} Auto-sticky management (lead)');
     addToggle('Auto-unsticky old / popular posts', 'autoUnstickyEnabled',
-      'Every 4 min on the home/community pages: unsticky any sticky older than maxHours OR with more than upvoteThreshold upvotes. Per-post 6h cooldown stored in chrome.storage.local prevents re-toggling. Off by default.');
+      'Every 4 min on the home/community pages: unsticky any sticky older than maxHours OR with more than upvoteThreshold upvotes. Per-post 6h cooldown stored in chrome.storage.local prevents re-toggling. On by default.');
     // Threshold inputs as a custom row (no addToggle has number support)
     {
       const idH = 'gam-set-autoUnstickyMaxHours';
       const idU = 'gam-set-autoUnstickyUpvoteThreshold';
       const row = el('div', { cls:'gam-settings-row' });
       const curH = Number(getSetting('autoUnstickyMaxHours', 12)) || 12;
-      const curU = Number(getSetting('autoUnstickyUpvoteThreshold', 110)) || 110;
+      const curU = Number(getSetting('autoUnstickyUpvoteThreshold', 100)) || 100;
       row.innerHTML =
         '<div class="gam-settings-info">' +
         '<label class="gam-settings-lbl">Auto-unsticky thresholds</label>' +
@@ -12778,7 +12809,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         e.target.value = v;
       });
       row.querySelector('#' + idU).addEventListener('change', e => {
-        const v = Math.max(1, Math.min(10000, parseInt(e.target.value, 10) || 110));
+        const v = Math.max(1, Math.min(10000, parseInt(e.target.value, 10) || 100));
         setSetting('autoUnstickyUpvoteThreshold', v);
         e.target.value = v;
       });
@@ -13706,7 +13737,10 @@ Analyze this comment against the community rules. Then write a brief, profession
   function enhanceModmailRead(){
     // v5.2.1: the floating action bar is now a popover on the status bar (envelope icon).
     // This keeps the page UI clean; hover/click the ✉ icon on the bottom bar for actions.
-    if (getSetting('statusBarCompact', false)) return; // v10.6.2 HOTFIX UIUX-04 A.3: default was true, action bar never showed; flip to false so bar appears by default
+    // v10.19.0: compact-bar guard removed. statusBarCompact now controls only the
+    // status-bar text labels; it no longer suppresses the modmail action bar
+    // (that coupling was the UIUX-04 bug). The bar shows on modmail threads
+    // regardless of compact mode.
     // v5.1.4: match /modmail/thread/<id> (the real GAW URL) and legacy /messages/<id>
     if (!/\/(modmail\/thread|messages?)\/[^/?]+\/?$/.test(location.pathname)) return;
     if (document.getElementById('gam-mm-bar')) return;
