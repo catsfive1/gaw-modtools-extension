@@ -2,9 +2,19 @@
 
 Running log of shipped versions + architecture decisions.
 Specs: `SHIELD_SHIPMASTER.md` (storm design), `00_REQUIREMENTS_LOCKED.md` (locked
-reqs + implementation constants). All worker work is **local-only until the
-Commander-gated production rollout** (the `cloudflare-worker/` dir is gitignored,
-so no per-version git commits — rollback is via Cloudflare deploy history).
+reqs + implementation constants). The `cloudflare-worker/` dir is gitignored, so no
+per-version git commits — rollback is via Cloudflare deploy history.
+
+> **🚀 DEPLOYED 2026-06-06** — worker bundle LIVE (detection + integrations + notifications).
+> `wrangler deploy` version `9716a887-2de1-4b0c-a553-db48c5645dcb` (startup 7ms);
+> migration `047` applied to remote `gaw-audit` (8 queries, 68 tables total).
+> CTO-side smoke (no-auth): `/version` 200 (existing unchanged); `/raid/detect` +
+> `/raid/score-candidates` 401 (wired + auth-gated); `/admin/integrations-config`
+> GET/POST/test 403 (the global `/admin/*` origin gate — extension's allowlisted
+> origin + is_lead token passes it, same path as every existing `/admin/*` route);
+> CORS preflight 204 no-body, allows `x-mod-token,x-lead-token`, echoes ext origin.
+> **No 404s (all routes wired), no 500s (no crashes).** The Settings Discord card
+> (ext v10.19.1) now functions end-to-end once a lead loads it.
 
 ## Versions shipped (worker)
 
