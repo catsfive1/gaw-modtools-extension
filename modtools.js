@@ -29668,6 +29668,23 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse)=>{
       // v5.8.1 security fix (HIGH-4): sender origin guard
       if (sender.id !== chrome.runtime.id) return;
+      // v10.18.5 (storm P1): background.js:321 broadcasts gamLocked on
+      // inactivity timeout but no content-script handler existed -- the
+      // feature silently failed for the entire v10.11+ lifetime. Surface
+      // the lock as a snack so the operator knows their session needs
+      // a fresh interaction. Same silent-feature-failure shape as the
+      // v10.18.4 isMod bug.
+      if (msg && msg.type === 'gamLocked'){
+        try {
+          var reason = (msg.reason ? String(msg.reason).slice(0, 32) : 'idle');
+          if (typeof snack === 'function') {
+            snack('ModTools paused — ' + reason + ' lock (move/click to wake)', 'warn');
+          } else {
+            console.warn('[ModTools] session locked:', reason);
+          }
+        } catch (_) {}
+        return;
+      }
       if (msg && msg.type === 'manualCrawl'){
         manualCrawlSection(msg.section || 'users', Math.max(1, Math.min(50, msg.pages||10)))
           .then(r => sendResponse({ ok:true, result:r }))
@@ -29865,6 +29882,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     }
   }
 
+  // v10.18.5 (storm P1, 3-dupe): expose firehose start/stop + state on window
+  // so modtools-aux palette entries can drive the crawler without a panel
+  // click. Three storm agents independently flagged that the floating panel
+  // was the ONLY way to start/stop firehose. Assigned at the function-decl
+  // level below (hoisted), with a state accessor that returns a snapshot
+  // (not the live mutable object) so callers can't trample internal state.
   async function firehoseStart() {
     if (_firehoseState.active) return;
     const ok = await ensureConsent(
@@ -29900,6 +29923,19 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     await setSetting('firehose.user_stopped', true);
     firehoseRefreshPanel();
   }
+
+  // v10.18.5 (storm P1, 3-dupe): window exposure for modtools-aux palette
+  // entries so keyboard-first operators can start/pause without the panel.
+  // State accessor returns a shallow copy to keep the live mutable object
+  // private. Hoisted-function refs, so this assignment can sit anywhere
+  // in the enclosing scope.
+  try {
+    window._gamFirehoseStart = firehoseStart;
+    window._gamFirehoseStop  = firehoseStop;
+    window._gamFirehoseState = function(){
+      try { return Object.assign({}, _firehoseState); } catch (_) { return { active: false }; }
+    };
+  } catch (_) {}
 
   async function firehoseLoop() {
     const throttle = parseInt(await getSetting('firehose.throttleMs') || String(FIREHOSE_THROTTLE_DEFAULT), 10);

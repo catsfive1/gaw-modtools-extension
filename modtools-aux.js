@@ -426,11 +426,18 @@
       { keys: 'Ctrl+Shift+H',   desc: 'Open ModTools rules + help panel' },
       { keys: 'Shift+?',         desc: 'This shortcuts overlay' },
       { keys: 'Alt+F',           desc: 'Toggle Focus Mode (dim low-priority items)' },
+      { keys: 'Alt+J / Alt+K',   desc: 'Queue navigation (cycle focus through visible items)' },
       { keys: 'Ctrl+Z',          desc: 'Undo last mod action (last 10 stored)' },
       { keys: 'j / k',           desc: 'Navigate up/down in modmail panel' },
       { keys: '↑ ↓',             desc: 'Navigate inside palettes' },
       { keys: 'Enter',           desc: 'Confirm selection / execute action' },
-      { keys: 'Escape',          desc: 'Close any open panel/modal/palette' }
+      { keys: 'Escape',          desc: 'Close any open panel/modal/palette' },
+      // v10.18.5 (storm P1, 7-dupe -- most-converged finding in the storm):
+      // Wave 4-6 shortcuts were missing from this overlay. Added inline rather
+      // than the storm-suggested mutable-array-pushed-by-each-wave pattern
+      // (smaller diff; subsequent waves can still append by editing this list).
+      { keys: '🔍 status-bar',   desc: 'GOD MODE firehose search (also Ctrl+Shift+P → "god mode")' },
+      { keys: '🩺 status-bar',   desc: 'Snapshot for fix — capture page state for debugging' }
     ];
   }
 
@@ -2481,9 +2488,28 @@
       }
       el.appendChild(titleCol);
 
-      // Column 3: author
-      el.appendChild(mkSpan('@' + (row.author || ''),
-        'color:' + AMBER + ';overflow:hidden;text-overflow:ellipsis;white-space:nowrap'));
+      // Column 3: author -- v10.18.5 (storm P1, 4-dupe): was a static mkSpan;
+      // four storm agents independently flagged that the amber username
+      // LOOKED interactive but did nothing. Now: click opens /u/<author>/
+      // in a new tab (Mod Console auto-opens there on mod-status detect).
+      // stopPropagation prevents the parent row's click handler from also
+      // firing and opening the post URL.
+      var authorEl = document.createElement('a');
+      var authorName = row.author || '';
+      authorEl.textContent = '@' + authorName;
+      authorEl.href = authorName ? ('https://greatawakening.win/u/' + encodeURIComponent(authorName) + '/') : 'javascript:void(0);';
+      authorEl.target = '_blank';
+      authorEl.rel = 'noopener noreferrer';
+      authorEl.title = authorName ? ('Open /u/' + authorName + ' (Mod Console will auto-open)') : '';
+      authorEl.style.cssText = 'color:' + AMBER + ';overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' +
+        'cursor:' + (authorName ? 'pointer' : 'default') + ';text-decoration:none;';
+      authorEl.addEventListener('mouseenter', function(){ if (authorName) authorEl.style.textDecoration = 'underline'; });
+      authorEl.addEventListener('mouseleave', function(){ authorEl.style.textDecoration = 'none'; });
+      authorEl.addEventListener('click', function(ev){
+        // Let the native anchor handle the navigation, but block the row click.
+        try { ev.stopPropagation(); } catch (_) {}
+      });
+      el.appendChild(authorEl);
 
       // Column 4: community
       el.appendChild(mkSpan(row.community || '-', 'color:' + TXT_DIM));
@@ -2926,7 +2952,55 @@
       label: 'GOD MODE: Firehose crawl health (lead-only)',
       kw: 'god mode firehose health crawl stats observability keywords lead admin',
       icon: '🔥',
-      fn: () => _gmOpenHealthModal()
+      // v10.18.5 (storm P1): was visible to all mods, opened modal, worker
+      // returned 403 -- bad UX. Now: check isLeadMod at click time and snack
+      // if not a lead instead of opening the modal.
+      fn: async () => {
+        try {
+          var r = await chrome.storage.local.get('gam_settings');
+          var s = (r && r.gam_settings) || {};
+          if (!s.isLeadMod) {
+            _gmSnack('Firehose crawl health is lead-only', 'warn');
+            return;
+          }
+        } catch (_) {}
+        _gmOpenHealthModal();
+      }
+    },
+    // v10.18.5 (storm P1, 3-dupe): Firehose Start/Pause palette entries.
+    // Three storm agents independently flagged the floating panel as the
+    // only control surface -- keyboard-first operators couldn't reach it.
+    // Calls into modtools.js via window._gamFirehoseStart/Stop (exposed at
+    // modtools.js:29868 area).
+    {
+      label: 'Firehose · Start data capture',
+      kw: 'firehose start crawl ingest background data capture run begin',
+      icon: '🔥',
+      fn: () => {
+        try {
+          if (typeof window._gamFirehoseStart === 'function') {
+            window._gamFirehoseStart();
+            _gmSnack('Firehose: start requested', 'ok');
+          } else {
+            _gmSnack('Firehose not available on this page', 'warn');
+          }
+        } catch (e) { _gmSnack('Firehose start failed: ' + (e && e.message || e), 'err'); }
+      }
+    },
+    {
+      label: 'Firehose · Pause data capture',
+      kw: 'firehose pause stop crawl ingest halt suspend',
+      icon: '⏸',
+      fn: () => {
+        try {
+          if (typeof window._gamFirehoseStop === 'function') {
+            window._gamFirehoseStop();
+            _gmSnack('Firehose: pause requested', 'ok');
+          } else {
+            _gmSnack('Firehose not available on this page', 'warn');
+          }
+        } catch (e) { _gmSnack('Firehose pause failed: ' + (e && e.message || e), 'err'); }
+      }
     },
     {
       label: 'GOD MODE: Open full search app (new tab)',
