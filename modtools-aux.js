@@ -2210,11 +2210,26 @@
     if (changed > 0) _gmSnack(mode + ': ' + changed + ' row' + (changed !== 1 ? 's' : ''), 'info');
   }
 
-  function _gmBulkOpenTabs() {
+  // v10.18.8 (storm P2, 2-dupe): the >25-tab guard used window.confirm() --
+  // the only remaining native blocking dialog in the GOD MODE surface.
+  // Replaced with _gamAuxConfirm for visual consistency with the rest of the
+  // modal + danger styling when N>50. Falls back to window.confirm if aux
+  // hasn't loaded.
+  async function _gmBulkOpenTabs() {
     const n = _gmSelected.size;
     if (n === 0) return;
     if (n > 25) {
-      const ok = window.confirm('Opening ' + n + ' tabs. Browser may slow. Continue?');
+      let ok = false;
+      try {
+        if (typeof window._gamAuxConfirm === 'function') {
+          ok = await window._gamAuxConfirm(
+            'Opening ' + n + ' tabs. Browser may slow down. Continue?',
+            { okLabel: 'Open ' + n + ' tabs', cancelLabel: 'Cancel', danger: n > 50 }
+          );
+        } else {
+          ok = window.confirm('Opening ' + n + ' tabs. Browser may slow. Continue?');
+        }
+      } catch (_) { ok = false; }
       if (!ok) return;
     }
     let opened = 0;

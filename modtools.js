@@ -22339,8 +22339,20 @@ Analyze this comment against the community rules. Then write a brief, profession
       snack(`Filter: ${filterSel.value === 'off' ? 'off' : filterSel.value + '+ upvoted hidden'}`, 'info');
     });
 
-    const drBtn = el('button', { id:'gam-dr-count', cls:'gam-bar-icon', style:{display:'none'}, title:'Death Row queue', 'aria-label':'Death Row queue' }); // v10.8.0 M11
-    drBtn.addEventListener('click', openModLog);
+    const drBtn = el('button', { id:'gam-dr-count', cls:'gam-bar-icon', style:{display:'none'}, title:'Death Row queue — click to triage (Ctrl+Shift+L for mod log)', 'aria-label':'Death Row queue — click to triage' }); // v10.8.0 M11; v10.18.8 (storm P2) title updated
+    // v10.18.8 (storm P2): the DR badge click opened the full mod log
+    // instead of the DR popover -- a storm-flagged misroute. The ticker
+    // already routes `cur.kind === 'dr'` to `_showDrPopover` at line 22562;
+    // the standalone badge now follows the same target. openModLog stays
+    // discoverable via the tooltip + Ctrl+Shift+L. Falls back to openModLog
+    // if the DR popover function is somehow unavailable.
+    drBtn.addEventListener('click', function(ev) {
+      try { ev.stopPropagation(); } catch (_) {}
+      try {
+        if (typeof _showDrPopover === 'function') { _showDrPopover(drBtn); return; }
+      } catch (e) { console.warn('[DR badge]', e); }
+      try { openModLog(); } catch (_) {}
+    });
 
     // v9.3.7 (P1-4) / v9.3.16 (Commander): SIREN chip. Live count of
     // TARDs (SUS users) + recent DR adds (last 24h).
