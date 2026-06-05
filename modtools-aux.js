@@ -1793,6 +1793,71 @@
       names.map(n => '• ' + n + ' (' + (macros[n].actions || []).length + ' actions, ' + new Date(macros[n].created).toLocaleString() + ')\n    ' + (macros[n].actions || []).map(a => a.label).join(' → ')).join('\n\n'));
   }
 
+  // v10.18.6 (storm P1, 3-dupe -- highest-converged macro finding):
+  // The macro feature was write-only -- Start/Stop/List palette entries existed
+  // but no Play. Three storm agents independently noted that recorded macros
+  // were "permanently unexecutable." This adds the missing replay path.
+  //
+  // Strategy: pick macro by name via _gamAuxAsk (with the saved list shown
+  // inline so the operator can pick), confirm replay with action preview,
+  // then iterate stored actions and dispatch click events on .gam-btn /
+  // .gam-mc-send-btn / .gam-strip-btn elements whose trimmed textContent
+  // matches the stored label. 200ms delay between actions. Aborts cleanly
+  // if a button can't be found on the current page (and reports which one).
+  async function _macroPlay() {
+    let r;
+    try { r = await chrome.storage.local.get('gam_macros'); } catch (_) { r = {}; }
+    const macros = (r && r.gam_macros) || {};
+    const names = Object.keys(macros);
+    if (names.length === 0) {
+      _snack('No macros saved yet -- record one via "Macro · Start recording" first', 'warn');
+      return;
+    }
+    // Show available names in the prompt so the operator can pick by typing.
+    const hint = 'Type macro name to play:\n\n' +
+      names.map(n => '  - ' + n + ' (' + ((macros[n] && macros[n].actions) || []).length + ' actions)').join('\n');
+    let choice = '';
+    try {
+      choice = await window._gamAuxAsk(hint, { defaultValue: names[0] || '' });
+    } catch (_) { return; }
+    if (!choice) return;
+    choice = String(choice).trim();
+    const macro = macros[choice];
+    if (!macro) { _snack('Macro "' + choice + '" not found', 'err'); return; }
+    const actions = Array.isArray(macro.actions) ? macro.actions : [];
+    if (actions.length === 0) { _snack('Macro "' + choice + '" has no actions', 'warn'); return; }
+    // Preview + confirm before replaying.
+    let ok = false;
+    try {
+      ok = await window._gamAuxConfirm(
+        'Replay ' + actions.length + ' actions from "' + choice + '"?\n\n' +
+        actions.map(a => '  - ' + (a && a.label ? String(a.label).slice(0, 60) : '?')).join('\n'),
+        { okLabel: 'Play', cancelLabel: 'Cancel' }
+      );
+    } catch (_) { ok = false; }
+    if (!ok) return;
+    _snack('Playing macro "' + choice + '" (' + actions.length + ' actions)...', 'info');
+    let played = 0;
+    for (var i = 0; i < actions.length; i++) {
+      const a = actions[i];
+      if (!a || a.type !== 'click' || !a.label) continue;
+      // Find a button whose trimmed textContent matches the stored label.
+      const candidates = document.querySelectorAll('.gam-btn, .gam-mc-send-btn, .gam-strip-btn');
+      let target = null;
+      for (var j = 0; j < candidates.length; j++) {
+        if ((candidates[j].textContent || '').trim() === a.label) { target = candidates[j]; break; }
+      }
+      if (!target) {
+        _snack('Macro halted: button "' + String(a.label).slice(0, 40) + '" not on this page (played ' + played + '/' + actions.length + ')', 'err');
+        return;
+      }
+      try { target.click(); played++; } catch (_) {}
+      // 200ms between actions so the UI can settle between clicks.
+      await new Promise(function(res){ setTimeout(res, 200); });
+    }
+    _snack('Macro "' + choice + '" complete (' + played + '/' + actions.length + ' actions)', 'ok');
+  }
+
   // ─── #47 Smart bulk ban (with safety preview) ──────────────────────────────
   async function _smartBulkBan() {
     const u = (await window._gamAuxAsk('Bulk ban — enter usernames (one per line, max 20):', { defaultValue: '', multiline: true })) || '';
@@ -1962,6 +2027,8 @@
     { label: 'Macro · Start recording',               kw: 'macro record workflow capture',         icon: '⏺', fn: _macroStartRecord },
     { label: 'Macro · Stop recording',                kw: 'macro stop save end',                   icon: '⏹', fn: _macroStop },
     { label: 'Macro · List saved macros',             kw: 'macro list saved show',                 icon: '📜', fn: _macroList },
+    // v10.18.6 (storm P1, 3-dupe): the only missing macro op -- replay.
+    { label: 'Macro · Play saved macro',              kw: 'macro play run execute replay saved',   icon: '▶', fn: _macroPlay },
     { label: 'Action · Smart bulk ban (preview)',     kw: 'bulk ban many users safety preview',    icon: '⚒', fn: _smartBulkBan },
     { label: 'Action · Ban + Send Template (1-click)', kw: 'ban template message combo flow',      icon: '🔨', fn: _banPlusTemplate },
     { label: 'Action · Apply Auto-DR rules now',      kw: 'auto dr sweep rules run apply',         icon: '▶', fn: _autoApplyDrRules },
@@ -2926,18 +2993,16 @@
       fn: () => _gmOpenModal()
     },
     {
-      label: 'GOD MODE: Search by author (open prompt)',
-      kw: 'god mode search author user posts comments by',
+      // v10.18.6 (storm P1): was a dedicated prompt-then-search flow; the
+      // window.prompt fallback silently fails on Brave, and the aux-modal
+      // path is redundant with the main 'GOD MODE: Search firehose' which
+      // accepts `author:NAME` syntax directly. Now: open the modal pre-
+      // seeded with `author:` so the cursor lands after the colon ready to
+      // type a name. Zero prompts, zero failure modes.
+      label: 'GOD MODE: Search by author',
+      kw: 'god mode search author user posts comments by name username',
       icon: '👤',
-      fn: async () => {
-        try {
-          const a = (typeof window._gamAuxAsk === 'function')
-            ? await window._gamAuxAsk('Author username to search:', { defaultValue: '' })
-            : (window.prompt && window.prompt('Author username to search:'));
-          if (!a) return;
-          _gmOpenModal('author:' + String(a).trim());
-        } catch (e) { _gmSnack('open prompt failed: ' + (e && e.message || e), 'err'); }
-      }
+      fn: () => _gmOpenModal('author:')
     },
     {
       label: 'GOD MODE: Search removed posts (last 7d)',

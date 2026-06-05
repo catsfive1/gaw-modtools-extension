@@ -5621,10 +5621,21 @@
         label: 'Investigate user (open Profile Intel)',
         kw: 'intel profile drawer user investigate ai analysis',
         icon: '🔬',
+        // v10.18.6 (storm P1): was window.prompt() which Brave blocks in
+        // certain content-script contexts (silent failure). Prefer the
+        // styled aux modal exported on window; fall back to prompt only
+        // if aux hasn't loaded yet.
         fn: async () => {
-          const u = window.prompt('Username to investigate:', '');
-          if (!u || !u.trim()) return;
-          const safe = u.trim().replace(/[^A-Za-z0-9_-]/g, '');
+          let u = '';
+          try {
+            if (typeof window._gamAuxAsk === 'function') {
+              u = await window._gamAuxAsk('Username to investigate:', { defaultValue: '' });
+            } else {
+              u = window.prompt('Username to investigate:', '');
+            }
+          } catch (_) {}
+          if (!u || !String(u).trim()) return;
+          const safe = String(u).trim().replace(/[^A-Za-z0-9_-]/g, '');
           if (!safe) { snack('Invalid username', 'warn'); return; }
           // Open the user's profile page; the Intel Drawer auto-opens via the
           // existing per-profile init flow.
