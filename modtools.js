@@ -7733,8 +7733,12 @@
       _gamUndoAnnounce(label + ' reversed.');
       snack('Undone: ' + label, 'success');
     }).catch(function(err) {
+      // v10.18.9 (storm P2): snack named 'mod log' as the recovery path
+      // but provided no link, button, or keyboard hint -- mod has to know
+      // the chord. Now appends 'Ctrl+Shift+L for mod log' so the action
+      // is one keystroke away.
       _gamUndoAnnounce('Undo failed. Check mod log.');
-      snack('Undo failed: ' + (err && err.message || 'error'), 'error');
+      snack('Undo failed: ' + (err && err.message || 'error') + ' (Ctrl+Shift+L for mod log)', 'error');
     });
   }
 
@@ -22723,7 +22727,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       inboxBtn,
       peopleBtn,
       el('span', { cls:'gam-bar-sep' }),
-      el('button',{ cls:'gam-bar-icon', onclick:openHelp, title:'Keybinds + commands cheatsheet (Ctrl+Shift+H)', 'aria-label':'Help \u2014 keybinds and commands' }, '\u2753'), // v10.8.0 M11
+      el('button',{ cls:'gam-bar-icon', onclick:openHelp, title:'ModTools rules + help (Ctrl+Shift+H) \u2014 press Shift+? for keyboard shortcuts cheatsheet', 'aria-label':'ModTools rules + help \u2014 press Shift+? for keyboard shortcuts' }, '\u2753'), // v10.8.0 M11; v10.18.9 (storm P2): tooltip promised 'cheatsheet' but opens tutorial; now honest about both paths
       el('button',{ cls:'gam-bar-icon', onclick:downloadDebugSnapshot, title:'Debug snapshot \u2014 redacted JSON export of local state for support', 'aria-label':'Debug snapshot' }, '\u{1F41E}'), // v10.8.0 M11
       // v7.1.2: team-sharable bug report (distinct from 🐞 local export above).
       el('button',{ cls:'gam-bar-icon', onclick:openBugReportModal, title:'File a bug report — sends to the team\'s GitHub via worker (auto-strips PII)', 'aria-label':'File a bug report' }, '\u{1F41B}'), // v10.8.0 M11
