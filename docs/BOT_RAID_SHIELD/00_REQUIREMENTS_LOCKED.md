@@ -89,3 +89,28 @@
 
 - Aggressive / hands-off auto-DR (killed per R1).
 - Replacing the existing similarity/lookalike graph (we may *consume* it later).
+
+---
+
+## Locked implementation constants (v10.19.x — every version MUST match)
+
+Set in v10.19.0–1 and verified by smoke. Later versions read/extend these EXACT
+values — drift here is a silent bug (e.g. a mis-spelled marker makes v10.19.2 fail
+to see the rows v10.19.1 wrote).
+
+- **SUS system marker:** `marked_by = 'bot-raid-shield'` (hyphens, NOT underscores).
+  v10.19.2+ filters AI-flagged SUS rows by this exact string. **Never overwrite a
+  row whose `marked_by` is anything else** — human marks are sacred (no-clobber guard).
+- **T0 bands:** `SKIP ≤29` · `ADJUDICATE 30–59` · `ESCALATE ≥60`.
+- **ADJUDICATE→SUS threshold:** Llama `risk ≥ 60` (`BRAID_FAMILY_THRESHOLD_DEFAULT`).
+- **Global AI cap (sits on top of `aiPreflight`):** KV key
+  `ai_global_rate:<YYYYMMDD-HHMM>`, **30 calls / 60s**, TTL 90s. One slot per Llama
+  **batch** (≤50 names), not per name.
+- **HI-6 degrade:** AI cap/outage → ESCALATE still → SUS (T0 alone); ADJUDICATE →
+  `needs_review` (`ai:"capped"`), never auto-SUS, never dropped; response `degraded:true`.
+- **Boundary jitter:** ±15% lives at the SUS-**placement** layer, NOT inside
+  `t0Prefilter` (the pure scorer stays reproducible/unit-testable).
+- **S8 (UA / device fingerprint): permanently dark** — no per-user fingerprint is
+  captured at registration. Lighting it up requires a signup-capture change (infra).
+- **Worker is gitignored** in the workspace repo → no per-version git commits for the
+  worker; rollback relies on Cloudflare deploy history. (Extension still commits per-version.)
