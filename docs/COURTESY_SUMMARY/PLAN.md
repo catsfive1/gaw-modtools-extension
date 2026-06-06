@@ -79,6 +79,16 @@ Net-new: one worker table, one cron stage, one comment-submit helper, a discover
    YouTube video_id** (youtu.be/X, /shorts/X, /embed/X, &t=42s are the SAME video — URL-keyed
    dedup would summarize it 5×).
 
+## Progress (2026-06-06)
+
+- **v1 transcript backbone — ✅ DEPLOYED + verified** (dedup core, `/crawler/observe`, Supadata path, 22/22 smoke). Kill-shot resolved.
+- **v2 summarizer — ✅ DEPLOYED + verified** (`/ai/summarize-transcript`, map-reduce, **4-layer injection defense**, 22/22 incl. the mandatory **canary test**). Worker `251bc7fa`.
+- **v3 cron — design notes before building (spotted, not yet built):**
+  - **`crawler_videos` needs a `post_fullname` column (migration 049).** v1's `/crawler/observe` captured `video_id` + `source_channel` but NOT the originating post's fullname — and v4 needs it to comment on that post. A real gap to close first.
+  - The cron reads the cached transcript from KV (no re-fetch), summarizes internally via the v2 path, L3-validates, INSERTs `post_summary` into the existing `auto_action_queue`, gated by a `videoSummaryEnabled` team_setting **DEFAULT-OFF** + a **degrade-CLOSED** hourly cap.
+- **v4 posting — BLOCKED on a datum only your browser has:** the GAW comment-submit endpoint is NOT in the repo (every existing `modPost` caller is ban/sticky/remove). Per the synthesis's open-risk #3, it needs a **one-time DevTools network capture of a manual comment** before `apiSubmitComment` can be coded reliably against endpoint drift.
+- **v5 discovery / v6 go-live:** extension-side; **go-live is your business-judgment call** — the design ships DEFAULT-OFF behind a dry-run ledger, and on a curator-quality board a bad auto-post is worse than no post.
+
 ## Build order
 
 | Ver | Surface | Scope | Verify |
