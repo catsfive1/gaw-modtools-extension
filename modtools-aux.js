@@ -1083,7 +1083,15 @@
         'body.gam-on-profile-page .post[data-author],',
         'body.gam-on-profile-page .post[data-type="post"],',
         'body.gam-on-profile-page .post[data-type="comment"] {',
-        '  display: revert !important;',
+        // v10.19.3 EATEN-PROFILE FIX: the previous `display: revert !important`
+        // here was the page-eater. GAW lays out .post with display:flex (vote |
+        // thumb | content in a row). `revert` rolls the cascade back to the
+        // USER-AGENT default (block for a div), overriding GAW's flex -> the
+        // children stack vertically -> a giant centered vote skull above every
+        // post -> unreadable. This rule hits EVERY visible post (data-viewer is
+        // set on all of them), so it broke the whole profile feed. Visible posts
+        // need NO display override -- only visibility/opacity, which defend
+        // against those hide vectors WITHOUT touching the flex layout.
         '  visibility: visible !important;',
         '  opacity: 1 !important;',
         '}',
@@ -1097,7 +1105,10 @@
         'body.gam-on-profile-page .post[data-gam-hidden],',
         'body.gam-on-profile-page .post[data-gam-eaten],',
         'body.gam-on-profile-page .post[data-gam-filtered] {',
-        '  display: revert !important;',
+        // v10.19.3: only this block targets GENUINELY-hidden posts (a stale gam
+        // hide class/attr). Restore GAW's horizontal flex layout -- NOT `revert`,
+        // which yields the UA-default block that collapsed the row.
+        '  display: flex !important;',
         '  visibility: visible !important;',
         '  opacity: 1 !important;',
         '}'
