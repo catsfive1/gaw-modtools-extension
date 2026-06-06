@@ -3041,6 +3041,28 @@ const RPC_HANDLERS = {
     allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
     async handler() { return await _rpcWorkerCall('GET', '/raid/detect', undefined); }
   },
+  // v10.21.0 R6/R8: Report Bot Raid intake + disposition-learning feedback.
+  // Both are deploy-gated worker routes (built, not yet live) -- callers treat a
+  // 404/non-ok as best-effort (HI-1: neither path bans; intake writes SUS only,
+  // feedback writes the dispositions ledger only).
+  modRaidReport: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const exampleNames = Array.isArray(args && args.exampleNames) ? args.exampleNames.slice(0, 100) : [];
+      const loosePattern = (args && typeof args.loosePattern === 'string') ? args.loosePattern.slice(0, 2000) : undefined;
+      return await _rpcWorkerCall('POST', '/raid/intake', { exampleNames, loosePattern });
+    }
+  },
+  modRaidDisposition: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const dispositions = Array.isArray(args && args.dispositions) ? args.dispositions.slice(0, 100) : [];
+      return await _rpcWorkerCall('POST', '/raid/disposition-feedback', {
+        raidIncidentId: (args && args.raidIncidentId) || 'manual',
+        dispositions
+      });
+    }
+  },
 
   // ---- Death Row rule sync (P1-6, v9.3.5) --------------------------------
   // Worker: GET /mod/dr-rules (any mod), POST/DELETE /admin/dr-rules (lead).

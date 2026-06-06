@@ -21051,6 +21051,13 @@ Analyze this comment against the community rules. Then write a brief, profession
           if (typeof _susState === 'object' && _susState && _susState.rows) {
             _susState.rows.delete(lkS);
           }
+          // v10.21.0 R8: unmarking a BOT-RAID row is a false-positive signal.
+          // Best-effort (deploy-gated route); never blocks the unmark (HI-1).
+          try {
+            if ((rowData.marked_by || '') === 'bot-raid-shield') {
+              rpcCall('modRaidDisposition', { raidIncidentId: 'manual', dispositions: [{ username: username, disposition: 'remove', reviewed: true }] }).catch(function(){});
+            }
+          } catch(_){}
           try { _susApplyDecorations(true); } catch(_){}
           // Remove the row from the popover
           if (outerWrap && outerWrap.parentNode) outerWrap.parentNode.removeChild(outerWrap);
@@ -21166,6 +21173,11 @@ Analyze this comment against the community rules. Then write a brief, profession
           try { await rpcCall('modSusClear', { username: uname, client_op_id: __makeReqId() }); } catch(_){}
         } catch(_){}
       }
+      // v10.21.0 R8: report the flush as a confirmed-bot signal (few-shot learning).
+      // Best-effort: /raid/disposition-feedback is deploy-gated, a 404 never breaks flush (HI-1).
+      try {
+        rpcCall('modRaidDisposition', { raidIncidentId: 'manual', dispositions: selected.map(function(u){ return { username: u, disposition: 'flush', reviewed: true }; }) }).catch(function(){});
+      } catch(_){}
       try { await _susRefresh(); } catch(_){}
       try { _susApplyDecorations(true); } catch(_){}
       try { if (typeof updateRaidIcon === 'function') updateRaidIcon(); } catch(_){}
@@ -21352,7 +21364,70 @@ Analyze this comment against the community rules. Then write a brief, profession
     footLink.style.cssText = 'color:#9b9892;font-size:9px;text-decoration:none';
     footLink.textContent = 'Open Death Row →';
     foot.appendChild(footLink);
+
+    // v10.21.0 R6: "Report bot raid" -- mod pastes example bot usernames; the
+    // worker infers the family, seeds the T1 scorer, and places the reported
+    // names in SUS (HI-1: SUS only). Degrade-safe: /raid/intake is deploy-gated,
+    // so a failure just shows a status line and never breaks the popover.
+    const reportBtn = document.createElement('button');
+    reportBtn.type = 'button';
+    reportBtn.textContent = '\u{1F916} Report raid';
+    reportBtn.title = 'Report a bot raid: paste example bot usernames to seed the scorer';
+    reportBtn.style.cssText = 'margin-left:auto;background:transparent;border:1px solid #ff8585;color:#ff8585;padding:2px 8px;cursor:pointer;font:700 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;white-space:nowrap;border-radius:2px';
+    reportBtn.addEventListener('focus', function(){ reportBtn.style.outline = '2px solid #66ccff'; reportBtn.style.outlineOffset = '2px'; });
+    reportBtn.addEventListener('blur', function(){ reportBtn.style.outline = 'none'; });
+    foot.appendChild(reportBtn);
     pop.appendChild(foot);
+
+    const reportWrap = document.createElement('div');
+    reportWrap.style.cssText = 'display:none;border-top:1px solid #2a2825;padding:8px 10px;background:rgba(255,59,59,0.05)';
+    const reportHint = document.createElement('div');
+    reportHint.style.cssText = 'color:#c8c5c0;font-size:9px;margin-bottom:4px';
+    reportHint.textContent = 'Paste 3+ example bot usernames (one per line or comma-separated). The scorer learns the family + flags matches.';
+    const reportTa = document.createElement('textarea');
+    reportTa.setAttribute('aria-label', 'Example bot usernames to report');
+    reportTa.placeholder = 'blackleopard480\norganiczebra586\nyellowwolf755';
+    reportTa.style.cssText = 'width:100%;box-sizing:border-box;background:#131316;border:1px solid #3d3a35;color:#e8e6e1;font:10px ui-monospace,monospace;padding:4px 6px;resize:vertical;min-height:54px';
+    const reportRow = document.createElement('div');
+    reportRow.style.cssText = 'display:flex;gap:8px;margin-top:4px;align-items:center';
+    const reportSend = document.createElement('button');
+    reportSend.type = 'button';
+    reportSend.textContent = 'SUBMIT REPORT';
+    reportSend.style.cssText = 'background:#ff3b3b;border:1px solid #ff3b3b;color:#140404;padding:3px 9px;cursor:pointer;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;border-radius:2px';
+    const reportStatus = document.createElement('span');
+    reportStatus.setAttribute('role', 'status');
+    reportStatus.setAttribute('aria-live', 'polite');
+    reportStatus.style.cssText = 'color:#9b9892;font-size:9px';
+    reportRow.appendChild(reportSend); reportRow.appendChild(reportStatus);
+    reportWrap.appendChild(reportHint); reportWrap.appendChild(reportTa); reportWrap.appendChild(reportRow);
+    pop.appendChild(reportWrap);
+
+    reportBtn.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      const showing = reportWrap.style.display !== 'none';
+      reportWrap.style.display = showing ? 'none' : 'block';
+      if (!showing) { setTimeout(function(){ try { reportTa.focus(); } catch(_){} }, 30); }
+    });
+    reportSend.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      const raw = (reportTa.value || '').split(/[\s,]+/).map(function(x){ return x.trim(); }).filter(Boolean);
+      if (raw.length < 3) { reportStatus.style.color = '#ff8585'; reportStatus.textContent = 'need 3+ example names'; return; }
+      reportSend.disabled = true; reportStatus.style.color = '#9b9892'; reportStatus.textContent = 'submitting...';
+      rpcCall('modRaidReport', { exampleNames: raw.slice(0, 100) }).then(function(r){
+        reportSend.disabled = false;
+        if (r && r.ok && r.data && r.data.status === 'intake_submitted') {
+          const suff = r.data.sufficiency === 'sufficient_examples';
+          reportStatus.style.color = suff ? '#3dd68c' : '#ffd84d';
+          reportStatus.textContent = suff
+            ? ('✓ seeded' + (r.data.placed_count ? ' · ' + r.data.placed_count + ' → SUS' : ''))
+            : 'add more examples to improve';
+          if (suff) { reportTa.value = ''; try { _susRefresh(); } catch(_){} try { if (typeof updateRaidIcon === 'function') updateRaidIcon(); } catch(_){} }
+        } else {
+          reportStatus.style.color = '#ff8585';
+          reportStatus.textContent = 'report route not live yet (deploy pending)';
+        }
+      }).catch(function(){ reportSend.disabled = false; reportStatus.style.color = '#ff8585'; reportStatus.textContent = 'failed -- route deploy pending'; });
+    });
 
     document.body.appendChild(pop);
 
