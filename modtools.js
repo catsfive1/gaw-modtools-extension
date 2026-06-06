@@ -21156,9 +21156,11 @@ Analyze this comment against the community rules. Then write a brief, profession
     const _otherRows = _allRows.filter(function(r){ return r && r.marked_by !== 'bot-raid-shield'; });
 
     async function _flushSelectedRaid(flushBtn){
-      const selected = [];
+      const selected = [], unchecked = [];
       pop.querySelectorAll('[data-raid-row]').forEach(function(ow){
-        if (ow._raidChk && ow._raidChk.checked) selected.push(ow.getAttribute('data-raid-row'));
+        const u = ow.getAttribute('data-raid-row');
+        if (ow._raidChk && ow._raidChk.checked) selected.push(u);
+        else if (ow._raidChk) unchecked.push(u);
       });
       if (selected.length === 0){ try { snack('No bot-raid rows selected to flush', 'info'); } catch(_){} return; }
       flushBtn.disabled = true; flushBtn.textContent = '…';
@@ -21173,10 +21175,14 @@ Analyze this comment against the community rules. Then write a brief, profession
           try { await rpcCall('modSusClear', { username: uname, client_op_id: __makeReqId() }); } catch(_){}
         } catch(_){}
       }
-      // v10.21.0 R8: report the flush as a confirmed-bot signal (few-shot learning).
-      // Best-effort: /raid/disposition-feedback is deploy-gated, a 404 never breaks flush (HI-1).
+      // v10.22.0 R8: one batched disposition report -- CHECKED rows = confirmed-bot
+      // (flush); the rows the mod UNCHECKED before flushing = false-positive (remove).
+      // Both feed the few-shot loop. Best-effort: /raid/disposition-feedback is
+      // deploy-gated; a 404 never breaks flush (HI-1/HI-4).
       try {
-        rpcCall('modRaidDisposition', { raidIncidentId: 'manual', dispositions: selected.map(function(u){ return { username: u, disposition: 'flush', reviewed: true }; }) }).catch(function(){});
+        const _disp = selected.map(function(u){ return { username: u, disposition: 'flush', reviewed: true }; })
+          .concat(unchecked.map(function(u){ return { username: u, disposition: 'remove', reviewed: true }; }));
+        if (_disp.length) rpcCall('modRaidDisposition', { raidIncidentId: 'manual', dispositions: _disp }).catch(function(){});
       } catch(_){}
       try { await _susRefresh(); } catch(_){}
       try { _susApplyDecorations(true); } catch(_){}
