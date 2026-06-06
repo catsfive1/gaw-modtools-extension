@@ -3024,6 +3024,23 @@ const RPC_HANDLERS = {
       return await _rpcWorkerCall('DELETE', '/mod/user/sus', { username });
     }
   },
+  // v10.20.0: Bot Raid Shield extension UI. modRaidScore feeds fresh /users
+  // registrations to the deployed T0+T1 scorer (worker places AI-flagged names
+  // into mod_user_sus ONLY -- HI-1: never a ban path). modRaidDetect drives the
+  // robot status-bar icon (raid_active + recent_sus_count). Both are plain authed
+  // mod routes (checkModToken), same trust tier as modAiScore / modSusList.
+  modRaidScore: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler(args) {
+      const usernames = Array.isArray(args && args.usernames) ? args.usernames.slice(0, 50) : [];
+      if (!usernames.length) return { ok: false, status: 0, error: 'usernames required' };
+      return await _rpcWorkerCall('POST', '/raid/score-candidates', { usernames });
+    }
+  },
+  modRaidDetect: {
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
+    async handler() { return await _rpcWorkerCall('GET', '/raid/detect', undefined); }
+  },
 
   // ---- Death Row rule sync (P1-6, v9.3.5) --------------------------------
   // Worker: GET /mod/dr-rules (any mod), POST/DELETE /admin/dr-rules (lead).

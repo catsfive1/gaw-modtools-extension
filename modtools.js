@@ -16406,6 +16406,53 @@ Analyze this comment against the community rules. Then write a brief, profession
     } catch(e){ console.warn('[modtools] AI scan error', e); }
   }
 
+  // v10.20.0: Bot Raid Shield -- autonomous raid scorer. Closes the §8 wiring
+  // gap: distinct from runDailyAiScanIfDue (once-per-UTC-day -> watchlist), this
+  // runs EVERY alarm tick (no daily gate) and feeds fresh 'new' registrations to
+  // the deployed /raid/score-candidates scorer. The worker places AI-flagged
+  // names into mod_user_sus ONLY. HI-1: this path NEVER bans and NEVER queues
+  // Death Row -- only a human FLUSH (the popover bulk-flush / per-row DR) does.
+  // _raidScoredSet dedups within a page session so the same names don't burn the
+  // worker AI budget every tick (the worker SUS write is no-clobber regardless).
+  const _raidScoredSet = new Set();
+  async function runRaidScoreScan(){
+    if (!getModToken()) return;
+    if (!consentEnabled('features.ai')) return;
+    // Candidate source mirrors the daily scan: newest 'new'-status roster names,
+    // minus any already SUS (placed) or already scored in this page session.
+    const already = (typeof _susState === 'object' && _susState && _susState.rows instanceof Map) ? _susState.rows : null;
+    const candidates = Object.values(getRoster())
+      .filter(r => r && r.status === 'new' && r.name)
+      .map(r => r.name)
+      .filter(n => {
+        const lk = String(n).toLowerCase();
+        if (_raidScoredSet.has(lk)) return false;
+        if (already && already.has(lk)) return false;
+        return true;
+      })
+      .slice(0, 50);
+    if (candidates.length === 0){
+      try { if (typeof updateRaidIcon === 'function') updateRaidIcon(); } catch(_){}
+      return;
+    }
+    try {
+      const r = await rpcCall('modRaidScore', { usernames: candidates });
+      candidates.forEach(n => _raidScoredSet.add(String(n).toLowerCase()));
+      // Bound long-lived tabs without wiping ALL dedup history (a full clear would
+      // re-score everything next tick -- exactly the AI-budget waste we avoid). Set
+      // iteration is insertion order, so this evicts the 1000 oldest entries.
+      if (_raidScoredSet.size > 5000){
+        const _it = _raidScoredSet.values();
+        for (let _i = 0; _i < 1000; _i++){ const _n = _it.next(); if (_n.done) break; _raidScoredSet.delete(_n.value); }
+      }
+      if (r && r.ok && r.data && (r.data.placed_count || 0) > 0){
+        try { await _susRefresh(); } catch(_){}
+        try { snack('\u{1F916} Bot Raid Shield flagged ' + r.data.placed_count + ' new SUS user' + (r.data.placed_count > 1 ? 's' : '') + ' — click \u{1F916} to review', 'warn'); } catch(_){}
+      }
+    } catch(e){ console.warn('[modtools] raid score scan error', e); }
+    try { if (typeof updateRaidIcon === 'function') updateRaidIcon(); } catch(_){}
+  }
+
   function buildTriageConsole(){
     scrapeCurrentPage();
     // v5.2.9 FIX: also run auto-DR rules against ALL currently 'new' roster users,
@@ -17304,6 +17351,70 @@ Analyze this comment against the community rules. Then write a brief, profession
       drEl.style.color = C.PURPLE;
       drEl.title = `${pending.length} on Death Row`;
       drEl.dataset.overload = '';
+    }
+  }
+
+  // v10.20.0: Bot Raid Shield -- robot status-bar icon updater. Hidden until a
+  // raid is active (GET /raid/detect -> raid_active). Mirrors updateDeathRowCounter
+  // (getElementById, no closure dependency, a11y title, non-color glyph). Click
+  // (wired at button creation) opens the SUS popover. degrade-quiet: a worker
+  // hiccup / missing token just leaves the icon hidden -- never throws.
+  let _lastRaidActive = false;
+  async function updateRaidIcon(){
+    const elIcon = document.getElementById('gam-raid-icon');
+    if (!elIcon) return;
+    let data = null;
+    try {
+      if (typeof getModToken === 'function' && !getModToken()) { elIcon.style.display = 'none'; _lastRaidActive = false; return; }
+      const r = await rpcCall('modRaidDetect');
+      if (r && r.ok && r.data) data = r.data;
+    } catch(_){ /* degrade-quiet */ }
+    if (!data || !data.raid_active){
+      elIcon.style.display = 'none';
+      _lastRaidActive = false;
+      return;
+    }
+    // Idempotent pulse keyframes (PRM-gated per codebase convention).
+    if (!document.getElementById('gam-raid-icon-css')){
+      const ss = document.createElement('style');
+      ss.id = 'gam-raid-icon-css';
+      ss.textContent =
+        '@keyframes gam-raid-pulse{0%,100%{opacity:1}50%{opacity:0.45}}' +
+        '#gam-raid-icon.gam-raid-active{animation:gam-raid-pulse 1.1s ease-in-out infinite}' +
+        '@media (prefers-reduced-motion: reduce){#gam-raid-icon.gam-raid-active{animation:none}}';
+      try { document.head.appendChild(ss); } catch(_){}
+    }
+    // Coerce every worker-supplied value to a safe integer before it touches
+    // the DOM (never trust external data). fam is rendered via textContent below.
+    const susN = Math.max(0, Math.floor(Number(data.recent_sus_count) || 0));
+    const incidents = Array.isArray(data.incidents) ? data.incidents : [];
+    const fam = incidents.length ? String(incidents[0].family || '').replace(/[^\w.\-]/g, '').slice(0, 24) : '';
+    const totalFlagged = Math.max(0, Math.floor(
+      incidents.reduce((a, i) => a + (Math.floor(Number(i && i.count)) || 0), 0) || susN));
+    elIcon.style.display = 'inline-flex';
+    elIcon.style.alignItems = 'center';
+    elIcon.style.justifyContent = 'center';
+    elIcon.style.width = 'auto';
+    elIcon.style.minWidth = '36px';
+    elIcon.style.padding = '0 6px';
+    elIcon.style.whiteSpace = 'nowrap';
+    elIcon.style.gap = '4px';
+    elIcon.style.color = C.RED;
+    // Build badge via textContent / DOM nodes (XSS-proof; no innerHTML).
+    elIcon.textContent = '\u{1F916} ';
+    const _cntSpan = document.createElement('span');
+    _cntSpan.style.fontWeight = '700';
+    _cntSpan.textContent = String(totalFlagged);
+    elIcon.appendChild(_cntSpan);
+    elIcon.title = '\u{1F916} BOT RAID ACTIVE — ' + totalFlagged + ' flagged'
+      + (fam ? ' (family ' + fam + ')' : '')
+      + ' — click to review + flush SUS to Death Row';
+    elIcon.setAttribute('aria-label', 'Bot raid active, ' + totalFlagged + ' flagged users — click to review and flush');
+    elIcon.classList.add('gam-raid-active');
+    // First transition into active -> refresh the SUS cache so the popover is fresh.
+    if (!_lastRaidActive){
+      _lastRaidActive = true;
+      try { if (typeof _susRefresh === 'function') _susRefresh(); } catch(_){}
     }
   }
 
@@ -20647,6 +20758,18 @@ Analyze this comment against the community rules. Then write a brief, profession
         '#gam-sus-popover .gam-sus-row-wrap{padding:5px 10px;border-bottom:1px solid #1e1c1a;display:flex;gap:8px}',
         '#gam-sus-popover .gam-sus-row-left{flex:1;min-width:0}',
         '#gam-sus-popover .gam-sus-row-top{display:flex;align-items:center;gap:5px}',
+        /* v10.20.0 Bot Raid Shield disposition surface */
+        '#gam-sus-popover .gam-sus-raid-bar{display:flex;align-items:center;gap:8px;padding:7px 10px;position:sticky;top:0;z-index:2;background:#261619;border-bottom:1px solid rgba(255,59,59,0.3)}',
+        '#gam-sus-popover .gam-sus-raid-bar-title{color:#ff8585;font:700 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;flex:1;display:flex;align-items:center;gap:6px}',
+        '#gam-sus-popover .gam-raid-flush-btn{background:#ff3b3b;border:1px solid #ff3b3b;color:#140404;padding:3px 9px;cursor:pointer;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;border-radius:2px}',
+        '#gam-sus-popover .gam-raid-flush-btn:hover{background:#ff5b5b}',
+        '#gam-sus-popover .gam-raid-flush-btn:disabled{opacity:0.5;cursor:default}',
+        '#gam-sus-popover .gam-raid-flush-btn:focus-visible{outline:2px solid #66ccff;outline-offset:2px}',
+        '#gam-sus-popover .gam-raid-selnone{background:transparent;border:1px solid #9b9892;color:#c8c5c0;padding:2px 6px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;white-space:nowrap}',
+        '#gam-sus-popover .gam-raid-selnone:focus-visible{outline:2px solid #66ccff;outline-offset:2px}',
+        '#gam-sus-popover .gam-raid-chk{accent-color:#ff3b3b;width:16px;height:16px;cursor:pointer;flex-shrink:0;margin:0}',
+        '#gam-sus-popover .gam-sus-row.gam-raid-row{border-left:3px solid #ff3b3b;background:rgba(255,59,59,0.04)}',
+        '#gam-sus-popover .gam-raid-badge{background:rgba(255,59,59,0.18);color:#ff8585;font:700 8px ui-monospace,monospace;letter-spacing:0.04em;padding:1px 3px;border-radius:2px;text-transform:uppercase;white-space:nowrap}',
       ].join('');
       document.head.appendChild(ss);
     }
@@ -20804,8 +20927,10 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     // Build a SUS row (hybrid layout: collapsed=[DR][⋯]▶, expanded=drill panel)
-    function _buildSusRow(rowData) {
+    function _buildSusRow(rowData, opts) {
       const username = rowData.username || '';
+      const _isRaid = !!(opts && opts.raid);
+      let _raidChk = null;
       const reason = rowData.reason || '';
       const markedBy = rowData.marked_by || '';
       const markedAt = rowData.marked_at || rowData.created_at || 0;
@@ -20813,7 +20938,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       const truncReason = reason.length > 70 ? reason.slice(0, 70) + '…' : reason;
 
       const rowWrap = document.createElement('div');
-      rowWrap.className = 'gam-sus-row';
+      rowWrap.className = 'gam-sus-row' + (_isRaid ? ' gam-raid-row' : '');
       rowWrap.setAttribute('data-sus-row', username);
       rowWrap.style.cssText = 'padding:5px 10px;border-bottom:1px solid #1e1c1a;display:flex;gap:8px;align-items:flex-start';
 
@@ -20824,6 +20949,16 @@ Analyze this comment against the community rules. Then write a brief, profession
 
       const topRow = document.createElement('div');
       topRow.style.cssText = 'display:flex;align-items:center;gap:5px';
+      if (_isRaid) {
+        _raidChk = document.createElement('input');
+        _raidChk.type = 'checkbox';
+        _raidChk.className = 'gam-raid-chk';
+        _raidChk.checked = true; // pre-selected; mod unchecks false positives before flush
+        _raidChk.title = 'Include ' + username + ' in the bulk flush to Death Row';
+        _raidChk.setAttribute('aria-label', 'Select ' + username + ' for bulk flush to Death Row');
+        _raidChk.addEventListener('click', function(e){ e.stopPropagation(); }); // don't toggle row expand
+        topRow.appendChild(_raidChk);
+      }
       const chevron = document.createElement('span');
       chevron.className = 'gam-sus-chevron';
       chevron.textContent = '▶';
@@ -20835,6 +20970,13 @@ Analyze this comment against the community rules. Then write a brief, profession
       uSpan.style.cssText = 'color:#ffd84d;font-weight:700;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
       uSpan.textContent = username;
       topRow.appendChild(uSpan);
+      if (_isRaid) {
+        const _rb = document.createElement('span');
+        _rb.className = 'gam-raid-badge';
+        _rb.textContent = '\u{1F916} BOT';
+        _rb.title = 'AI-flagged by Bot Raid Shield';
+        topRow.appendChild(_rb);
+      }
       if (cc24 !== null) {
         const ccEl = document.createElement('span');
         ccEl.style.cssText = 'font-size:9px;font-weight:700;' + (cc24 > 8 ? 'color:#ff3b3b' : 'color:#9b9892');
@@ -20942,6 +21084,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       const outerWrap = document.createElement('div');
       outerWrap.setAttribute('data-sus-row', username);
       outerWrap.style.cssText = 'border-bottom:1px solid #1e1c1a';
+      if (_isRaid) { outerWrap.setAttribute('data-raid-row', username); outerWrap._raidChk = _raidChk; }
       rowWrap.removeAttribute('style');
       rowWrap.style.cssText = 'padding:5px 10px;display:flex;gap:8px;align-items:flex-start';
       rowWrap.removeAttribute('data-sus-row');
@@ -20996,12 +21139,94 @@ Analyze this comment against the community rules. Then write a brief, profession
       return outerWrap;
     }
 
+    // v10.20.0: Bot Raid Shield disposition. AI-flagged rows (marked_by =
+    // 'bot-raid-shield') are pulled to the top, pre-selected, with a one-click
+    // bulk FLUSH -> Death Row. This IS the human flush (HI-1): the mod unchecks
+    // false positives, then flushes the rest. Flush = existing client
+    // addToDeathRow(72h) + server modSusClear, then re-render off fresh state.
+    const _allRows = [...rows.values()];
+    const _raidRows = _allRows.filter(function(r){ return r && r.marked_by === 'bot-raid-shield'; });
+    const _otherRows = _allRows.filter(function(r){ return r && r.marked_by !== 'bot-raid-shield'; });
+
+    async function _flushSelectedRaid(flushBtn){
+      const selected = [];
+      pop.querySelectorAll('[data-raid-row]').forEach(function(ow){
+        if (ow._raidChk && ow._raidChk.checked) selected.push(ow.getAttribute('data-raid-row'));
+      });
+      if (selected.length === 0){ try { snack('No bot-raid rows selected to flush', 'info'); } catch(_){} return; }
+      flushBtn.disabled = true; flushBtn.textContent = '…';
+      let queued = 0, already = 0;
+      for (const uname of selected){
+        try {
+          const _row = (_susState.rows && _susState.rows.get(String(uname).toLowerCase())) || {};
+          const _reason = _row.reason || 'bot-raid-shield SUS flush';
+          const added = addToDeathRow(uname, 72 * 3600 * 1000, _reason, { fromUserAction: true });
+          if (added !== false) queued++; else already++;
+          // Clear the server SUS row -- it's disposed now (on DR). Best-effort.
+          try { await rpcCall('modSusClear', { username: uname, client_op_id: __makeReqId() }); } catch(_){}
+        } catch(_){}
+      }
+      try { await _susRefresh(); } catch(_){}
+      try { _susApplyDecorations(true); } catch(_){}
+      try { if (typeof updateRaidIcon === 'function') updateRaidIcon(); } catch(_){}
+      try { snack('⚡ Flushed ' + queued + ' → Death Row (72h)' + (already ? ', ' + already + ' already queued' : ''), 'success'); } catch(_){}
+      // Re-render off the now-pruned SUS state. Use the popover's clean teardown
+      // (_closePop tears down the focus trap + outside-click listener + restores
+      // focus) rather than a bare pop.remove(); reopen only if it's actually gone
+      // (guards against a concurrent reopen racing the async refresh above).
+      try { _closePop(); } catch(_){ try { pop.remove(); } catch(__){} }
+      try { if (!document.getElementById('gam-sus-popover')) _showSusPopover(anchor); } catch(_){}
+    }
+
+    function _buildRaidFlushBar(raidRows){
+      const bar = document.createElement('div');
+      bar.className = 'gam-sus-raid-bar';
+      const titleEl = document.createElement('span');
+      titleEl.className = 'gam-sus-raid-bar-title';
+      titleEl.textContent = '\u{1F916} BOT RAID — ' + raidRows.length + ' AI-FLAGGED';
+      const selBtn = document.createElement('button');
+      selBtn.type = 'button';
+      selBtn.className = 'gam-raid-selnone';
+      selBtn.textContent = 'Select none';
+      selBtn.title = 'Toggle all bot-raid checkboxes';
+      selBtn.addEventListener('click', function(e){
+        e.stopPropagation();
+        let anyChecked = false;
+        pop.querySelectorAll('[data-raid-row]').forEach(function(ow){ if (ow._raidChk && ow._raidChk.checked) anyChecked = true; });
+        const next = !anyChecked; // any checked -> uncheck all; none checked -> check all
+        pop.querySelectorAll('[data-raid-row]').forEach(function(ow){ if (ow._raidChk) ow._raidChk.checked = next; });
+        selBtn.textContent = next ? 'Select none' : 'Select all';
+        try { const _n = pop.querySelectorAll('[data-raid-row]').length; __announce('info', 'All ' + _n + ' bot-raid rows ' + (next ? 'selected' : 'deselected')); } catch(_){}
+      });
+      const flushBtn = document.createElement('button');
+      flushBtn.type = 'button';
+      flushBtn.className = 'gam-raid-flush-btn';
+      flushBtn.textContent = '⚡ FLUSH → DR 72h';
+      // Stable accessible name so the busy "…" textContent swap during flush
+      // doesn't clobber the button's name for screen readers.
+      flushBtn.setAttribute('aria-label', 'Flush selected bot-raid users to Death Row (72 hour delay)');
+      flushBtn.title = 'Queue all CHECKED bot-raid users to Death Row (72h delay). Uncheck false positives first. This is the human flush — nothing is banned automatically.';
+      flushBtn.addEventListener('click', function(e){ e.stopPropagation(); _flushSelectedRaid(flushBtn); });
+      bar.appendChild(titleEl);
+      bar.appendChild(selBtn);
+      bar.appendChild(flushBtn);
+      return bar;
+    }
+
     if (count === 0) {
       body.appendChild(gamMakeEmpty({ icon: 'sus-empty', headline: 'Queue is clean', desc: 'No users currently flagged as suspicious.' }));
     } else {
-      rows.forEach(function(rowData) {
-        body.appendChild(_buildSusRow(rowData));
-      });
+      if (_raidRows.length){
+        body.appendChild(_buildRaidFlushBar(_raidRows));
+        _raidRows.forEach(function(rowData){ body.appendChild(_buildSusRow(rowData, { raid: true })); });
+        if (_otherRows.length){
+          const _div = document.createElement('div');
+          _div.className = 'gam-sus-tard-divider';
+          _div.textContent = '\u{1F6A9} OTHER SUS (human / legacy)';
+          body.appendChild(_div);
+        }
+      }
+      _otherRows.forEach(function(rowData){ body.appendChild(_buildSusRow(rowData)); });
     }
 
     // Tard suspects section (UIUX-02 §D/§I)
@@ -22565,6 +22790,16 @@ Analyze this comment against the community rules. Then write a brief, profession
       try { openModLog(); } catch (_) {}
     });
 
+    // v10.20.0: Bot Raid Shield -- robot status-bar icon. Hidden until a raid is
+    // active (updateRaidIcon, polled below + refreshed after each raid scan,
+    // toggles it on GET /raid/detect -> raid_active). Click opens the SUS popover
+    // where bot-raid rows are pre-selected for one-click FLUSH -> Death Row.
+    const raidBtn = el('button', { id:'gam-raid-icon', cls:'gam-bar-icon', style:{display:'none'}, title:'Bot raid monitor', 'aria-label':'Bot raid monitor — opens SUS review' }, '\u{1F916}');
+    raidBtn.addEventListener('click', function(ev){
+      try { ev.stopPropagation(); } catch(_){}
+      try { _showSusPopover(raidBtn); } catch(err){ console.warn('[raid icon]', err); }
+    });
+
     // v9.3.7 (P1-4) / v9.3.16 (Commander): SIREN chip. Live count of
     // TARDs (SUS users) + recent DR adds (last 24h).
     // v9.3.16 changes per Commander 2026-05-05:
@@ -22624,6 +22859,10 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
     setInterval(_updateSirenChip, 30_000);
     setTimeout(_updateSirenChip, 2500);
+    // v10.20.0: Bot Raid Shield -- poll /raid/detect to drive the robot icon.
+    // 120s cadence (raids build over 15min-2h windows; the worker dedups any
+    // duplicate polls). Also refreshed immediately after each 30-min raid scan.
+    if (typeof updateRaidIcon === 'function') { setInterval(updateRaidIcon, 120_000); setTimeout(updateRaidIcon, 5000); }
 
     // Modmail popover trigger: only rendered on modmail read pages.
     const IS_MODMAIL_READ = /\/(modmail\/thread|messages?)\/[^/?]+\/?$/.test(location.pathname);
@@ -22951,6 +23190,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       filterSel,
       el('span', { cls:'gam-bar-sep' }), // v10.14.5: break up the 10-icon run -- separates passive filter from active counters
       drBtn,
+      raidBtn,
       sirenBtn,
       sirenClearBtn,
       // v10.3 Patch 3: Sticky-queue chip
@@ -29989,6 +30229,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
             var due = (typeof getSetting === 'function') ? (getSetting('lastAiScanDate','') !== today) : true;
             if (due && typeof manualCrawlSection === 'function'){ try { await manualCrawlSection('users', 3); } catch(_){} }
             if (typeof runDailyAiScanIfDue === 'function'){ await runDailyAiScanIfDue(); }
+            // v10.20.0: Bot Raid Shield -- also run the per-tick raid scorer
+            // (ungated; SUS-only; HI-1 -- never bans). Distinct from the daily
+            // watchlist scan above. Closes the §8 alarm wiring gap.
+            if (typeof runRaidScoreScan === 'function'){ try { await runRaidScoreScan(); } catch(_){} }
             sendResponse({ ok:true, due: due });
           } catch(e){ try { sendResponse({ ok:false, error:String(e && e.message || e) }); } catch(_){} }
         })();
