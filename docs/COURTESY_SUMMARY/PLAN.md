@@ -13,6 +13,13 @@ Full agent output: workflow task `w15n3u7cz.output`.
 > CF egress IP returns `<?xml ...>` instead of JSON for the Innertube player — the datacenter
 > ASN block the synthesis predicted. Free Tier-0 stays as opportunistic-only; it is NOT a path.
 >
+> **✅ RESOLVED 2026-06-06 (worker `00395e27`) — Supadata is the transcript path, PROVEN GREEN.**
+> `SUPADATA_API_KEY` secret set; verified returning clean **English** transcripts (`&lang=en`) for
+> test videos directly from `api.supadata.ai` (Supadata proxies the video host on *their* infra, so
+> the worker's blocked egress IP is irrelevant — it only calls the Supadata API). Worker patched
+> (Supadata primary + `lang=en`) and redeployed. Innertube demoted to a harmless free fallback.
+> **Transcripts flow. v2 (the summarizer) is unblocked.**
+>
 > **DECISION NEEDED — transcript source (a genuine fork, lasting consequence):**
 > - **(A) Supadata** (paid, ~$0.99/1k): worker-side, reliable, absorbs the IP block on their infra,
 >   auto-transcribes no-caption videos, no new extension permissions. `SUPADATA_API_KEY` as a worker secret.
