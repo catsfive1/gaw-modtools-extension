@@ -12715,23 +12715,30 @@ Analyze this comment against the community rules. Then write a brief, profession
       opts = opts || {};
       const collapsed = (id in _cardCollapse) ? !!_cardCollapse[id] : !!collapsedDefault;
       const card = el('div', { cls: 'gam-settings-card'
+        + (opts.primary ? ' gam-settings-card--primary' : '')
         + (opts.danger ? ' gam-settings-card--danger' : '')
         + (opts.lead ? ' gam-settings-card--lead' : '') });
       const bodyId = 'gam-card-' + id + '-body';
-      const caret = el('span', { cls:'gam-card-caret' }, collapsed ? '▸' : '▾');
+      // v10.19.4: ONE caret glyph (▸); CSS rotates it 90deg off aria-expanded.
+      // (The old glyph-swap double-animated against the CSS rotate -> looked broken.)
+      const caret = el('span', { cls:'gam-card-caret' }, '▸');
+      // v10.19.4: title + optional one-line subtitle so a COLLAPSED card self-describes
+      // without expanding (the scannable index). Subtitle fades out on expand.
+      const titlewrap = el('span', { cls:'gam-card-titlewrap' }, el('span', { cls:'gam-card-title' }, label));
+      if (opts.sub) titlewrap.appendChild(el('span', { cls:'gam-card-sub' }, opts.sub));
       const hdr = el('button', {
         cls: 'gam-settings-card-header' + (opts.danger ? ' gam-settings-card-header--danger' : ''),
         type: 'button',
         'aria-expanded': String(!collapsed),
         'aria-controls': bodyId
-      }, caret, el('span', { cls:'gam-card-title' }, label));
+      }, caret, titlewrap);
       const body = el('div', { cls:'gam-settings-card-body', id: bodyId });
       if (collapsed) body.hidden = true;
       hdr.addEventListener('click', function(){
         const willOpen = body.hidden;
         body.hidden = !willOpen;
         hdr.setAttribute('aria-expanded', String(willOpen));
-        caret.textContent = willOpen ? '▾' : '▸';
+        // v10.19.4: caret rotation is CSS-driven off aria-expanded (set above); no glyph swap.
         _cardCollapse[id] = !willOpen;
         try { lsSet(K_CARD_COLLAPSE, _cardCollapse); } catch(_){}
         if (willOpen){ const f = body.querySelector('input,button,select,textarea'); if (f) f.focus(); }
@@ -12833,7 +12840,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       load();
     }
 
-    closeCard(); openCard('display', '\u{1F5A5}\u{FE0F} Display & Appearance', 1, 3, true);
+    closeCard(); openCard('display', '\u{1F5A5}\u{FE0F} Display & Appearance', 1, 3, true, { sub:'Sidebar, bar orientation, theme, markers' });
     addToggle('Hide Sidebar', 'hideSidebar', 'Remove GAW\'s right sidebar — more room for content.', v=>{
       document.body.classList.toggle('gam-hide-sidebar', v);
     });
@@ -12901,7 +12908,7 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     addToggle('Compact status bar (icon-only)', 'statusBarCompact', 'Hide the status-bar text labels (icons only). v10.19.1: decoupled from the modmail action bar -- this is now purely cosmetic.');
 
-    closeCard(); openCard('moderation', '\u26A1 Daily Moderation', 0, 1, false);
+    closeCard(); openCard('moderation', '\u26A1 Daily Moderation', 0, 1, false, { primary:true, sub:'Console dock, DR duration, tards, mod chat' });
     addSelect('Console Position', 'modConsoleDock',
       [{value:'modal',label:'Center modal'},{value:'right',label:'Right panel'},{value:'left',label:'Left panel'}],
       'Where the Mod Console opens.'
@@ -12916,7 +12923,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       ()=>{ if(IS_USERS_PAGE && typeof refreshTriageConsole==='function') refreshTriageConsole(); }
     );
 
-    closeCard(); openCard('ai', '\u{1F916} AI & Analysis', 0, 2, false);
+    closeCard(); openCard('ai', '\u{1F916} AI & Analysis', 0, 2, false, { primary:true, sub:'AI engine + deep analysis on load' });
     addSelect('Default AI Engine', 'aiEngine',
       [{value:'llama3',label:'Llama 3 (free, via CF Worker)'},{value:'grok',label:'Grok / xAI (via CF Worker proxy)'}],
       'Which AI model to use for ban reply suggestions and sidebar conformity checks. Both engines are proxied through the team Cloudflare Worker; no API keys are stored in the extension.'
@@ -12928,7 +12935,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     // v9.12.0 - Auto-sticky management (Commander #15/#16). Disabled by default
     // since the underlying /sticky toggle bug is mitigated by client-side
     // cooldown but not eliminated. Lead must opt in.
-    closeCard(); openCard('auto-sticky', '\u{1F4CC} Auto-Sticky Management', 1, 4, true);
+    closeCard(); openCard('auto-sticky', '\u{1F4CC} Auto-Sticky Management', 1, 4, true, { sub:'Auto-unsticky thresholds + AI sticky detector' });
     addToggle('Auto-unsticky old / popular posts', 'autoUnstickyEnabled',
       'Every 4 min on the home/community pages: unsticky any sticky older than maxHours OR with more than upvoteThreshold upvotes. Per-post 6h cooldown stored in chrome.storage.local prevents re-toggling. On by default.');
     // Threshold inputs as a custom row (no addToggle has number support)
@@ -12967,7 +12974,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     // v7.1.2: Features section. Each row reads from getFeatureEffective, so a
     // team override (lead-pushed) visibly dominates a local toggle. Lead mods
     // see a Promote/Demote button next to the toggle.
-    closeCard(); openCard('features', '\u{1F680} Features', 1, 6, true);
+    closeCard(); openCard('features', '\u{1F680} Features', 1, 6, true, { sub:'Drawer, Super-Mod, alerts, cloud opt-ins' });
     addFeatureToggle('Intel Drawer', 'features.drawer', false,
       'v7.0 Intel Drawer: keyboard-first subject overlay with precedent memory and AI next-best-action.');
     addFeatureToggle('Super-Mod Foundation', 'features.superMod', false,
@@ -12985,7 +12992,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     // Worker cron monitors GAW; dispatches queued actions to any open GAW
     // tab via SW. Thresholds mirror worker-side team_settings namespace.
     if (isLeadMod()) {
-      closeCard(); openCard('auto-unsticky-mon', '\u{1F501} Auto-Unsticky Monitoring', 1, 5, true);
+      closeCard(); openCard('auto-unsticky-mon', '\u{1F501} Auto-Unsticky Monitoring', 1, 5, true, { sub:'Team cron, personal mode, title exceptions' });
       // v10.14.3: Auto-unsticky thresholds. The worker cron reads team_settings
       // keys (autoUnstickyEnabled / autoUnstickyMaxHours / autoUnstickyUpvoteThreshold)
       // -- NOT the extension-side gam_settings keys directly. Pre-v10.14.3 the
@@ -13132,9 +13139,9 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     // v10.9.0 M2 (ASK-053): auto-remove opt-in toggle
-    closeCard(); openCard('auto-actions', '\u{1F6E1} Auto-Actions', 1, 7, true);
+    closeCard(); openCard('auto-actions', '\u{1F6E1} Auto-Actions', 1, 7, true, { sub:'Auto-remove SUS/DR queue items' });
     addToggle('Auto-Remove SUS/DR Queue Items', 'autoRemoveSusDr', 'When the queue page is open, automatically remove posts/comments from SUS-marked or Death Row users after a 1.5s undo window. OFF by default.');
-    closeCard(); openCard('fun', '\u{1F95A} Fun', 1, 9, true);
+    closeCard(); openCard('fun', '\u{1F95A} Fun', 1, 9, true, { sub:'Easter eggs' });
     addToggle('Easter Eggs', 'easterEggsEnabled', 'Enable Q-themed easter eggs in the mod interface. \u{1F910}');
 
     closeCard(); // close the final card
@@ -13142,7 +13149,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     // v10.19.1: Discord / Integrations card (lead-only, set-and-forget). Net-new
     // section for the raid-alert webhook + mod IDs -- the config Bot Raid Shield reads.
     if (isLeadMod()){
-      openCard('discord', '\u{1F4E1} Discord / Integrations', 1, 8, true, { lead:true });
+      openCard('discord', '\u{1F4E1} Discord / Integrations', 1, 8, true, { lead:true, sub:'Raid-alert webhook + mod IDs' });
       buildDiscordCard(_currentCardBody);
       closeCard();
     }
@@ -24745,18 +24752,59 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-settings-promote-btn-demote{color:#f6ad55;border-color:#f6ad55}
 .gam-settings-promote-btn-demote:hover{background:#f6ad55;color:#1a202c}
 /* v10.19.1 settings cards */
-.gam-settings-card{border:1px solid ${C.BORDER};border-radius:7px;margin:0 0 8px;overflow:hidden;background:rgba(255,255,255,.012)}
-.gam-settings-card-header{display:flex;align-items:center;gap:8px;width:100%;padding:9px 11px;background:rgba(255,255,255,.03);border:0;border-bottom:1px solid transparent;color:${C.TEXT};font:700 11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;text-transform:uppercase;letter-spacing:.6px;cursor:pointer;text-align:left}
-.gam-settings-card-header:hover{background:rgba(255,255,255,.06)}
-.gam-settings-card-header[aria-expanded="true"]{border-bottom-color:${C.BORDER}}
-.gam-settings-card-header:focus-visible{outline:2px solid ${C.ACCENT};outline-offset:-2px}
-.gam-card-caret{font-size:9px;color:${C.TEXT3};flex-shrink:0;width:10px;text-align:center}
-.gam-card-title{flex:1}
-.gam-settings-card-header--danger{color:#ff6b6b}
-.gam-settings-card--danger{border-color:rgba(198,40,40,.45);border-left:3px solid #C62828}
-.gam-settings-card--lead{border-left:3px solid #E65100}
-.gam-settings-card-body{padding:3px 5px 7px}
+/* v10.19.4 PRO CARD REDESIGN (design tournament wf_95bf1adc-e32, polished+WCAG-AA-verified).
+   Two real surface tiers (open=BG2 workbench / collapsed=flush index), state+tier left rail,
+   rotating caret, collapsed-card subtitle index, the one mandatory contrast lift (TEXT3 3.1:1 ->
+   TEXT2 6.04:1, scoped), focus parity, single motion ladder behind no-preference. */
+.gam-settings-card{position:relative;border:1px solid ${C.BORDER};border-left:2px solid transparent;border-radius:6px;margin:0 0 4px;overflow:hidden;background:transparent}
+.gam-settings-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:${C.TEXT2};opacity:.45;pointer-events:none}
+.gam-settings-card:has(> .gam-settings-card-header[aria-expanded="false"]) + .gam-settings-card:has(> .gam-settings-card-header[aria-expanded="false"]){margin-top:-1px}
+.gam-settings-card:has(> .gam-settings-card-header[aria-expanded="true"]){background:${C.BG2};border-color:${C.BORDER2};margin:8px 0 12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.gam-settings-card:has(> .gam-settings-card-header[aria-expanded="true"])::before{background:${C.AMBER};opacity:1}
+.gam-settings-card--primary::before{background:${C.AMBER};opacity:1}
+.gam-settings-card-header{display:flex;align-items:center;gap:9px;width:100%;padding:8px 11px 8px 13px;background:rgba(255,255,255,.022);border:0;border-bottom:1px solid transparent;color:${C.TEXT2};font:700 11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;text-transform:uppercase;letter-spacing:.6px;cursor:pointer;text-align:left}
+.gam-settings-card-header:hover{background:rgba(255,255,255,.05);color:${C.TEXT}}
+.gam-settings-card-header:active{background:rgba(255,255,255,.07)}
+.gam-settings-card:hover::before{opacity:1}
+.gam-settings-card-header[aria-expanded="true"]{color:${C.TEXT};background:rgba(255,255,255,.045);border-bottom-color:${C.BORDER};padding-top:9px;padding-bottom:9px}
+.gam-settings-card-header[aria-expanded="true"]:hover{background:rgba(255,255,255,.06)}
+.gam-settings-card--primary .gam-settings-card-header[aria-expanded="true"] .gam-card-title{color:${C.AMBER}}
+.gam-settings-card-header:focus-visible{outline:2px solid ${C.AMBER};outline-offset:-2px;border-radius:6px;box-shadow:inset 0 0 0 1px rgba(255,153,51,.45)}
+.gam-card-caret{font-size:9px;color:${C.TEXT2};flex:0 0 10px;width:10px;text-align:center;transform:rotate(0deg);transform-origin:50% 50%}
+.gam-settings-card-header:hover .gam-card-caret{color:${C.TEXT}}
+.gam-settings-card-header[aria-expanded="true"] .gam-card-caret{transform:rotate(90deg);color:${C.AMBER}}
+.gam-card-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gam-card-titlewrap{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}
+.gam-card-titlewrap .gam-card-title{flex:0 0 auto}
+.gam-card-sub{display:block;margin-top:2px;font:400 10.5px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;text-transform:none;letter-spacing:0;color:${C.TEXT2};max-height:18px;opacity:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.gam-settings-card-header[aria-expanded="true"] .gam-card-sub{max-height:0;opacity:0;margin-top:0}
+.gam-card-status{flex:0 0 auto;margin-left:auto;width:7px;height:7px;border-radius:50%;background:var(--gam-status, transparent);box-shadow:0 0 6px -2px var(--gam-status, transparent)}
+.gam-settings-card-header[aria-expanded="true"] .gam-card-status{display:none}
+.gam-settings-card-body{padding:4px 11px 8px 13px}
 .gam-settings-card-body[hidden]{display:none}
+.gam-settings-card--danger{border-color:rgba(198,40,40,.45);border-left:2px solid transparent}
+.gam-settings-card--danger::before{background:${C.RED};opacity:1;width:3px}
+.gam-settings-card--danger .gam-settings-card-header,.gam-settings-card-header--danger{color:#ff6b6b}
+.gam-settings-card--danger .gam-card-caret{color:${C.RED}}
+.gam-settings-card--danger .gam-card-title::before{content:'⚠︎ ';font-weight:700}
+.gam-settings-card--danger .gam-settings-card-header:hover{background:rgba(240,64,64,.08);color:#ff8a8a}
+.gam-settings-card--danger .gam-settings-card-header[aria-expanded="true"]{color:#ff8a8a;border-bottom-color:rgba(240,64,64,.30)}
+.gam-settings-card--danger .gam-settings-card-header:focus-visible{outline-color:${C.RED};box-shadow:inset 0 0 0 1px rgba(240,64,64,.45)}
+.gam-settings-card--lead{border-left:2px solid transparent}
+.gam-settings-card--lead::before{background:#E65100;opacity:1;width:3px}
+.gam-settings-card--lead .gam-card-caret{color:#FB8C00}
+.gam-settings-card--lead .gam-settings-card-header[aria-expanded="true"] .gam-card-title{color:#FB8C00}
+.gam-settings-card-body .gam-settings-row + .gam-settings-row{border-top:1px solid rgba(255,255,255,.05)}
+.gam-settings-card-body .gam-settings-desc{color:${C.TEXT2};font-size:10px;margin-top:2px;line-height:1.4}
+.gam-toggle input:focus-visible + .gam-toggle-track{outline:2px solid ${C.ACCENT};outline-offset:2px}
+@media (prefers-reduced-motion: no-preference){
+.gam-settings-card{transition:background .16s cubic-bezier(.2,.7,.3,1),border-color .16s cubic-bezier(.2,.7,.3,1),margin .16s cubic-bezier(.2,.7,.3,1)}
+.gam-settings-card::before{transition:background .16s cubic-bezier(.2,.7,.3,1),opacity .12s ease}
+.gam-settings-card-header{transition:background .12s ease,color .12s ease}
+.gam-card-caret{transition:transform .2s cubic-bezier(.2,.7,.3,1),color .12s ease}
+.gam-card-sub{transition:max-height .16s cubic-bezier(.2,.7,.3,1),opacity .12s ease,margin .16s cubic-bezier(.2,.7,.3,1)}
+.gam-settings-card-body .gam-settings-row{transition:background .12s ease}
+}
 .gam-disc-input{width:100%;margin-top:4px;background:#050507;color:#e8e6e1;border:1px solid #3d3a35;padding:6px 8px;font:11px ui-monospace,monospace;border-radius:3px;box-sizing:border-box}
 .gam-disc-input:focus{border-color:${C.ACCENT};outline:none}
 .gam-disc-input:disabled{opacity:.5}
