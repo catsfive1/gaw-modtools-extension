@@ -53,6 +53,11 @@ const HEALTH_PERIOD_MIN = 5;
 // v10.10.0 S4: auto-action poll alarm constants.
 const AUTO_POLL_ALARM = 'gam_auto_action_poll';
 const AUTO_POLL_PERIOD_MIN = 1; // 1 minute -- worker cron runs every 5 min so 1-min poll is responsive without overload
+// v10.19.2: autonomous /users AI-scan alarm. Fixes the daily AI scan only
+// running when a mod had a /users tab open (it was content-script-bound to
+// buildTriageConsole's setTimeout). Now alarm-driven + dispatched to any GAW tab.
+const AI_USERS_SCAN_ALARM = 'gam_ai_users_scan';
+const AI_USERS_SCAN_PERIOD_MIN = 30;
 // v10.11 T2 (REDTEAM-1): inactivity lock alarm -- fires every 5 min and checks elapsed idle time.
 const INACTIVITY_LOCK_ALARM = 'gam_inactivity_lock';
 const INACTIVITY_LOCK_PERIOD_MIN = 5;
@@ -814,6 +819,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     chrome.alarms.create(INACTIVITY_LOCK_ALARM, { delayInMinutes: INACTIVITY_LOCK_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: INACTIVITY_LOCK_PERIOD_MIN });
     // v10.16.34 (Grok #16) proactive alerts -- endpoint may not exist yet; 404 silently swallowed.
     chrome.alarms.create(AI_PROACTIVE_ALARM, { delayInMinutes: AI_PROACTIVE_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: AI_PROACTIVE_PERIOD_MIN });
+    chrome.alarms.create(AI_USERS_SCAN_ALARM, { delayInMinutes: AI_USERS_SCAN_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: AI_USERS_SCAN_PERIOD_MIN });
   } catch (e) { console.warn('[ModTools] alarm create failed', e); }
   // v8.6.9: AWAIT __ensureSessionAccess so subsequent storage calls don't
   // fire before the session-area access level is set. Pre-fix race: the
@@ -882,6 +888,11 @@ chrome.runtime.onStartup?.addListener(async () => {
     chrome.alarms.get(AI_PROACTIVE_ALARM, (a) => {
       if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get AI_PROACTIVE_ALARM:', chrome.runtime.lastError.message); return; }
       if (!a) chrome.alarms.create(AI_PROACTIVE_ALARM, { delayInMinutes: AI_PROACTIVE_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: AI_PROACTIVE_PERIOD_MIN });
+    });
+    // v10.19.2: autonomous /users AI-scan alarm resurrection (eviction-safe).
+    chrome.alarms.get(AI_USERS_SCAN_ALARM, (a) => {
+      if (chrome.runtime.lastError) { console.warn('[ModTools] alarms.get AI_USERS_SCAN_ALARM:', chrome.runtime.lastError.message); return; }
+      if (!a) chrome.alarms.create(AI_USERS_SCAN_ALARM, { delayInMinutes: AI_USERS_SCAN_PERIOD_MIN + (Math.random() * 0.5), periodInMinutes: AI_USERS_SCAN_PERIOD_MIN });
     });
   } catch (e) {}
   // v8.6.9: AWAIT both bootstrap calls so the SW is fully ready before
@@ -1894,7 +1905,31 @@ async function _aiProactiveAlertsPoll() {
   }
 }
 
+// v10.19.2: autonomous /users AI scan. Fixes the bug where the daily AI scan
+// only ran when a mod had a /users tab open (runDailyAiScanIfDue was reached
+// only via buildTriageConsole's setTimeout, which only runs on /users). Now an
+// alarm dispatches to ANY open GAW tab; the content script ingests fresh /users
+// registrations (manualCrawlSection -- the proven manual-crawl path that already
+// clears Bot Fight Mode from a real tab) + scores them (runDailyAiScanIfDue),
+// both gated by the existing daily marker + features.ai consent. No GAW tab
+// open -> skip this tick (next one retries), identical to _autoActionPoll.
+async function _aiUsersScanPoll() {
+  if (!secretCache || !secretCache.workerModToken) { try { await loadSecrets(); } catch (_) {} }
+  if (!secretCache.workerModToken) return;
+  let tabs = [];
+  try { tabs = await chrome.tabs.query({ url: ['*://greatawakening.win/*', '*://*.greatawakening.win/*'] }); } catch (_) {}
+  if (!tabs || tabs.length === 0) return; // no GAW tab -> next tick retries
+  const tab = tabs.find(t => t.status === 'complete') || tabs[0];
+  try { await chrome.tabs.sendMessage(tab.id, { type: 'gam_run_users_scan' }); } catch (_) {}
+}
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+  // v10.19.2: cold-boot hardening -- hydrate crypto + secret vault before ANY
+  // secretCache-touching handler runs. On SW resurrection the vault can be empty;
+  // without this, token-bearing handlers (auto-action poll, users scan, proactive
+  // alerts) race an empty vault -> silent 401s. _initOnce() is idempotent +
+  // awaitable (shared in-flight promise), so this is cheap on warm boots.
+  try { await _initOnce(); } catch (_) {}
   // AF-05 (Rule 14): health heartbeat -- check vault + storage every 5 min.
   if (alarm.name === HEALTH_ALARM) { await _healthCheck(); return; }
   // v10.11 T2 (REDTEAM-1): inactivity lock check.
@@ -1910,6 +1945,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === MAINT_WEEKLY_ALARM)       { await _maintWeeklyRun();     return; }
   // v10.16.34 (Grok #16) proactive alerts -- endpoint may not exist yet; 404 is silently swallowed.
   if (alarm.name === AI_PROACTIVE_ALARM)       { await _aiProactiveAlertsPoll(); return; }
+  // v10.19.2: autonomous /users AI scan (ingest fresh registrations + score).
+  if (alarm.name === AI_USERS_SCAN_ALARM)      { await _aiUsersScanPoll();    return; }
   if (alarm.name !== ALARM_NAME) return;
   try {
     const resp = await fetch(VERSION_JSON_URL, { cache: 'no-store' });

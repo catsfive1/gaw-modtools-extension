@@ -29928,6 +29928,24 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         } catch (_) {}
         return;
       }
+      // v10.19.2: autonomous /users AI scan, triggered by the background
+      // AI_USERS_SCAN_ALARM (fixes the daily scan never running without a /users
+      // tab open). Ingest fresh registrations via the proven manual-crawl path,
+      // then score. Gated by features.ai consent + the once-per-UTC-day marker so
+      // repeated 30-min ticks are a cheap no-op until the next day's scan is due.
+      if (msg && msg.type === 'gam_run_users_scan'){
+        (async function(){
+          try {
+            if (typeof consentEnabled === 'function' && !consentEnabled('features.ai')){ sendResponse({ ok:true, skipped:'consent' }); return; }
+            var today = new Date().toISOString().slice(0,10);
+            var due = (typeof getSetting === 'function') ? (getSetting('lastAiScanDate','') !== today) : true;
+            if (due && typeof manualCrawlSection === 'function'){ try { await manualCrawlSection('users', 3); } catch(_){} }
+            if (typeof runDailyAiScanIfDue === 'function'){ await runDailyAiScanIfDue(); }
+            sendResponse({ ok:true, due: due });
+          } catch(e){ try { sendResponse({ ok:false, error:String(e && e.message || e) }); } catch(_){} }
+        })();
+        return true;
+      }
       if (msg && msg.type === 'manualCrawl'){
         manualCrawlSection(msg.section || 'users', Math.max(1, Math.min(50, msg.pages||10)))
           .then(r => sendResponse({ ok:true, result:r }))
