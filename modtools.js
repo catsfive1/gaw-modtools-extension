@@ -11768,6 +11768,31 @@ Analyze this comment against the community rules. Then write a brief, profession
   // ║  POST-LEVEL ACTION STRIP - [Quick-Remove] [Flair] [Ban Author] ║
   // ╚══════════════════════════════════════════════════════════════════╝
 
+  // v10.25.0 (next-wave): client-side post-quality heuristic for the in-feed slop
+  // badge. PURE + testable -- scores a TITLE string for low-effort/slop signals.
+  // CONSERVATIVE: needs >=3 points to flag, so a single weak signal never trips it
+  // (low false-positive rate is the whole point -- a noisy badge gets ignored).
+  // INFORMATIONAL ONLY; nothing auto-acts on this (broken-windows hint, mod decides).
+  // PRECISION-FIRST: only unambiguous spam signals (emoji walls, repeated-char,
+  // punctuation spam). Deliberately does NOT score ALL-CAPS -- on GAW, all-caps is
+  // common in legit slogans / "BREAKING" / acronyms, so caps-detection would
+  // false-positive and a badge that cries wolf gets ignored. Under-flagging (missing
+  // some slop) is the SAFE error; false-flagging legit content is not.
+  function scorePostQualityText(title){
+    const t = String(title == null ? '' : title).trim();
+    const reasons = [];
+    let score = 0;
+    if (!t) return { slop: false, score: 0, reasons: reasons };
+    const emoji = (t.match(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/gu) || []).length;
+    if (emoji >= 8) { score += 3; reasons.push(emoji + ' emoji (wall)'); }
+    else if (emoji >= 4) { score += 2; reasons.push(emoji + ' emoji'); }
+    if (/(.)\1{7,}/.test(t)) { score += 2; reasons.push('repeated-character spam'); }
+    const marks = (t.match(/[!?]/g) || []).length;
+    if (marks >= 10) { score += 3; reasons.push(marks + ' !/? marks (extreme)'); }
+    else if (marks >= 6) { score += 2; reasons.push(marks + ' !/? marks'); }
+    return { slop: score >= 3, score: score, reasons: reasons };
+  }
+
   function buildActionStrip(item){
     if (item.dataset.gamStrip === '1') return;
     const actions = item.querySelector(SELECTORS.actionsBar);
@@ -11879,6 +11904,29 @@ Analyze this comment against the community rules. Then write a brief, profession
       openModConsole(author, item, 'ban');
     });
     strip.appendChild(banBtn);
+
+    // v10.25.0 (next-wave): in-feed SLOP BADGE -- an at-a-glance low-effort flag for
+    // the curator. Posts only, INFORMATIONAL (no auto-action), conservative heuristic
+    // (needs multiple slop signals to trip). Toggle via the 'slopBadge' setting (default on).
+    if (type === 'post' && getSetting('slopBadge', true)) {
+      try {
+        const _titleEl = item.querySelector('.title');
+        const _q = scorePostQualityText(_titleEl ? _titleEl.textContent : '');
+        if (_q.slop) {
+          const slopBadge = el('a', {
+            cls: 'gam-strip-btn gam-strip-slop',
+            href: 'javascript:void(0)',
+            title: 'Low-effort signals: ' + _q.reasons.join('; ') + ' — informational, your call'
+          }, '⚠ low-effort');
+          slopBadge.style.cssText = 'color:#ffab40;border-color:rgba(255,171,64,0.55)';
+          slopBadge.addEventListener('click', function(e){
+            e.preventDefault(); e.stopPropagation();
+            try { snack('⚠ Low-effort signals: ' + _q.reasons.join('; ') + ' (informational — nothing was actioned)', 'info'); } catch(_){}
+          });
+          strip.appendChild(slopBadge);
+        }
+      } catch(_){}
+    }
 
     actions.appendChild(strip);
   }
