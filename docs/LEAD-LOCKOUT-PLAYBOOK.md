@@ -1,8 +1,33 @@
 # Lead-Lockout Playbook — when you can't get in as lead
 
-> TL;DR: **double-click `scripts\RECOVER-LEAD-ACCESS.bat` → paste (Ctrl+V) into the
-> popup's "I have a token" field → SAVE & VERIFY → reload your GAW tab.** ~30 seconds.
-> Works for every cause (wiped vault, rotated token, corrupted settings).
+> TL;DR: **double-click the `GAW LEAD RESCUE` button on your Desktop → paste (Ctrl+V)
+> into the popup's "I have a token" field → SAVE & VERIFY → reload your GAW tab.**
+> ~30 seconds. Works for every cause (wiped vault, rotated token, corrupted settings).
+
+## ELI5 — fixing the lockout (the dead-simple version)
+
+**What went wrong:** the extension keeps your "lead badge" (your token) in its
+pocket. To save memory, Chrome makes the extension take naps. Sometimes when it
+wakes up, the badge has fallen out of its pocket — so it doesn't recognize you and
+shows the **"NEW MOD SETUP"** screen. **You are NOT a new mod.** The badge just got lost.
+
+**How to fix it — 3 steps, ~30 seconds:**
+
+1. **Double-click `GAW LEAD RESCUE` on your Desktop.** A black window opens, works
+   for ~10 seconds, then beeps. It just minted you a brand-new badge and **copied it
+   to your clipboard** for you.
+2. **Open the ModTools popup.** If you see "NEW MOD SETUP," click **← BACK**, then
+   click **"I have a token"** (NOT the invite-link or invite-code options).
+3. **Press Ctrl+V** to paste, then **SAVE & VERIFY**. Reload your greatawakening.win
+   tab. You're lead again.
+
+**The good news:** the extension now keeps a *spare* badge and puts it back in its
+pocket by itself. Once you're on **v10.24.0+**, this mostly stops happening on its
+own — and the rare time it can't auto-fix (your badge was changed on the server),
+the popup now says *"your token was rejected — paste a new one"* instead of
+pretending you're a stranger.
+
+*(That's the whole strategy. Everything below is the technical detail.)*
 
 ## When you're locked out RIGHT NOW (the break-glass)
 
