@@ -233,6 +233,43 @@ function __tokSetState(state, opts) {
   }
 }
 
+// v10.24.0 (lockout-proof L2): RECOVERY state. A returning operator whose token
+// was REJECTED (background L1 sets gam_auth_failed on a real 401) must NOT be shown
+// the NEW-MOD onboarding (the invite-claim dead end that trapped the lead). This
+// shows the first-run paste UI but reframes it with a recovery banner: "your token
+// was rejected, not a new mod" + pre-opens the token-paste path + points to the
+// break-glass .bat. Auto-hides when whoami later succeeds (banner lives inside the
+// first-run container, which __tokSetState('returning') hides).
+function __tokShowRecovery() {
+  try { __tokSetState('first-run'); } catch (_) {}
+  try {
+    var host = document.getElementById('tokStateFirstRun');
+    if (!host) return;
+    var el = document.getElementById('tokRecoveryBanner');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'tokRecoveryBanner';
+      el.setAttribute('role', 'status');
+      el.style.cssText = 'margin:0 0 10px;padding:8px 10px;border:1px solid var(--bb-warn,#ffd84d);border-radius:4px;background:rgba(255,216,77,0.08);color:#e8e6e1;font:11px/1.45 ui-monospace,monospace';
+      host.insertBefore(el, host.firstChild);
+    }
+    while (el.firstChild) el.removeChild(el.firstChild);
+    var h = document.createElement('div');
+    h.style.cssText = 'font-weight:700;color:var(--bb-warn,#ffd84d);margin-bottom:3px';
+    h.textContent = '⚠ Your saved token was rejected';
+    var p = document.createElement('div');
+    p.textContent = "You're a returning mod, not a new one — your token expired or was rotated. Paste a fresh token below (the \"I have a token\" path), or double-click RECOVER-LEAD-ACCESS.bat to mint one (it copies the new token to your clipboard).";
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pop-btn pop-btn-ghost';
+    b.style.cssText = 'margin-top:6px;font-size:11px';
+    b.textContent = 'I have a token → paste it';
+    b.addEventListener('click', function () { try { var t = document.getElementById('firstRunPathToken'); if (t) t.click(); } catch (_) {} });
+    el.appendChild(h); el.appendChild(p); el.appendChild(b);
+    el.style.display = '';
+  } catch (_) {}
+}
+
 // Populate the verified-status banner with live data.
 // opts: { username, tier, verifiedAgo, ageDays, encrypted }
 function __tokUpdateBanner(opts) {
@@ -2028,8 +2065,17 @@ async function __applyTierGate() {
     const r = await popupRpc('modWhoami');
     clearTimeout(_whoamiTimer);
     if (!r || !r.ok || !r.data) {
-      // v10.13.3 W2: explicit State A on auth fail (no flash)
-      try { __tokSetState('first-run'); } catch(_){}
+      // v10.24.0 (lockout-proof L2): a returning operator whose token was REJECTED
+      // (L1 flags gam_auth_failed) -- or who has a token backup -- is NOT a new mod.
+      // Show RECOVERY (reframe + pre-open token paste + point to the .bat), never the
+      // bare NEW-MOD onboarding that dumped the lead into the invite-claim dead end.
+      let _wasAuthed = false;
+      try {
+        const _f = await chrome.storage.local.get(['gam_auth_failed', 'gam_token_backup_v1']);
+        _wasAuthed = !!(_f && (_f.gam_auth_failed || _f.gam_token_backup_v1));
+      } catch (_) {}
+      if (_wasAuthed) { try { __tokShowRecovery(); } catch (_) { try { __tokSetState('first-run'); } catch (__) {} } }
+      else { try { __tokSetState('first-run'); } catch (_) {} }
       _cardAuthFailed();
       return;
     }

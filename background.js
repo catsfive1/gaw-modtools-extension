@@ -2459,6 +2459,33 @@ async function _rpcWorkerCall(method, path, body, opts) {
       body: (body === undefined || body === null) ? undefined : JSON.stringify(body),
       signal: ctrl.signal
     });
+    // v10.24.0 (lockout-proof L1): a token-bearing 401 means the in-memory vault is
+    // stale/empty (SW race -- bust session + reload picks up an L5 backup-restore or a
+    // popup-saved fresher token) OR the stored token is genuinely rejected
+    // (rotated/revoked). Reload once and retry ONLY if the token actually changed (no
+    // pointless same-token retry); if it didn't, flag gam_auth_failed for the popup
+    // recovery UI (L2) so the operator is guided to re-auth, NOT dumped into onboarding.
+    if (r.status === 401 && !o._retried401 && (secretCache.workerModToken || secretCache.leadModToken)) {
+      const usedW = secretCache.workerModToken, usedL = secretCache.leadModToken;
+      try {
+        secretCache = { workerModToken: '', leadModToken: '' };
+        try { if (chrome.storage && chrome.storage.session) await chrome.storage.session.remove('gam_settings'); } catch (_) {}
+        await loadSecrets(); // session busted -> reads storage.local + L5 backup-restore
+      } catch (_) {}
+      const newW = secretCache.workerModToken, newL = secretCache.leadModToken;
+      if ((newW && newW !== usedW) || (newL && newL !== usedL)) {
+        clearTimeout(timer);
+        return await _rpcWorkerCall(method, path, body, Object.assign({}, o, { _retried401: true }));
+      }
+      // No fresher token available -> genuine rejection. Restore the cache we cleared
+      // (so other in-flight callers still carry the token) + flag for the recovery UI.
+      secretCache = { workerModToken: usedW, leadModToken: usedL };
+      try { await chrome.storage.local.set({ gam_auth_failed: { at: Date.now(), path: String(path).slice(0, 80), kind: o.asLead ? 'lead' : 'team' } }); } catch (_) {}
+    } else if (r.status === 401 && o._retried401) {
+      // The retry (with a freshly-reloaded token) ALSO got 401 -> the stored token is
+      // genuinely bad -> flag for the recovery UI (L2) so the operator isn't onboarded.
+      try { await chrome.storage.local.set({ gam_auth_failed: { at: Date.now(), path: String(path).slice(0, 80), kind: o.asLead ? 'lead' : 'team' } }); } catch (_) {}
+    }
     const text = await r.text();
     let parsed = null;
     try { parsed = JSON.parse(text); } catch (e) {}
@@ -2625,6 +2652,8 @@ const RPC_HANDLERS = {
         } catch (e) {}
         // v10.23.0 (lockout-proof L4): back up the freshly-validated team token now.
         try { await _writeTokenBackup(); } catch (_) {}
+        // v10.24.0 (lockout-proof L1): a successful (re)auth clears the recovery flag.
+        try { await chrome.storage.local.remove('gam_auth_failed'); } catch (_) {}
         return { ok: true, status: r.status, data: { version: parsed.version } };
       } catch (e) {
         return { ok: false, status: 0, error: String(e && e.message || e), timeout: !!(e && e.name === 'AbortError') };
