@@ -162,8 +162,8 @@ try {
     Say '    1. Open the ModTools popup.' 'Yellow'
     Say '    2. In NEW MOD SETUP, click BACK, then pick the "I have a token" path' 'Yellow'
     Say '       (the third option -- NOT the invite link or invite code).' 'Yellow'
-    Say ('    3. Open the file above, copy the token, paste it (username is not needed' ) 'Yellow'
-    Say '       on the token path), then SAVE & VERIFY.' 'Yellow'
+    Say '    3. The token is ALREADY on your clipboard -- just paste it (Ctrl+V);' 'Yellow'
+    Say '       username is not needed on the token path. Then SAVE & VERIFY.' 'Yellow'
     Say '    4. whoami confirms lead; reload your GAW tab to re-enable the HUD.' 'Yellow'
   }
 }
@@ -183,11 +183,19 @@ finally {
   if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
   $logFile = Join-Path $LogDir ('recover-lead-access-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
   try { $log -join "`r`n" | Set-Content -Path $logFile -Encoding UTF8 } catch {}
+  # Clipboard holds whatever the operator needs NEXT: on SUCCESS the TOKEN (paste
+  # straight into the popup -- zero friction); on FAILURE the debug log (paste back
+  # to Claude). The full debug log is ALWAYS saved to $logFile regardless.
   try {
-    $log -join "`r`n" | Set-Clipboard
-    Say '[FULL DEBUG LOG COPIED TO CLIPBOARD]' 'DarkGreen'
-    if ($tokenFile) { Say ('  (the TOKEN is in the .txt file above -- clipboard holds the debug log, not the token)') 'DarkGray' }
-  } catch { Say '(clipboard copy failed)' 'DarkYellow' }
+    if ($ok -and $token) {
+      $token | Set-Clipboard
+      Say '[NEW LEAD TOKEN COPIED TO CLIPBOARD -- paste into the popup with Ctrl+V]' 'Green'
+      Say ('  (full debug log saved to: ' + $logFile + ')') 'DarkGray'
+    } else {
+      $log -join "`r`n" | Set-Clipboard
+      Say '[FULL DEBUG LOG COPIED TO CLIPBOARD -- paste it to Claude]' 'DarkYellow'
+    }
+  } catch { Say '(clipboard copy failed -- the token is in the .txt file shown above)' 'DarkYellow' }
   try {
     [Console]::Beep(659,160); Start-Sleep -Milliseconds 100
     [Console]::Beep(523,160); Start-Sleep -Milliseconds 100
