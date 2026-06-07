@@ -443,6 +443,31 @@ async function loadSecrets() {
       workerModToken: s.workerModToken || '',
       leadModToken: s.leadModToken || ''
     };
+    // v10.23.0 (lockout-proof L5): SELF-HEAL. If the vault came up empty (SW
+    // eviction emptied session + gam_settings missing/undecryptable -- the exact
+    // wiped-vault lockout), restore the team token from the decrypt-independent
+    // backup so the operator is never dumped into NEW-MOD onboarding for a token
+    // they already have. Best-effort + silent if no backup exists.
+    if (!secretCache.workerModToken) {
+      try {
+        const _bak = await _readTokenBackup();
+        if (_bak) {
+          secretCache.workerModToken = _bak;
+          // Mirror back into gam_settings (plaintext, per the v10.11.1 model) so the
+          // popup + content script see the restored token immediately.
+          try {
+            const _cur = await chrome.storage.local.get('gam_settings');
+            const _m = Object.assign({}, (_cur && _cur.gam_settings) || {});
+            _m.workerModToken = _bak;
+            await chrome.storage.local.set({ gam_settings: _m });
+          } catch (_) {}
+          try { console.warn('[ModTools v10.23.0] team token AUTO-RESTORED from backup (vault was empty)'); } catch (_) {}
+        }
+      } catch (_) {}
+    }
+    // v10.23.0 (lockout-proof L4): keep the backup fresh whenever we hold a valid
+    // token (covers normal load + a just-restored token). Fire-and-forget.
+    if (secretCache.workerModToken) { _writeTokenBackup(); }
     // AF-01 P1 fix: restore _UPDATE_FLAG_LAST_SET from durable storage so the
     // update banner survives SW termination. Without this, verifyUpdateFlag
     // returns ok:false after every SW restart until the next alarm fires (~30m).
@@ -2372,7 +2397,37 @@ async function _persistRotatedToken(newTokenPlaintext) {
       await chrome.storage.session.set({ gam_settings: secretCache });
     }
   } catch (_) {}
+  // v10.23.0 (lockout-proof L4): refresh the decrypt-independent backup on rotation.
+  try { await _writeTokenBackup(); } catch (_) {}
   return { saved: saved, lastError: lastError };
+}
+
+// v10.23.0 lockout-proof L4/L5 -- team-token backup + restore. The team token is
+// already stored plaintext in gam_settings (the v10.11.1 "plaintext is the safety
+// net" model), so the plaintext backup field is NO NEW exposure -- but it lives in
+// a SEPARATE storage key, so it survives the exact failures that cause the lockout:
+// gam_settings cleared/corrupted, OR its encrypted blob undecryptable after SW
+// eviction (the v10.11.1 crypto-key-loss case the main vault does NOT survive).
+// Scope: TEAM token only (its loss is what dumps the operator into NEW-MOD
+// onboarding). Lead-token backup + a storage.sync cross-device mirror are deferred.
+async function _writeTokenBackup() {
+  try {
+    const w = (secretCache && secretCache.workerModToken) || '';
+    if (!w) return; // never overwrite a good backup with empty
+    const payload = { ver: 1, savedAt: Date.now(), worker_pt: w };
+    try { payload.worker_enc = await _cryptEncrypt(w); } catch (_) {}
+    await chrome.storage.local.set({ gam_token_backup_v1: payload });
+  } catch (_) {}
+}
+async function _readTokenBackup() {
+  try {
+    const r = await chrome.storage.local.get('gam_token_backup_v1');
+    const b = r && r.gam_token_backup_v1;
+    if (!b) return '';
+    if (typeof b.worker_pt === 'string' && b.worker_pt) return b.worker_pt; // plaintext: always restorable
+    if (_cryptIsEncrypted(b.worker_enc)) { try { return await _cryptDecrypt(b.worker_enc); } catch (_) {} }
+    return '';
+  } catch (_) { return ''; }
 }
 
 async function _rpcWorkerCall(method, path, body, opts) {
@@ -2568,6 +2623,8 @@ const RPC_HANDLERS = {
             await chrome.storage.local.set({ gam_settings: base });
           }
         } catch (e) {}
+        // v10.23.0 (lockout-proof L4): back up the freshly-validated team token now.
+        try { await _writeTokenBackup(); } catch (_) {}
         return { ok: true, status: r.status, data: { version: parsed.version } };
       } catch (e) {
         return { ok: false, status: 0, error: String(e && e.message || e), timeout: !!(e && e.name === 'AbortError') };
