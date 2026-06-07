@@ -31,12 +31,14 @@ This file is the ranked, actionable queue distilled from the synthesis.
 > trust-critical code in the project (the `loadSecrets` path has a documented
 > v10.11.1 history of breaking auth on every load) — do not rush it. Full
 > file:line design in `_cloud_designs_raw.md`. The root cause of the ~20-step
-> lockout was FOUR converging gaps. **L4 + L5 SHIPPED in v10.23.0** (the
-> wiped-vault case now self-heals); **L1 + L2 are the next focused pass** (the
-> rotated/invalid-token case → recovery UI).
+> lockout was FOUR converging gaps. **L1–L5 ALL SHIPPED (v10.23.0 + v10.24.0) —
+> the recurring lead-lockout is structurally closed:** wiped vault self-heals
+> (L4/L5), rotated/invalid token → guided one-paste recovery in the popup
+> (L1/L2), and the `.bat` is the universal break-glass. Remaining L3/L6–L10 are
+> lower-priority hardening (do when the edge cases earn it).
 
-1. **L1 — 401 self-heal + flag** in `_rpcWorkerCall` (background.js:**2433**; fetch result at :2465 currently has ZERO 401 handling). On a token-bearing 401: clear+`loadSecrets()` (picks up an L5 backup-restore or fresher stored token) and **retry once ONLY if the reloaded token actually changed** (avoid a wasted same-token retry); if unchanged → restore `secretCache` + set `gam_auth_failed:{at,path}`. **Subtlety to handle:** `loadSecrets` reads `storage.session` FIRST then `storage.local` — so on a same-SW-lifecycle popup-token-update the session copy can be stale; consider a direct `storage.local` re-read on the bust. Clear `gam_auth_failed` on the next successful `authValidateToken`. Pairs with L2.
-2. **L2 — route whoami-failure / `gam_auth_failed` to a RECOVERY state, never NEW-MOD onboarding** (popup `__applyTierGate` + the `firstRunPath*` wizard). The operator must never be told to "claim an invite" when they're a returning lead. **Needs popup-onboarding recon + the §18 UI lens** (this is the screen the operator SEES).
+1. ✅ **DONE v10.24.0** — **L1 — 401 self-heal + flag** in `_rpcWorkerCall` (background.js:**2433**; fetch result at :2465 currently has ZERO 401 handling). On a token-bearing 401: clear+`loadSecrets()` (picks up an L5 backup-restore or fresher stored token) and **retry once ONLY if the reloaded token actually changed** (avoid a wasted same-token retry); if unchanged → restore `secretCache` + set `gam_auth_failed:{at,path}`. **Subtlety to handle:** `loadSecrets` reads `storage.session` FIRST then `storage.local` — so on a same-SW-lifecycle popup-token-update the session copy can be stale; consider a direct `storage.local` re-read on the bust. Clear `gam_auth_failed` on the next successful `authValidateToken`. Pairs with L2.
+2. ✅ **DONE v10.24.0** — **L2 — route whoami-failure / `gam_auth_failed` to a RECOVERY state, never NEW-MOD onboarding** (popup `__applyTierGate` + the `firstRunPath*` wizard). The operator must never be told to "claim an invite" when they're a returning lead. **Needs popup-onboarding recon + the §18 UI lens** (this is the screen the operator SEES).
 3. **L3 — decouple lead-token recovery from whoami AND the team-token precondition** — break the catch-22 that forced the wrangler-d1 path.
 4. **L4 — encrypted LOCAL token backup** — ✅ **DONE v10.23.0** (`_writeTokenBackup`/`_readTokenBackup`, `gam_token_backup_v1`, plaintext-fallback = no new exposure, hooked into save/rotate/load). Deferred from this cut: lead-token backup + a `storage.sync` cross-device mirror.
 5. **L5 — AUTO-RESTORE from backup when `loadSecrets` finds the vault empty** — ✅ **DONE v10.23.0** (restores team token into `secretCache` + mirrors to `gam_settings`; 12/12 smoke incl. crypto-loss survival). Self-heals the wiped-vault lockout.
