@@ -29703,7 +29703,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       if (r.status !== 200) return { ok:false, reason:'whoami_status', tokenLen:String(tok).length, status:r.status };
       const j = await r.json().catch(() => null);
       if (!j || !j.username) return { ok:false, reason:'whoami_empty', tokenLen:String(tok).length };
-      return { ok:true, username:j.username, tokenLen:String(tok).length };
+      // v10.27.0: remember lead status so the lockout banner can show lead-aware
+      // self-recovery copy -- a returning LEAD must never be told to "ask your lead".
+      // Side-effect only, AFTER the gate decision; it cannot change ok/not-ok.
+      try { setSetting('gam_was_lead', !!j.is_lead); } catch (_) {}
+      return { ok:true, username:j.username, isLead:!!j.is_lead, tokenLen:String(tok).length };
     } catch (e) {
       return { ok:false, reason:'exception', error:String(e && e.message || e) };
     }
@@ -29919,6 +29923,24 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     };
   }
 
+  // v10.27.0: lead-aware lockout recovery. A returning LEAD must NEVER be told
+  // to "ask your lead" -- there is no lead above the lead. These two pure
+  // helpers drive __showAuthFailBanner's copy and are unit-tested
+  // (_lead_recovery_copy_smoke_test.mjs). gam_was_lead is persisted whenever
+  // /mod/whoami returns is_lead:true (see __validateModAuth).
+  function __authReasonIsCredential(reason) {
+    return reason === 'no_token' || reason === 'short_token'
+        || reason === 'whoami_status' || reason === 'whoami_empty';
+  }
+  function __authLeadRecoverySteps() {
+    return [
+      'You are the LEAD -- your saved token dropped out (Chrome evicted it). You do NOT need an invite from anyone.',
+      'Fastest fix: double-click GAW LEAD RESCUE on your desktop. It mints a fresh lead token and copies it to your clipboard (~10s, then a beep).',
+      'Then click "Open ModTools popup" below, choose "I have a token", press Ctrl+V, and Save. The banner closes when you are back in.',
+      'On v10.26.0+ this normally self-heals on its own. If you keep seeing it, tell Claude.'
+    ];
+  }
+
   function __showAuthFailBanner(authResult) {
     try {
       // Don't double-render if already shown.
@@ -29930,6 +29952,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       // user-derived content (reason codes are all hardcoded strings here).
       const reasonSteps = (function(){
         const reason = authResult && authResult.reason;
+        // v10.27.0: a returning LEAD self-recovers (GAW LEAD RESCUE) -- never
+        // "ask your lead". gam_was_lead is set on a prior is_lead:true auth.
+        const __wasLead = (function(){ try { return getSetting('gam_was_lead', false) === true; } catch(_) { return false; } })();
+        if (__wasLead && __authReasonIsCredential(reason)) return __authLeadRecoverySteps();
         // v10.13.3 W2 (UIUX2-19 B.9): short_token split from no_token.
         // short_token = something in storage but <32 chars (truncation).
         // Different remediation: check what's already there, repaste cleanly.
@@ -29946,7 +29972,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
             'Step 1 of 3: Click "Open ModTools popup" (button below). The popup opens.',
             'Step 2 of 3: In the popup, select "I have an invite LINK" OR "I have a token". Paste what your lead sent you.',
             'Step 3 of 3: Click Save. If the popup says "Welcome, [username]", you\'re done -- this banner will close.',
-            'Still stuck? Your invite link may be expired. Ask your lead for a fresh one.'
+            'Still stuck? Lead: run GAW LEAD RESCUE on your desktop (no invite needed). New mod: ask your lead for a fresh invite.'
           ];
         }
         if (reason === 'fetch_failed' || reason === 'no_response') {
@@ -29999,7 +30025,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       ].join(';');
       const title = document.createElement('div');
       title.style.cssText = 'font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:6px';
-      title.textContent = '\u{1F512} ' + _sev.title;
+      // v10.27.0: dignified title when a returning LEAD's token dropped out.
+      const __leadTitle = (function(){ try { return getSetting('gam_was_lead', false) === true && __authReasonIsCredential(authResult && authResult.reason); } catch(_) { return false; } })();
+      title.textContent = '\u{1F512} ' + (__leadTitle ? 'GAW ModTools: lead access dropped' : _sev.title);
       // AF-33 (Rule 99): render steps as <ol><li> for clear numbered recovery path.
       // textContent only -- no innerHTML with user-derived content.
       const msg = document.createElement('div');
