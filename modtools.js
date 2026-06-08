@@ -30619,6 +30619,87 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     };
   } catch (_) {}
 
+  // ==========================================================================
+  // v10.26.0 (next-wave #2) -- FIRST-POST SCREENING
+  // Catch new-account slop/bots at the door. In the FIREHOSE crawl loop, a
+  // scraped post whose TITLE trips the slop heuristic AND whose author is a
+  // brand-new account (<14d, via the LIVE /mod/user/cadence intel) is placed
+  // in SUS (mod_user_sus, via modSusMark) so the robot-icon SUS popover
+  // surfaces them BEFORE the post farms karma.
+  //   - INFORMATIONAL placement only. HI-1 sacred: writes the SUS list, NEVER
+  //     a ban path (POST /mod/user/sus is SUS-write-only).
+  //   - ZERO worker deploy: both routes (modUserCadence GET, modSusMark POST)
+  //     are already live + registered in background.js.
+  //   - Cheap gate FIRST: only sloppy-titled posts cost a cadence call, so the
+  //     network footprint stays tiny even on a busy /new.
+  //   - Dedup-cached (6h TTL) + concurrency-capped so a sloppy page can't fan
+  //     out dozens of intel calls.
+  //   - Toggle via the 'firstPostScreen' setting (default on), mirroring the
+  //     v10.25.0 slop badge.
+  // --------------------------------------------------------------------------
+  const _fpScreenCache = new Map();              // username(lc) -> last-screened ts
+  const FP_SCREEN_TTL_MS = 6 * 60 * 60 * 1000;   // re-screen an author at most every 6h
+  const FP_SCREEN_MAX_INFLIGHT = 3;              // cap concurrent cadence calls
+  let _fpScreenInflight = 0;
+
+  async function firstPostScreenTick(posts) {
+    try {
+      if (getSetting('firstPostScreen', true) !== true) return;
+      if (!Array.isArray(posts) || !posts.length) return;
+      const now = Date.now();
+      // Opportunistic prune so the dedup map can't grow unbounded.
+      if (_fpScreenCache.size > 5000) {
+        for (const [k, ts] of _fpScreenCache) { if (now - ts > FP_SCREEN_TTL_MS) _fpScreenCache.delete(k); }
+      }
+      for (const p of posts) {
+        if (!p || !p.author || !p.title) continue;
+        // Cheap gate FIRST: skip the network call unless the title is already sloppy.
+        const q = scorePostQualityText(p.title);
+        if (!q.slop) continue;
+        const uname = String(p.author).toLowerCase();
+        const last = _fpScreenCache.get(uname);
+        if (last && (now - last) < FP_SCREEN_TTL_MS) continue;   // dedup
+        _fpScreenCache.set(uname, now);
+        // Concurrency cap -- wait for a slot. This whole tick is fire-and-forget
+        // off the crawl loop, so a brief await here never stalls ingest.
+        while (_fpScreenInflight >= FP_SCREEN_MAX_INFLIGHT) {
+          await new Promise(r => setTimeout(r, 250));
+        }
+        _fpScreenInflight++;
+        // Per-author async, NOT awaited, so one slow author can't stall the rest.
+        (async function (author, scored) {
+          try {
+            const r = await rpcCall('modUserCadence', { username: author });
+            const cad = (r && r.ok && r.data) ? r.data : null;
+            if (!cad || typeof cad.is_new_account === 'undefined') return;
+            // Warm the shared new-account cache so /u/ link decorations light up too.
+            try { _newAccountCache.set(author.toLowerCase(), { is_new: !!cad.is_new_account, age_days: cad.account_age_days || 0 }); } catch (_) {}
+            if (!cad.is_new_account) return;
+            const age = cad.account_age_days;
+            const lbl = String(cad.cadence_label || '');
+            const reason = ('NEW first-post slop: ' + scored.reasons.join('; ')
+              + (age != null ? ' [' + age + 'd' : ' [new')
+              + (lbl && lbl !== 'normal' && lbl !== 'NEW' ? '/' + lbl : '') + ']').slice(0, 200);
+            const sr = await rpcCall('modSusMark', { username: author, reason: reason });
+            if (sr && sr.ok) {
+              _firehoseState.screened = (_firehoseState.screened || 0) + 1;
+              try { console.log('[firehose] first-post SUS: @' + author + ' (' + age + 'd) -- ' + scored.reasons.join('; ')); } catch (_) {}
+              try { firehoseRefreshPanel(); } catch (_) {}
+              try { if (typeof _susRefresh === 'function') _susRefresh(); } catch (_) {}
+            }
+          } catch (e) {
+            try { console.warn('[firehose] screen failed @' + author, e && e.message || e); } catch (_) {}
+          } finally {
+            _fpScreenInflight--;
+          }
+        })(p.author, q);
+      }
+    } catch (e) {
+      try { console.warn('[firehose] screen tick failed', e && e.message || e); } catch (_) {}
+    }
+  }
+  try { window._gamFirstPostScreenTick = firstPostScreenTick; } catch (_) {}
+
   async function firehoseLoop() {
     const throttle = parseInt(await getSetting('firehose.throttleMs') || String(FIREHOSE_THROTTLE_DEFAULT), 10);
     const community = (await getSetting('firehose.community')) || 'GreatAwakening';
@@ -30635,6 +30716,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           await new Promise(r => setTimeout(r, 5 * 60 * 1000));
           continue;
         }
+        // v10.26.0: first-post screening -- fire-and-forget (new-account + slop -> SUS).
+        // Non-blocking: never gates the ingest pipeline below.
+        try { firstPostScreenTick(parsed); } catch (_) {}
         for (const p of parsed) {
           buffer.push(p);
           if (buffer.length >= FIREHOSE_BATCH) {
@@ -30672,7 +30756,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         <span style="font-size:10px;color:${st.active ? '#4ade80' : '#9ca3af'};">${st.active ? 'ACTIVE' : 'idle'}</span>
       </div>
       <div style="font-size:11px;color:#9ca3af;line-height:1.5;margin-bottom:8px;">
-        Pages: ${st.pagesCrawled} &middot; Posts: ${st.postsQueued} &middot; Errors: ${st.errors}
+        Pages: ${st.pagesCrawled} &middot; Posts: ${st.postsQueued}${st.screened ? ' &middot; <span style="color:#a78bfa" title="new-account first-post slop placed in SUS">Flagged: ' + st.screened + '</span>' : ''} &middot; Errors: ${st.errors}
       </div>
       <div style="display:flex;gap:6px;">
         ${st.active
