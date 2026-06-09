@@ -3036,6 +3036,27 @@ async function rotateToken() {
   }
 }
 
+// v10.28.0: a lead self-recovering via GAW LEAD RESCUE holds a TEAM TOKEN, not a
+// rotation invite -- but both are base64url, so the claim field accepts the token
+// and the worker rejects it ("claim failed: invalid"). Tokens and invite codes
+// are indistinguishable by shape; the only reliable test is whether the value
+// AUTHENTICATES. This adopts a pasted value as a token: save it, probe
+// /mod/whoami, keep it on success, roll the save back on failure. Returns the
+// username on success (it IS a token), or null (let the caller claim as normal).
+async function __tryAdoptCodeAsToken(code) {
+  try {
+    if (!__isTokenShape(code)) return null;
+    const r = await saveTokensSecurely({ workerModToken: code });
+    if (!r || !r.ok) return null;
+    const probe = await popupRpc('modWhoami');
+    if (probe && probe.ok && probe.data && probe.data.username) return probe.data.username;
+    // Not a valid token after all -- roll the transient save back so we never
+    // leave a bad token persisted (same pattern as the Team Mod Token field).
+    try { await saveTokensSecurely({ workerModToken: '' }); } catch (_) {}
+    return null;
+  } catch (_) { return null; }
+}
+
 async function claimRotationInvite() {
   const status = $('rotateStatus');
   if (!status) return;
@@ -3095,6 +3116,21 @@ async function claimRotationInvite() {
     });
     if (!code) { status.textContent = 'cancelled'; return; }
 
+    // v10.28.0: foolproofing -- a lead recovering via GAW LEAD RESCUE pastes a
+    // TEAM TOKEN here (same base64url shape as an invite code). If it
+    // authenticates, adopt it directly instead of failing "claim ... invalid".
+    try {
+      const _adoptedUser = await __tryAdoptCodeAsToken(code);
+      if (_adoptedUser) {
+        status.className = 'pop-token-status ok';
+        status.textContent = '✓ that was your team TOKEN, not an invite -- saved it. You are ' + _adoptedUser;
+        _showVerifyTokenBtn();
+        try { await loadToken(); } catch (e) {}
+        try { await loadLead(); } catch (e) {}
+        return;
+      }
+    } catch (_) {}
+
     status.textContent = 'claiming...';
     // v5.0-Phase-1: authClaimInvite validates the code, stores the new token in the vault.
     const rClaim = await popupRpc('authClaimInvite', { code: code, username: username });
@@ -3111,6 +3147,8 @@ async function claimRotationInvite() {
       let msg = 'claim rejected (HTTP ' + (rClaim && rClaim.status || '?') + ')';
       if (rClaim && rClaim.data && rClaim.data.error) msg += ' -- ' + rClaim.data.error;
       else if (rClaim && rClaim.error) msg += ' -- ' + rClaim.error;
+      // v10.28.0: if it wasn't a valid invite, it may be a team token in the wrong box.
+      msg += ' (if this is your team TOKEN, paste it in the "Team Mod Token" field instead)';
       status.textContent = msg;
       return;
     }
