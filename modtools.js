@@ -15739,7 +15739,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     const clusters=getIPClusters(users);
     const raidClusters=Object.entries(clusters).filter(([,names])=>names.length>=3);
     raidClusters.forEach(([prefix,names])=>{
-      aEl.innerHTML+=`<div class="gam-t-alert gam-t-alert-warn">\u{26A0}\u{FE0F} <b>Burst detected:</b> ${names.length} users from IP range ${prefix}.x.x &mdash; <a href="#" class="gam-t-alert-link" data-cluster="${prefix}">Filter this cluster</a></div>`;
+      aEl.innerHTML+=`<div class="gam-t-alert gam-t-alert-warn">\u{26A0}\u{FE0F} <b>Burst detected:</b> ${names.length} users from IP range ${prefix}.x.x &mdash; <a href="#" class="gam-t-alert-link" data-cluster="${prefix}">Filter this cluster</a> &middot; <a href="#" class="gam-t-alert-link gam-t-alert-selectall" data-cluster-select="${prefix}">☑ Select all ${names.length}</a></div>`;
     });
     const drPending=getDeathRowPending();
     if(drPending.length>0){
@@ -15752,8 +15752,29 @@ Analyze this comment against the community rules. Then write a brief, profession
     aEl.querySelectorAll('.gam-t-alert-link').forEach(a=>{
       a.addEventListener('click', e=>{
         e.preventDefault();
+        // v10.29.0: the "Select all" link is also .gam-t-alert-link but carries
+        // data-cluster-select (not data-cluster) -- let its own handler take it.
+        if(!a.dataset.cluster) return;
         triageFilter='cluster-'+a.dataset.cluster;
         triageSelected.clear();
+        refreshTriageConsole();
+      });
+    });
+    // v10.29.0: "Select all N" on a burst alert -> add every user in that one IP
+    // cluster to the batch selection AND filter to the cluster so they're visible,
+    // so a lead can Death-Row/Ban a one-address registration flood in two clicks.
+    // HI-1 intact: this only SELECTS; the batch buttons still gate the action and
+    // Death Row keeps its delay/undo. Cluster is recomputed from the live roster
+    // (getIPClusters returns {prefix:[username,...]}), never trusting stale DOM.
+    aEl.querySelectorAll('.gam-t-alert-selectall').forEach(a=>{
+      a.addEventListener('click', e=>{
+        e.preventDefault();
+        const prefix=a.dataset.clusterSelect;
+        const names=(getIPClusters(users)||{})[prefix]||[];
+        let added=0;
+        names.forEach(n=>{ if(n && !triageSelected.has(n)){ triageSelected.add(n); added++; } });
+        triageFilter='cluster-'+prefix;
+        try { snack('☑ Selected ' + names.length + ' from ' + prefix + '.x.x — choose a batch action below', 'success'); } catch(_){}
         refreshTriageConsole();
       });
     });
