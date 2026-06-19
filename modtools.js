@@ -423,6 +423,36 @@
     WARN_BG:   'rgba(240,160,64,0.10)',
   });
 
+  // ════════════════════════════════════════════════════════════════════════
+  // GAM_TOK — canonical in-page design tokens (CHANNEL 1: inline cssText)
+  // ════════════════════════════════════════════════════════════════════════
+  // Single source of truth for the in-page redesign (REDESIGN-BRIEF PART 1/2).
+  // var() is unreliable inside injected inline el.style.cssText (see modtools.js
+  // ~L416 + the documented note in __v81InjectContrastCss), so tokens ship TWICE
+  // with IDENTICAL values: this frozen object for inline string-concatenation,
+  // and the mirrored --gam-tok-* :root block appended near L4424 for <style>
+  // rules. Inline migration is string concat ONLY — never var() in cssText.
+  //   el.style.cssText='color:#9b9892' -> el.style.cssText='color:'+GAM_TOK.inkMuted
+  // WP-01 installs both channels additive-first; nothing reads them until a
+  // downstream component migrates. The legacy `C` object above is aliased onto
+  // this same ramp (BG/BG2/BG3 already equal surfaceRaised/Panel/Overlay), so a
+  // mixed migration state cannot visually regress.
+  const GAM_TOK = Object.freeze({
+    surface:'#0a0a0b', surfaceSunken:'#050507', surfaceRaised:'#0f1114',
+    surfacePanel:'#181b20', surfaceOverlay:'#252a31',
+    border:'#2a2f38', borderStrong:'#3a3f48',
+    ink:'#e8e6e1', inkMuted:'#b0b5bc', inkFaint:'#7a7672',
+    onAccentDark:'#0a0a0b', onAccentLight:'#ffffff',
+    accent:'#ff9933', accentSoft:'rgba(255,153,51,0.10)', accentLine:'rgba(255,153,51,0.28)',
+    focusRing:'#ff9933',
+    info:'#7cb8ff', infoSoft:'rgba(74,158,255,0.10)',
+    danger:'#f04040', dangerSoft:'rgba(240,64,64,0.12)',
+    warn:'#f0a040', warnSoft:'rgba(240,160,64,0.12)',
+    success:'#3dd68c', successSoft:'rgba(61,214,140,0.12)',
+    special:'#a78bfa', specialSoft:'rgba(167,139,250,0.12)',
+    scrim:'rgba(0,0,0,0.60)',
+  });
+
   const USERS_BAN_REASON_DEFAULT = 'Inappropriate/obscene username - permanent ban.';
   // v5.1.9: dynamic getter respects user-set Settings.banMessageTemplate
   function getUsersBanReason(){
@@ -4435,6 +4465,51 @@
           '--gam-ok-text:#c6f6d5;',
           '--gam-danger-bg:#9b2c2c;',
           '--gam-danger-text:#fed7d7;',     /* Session C correction: #feb2b2 on #9b2c2c was 4.38:1 (FAIL); #fed7d7 = 5.70:1 */
+          /* ── GAM_TOK CHANNEL 2 (in-page redesign WP-01) ──────────────────── */
+          /* Mirror of the frozen GAM_TOK object (values MUST stay identical).   */
+          /* <style>-rule channel; safe to use var() here (NOT in inline cssText)*/
+          '--gam-tok-surface:#0a0a0b;',
+          '--gam-tok-surface-sunken:#050507;',
+          '--gam-tok-surface-raised:#0f1114;',
+          '--gam-tok-surface-panel:#181b20;',
+          '--gam-tok-surface-overlay:#252a31;',
+          '--gam-tok-border:#2a2f38;',
+          '--gam-tok-border-strong:#3a3f48;',
+          '--gam-tok-ink:#e8e6e1;',
+          '--gam-tok-ink-muted:#b0b5bc;',
+          '--gam-tok-ink-faint:#7a7672;',
+          '--gam-tok-on-accent-dark:#0a0a0b;',
+          '--gam-tok-on-accent-light:#ffffff;',
+          '--gam-tok-accent:#ff9933;',
+          '--gam-tok-accent-soft:rgba(255,153,51,0.10);',
+          '--gam-tok-accent-line:rgba(255,153,51,0.28);',
+          '--gam-tok-focus-ring:#ff9933;',
+          '--gam-tok-info:#7cb8ff;',
+          '--gam-tok-info-soft:rgba(74,158,255,0.10);',
+          '--gam-tok-danger:#f04040;',
+          '--gam-tok-danger-soft:rgba(240,64,64,0.12);',
+          '--gam-tok-warn:#f0a040;',
+          '--gam-tok-warn-soft:rgba(240,160,64,0.12);',   /* NEW soft token */
+          '--gam-tok-success:#3dd68c;',
+          '--gam-tok-success-soft:rgba(61,214,140,0.12);', /* NEW soft token */
+          '--gam-tok-special:#a78bfa;',
+          '--gam-tok-special-soft:rgba(167,139,250,0.12);',/* NEW soft token */
+          '--gam-tok-scrim:rgba(0,0,0,0.60);',
+          /* ── Named z-layer ladder (in-page redesign WP-01 §2.6) ───────────── */
+          /* Replaces magic z literals. Values kept IDENTICAL to the current     */
+          /* stacking order so nothing regresses; GAM_CSS rules now read these.  */
+          '--z-content:0;',
+          '--z-sticky-bar:9999970;',
+          '--z-drawer:2147483600;',
+          '--z-backdrop-scrim:9999990;',
+          '--z-modal:9999995;',
+          '--z-toast:9999999;',
+          /* specialized overlays that legitimately sit above toast (documented  */
+          /* onto the ladder family; values unchanged from prior literals).      */
+          '--z-preflight:10000000;',
+          '--z-update-banner:10000001;',
+          '--z-ctx-menu:10000005;',
+          '--z-t-popover:10000010;',
         '}'
       ].join('');
       if (document.head) document.head.appendChild(style);
@@ -24139,7 +24214,7 @@ Analyze this comment against the community rules. Then write a brief, profession
 /* v6.0.1: snack sits 100px from the right edge (was right:14px). Status bar
    now centered, so notifications have clean real-estate on the right. */
 /* v9.4.0: snack padding 7/14→6/12, single shadow layer (no inset stack). */
-.gam-snack{position:fixed;bottom:14px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;opacity:0;transform:translateY(6px) scale(.97);transition:opacity .14s,transform .18s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px}
+.gam-snack{position:fixed;bottom:14px;right:100px;z-index:var(--z-toast,9999999);padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;opacity:0;transform:translateY(6px) scale(.97);transition:opacity .14s,transform .18s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px}
 .gam-snack-show{opacity:1;transform:translateY(0)}
 .gam-snack-success{background:${C.GREEN};color:#0f1114}
 .gam-snack-error{background:${C.RED};color:#fff}
@@ -24161,11 +24236,11 @@ Analyze this comment against the community rules. Then write a brief, profession
         Note/Message tabs) — exactly what Commander sees.
    Two-part fix: kill backdrop blur (here) + scope chat-panel rule to
    [data-dock] so only the chat panel matches it (further down the file). */
-#gam-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999990;opacity:0;transition:opacity .2s}
+#gam-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:var(--z-backdrop-scrim,9999990);opacity:0;transition:opacity .2s}
 /* ── Iter-3: modal + console polish ── */
 /* v9.4.0: dropped the inset 1px highlight (the ",0 0 0 1px rgba(255,255,255,.04)"
    was pure visual noise on a 1px border). Shadow now a single clean layer. */
-.gam-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.97);z-index:9999995;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:8px;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};opacity:0;transition:opacity .15s,transform .18s;box-shadow:0 24px 48px rgba(0,0,0,.6);max-height:85vh;max-width:95vw;display:flex;flex-direction:column;overflow:hidden}
+.gam-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.97);z-index:var(--z-modal,9999995);background:${C.BG};border:1px solid ${C.BORDER2};border-radius:8px;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};opacity:0;transition:opacity .15s,transform .18s;box-shadow:0 24px 48px rgba(0,0,0,.6);max-height:85vh;max-width:95vw;display:flex;flex-direction:column;overflow:hidden}
 /* v9.4.0: header padding 11/16 → 10/14, body padding 16 → 12. Closes
    ~10px of vertical+horizontal whitespace per modal — substantial when
    stacked across stats / actions / form fields. */
@@ -24427,7 +24502,7 @@ Analyze this comment against the community rules. Then write a brief, profession
    C.TEXT3 — drawer now reads as part of the same surface family.
    Padding tightened (sections 14/16 → 10/14), title 15→14, button
    sizing brought in line with .gam-btn-small. */
-#gam-intel-drawer { position:fixed; top:0; right:0; height:100vh; width:min(480px, 40vw); background:${C.BG2}; color:${C.TEXT}; box-shadow:-4px 0 24px rgba(0,0,0,.6); transform:translateX(100%); transition:transform .18s ease-out; z-index:2147483600; display:flex; flex-direction:column; font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; }
+#gam-intel-drawer { position:fixed; top:0; right:0; height:100vh; width:min(480px, 40vw); background:${C.BG2}; color:${C.TEXT}; box-shadow:-4px 0 24px rgba(0,0,0,.6); transform:translateX(100%); transition:transform .18s ease-out; z-index:var(--z-drawer,2147483600); display:flex; flex-direction:column; font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; }
 #gam-intel-drawer.gam-intel-drawer--open { transform:translateX(0); }
 #gam-intel-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:2147483599; opacity:0; pointer-events:none; transition:opacity .18s; }
 #gam-intel-backdrop.gam-intel-backdrop--open { opacity:1; pointer-events:auto; }
@@ -24860,7 +24935,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
    async resolver lost) could linger forever, parking the blur indefinitely.
    Both gaps closed together. Solid 0.7 black gives the same focus-direction
    without the GPU side effect. */
-.gam-preflight-wrap{position:fixed;inset:0;z-index:10000000;display:flex;align-items:center;justify-content:center}
+.gam-preflight-wrap{position:fixed;inset:0;z-index:var(--z-preflight,10000000);display:flex;align-items:center;justify-content:center}
 .gam-preflight-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.7)}
 .gam-preflight{position:relative;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:6px;padding:20px;min-width:420px;max-width:560px;box-shadow:0 24px 48px rgba(0,0,0,.7);color:${C.TEXT}}
 .gam-preflight-danger{border-color:${C.RED};box-shadow:0 0 0 2px rgba(240,64,64,.2), 0 24px 48px rgba(0,0,0,.7)}
@@ -24994,7 +25069,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-home-jump:hover{color:#ffffff!important;text-decoration:underline!important}
 
 /* v5.1.9 EXP Loop 3: right-click context menu on /u/ links */
-.gam-ctx-menu{position:fixed;z-index:10000005;width:220px;background:#181b20;border:1px solid #3a3f48;border-radius:4px;padding:4px 0;box-shadow:0 8px 32px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.04);font:11px/1 'JetBrains Mono','SF Mono',Consolas,monospace;color:#e8eaed;user-select:none}
+.gam-ctx-menu{position:fixed;z-index:var(--z-ctx-menu,10000005);width:220px;background:#181b20;border:1px solid #3a3f48;border-radius:4px;padding:4px 0;box-shadow:0 8px 32px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.04);font:11px/1 'JetBrains Mono','SF Mono',Consolas,monospace;color:#e8eaed;user-select:none}
 .gam-ctx-head{padding:6px 12px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5c6370;border-bottom:1px solid #2a2f38;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gam-ctx-sep{height:1px;background:#2a2f38;margin:3px 0}
 /* v10.13.2 W5 (UIUX2-34 P0): bumped 28 -> 32 for tap target compliance */
@@ -25009,7 +25084,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-ctx-kbd kbd{display:inline-flex;align-items:center;justify-content:center;height:16px;min-width:16px;padding:0 3px;border:1px solid #3a3f48;border-radius:2px;font:9px/1 inherit;color:#5c6370;background:transparent}
 
 /* v5.1.4 auto-update banner - sticky top, high contrast so mods can't miss it */
-.gam-update-banner{position:fixed;top:0;left:0;right:0;z-index:10000001;display:flex;align-items:center;gap:12px;padding:10px 16px;background:linear-gradient(90deg, ${C.RED} 0%, #c72222 100%);color:#fff;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;box-shadow:0 2px 12px rgba(0,0,0,.45);letter-spacing:.2px}
+.gam-update-banner{position:fixed;top:0;left:0;right:0;z-index:var(--z-update-banner,10000001);display:flex;align-items:center;gap:12px;padding:10px 16px;background:linear-gradient(90deg, ${C.RED} 0%, #c72222 100%);color:#fff;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;box-shadow:0 2px 12px rgba(0,0,0,.45);letter-spacing:.2px}
 .gam-update-emoji{font-size:18px;flex:0 0 auto}
 .gam-update-text{flex:1;font-size:13px;line-height:1.4}
 .gam-update-text em{font-style:normal;color:#ffe0e0;font-weight:400}
@@ -25077,7 +25152,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-act-pattern:hover{background:rgba(255,214,10,.12);border-color:rgba(255,214,10,.3);color:${C.YELLOW}}
 
 /* Triage popover base (shared by DR + pattern) */
-.gam-t-popover{position:absolute;right:0;top:calc(100% + 4px);z-index:10000010;background:${C.BG};border:1px solid ${C.BORDER2};border-radius:6px;padding:12px 14px;min-width:230px;max-width:300px;box-shadow:0 12px 32px rgba(0,0,0,.6);font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT}}
+.gam-t-popover{position:absolute;right:0;top:calc(100% + 4px);z-index:var(--z-t-popover,10000010);background:${C.BG};border:1px solid ${C.BORDER2};border-radius:6px;padding:12px 14px;min-width:230px;max-width:300px;box-shadow:0 12px 32px rgba(0,0,0,.6);font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT}}
 .gam-t-pop-title{font-size:12px;font-weight:700;margin-bottom:4px;color:${C.TEXT}}
 .gam-t-pop-sub{font-size:10px;color:${C.TEXT3};margin-bottom:8px}
 .gam-t-pop-actions{display:flex;gap:6px;justify-content:flex-end;margin-top:8px}
@@ -26630,6 +26705,88 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   .gam-chip--risk-critical, .gam-thread-watch-btn--flagged,
   .gam-repeat-halo--pulse, .gam-mc-loading::before,
   .gam-skeleton, .gam-snack { animation: none !important; }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   IN-PAGE REDESIGN — WP-01 FOUNDATION INVARIANTS (REDESIGN-BRIEF §2.6/§2.7/§1.5)
+   Appended last so it establishes the global floor without fighting earlier
+   rules. var(--gam-tok-*) is safe here (<style> channel, never inline cssText).
+   ADDITIVE-FIRST: every rule below either tightens an a11y/motion invariant or
+   sets an elevation default that matches the current surface values, so a
+   not-yet-migrated component cannot visually regress.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* §2.6 — ONE global prefers-reduced-motion cap across all pseudo-elements.
+   Supersedes the scattered per-selector PRM blocks above by covering the whole
+   GAM surface; static fallbacks (persistent rings, static skeleton blocks) live
+   in each component package. iteration-count:1 stops infinite halos/pulses. */
+@media (prefers-reduced-motion: reduce) {
+  [class*="gam-"], [class*="gam-"]::before, [class*="gam-"]::after,
+  [id*="gam-"], [id*="gam-"]::before, [id*="gam-"]::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* §2.7 — UNSCOPED minimum target size. Moved OFF body.gam-ux-polish-on so new
+   interactive classes cannot silently opt out of the 32px floor (44px for the
+   primary action chips). box-sizing normalized so per-class padding stays on
+   grid. This duplicates the polish-on touch rule at the base level; identical
+   min values, so no visual change for already-polished surfaces. */
+.gam-btn, .gam-mc-send-btn, .gam-strip-btn, .gam-bar-btn, .gam-modal-close,
+.gam-empty-cta, .gam-mm-bar-btn, .gam-snack-action, .gam-tip-ctrl-btn,
+.gam-sus-dr-btn, .gam-drawer-close, .gam-t-flush-btn, .gam-park-btn,
+.gam-mc-tab, .gam-modal-tab, .gam-settings-promote-btn, .gam-action-btn,
+.gam-row-delete, .gam-chip, .gam-ctx-item, .gam-toast-btn {
+  min-height: 32px; box-sizing: border-box;
+}
+.gam-btn-accent, .gam-btn-danger, .gam-bar-icon, .gam-bar-icon-brand,
+.gam-park-badge, .gam-shadow-badge {
+  min-width: 32px; min-height: 32px;
+}
+/* 24px absolute-floor hit-area helper for deliberately-small visuals: a
+   transparent ::before that pads the click target without growing the glyph. */
+.gam-min-target-24 { position: relative; }
+.gam-min-target-24::before {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 24px; min-height: 24px; width: 100%; height: 100%;
+}
+
+/* §2.7 — Global keyboard focus ring on all GAM interactive base classes.
+   2px solid focus-ring token + 2px offset. overflow:clip-friendly: rules that
+   need to show the offset ring should use overflow:clip (not hidden) or inset
+   padding; this rule supplies the ring, components ensure it isn't clipped. */
+.gam-btn:focus-visible, .gam-mc-tab:focus-visible, .gam-modal-tab:focus-visible,
+.gam-modal-close:focus-visible, .gam-input:focus-visible,
+.gam-textarea:focus-visible, .gam-select:focus-visible,
+.gam-chip:focus-visible, .gam-bar-btn:focus-visible,
+.gam-strip-btn:focus-visible, .gam-snack-action:focus-visible,
+.gam-toast-btn:focus-visible, .gam-park-btn:focus-visible,
+.gam-empty-cta:focus-visible, .gam-mm-bar-btn:focus-visible,
+.gam-drawer-close:focus-visible, .gam-ctx-item:focus-visible,
+.gam-t-flush-btn:focus-visible, .gam-mc-send-btn:focus-visible {
+  outline: 2px solid var(--gam-tok-focus-ring, #ff9933) !important;
+  outline-offset: 2px !important;
+}
+
+/* §1.5 — Elevation contract. In-flow GAM cards = surface-raised + 1px border,
+   NO shadow. Floating shells (modals, toasts/snacks, popovers, ctx-menus) =
+   surface-panel + 1px border-strong + a single scrim shadow. Defined with
+   :where() so specificity stays 0 — every component package can override
+   freely, and not-yet-migrated components keep their own (matching) values. */
+:where(.gam-mc-section, .gam-mc-panel, .gam-card, .gam-intel-card) {
+  background: var(--gam-tok-surface-raised, #0f1114);
+  border: 1px solid var(--gam-tok-border, #2a2f38);
+  box-shadow: none;
+}
+:where(.gam-modal, .gam-snack, .gam-toast, .gam-t-popover, .gam-ctx-menu,
+       .gam-mc-link-preview) {
+  background: var(--gam-tok-surface-panel, #181b20);
+  border: 1px solid var(--gam-tok-border-strong, #3a3f48);
+  box-shadow: 0 8px 24px var(--gam-tok-scrim, rgba(0,0,0,0.60));
 }
 `;
       if (document.head) document.head.appendChild(ts);
