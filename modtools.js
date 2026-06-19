@@ -10126,7 +10126,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         <input type="text" class="gam-input" id="mc-ban-subj" placeholder="Subject line...">
       </div>
       <div class="gam-mc-field">
-        <label>\u{1F4DD} Team macros (shared) <span style="color:' + GAM_TOK.inkFaint + ';font-weight:400;font-size:10px">\u2014 manage in popup</span></label>
+        <label>\u{1F4DD} Team macros (shared) <span style="color:${GAM_TOK.inkFaint};font-weight:400;font-size:10px">\u2014 manage in popup</span></label>
         <select class="gam-input" id="mc-ban-macro-pick">
           <option value="">-- Pick a team macro --</option>
         </select>
@@ -10169,13 +10169,13 @@ Analyze this comment against the community rules. Then write a brief, profession
       <div id="mc-ban-status" class="gam-mc-ban-status"></div>
       <!-- v10.13.4 W4 (P0): UNBAN demoted to a ghost link beneath the status div.
            v10.14.2 MM7: rendered ONLY when banned-status signal is positive. -->
-      ${_isBannedHint ? `<div style="margin-top:6px;font-size:10px;text-align:right;letter-spacing:0.04em">
-        <a href="#" id="mc-ban-unban" style="color:' + GAM_TOK.success + ';text-decoration:underline;cursor:pointer;background:transparent;border:none;padding:0;font:inherit">already banned — unban instead</a>` : `<div style="display:none">`}
+      <div style="margin-top:6px;font-size:10px;text-align:right;letter-spacing:0.04em;visibility:${_isBannedHint ? 'visible' : 'hidden'}">
+        <a href="#" id="mc-ban-unban" style="color:${GAM_TOK.success};text-decoration:underline;cursor:pointer;background:transparent;border:none;padding:0;font:inherit">already banned — unban instead</a>
       </div>
       <!-- v9.9.0 - AI ban-summary -> auto-add to user notes (max 15 words). -->
       <div class="gam-mc-field" id="mc-ban-summary-wrap" style="margin-top:8px;display:none">
-        <label style="font-size:10px;color:' + GAM_TOK.inkMuted + ';text-transform:uppercase;letter-spacing:0.08em">\u{1F916} AI summary (auto-appended to notes after BAN)</label>
-        <div id="mc-ban-summary-preview" style="background:' + GAM_TOK.surfaceSunken + ';border:1px solid ' + GAM_TOK.border + ';border-left:3px solid ' + GAM_TOK.special + ';padding:6px 8px;font-size:11px;color:' + GAM_TOK.ink + ';line-height:1.4">
+        <label style="font-size:10px;color:${GAM_TOK.inkMuted};text-transform:uppercase;letter-spacing:0.08em">\u{1F916} AI summary (auto-appended to notes after BAN)</label>
+        <div id="mc-ban-summary-preview" style="background:${GAM_TOK.surfaceSunken};border:1px solid ${GAM_TOK.border};border-left:3px solid ${GAM_TOK.special};padding:6px 8px;font-size:11px;color:${GAM_TOK.ink};line-height:1.4">
           (the AI will summarize the ban reason into <=15 words and append to ` + JSON.stringify(username) + ` notes after the ban succeeds)
         </div>
       </div>
@@ -10247,7 +10247,9 @@ Analyze this comment against the community rules. Then write a brief, profession
         // selectedDuration defaults to 1 (24h, see L10130 area). Mark it active.
         const _defaultDur = durRow.querySelector('[data-v="1"]');
         if (_defaultDur && !_defaultDur.classList.contains('gam-mc-dur-active')) {
-          _defaultDur.classList.add('gam-mc-dur-active');
+          // WP-05.1: preselected default carries the amber accent tier via
+          // -default; selectDuration() strips it on first user click -> danger.
+          _defaultDur.classList.add('gam-mc-dur-active', 'gam-mc-dur-default');
         }
       }
     } catch (_) {}
@@ -10622,6 +10624,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     function selectDuration(v){
       selectedDuration = v;
       durRow.querySelectorAll('.gam-mc-dur').forEach(b=>{
+        // WP-05.1: a deliberate pick is danger-tier; clear the amber default mark.
+        b.classList.remove('gam-mc-dur-default');
         b.classList.toggle('gam-mc-dur-active', parseInt(b.dataset.v)===v);
       });
       updateGoLabel();
@@ -24564,6 +24568,13 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-mc-dur-active{background:var(--gam-tok-danger-soft,rgba(240,64,64,0.12));border-color:var(--gam-tok-danger,${C.RED});color:var(--gam-tok-danger,${C.RED});box-shadow:inset 3px 0 0 var(--gam-tok-danger,${C.RED}),inset 0 0 0 1px var(--gam-tok-danger,${C.RED})}
 .gam-mc-dur-active::after{content:'\\2B23';position:absolute;top:3px;right:5px;font-size:9px;line-height:1;color:var(--gam-tok-danger,${C.RED});opacity:.9}
 .gam-mc-dur-active:hover{opacity:1;color:var(--gam-tok-danger,${C.RED});border-color:var(--gam-tok-danger,${C.RED})}
+/* WP-05.1: the preselected DEFAULT duration uses the amber accent tier (not danger
+   red) so it reads as "default, not deliberately chosen" pre-interaction. The
+   .gam-mc-dur-default modifier is added alongside -active only at preselect and is
+   stripped on the first user click (see selectDuration), reverting to danger tier. */
+.gam-mc-dur-active.gam-mc-dur-default{background:var(--gam-tok-accent-soft,rgba(255,153,51,0.12));border-color:var(--gam-tok-accent,${C.ACCENT});color:var(--gam-tok-accent,${C.ACCENT});box-shadow:inset 3px 0 0 var(--gam-tok-accent,${C.ACCENT}),inset 0 0 0 1px var(--gam-tok-accent,${C.ACCENT})}
+.gam-mc-dur-active.gam-mc-dur-default::after{color:var(--gam-tok-accent,${C.ACCENT})}
+.gam-mc-dur-active.gam-mc-dur-default:hover{color:var(--gam-tok-accent,${C.ACCENT});border-color:var(--gam-tok-accent,${C.ACCENT})}
 
 .gam-mc-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 .gam-mc-actions .gam-btn{min-width:160px}
@@ -25219,13 +25230,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 
 /* v5.2.9: custom ban message history */
 /* WP-05.3: thin token-styled scrollbar + bottom fade-mask so 130px overflow is visible; overflow:clip-safe focus ring via scroll-padding so a focused item's ring isn't hidden under the fade. */
-.gam-mc-custom-hist{position:relative;display:flex;flex-direction:column;gap:4px;max-height:130px;overflow-y:auto;margin-top:6px;scrollbar-width:thin;scrollbar-color:var(--gam-tok-accent-line,rgba(255,153,51,0.28)) transparent;-webkit-mask-image:linear-gradient(to bottom,black calc(100% - 14px),transparent 100%);mask-image:linear-gradient(to bottom,black calc(100% - 14px),transparent 100%)}
+.gam-mc-custom-hist{position:relative;display:flex;flex-direction:column;gap:4px;max-height:130px;overflow-y:auto;margin-top:6px;scroll-padding-bottom:18px;scrollbar-width:thin;scrollbar-color:var(--gam-tok-accent-line,rgba(255,153,51,0.28)) transparent;-webkit-mask-image:linear-gradient(to bottom,black calc(100% - 14px),transparent 100%);mask-image:linear-gradient(to bottom,black calc(100% - 14px),transparent 100%)}
+/* WP-05.3: when an item is focused, drop the bottom fade-mask entirely so the
+   focus ring can never be dimmed by the 14px gradient; scroll-padding-bottom
+   already keeps keyboard focus clear of the fade band. */
+.gam-mc-custom-hist:focus-within{-webkit-mask-image:none;mask-image:none}
 .gam-mc-custom-hist::-webkit-scrollbar{width:6px}
 .gam-mc-custom-hist::-webkit-scrollbar-thumb{background:var(--gam-tok-accent-line,rgba(255,153,51,0.28));border-radius:999px}
 .gam-mc-custom-hist::-webkit-scrollbar-track{background:transparent}
 .gam-mc-custom-hist-item{background:var(--gam-tok-surface-overlay,${C.BG3});border:1px solid var(--gam-tok-border,${C.BORDER});border-radius:6px;padding:5px 8px;font-size:11px;color:var(--gam-tok-ink-muted,${C.TEXT2});cursor:pointer;line-height:1.4;transition:border-color .1s,color .1s,background .1s}
 .gam-mc-custom-hist-item:hover{border-color:var(--gam-tok-accent,${C.ACCENT});color:var(--gam-tok-ink,${C.TEXT});background:var(--gam-tok-accent-soft,rgba(255,153,51,0.10))}
-.gam-mc-custom-hist-item:focus-visible{outline:2px solid var(--gam-tok-accent,${C.ACCENT});outline-offset:2px}
+.gam-mc-custom-hist-item:focus-visible{outline:2px solid var(--gam-tok-accent,${C.ACCENT});outline-offset:-2px}
 
 /* v5.2.9: settings small input */
 .gam-settings-input-sm{background:${C.BG};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT};font:11px 'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;padding:5px 8px;outline:none;transition:border-color .15s}
