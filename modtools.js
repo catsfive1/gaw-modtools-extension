@@ -4561,14 +4561,15 @@
       style.textContent = [
         /* v8.1 ux: skeleton — all rules body.gam-ux-polish-on-scoped */
         'body.gam-ux-polish-on .gam-skeleton-wrap{display:flex;flex-direction:column;gap:8px;padding:8px 0;}',
-        'body.gam-ux-polish-on .gam-sk-line{height:12px;border-radius:4px;background:#2a2a30;}',
-        'body.gam-ux-polish-on .gam-sk-row{height:36px;border-radius:6px;background:#2a2a30;}',
-        'body.gam-ux-polish-on .gam-sk-card{height:120px;border-radius:8px;background:#2a2a30;}',
-        'body.gam-ux-polish-on .gam-sk-avatar{width:32px;height:32px;border-radius:50%;background:#2a2a30;}',
+        /* WP-09: ONE skeleton look — shimmer over surface-overlay blocks (token ramp). */
+        'body.gam-ux-polish-on .gam-sk-line{height:12px;border-radius:4px;background:var(--gam-tok-surface-overlay,#252a31);}',
+        'body.gam-ux-polish-on .gam-sk-row{height:36px;border-radius:6px;background:var(--gam-tok-surface-overlay,#252a31);}',
+        'body.gam-ux-polish-on .gam-sk-card{height:120px;border-radius:8px;background:var(--gam-tok-surface-overlay,#252a31);}',
+        'body.gam-ux-polish-on .gam-sk-avatar{width:32px;height:32px;border-radius:50%;background:var(--gam-tok-surface-overlay,#252a31);}',
         /* Shimmer animation respects prefers-reduced-motion via no-preference guard */
         '@media (prefers-reduced-motion: no-preference){',
           'body.gam-ux-polish-on .gam-skeleton-shimmer{',
-            'background:linear-gradient(90deg,#2a2a30 0%,#3a3a42 50%,#2a2a30 100%);',
+            'background:linear-gradient(90deg,var(--gam-tok-surface-overlay,#252a31) 0%,var(--gam-tok-border-strong,#3a3f48) 50%,var(--gam-tok-surface-overlay,#252a31) 100%);',
             'background-size:200% 100%;',
             'animation:gam-skeleton-shimmer 2s linear infinite;',
           '}',
@@ -4576,6 +4577,12 @@
             '0%{background-position:200% 0;}',
             '100%{background-position:-200% 0;}',
           '}',
+        '}',
+        /* WP-09 PRM fallback: static surface-overlay block + border + explicit "Loading…" affordance (NOT nothing). */
+        '@media (prefers-reduced-motion: reduce){',
+          'body.gam-ux-polish-on .gam-skeleton-wrap{border:1px solid var(--gam-tok-border,#2a2f38);border-radius:6px;padding:8px;position:relative;}',
+          'body.gam-ux-polish-on .gam-skeleton-shimmer{background:var(--gam-tok-surface-overlay,#252a31);}',
+          'body.gam-ux-polish-on .gam-skeleton-wrap::after{content:"Loading…";display:block;margin-top:4px;font-size:11px;letter-spacing:.04em;color:var(--gam-tok-ink-muted,#b0b5bc);}',
         '}'
       ].join('');
       if (document.head) document.head.appendChild(style);
@@ -4650,12 +4657,13 @@
       const style = document.createElement('style');
       style.textContent = [
         /* v8.1 ux: empty-state -- body.gam-ux-polish-on-scoped */
-        'body.gam-ux-polish-on .gam-empty-card{display:flex;flex-direction:column;align-items:center;gap:12px;padding:32px 20px;background:#1f1f24;border-radius:8px;text-align:center;color:var(--gam-muted-text,#b0b5bc);}',
-        'body.gam-ux-polish-on .gam-empty-icon{color:#5a5a62;}',
-        'body.gam-ux-polish-on .gam-empty-headline{font-size:15px;font-weight:600;color:#e5e5e8;}',
-        'body.gam-ux-polish-on .gam-empty-desc{font-size:13px;color:var(--gam-muted-text,#b0b5bc);max-width:320px;line-height:1.5;}',
-        'body.gam-ux-polish-on .gam-empty-cta{margin-top:4px;padding:8px 16px;background:#3a3a42;color:#e5e5e8;border:none;border-radius:6px;cursor:pointer;font-size:13px;min-height:44px;min-width:44px;}',
-        'body.gam-ux-polish-on .gam-empty-cta:hover{background:#4a4a52;}'
+        /* WP-09: empty-card on surface-raised, token-driven ink; CTA already 44px. */
+        'body.gam-ux-polish-on .gam-empty-card{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;background:var(--gam-tok-surface-raised,#0f1114);border:1px solid var(--gam-tok-border,#2a2f38);border-radius:8px;text-align:center;color:var(--gam-tok-ink-muted,#b0b5bc);}',
+        'body.gam-ux-polish-on .gam-empty-icon{color:var(--gam-tok-ink-faint,#7a7672);}',
+        'body.gam-ux-polish-on .gam-empty-headline{font-size:15px;font-weight:600;color:var(--gam-tok-ink,#e8e6e1);}',
+        'body.gam-ux-polish-on .gam-empty-desc{font-size:13px;color:var(--gam-tok-ink-muted,#b0b5bc);max-width:320px;line-height:1.5;}',
+        'body.gam-ux-polish-on .gam-empty-cta{margin-top:4px;padding:8px 16px;background:var(--gam-tok-surface-overlay,#252a31);color:var(--gam-tok-ink,#e8e6e1);border:1px solid var(--gam-tok-border,#2a2f38);border-radius:6px;cursor:pointer;font-size:13px;min-height:44px;min-width:44px;}',
+        'body.gam-ux-polish-on .gam-empty-cta:hover{background:var(--gam-tok-accent-soft,rgba(255,153,51,0.10));border-color:var(--gam-tok-accent-line,rgba(255,153,51,0.28));}'
       ].join('');
       if (document.head) document.head.appendChild(style);
       else document.addEventListener('DOMContentLoaded', function(){ document.head.appendChild(style); }, { once: true });
@@ -4681,7 +4689,7 @@
     for (let i = 0; i < lines; i++) {
       const l = document.createElement('div');
       l.className = 'gam-skel-line';
-      l.style.cssText = 'height:10px;background:#2a2825;border-radius:2px;margin:3px 0;width:' + (widths[i % 3]) + '%';
+      l.style.cssText = 'height:10px;background:'+GAM_TOK.surfaceOverlay+';border-radius:2px;margin:3px 0;width:' + (widths[i % 3]) + '%';
       wrap.appendChild(l);
     }
     wrap.setAttribute('aria-busy', 'true');
@@ -26877,39 +26885,45 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   --bb-ease-linear: linear;
 }
 /* Bloomberg state CSS (content-script context) — mirrors popup.css UIUX-19 §C */
+/* WP-09: content-script empty-state unified onto the token ramp; ink-muted message,
+   ink-faint subtext, CTA bumped to the 44px touch-target floor (was 9px no-target). */
 .gam-empty-state {
   display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 6px; padding: 20px 12px;
-  text-align: center; color: #9b9892; font: 10px/1.4 ui-monospace, monospace;
+  text-align: center; color: var(--gam-tok-ink-muted, #b0b5bc); font: 10px/1.4 ui-monospace, monospace;
 }
 .gam-empty-icon { font-size: 24px; line-height: 1; opacity: 0.6; }
-.gam-empty-headline { color: #9b9892; font-weight: 600; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
-.gam-empty-desc { color: #9b9892; font-size: 9px; }
+.gam-empty-headline { color: var(--gam-tok-ink-muted, #b0b5bc); font-weight: 600; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+.gam-empty-desc { color: var(--gam-tok-ink-faint, #7a7672); font-size: 9px; }
 .gam-empty-cta {
-  background: transparent; border: 1px solid var(--bb-amber); color: var(--bb-amber);
-  padding: 2px 8px; cursor: pointer; font: 600 9px ui-monospace, monospace;
+  background: transparent; border: 1px solid var(--gam-tok-accent, #ff9933); color: var(--gam-tok-accent, #ff9933);
+  padding: 8px 12px; cursor: pointer; font: 600 11px ui-monospace, monospace;
   letter-spacing: 0.04em; text-transform: uppercase; margin-top: 4px;
+  min-height: 44px; min-width: 44px; box-sizing: border-box;
 }
+/* WP-09: error states on danger/warn tokens (no hardcoded #ff3b3b/#f0a040). */
 .gam-error-state {
-  padding: 10px 12px; background: rgba(255,59,59,0.04);
-  border-left: 2px solid #ff3b3b;
+  padding: 10px 12px; background: var(--gam-tok-danger-soft, rgba(240,64,64,0.12));
+  border-left: 2px solid var(--gam-tok-danger, #f04040);
 }
 .gam-error-chip {
   display: inline-block; padding: 1px 5px;
   font: 700 8px ui-monospace, monospace; letter-spacing: 0.1em;
   text-transform: uppercase; border-radius: 2px; margin-bottom: 4px;
 }
-.gam-error-chip.hard { background: rgba(255,59,59,0.18); color: #ff3b3b; }
-.gam-error-chip.soft { background: rgba(240,160,64,0.15); color: var(--bb-amber-warm); }
-.gam-error-msg { color: #c8c5c0; font-size: 10px; margin: 2px 0; }
-.gam-error-hint { color: #9b9892; font-size: 9px; }
+.gam-error-chip.hard { background: var(--gam-tok-danger-soft, rgba(240,64,64,0.12)); color: var(--gam-tok-danger, #f04040); }
+.gam-error-chip.soft { background: var(--gam-tok-warn-soft, rgba(240,160,64,0.12)); color: var(--gam-tok-warn, #f0a040); }
+.gam-error-msg { color: var(--gam-tok-ink, #e8e6e1); font-size: 10px; margin: 2px 0; }
+.gam-error-hint { color: var(--gam-tok-ink-muted, #b0b5bc); font-size: 9px; }
 .gam-error-retry {
-  background: transparent; border: 1px solid #9b9892; color: #9b9892;
-  padding: 1px 6px; cursor: pointer; font: 600 8px ui-monospace, monospace;
+  background: transparent; border: 1px solid var(--gam-tok-border-strong, #3a3f48); color: var(--gam-tok-ink-muted, #b0b5bc);
+  padding: 8px 12px; cursor: pointer; font: 600 11px ui-monospace, monospace;
   letter-spacing: 0.04em; text-transform: uppercase; margin-top: 6px;
+  min-height: 44px; min-width: 44px; box-sizing: border-box;
 }
+/* WP-09: content-script skel line on the same surface-overlay base as the v8.1 skeleton. */
 .gam-skel-line {
-  height: 10px; background: #2a2825; border-radius: 2px;
+  height: 10px; background: var(--gam-tok-surface-overlay, #252a31); border-radius: 2px;
   margin: 3px 0; animation: gam-skel-pulse 1.4s ease-in-out infinite;
 }
 @keyframes gam-skel-pulse {
