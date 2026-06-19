@@ -8150,17 +8150,20 @@
       if (document.getElementById('gam-ext-orphaned-banner')) return;
       const b = document.createElement('div');
       b.id = 'gam-ext-orphaned-banner';
-      // WP-03 §2.6 z-ladder: z-index 99999999 = the --z-toast (top) tier — the
-      // ext-orphaned banner is page-blocking and must sit above all toasts
-      // (var() forbidden in inline cssText — literal documented onto the tier).
-      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999999;background:'+GAM_TOK.surfacePanel+';border-bottom:3px solid '+GAM_TOK.warn+';color:'+GAM_TOK.ink+';font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:12px 16px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 8px 24px '+GAM_TOK.scrim+'';
+      // WP-13 §2.6 z-ladder: mapped onto the --z-toast (top) tier — the
+      // ext-orphaned banner is page-blocking and must sit above all toasts.
+      // Custom properties DO resolve inside inline cssText, so the ladder token
+      // is used directly here (matching the #gam-auth-fail-banner sibling at the
+      // var(--z-toast,9999999) z-index); the literal fallback keeps the prior
+      // top-tier value if --z-* is ever absent.
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:var(--z-toast,9999999);background:'+GAM_TOK.surfacePanel+';border-bottom:3px solid '+GAM_TOK.warn+';color:'+GAM_TOK.ink+';font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:12px 16px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 8px 24px '+GAM_TOK.scrim+'';
       b.innerHTML =
         '<span style="font-size:14px">↻</span>' +
         '<span><b>ModTools updated.</b> The extension was reloaded — refresh this page to reconnect.</span>' +
         '<span style="flex:1"></span>' +
-        '<button id="gam-ext-orphaned-copy" class="gam-toast-btn" style="background:transparent;border:1px solid '+GAM_TOK.borderStrong+';color:'+GAM_TOK.inkMuted+';padding:6px 10px;min-height:32px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase" title="Copy debug details to clipboard">📋 Copy</button>' +
+        '<button id="gam-ext-orphaned-copy" class="gam-toast-btn" style="font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase" title="Copy debug details to clipboard">📋 Copy</button>' +
         '<button id="gam-ext-orphaned-reload" class="gam-toast-btn gam-toast-btn--warn" style="background:'+GAM_TOK.warn+';border:1px solid '+GAM_TOK.warn+';color:'+GAM_TOK.onAccentDark+';padding:6px 12px;min-height:32px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Reload page</button>' +
-        '<button id="gam-ext-orphaned-dismiss" class="gam-toast-btn" style="background:transparent;border:1px solid '+GAM_TOK.borderStrong+';color:'+GAM_TOK.inkMuted+';padding:6px 10px;min-height:32px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Dismiss</button>';
+        '<button id="gam-ext-orphaned-dismiss" class="gam-toast-btn" style="font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Dismiss</button>';
       document.body.appendChild(b);
       const reload = b.querySelector('#gam-ext-orphaned-reload');
       const dismiss = b.querySelector('#gam-ext-orphaned-dismiss');
@@ -8219,7 +8222,7 @@
           copy.textContent = via ? '✓ Copied' : '✕ failed';
           copy.style.background = via ? GAM_TOK.successSoft : GAM_TOK.dangerSoft;
           setTimeout(() => {
-            try { copy.textContent = orig; copy.style.background = 'transparent'; } catch (_) {} /* WP-13: revert to transparent; styled bg handled by .gam-toast-btn */
+            try { copy.textContent = orig; copy.style.background = ''; } catch (_) {} /* WP-13: clear inline bg so .gam-toast-btn (incl. :hover) drives the button again */
           }, 1800);
         } catch (_) {}
       });
