@@ -15916,7 +15916,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         ${tRows}
         <div class="gam-t-dr-add">
           <input class="gam-t-dr-add-pat" id="gam-tards-add-pat" type="text" placeholder="regex or *wildcard*..." spellcheck="false">
-          <button class="gam-t-dr-add-btn" id="gam-tards-add-btn" style="background:rgba(240,64,64,.15);border-color:rgba(240,64,64,.3);color:${C.RED}">\u{1F9E8} Add</button>
+          <button class="gam-t-dr-add-btn" id="gam-tards-add-btn" style="background:${GAM_TOK.dangerSoft};border-color:${GAM_TOK.danger};color:${GAM_TOK.danger}">\u{1F9E8} Add</button>
         </div>
         <div class="gam-t-dr-hint" id="gam-tards-pat-hint"></div>`;
 
@@ -25027,155 +25027,171 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 #gam-hint-bar{display:none!important}
 
 /* Triage Console */
-#gam-triage{font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};padding:16px;max-width:1100px}
+#gam-triage{font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:var(--gam-tok-ink,#e8e6e1);padding:16px;max-width:1100px}
 /* ── Loop-6: final cohesion ── */
-.gam-t-header{display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid ${C.BORDER};flex-wrap:wrap}
-.gam-t-brand{font-weight:800;font-size:14px;color:${C.AMBER};letter-spacing:-.1px}
-.gam-t-header-hint{font-size:10px;color:${C.TEXT3};letter-spacing:.1px}
+.gam-t-header{display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--gam-tok-border,#2a2f38);flex-wrap:wrap}
+.gam-t-brand{font-weight:800;font-size:14px;color:var(--gam-tok-accent,#ff9933);letter-spacing:-.1px}
+.gam-t-header-hint{font-size:10px;color:var(--gam-tok-ink-faint,#7a7672);letter-spacing:.1px}
 /* v5.2.7: two-column layout - list left, stats sidebar right */
 .gam-t-layout{display:flex;gap:18px;align-items:flex-start}
 .gam-t-main{flex:1;min-width:0}
 .gam-t-sidebar{width:210px;flex-shrink:0;position:sticky;top:56px;display:flex;flex-direction:column;gap:4px;align-self:flex-start}
-.gam-t-sidebar-label{font-size:9px;font-weight:700;color:${C.TEXT3};text-transform:uppercase;letter-spacing:.7px;padding:0 2px}
+.gam-t-sidebar-label{font-size:9px;font-weight:700;color:var(--gam-tok-ink-faint,#7a7672);text-transform:uppercase;letter-spacing:.7px;padding:0 2px}
 /* v5.4.0: clickable sidebar section headers (carat-collapsible) */
 .gam-t-sb-head{cursor:pointer;user-select:none;display:flex;align-items:center;gap:4px;padding:2px 4px;border-radius:3px;transition:background .1s}
-.gam-t-sb-head:hover{background:rgba(255,255,255,.04);color:${C.TEXT2}}
+.gam-t-sb-head:hover{background:rgba(255,255,255,.04);color:var(--gam-tok-ink-muted,#b0b5bc)}
 /* v5.4.1: sync indicator dot on collapsible headers */
 .gam-t-sync-dot{font-size:9px;margin-left:auto;opacity:.55;flex-shrink:0}
-.gam-t-sync-dot.gam-sync-active{opacity:1;color:${C.GREEN};text-shadow:0 0 6px rgba(61,214,140,.6)}
+.gam-t-sync-dot.gam-sync-active{opacity:1;color:var(--gam-tok-success,#3dd68c);text-shadow:0 0 6px var(--gam-tok-success-soft,rgba(61,214,140,.6))}
 .gam-t-sb-collapsed .gam-t-carat{transform:rotate(-90deg)}
 /* v5.4.0: Auto-DR panel sticky within the (already-sticky) sidebar — floats at top */
-.gam-t-sb-sticky{position:sticky;top:0;background:${C.BG};z-index:2;padding-top:4px}
-.gam-t-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:0}
-.gam-t-stat{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;padding:8px 10px;transition:border-color .15s}
-.gam-t-stat:hover{border-color:${C.BORDER2}}
-.gam-t-stat-val{font-size:20px;font-weight:700;line-height:1}
-.gam-t-stat-label{font-size:9px;color:${C.TEXT3};text-transform:uppercase;letter-spacing:.5px;margin-top:3px}
+.gam-t-sb-sticky{position:sticky;top:0;background:var(--gam-tok-surface-raised,#0f1114);z-index:2;padding-top:4px}
+.gam-t-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:0}
+.gam-t-stat{background:var(--gam-tok-surface-panel,#181b20);border:1px solid var(--gam-tok-border,#2a2f38);border-radius:4px;padding:8px 10px;min-width:0;transition:border-color .15s}
+.gam-t-stat:hover{border-color:var(--gam-tok-border-strong,#3a3f48)}
+.gam-t-stat-val{font-size:20px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
+.gam-t-stat-label{font-size:9px;color:var(--gam-tok-ink-faint,#7a7672);text-transform:uppercase;letter-spacing:.5px;margin-top:3px}
 .gam-t-stat-sub{font-size:9px;margin-top:3px}
+/* WP-12 #4: stats grid collapses to single column below 380px so values never overflow */
+@media (max-width:380px){.gam-t-stats{grid-template-columns:1fr}}
 /* Auto-DR rules sidebar panel */
 .gam-t-dr-rules{display:flex;flex-direction:column;gap:3px}
-.gam-t-dr-empty{font-size:10px;color:${C.TEXT3};font-style:italic;padding:6px 4px;white-space:pre-line;line-height:1.5}
-.gam-t-dr-rule{display:flex;align-items:center;gap:4px;padding:4px 6px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;font-size:10px}
-.gam-t-dr-rule-pat{flex:1;font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;color:${C.YELLOW};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
-.gam-t-dr-rule-meta{color:${C.TEXT3};font-size:9px;flex-shrink:0}
-/* v6.3.1: dotted underline on hover so the click-to-edit affordance is visible */
-.gam-t-dr-rule-pat,.gam-t-dr-rule-meta{border-bottom:1px dotted transparent;transition:border-color .15s}
+.gam-t-dr-empty{font-size:10px;color:var(--gam-tok-ink-faint,#7a7672);font-style:italic;padding:6px 4px;white-space:pre-line;line-height:1.5}
+.gam-t-dr-rule{display:flex;align-items:center;gap:4px;padding:4px 6px;background:var(--gam-tok-surface-panel,#181b20);border:1px solid var(--gam-tok-border,#2a2f38);border-radius:4px;font-size:10px}
+.gam-t-dr-rule-pat{flex:1;font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;color:var(--gam-tok-warn,#f0a040);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
+.gam-t-dr-rule-meta{color:var(--gam-tok-ink-faint,#7a7672);font-size:9px;flex-shrink:0}
+/* WP-12 #7: persistent (not hover-only) dotted click-to-edit underline in ink-faint */
+.gam-t-dr-rule-pat,.gam-t-dr-rule-meta{border-bottom:1px dotted var(--gam-tok-ink-faint,#7a7672);transition:border-color .15s}
 .gam-t-dr-rule-pat:hover,.gam-t-dr-rule-meta:hover{border-bottom-color:var(--gam-tok-info,#7cb8ff)}
 .gam-t-dr-rule-toggle{display:flex;align-items:center;flex-shrink:0;cursor:pointer}
-.gam-t-dr-rule-toggle input{cursor:pointer;accent-color:${C.PURPLE};width:12px;height:12px}
-.gam-t-dr-rule-del{background:transparent;border:none;color:${C.TEXT3};cursor:pointer;font-size:12px;padding:0 2px;line-height:1;transition:color .1s;flex-shrink:0}
-.gam-t-dr-rule-del:hover{color:${C.RED}}
+.gam-t-dr-rule-toggle input{cursor:pointer;accent-color:var(--gam-tok-special,#a78bfa);width:12px;height:12px}
+.gam-t-dr-rule-del{background:transparent;border:none;color:var(--gam-tok-ink-faint,#7a7672);cursor:pointer;font-size:12px;padding:0 2px;line-height:1;transition:color .1s;flex-shrink:0}
+.gam-t-dr-rule-del:hover{color:var(--gam-tok-danger,#f04040)}
 /* v5.3.0: disabled rule visual */
 .gam-t-dr-rule-disabled{opacity:.45}
-.gam-t-dr-rule-disabled .gam-t-dr-rule-pat{text-decoration:line-through;color:${C.TEXT3}}
+.gam-t-dr-rule-disabled .gam-t-dr-rule-pat{text-decoration:line-through;color:var(--gam-tok-ink-faint,#7a7672)}
 /* v5.4.0: hot rule (currently matching DR users) */
-.gam-t-dr-rule-hot .gam-t-dr-rule-pat{color:${C.WARN};font-weight:700}
-.gam-t-dr-rule-hit{font-size:9px;font-weight:700;padding:1px 4px;border-radius:3px;background:rgba(240,160,64,.15);color:${C.WARN};margin-left:3px;flex-shrink:0}
+.gam-t-dr-rule-hot .gam-t-dr-rule-pat{color:var(--gam-tok-warn,#f0a040);font-weight:700}
+.gam-t-dr-rule-hit{font-size:9px;font-weight:700;padding:1px 4px;border-radius:3px;background:var(--gam-tok-warn-soft,rgba(240,160,64,.15));color:var(--gam-tok-warn,#f0a040);margin-left:3px;flex-shrink:0}
 /* v5.2.9: inline Add Pattern row */
-.gam-t-dr-add{display:flex;gap:4px;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid ${C.BORDER}}
-.gam-t-dr-add-pat{flex:1;background:${C.BG};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT};font:10px 'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;padding:4px 6px;outline:none;min-width:0;transition:border-color .15s}
-.gam-t-dr-add-pat:focus{border-color:${C.PURPLE}}
-.gam-t-dr-add-hours{background:${C.BG};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT2};font-size:10px;padding:3px 4px;flex-shrink:0}
-.gam-t-dr-add-btn{background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.3);border-radius:4px;color:${C.PURPLE};font-size:10px;font-weight:700;padding:4px 7px;cursor:pointer;flex-shrink:0;transition:all .1s}
-.gam-t-dr-add-btn:hover{background:rgba(167,139,250,.25);border-color:${C.PURPLE}}
+.gam-t-dr-add{display:flex;gap:4px;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid var(--gam-tok-border,#2a2f38)}
+/* WP-12 #7: rule-pattern input — sunken well + visible 2px focus ring (no more "barely-visible blue border") */
+.gam-t-dr-add-pat{flex:1;background:var(--gam-tok-surface-sunken,#050507);border:1px solid var(--gam-tok-border,#2a2f38);border-radius:4px;color:var(--gam-tok-ink,#e8e6e1);font:10px 'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;padding:4px 6px;outline:none;min-width:0;transition:border-color .15s,box-shadow .15s}
+.gam-t-dr-add-pat:focus{border-color:var(--gam-tok-info,#7cb8ff);box-shadow:0 0 0 2px var(--gam-tok-info-soft,rgba(74,158,255,.10))}
+.gam-t-dr-add-hours{background:var(--gam-tok-surface-sunken,#050507);border:1px solid var(--gam-tok-border,#2a2f38);border-radius:4px;color:var(--gam-tok-ink-muted,#b0b5bc);font-size:10px;padding:3px 4px;flex-shrink:0}
+.gam-t-dr-add-btn{background:var(--gam-tok-special-soft,rgba(167,139,250,.15));border:1px solid var(--gam-tok-special,#a78bfa);border-radius:4px;color:var(--gam-tok-special,#a78bfa);font-size:10px;font-weight:700;padding:4px 7px;cursor:pointer;flex-shrink:0;transition:all .1s}
+.gam-t-dr-add-btn:hover{background:var(--gam-tok-special-soft,rgba(167,139,250,.25));border-color:var(--gam-tok-special,#a78bfa)}
 /* v7.0.1: on-demand Auto-DR sweep button */
 .gam-t-dr-sweep{display:flex;align-items:center;gap:8px;margin-top:6px;padding:4px 0 2px}
-.gam-t-dr-sweep-btn{background:rgba(240,64,64,.12);border:1px solid rgba(240,64,64,.3);border-radius:4px;color:${C.RED};font-size:10px;font-weight:700;padding:4px 8px;cursor:pointer;flex-shrink:0;transition:all .1s;letter-spacing:.2px}
+.gam-t-dr-sweep-btn{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));border:1px solid var(--gam-tok-danger,#f04040);border-radius:4px;color:var(--gam-tok-danger,#f04040);font-size:10px;font-weight:700;padding:4px 8px;cursor:pointer;flex-shrink:0;transition:all .1s;letter-spacing:.2px}
 /* v10.16.29: when sweep button is at TOP of rules section, amp the prominence.
    Larger padding + amber primary instead of muted red so it's the obvious
    primary action when the panel first renders. */
-.gam-t-dr-sweep-top{margin-top:0;margin-bottom:8px;padding:0 0 6px;border-bottom:1px solid ${C.BORDER}}
-.gam-t-dr-sweep-btn-top{background:rgba(255,153,51,0.15);border:1px solid var(--gam-tok-accent,#ff9933);color:var(--gam-tok-accent,#ff9933);font-size:11px;padding:6px 12px;letter-spacing:.4px}
-.gam-t-dr-sweep-btn-top:hover{background:rgba(255,153,51,0.25);box-shadow:0 0 8px rgba(255,153,51,0.3)}
-.gam-t-dr-sweep-btn:hover:not(:disabled){background:rgba(240,64,64,.22);border-color:${C.RED}}
+.gam-t-dr-sweep-top{margin-top:0;margin-bottom:8px;padding:0 0 6px;border-bottom:1px solid var(--gam-tok-border,#2a2f38)}
+.gam-t-dr-sweep-btn-top{background:var(--gam-tok-accent-soft,rgba(255,153,51,0.15));border:1px solid var(--gam-tok-accent,#ff9933);color:var(--gam-tok-accent,#ff9933);font-size:11px;padding:6px 12px;letter-spacing:.4px}
+.gam-t-dr-sweep-btn-top:hover{background:var(--gam-tok-accent-soft,rgba(255,153,51,0.25));box-shadow:0 0 8px var(--gam-tok-accent-line,rgba(255,153,51,0.3))}
+.gam-t-dr-sweep-btn:hover:not(:disabled){background:var(--gam-tok-danger-soft,rgba(240,64,64,.22));border-color:var(--gam-tok-danger,#f04040)}
 .gam-t-dr-sweep-btn:disabled{opacity:.5;cursor:progress}
-.gam-t-dr-sweep-hint{font-size:9px;color:${C.TEXT3};flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gam-t-dr-sweep-hint{font-size:9px;color:var(--gam-tok-ink-faint,#7a7672);flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gam-t-dr-hint{font-size:9px;min-height:12px;padding:2px 0;font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace}
 .gam-t-alerts{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
 /* ── Iter-2: alerts with left-accent bar ── */
 .gam-t-alert{padding:7px 11px 7px 14px;border-radius:4px;font-size:11px;line-height:1.45;margin-bottom:6px;border-left-width:3px;border-left-style:solid}
 .gam-t-alert:last-child{margin-bottom:0}
 .gam-t-alert b{font-weight:700}
-.gam-t-alert-warn{background:rgba(240,160,64,.09);color:${C.WARN};border:1px solid rgba(240,160,64,.2);border-left-color:${C.WARN}}
-.gam-t-alert-red{background:rgba(240,64,64,.09);color:${C.RED};border:1px solid rgba(240,64,64,.2);border-left-color:${C.RED}}
-.gam-t-alert-info{background:rgba(74,158,255,.06);color:${C.TEXT2};border:1px solid rgba(74,158,255,.12);border-left-color:${C.ACCENT}}
+.gam-t-alert-warn{background:var(--gam-tok-warn-soft,rgba(240,160,64,.09));color:var(--gam-tok-warn,#f0a040);border:1px solid var(--gam-tok-warn-soft,rgba(240,160,64,.2));border-left-color:var(--gam-tok-warn,#f0a040)}
+.gam-t-alert-red{background:var(--gam-tok-danger-soft,rgba(240,64,64,.09));color:var(--gam-tok-danger,#f04040);border:1px solid var(--gam-tok-danger-soft,rgba(240,64,64,.2));border-left-color:var(--gam-tok-danger,#f04040)}
+.gam-t-alert-info{background:var(--gam-tok-info-soft,rgba(74,158,255,.06));color:var(--gam-tok-ink-muted,#b0b5bc);border:1px solid var(--gam-tok-info-soft,rgba(74,158,255,.12));border-left-color:var(--gam-tok-info,#7cb8ff)}
 .gam-t-alert-link{color:inherit;text-decoration:underline;cursor:pointer;font-weight:600}
-.gam-t-toolbar{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
-.gam-t-filter{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;padding:5px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:${C.TEXT2};cursor:pointer;transition:border-color .12s,color .12s,background .12s;letter-spacing:.1px}
-.gam-t-filter:hover{border-color:${C.BORDER2};color:${C.TEXT}}
-.gam-t-filter-active{background:${C.ACCENT};border-color:${C.ACCENT};color:var(--gam-tok-on-accent-dark,#0a0a0b)}
+/* WP-12 #1/#2: fixed-height single-line horizontal-scroll filter row — NO vertical wrap, so
+   buttons never reposition on resize (protects operator muscle-memory). */
+.gam-t-toolbar{display:flex;gap:6px;margin-bottom:10px;flex-wrap:nowrap;align-items:center;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scrollbar-color:var(--gam-tok-accent-line,rgba(255,153,51,0.28)) transparent}
+.gam-t-toolbar::-webkit-scrollbar{height:6px}
+.gam-t-toolbar::-webkit-scrollbar-thumb{background:var(--gam-tok-accent-line,rgba(255,153,51,0.28));border-radius:999px}
+.gam-t-toolbar::-webkit-scrollbar-track{background:transparent}
+.gam-t-filter{flex-shrink:0;white-space:nowrap;background:var(--gam-tok-surface-panel,#181b20);border:1px solid var(--gam-tok-border,#2a2f38);border-radius:4px;padding:5px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:var(--gam-tok-ink-muted,#b0b5bc);cursor:pointer;transition:border-color .12s,color .12s,background .12s;letter-spacing:.1px}
+.gam-t-filter:hover{border-color:var(--gam-tok-border-strong,#3a3f48);color:var(--gam-tok-ink,#e8e6e1)}
+/* WP-12 #2: active filter — surface-overlay + accent-soft fill + accent border (amber chrome) */
+.gam-t-filter-active{background:var(--gam-tok-accent-soft,rgba(255,153,51,0.10));border-color:var(--gam-tok-accent,#ff9933);color:var(--gam-tok-accent,#ff9933)}
 .gam-t-filter-count{font-size:10px;opacity:.7;margin-left:4px}
-.gam-t-cluster-badge{background:rgba(240,160,64,.15);color:${C.WARN};padding:4px 10px;border-radius:4px;font-size:11px;font-weight:600;margin-left:8px}
+/* WP-12 #5: cluster badge promoted to high salience — warn-tier (warm-amber + triangle glyph)
+   + raised one elevation step (border + shadow) so it's catchable mid-firehose. */
+.gam-t-cluster-badge{flex-shrink:0;white-space:nowrap;background:var(--gam-tok-warn-soft,rgba(240,160,64,.15));color:var(--gam-tok-warn,#f0a040);border:1px solid var(--gam-tok-warn,#f0a040);box-shadow:0 1px 4px var(--gam-tok-warn-soft,rgba(240,160,64,.25));padding:4px 10px;border-radius:4px;font-size:11px;font-weight:700;margin-left:8px}
+.gam-t-cluster-badge::before{content:"▲ ";font-size:9px}
 .gam-t-cluster-clear{cursor:pointer;margin-left:4px;opacity:.7}
 .gam-t-cluster-clear:hover{opacity:1}
-.gam-t-batch{display:flex;align-items:center;gap:8px;padding:7px 10px;background:rgba(74,158,255,.07);border:1px solid rgba(74,158,255,.18);border-left:3px solid ${C.ACCENT};border-radius:4px;margin-bottom:10px;font-size:11px;color:${C.TEXT}}
-.gam-t-batch-count{font-weight:600;color:${C.ACCENT}}
-.gam-t-batch-btn{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;padding:4px 12px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT2};cursor:pointer;transition:all .15s}
-.gam-t-batch-btn:hover{border-color:${C.BORDER2};color:${C.TEXT}}
-.gam-t-batch-ban{color:${C.RED};border-color:rgba(240,64,64,.3)}
-.gam-t-batch-ban:hover{background:rgba(240,64,64,.15)}
-.gam-t-batch-dr{color:${C.PURPLE};border-color:rgba(167,139,250,.3)}
-.gam-t-batch-dr:hover{background:rgba(167,139,250,.15)}
-.gam-t-batch-watch{color:${C.YELLOW};border-color:rgba(255,214,10,.3)}
-.gam-t-batch-watch:hover{background:rgba(255,214,10,.15)}
-.gam-t-batch-clear{color:${C.GREEN};border-color:rgba(61,214,140,.3)}
-.gam-t-batch-clear:hover{background:rgba(61,214,140,.15)}
-.gam-t-batch-cancel{color:${C.TEXT3}}
+/* WP-12 #3: batch-action bar sticky + fixed-height; actions truncate (no wrap). */
+.gam-t-batch{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:8px;padding:7px 10px;min-height:36px;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;background:var(--gam-tok-info-soft,rgba(74,158,255,.07));border:1px solid var(--gam-tok-info-soft,rgba(74,158,255,.18));border-left:3px solid var(--gam-tok-info,#7cb8ff);border-radius:4px;margin-bottom:10px;font-size:11px;color:var(--gam-tok-ink,#e8e6e1)}
+.gam-t-batch-count{flex-shrink:0;font-weight:700;color:var(--gam-tok-info,#7cb8ff)}
+.gam-t-batch .gam-t-batch-btn{flex-shrink:0;white-space:nowrap}
+.gam-t-batch-btn{background:var(--gam-tok-surface-panel,#181b20);border:1px solid var(--gam-tok-border,#2a2f38);border-radius:4px;padding:4px 12px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:var(--gam-tok-ink-muted,#b0b5bc);cursor:pointer;transition:all .15s}
+.gam-t-batch-btn:hover{border-color:var(--gam-tok-border-strong,#3a3f48);color:var(--gam-tok-ink,#e8e6e1)}
+.gam-t-batch-ban{color:var(--gam-tok-danger,#f04040);border-color:var(--gam-tok-danger-soft,rgba(240,64,64,.3))}
+.gam-t-batch-ban:hover{background:var(--gam-tok-danger-soft,rgba(240,64,64,.15))}
+.gam-t-batch-dr{color:var(--gam-tok-special,#a78bfa);border-color:var(--gam-tok-special-soft,rgba(167,139,250,.3))}
+.gam-t-batch-dr:hover{background:var(--gam-tok-special-soft,rgba(167,139,250,.15))}
+.gam-t-batch-watch{color:var(--gam-tok-warn,#f0a040);border-color:var(--gam-tok-warn-soft,rgba(255,214,10,.3))}
+.gam-t-batch-watch:hover{background:var(--gam-tok-warn-soft,rgba(255,214,10,.15))}
+.gam-t-batch-clear{color:var(--gam-tok-success,#3dd68c);border-color:var(--gam-tok-success-soft,rgba(61,214,140,.3))}
+.gam-t-batch-clear:hover{background:var(--gam-tok-success-soft,rgba(61,214,140,.15))}
+.gam-t-batch-cancel{color:var(--gam-tok-ink-faint,#7a7672)}
 /* ── Loop-1: tighter columns, crisper labels ── */
-.gam-t-col-header{display:grid;grid-template-columns:22px 1fr 80px 130px 120px;gap:6px;padding:3px 8px;font-size:9px;color:${C.TEXT3};text-transform:uppercase;letter-spacing:.7px;font-weight:700;border-bottom:1px solid ${C.BORDER};margin-bottom:1px}
-.gam-t-section-head{font-size:10px;font-weight:700;color:${C.TEXT2};padding:8px 8px 4px;display:flex;align-items:center;gap:5px;border-top:1px solid ${C.BORDER};margin-top:6px;text-transform:uppercase;letter-spacing:.6px;cursor:pointer;user-select:none}
-.gam-t-section-head:hover{color:${C.TEXT}}
+.gam-t-col-header{display:grid;grid-template-columns:22px 1fr 80px 130px 120px;gap:6px;padding:3px 8px;font-size:9px;color:var(--gam-tok-ink-faint,#7a7672);text-transform:uppercase;letter-spacing:.7px;font-weight:700;border-bottom:1px solid var(--gam-tok-border,#2a2f38);margin-bottom:1px}
+.gam-t-section-head{font-size:10px;font-weight:700;color:var(--gam-tok-ink-muted,#b0b5bc);padding:8px 8px 4px;display:flex;align-items:center;gap:5px;border-top:1px solid var(--gam-tok-border,#2a2f38);margin-top:6px;text-transform:uppercase;letter-spacing:.6px;cursor:pointer;user-select:none}
+.gam-t-section-head:hover{color:var(--gam-tok-ink,#e8e6e1)}
 .gam-t-section:first-child .gam-t-section-head{border-top:none;margin-top:0}
 .gam-t-section-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 /* v5.4.0: collapsible sections */
-.gam-t-carat{display:inline-block;font-size:10px;width:10px;color:${C.TEXT3};transition:transform .15s;flex-shrink:0}
+.gam-t-carat{display:inline-block;font-size:10px;width:10px;color:var(--gam-tok-ink-faint,#7a7672);transition:transform .15s;flex-shrink:0}
 .gam-t-section-collapsed .gam-t-carat{transform:rotate(-90deg)}
 .gam-t-section-collapsed .gam-t-section-body{display:none}
 .gam-t-list{display:flex;flex-direction:column;gap:0;max-height:none;overflow:visible}
-.gam-t-row{display:grid;grid-template-columns:22px 1fr 80px 130px 120px;gap:6px;align-items:center;padding:2px 8px;min-height:34px;border-radius:3px;border:1px solid transparent;transition:background .12s,border-color .12s}
-.gam-t-row:hover{background:${C.BG2};border-color:${C.BORDER}}
-.gam-t-row-selected{background:rgba(74,158,255,.08)!important;border-color:rgba(74,158,255,.25)!important}
+.gam-t-row{display:grid;grid-template-columns:22px 1fr 80px 130px 120px;gap:6px;align-items:center;padding:2px 8px;min-height:30px;border-radius:3px;border:1px solid transparent;transition:background .12s,border-color .12s}
+.gam-t-row:hover{background:var(--gam-tok-surface-panel,#181b20);border-color:var(--gam-tok-border,#2a2f38)}
+.gam-t-row-selected{background:var(--gam-tok-info-soft,rgba(74,158,255,.08))!important;border-color:var(--gam-tok-info-soft,rgba(74,158,255,.25))!important}
 .gam-t-row-banned{opacity:.5}
 .gam-t-row-historical{opacity:.72}
 .gam-t-row-historical:hover{opacity:1}
-.gam-t-check{width:16px;height:16px;border:1.5px solid ${C.BORDER2};border-radius:3px;cursor:pointer;transition:border-color .12s,background .12s,box-shadow .12s;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.gam-t-check:hover{border-color:${C.ACCENT};box-shadow:0 0 0 2px rgba(74,158,255,.15)}
-.gam-t-check:hover{border-color:${C.ACCENT}}
-.gam-t-check-on{background:${C.ACCENT};border-color:${C.ACCENT}}
-.gam-t-check-on::after{content:'\u2713';color:var(--gam-tok-on-accent-dark,#0a0a0b);font-size:11px;font-weight:700}
+.gam-t-check{width:16px;height:16px;border:1.5px solid var(--gam-tok-border-strong,#3a3f48);border-radius:3px;cursor:pointer;transition:border-color .12s,background .12s,box-shadow .12s;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.gam-t-check:hover{border-color:var(--gam-tok-info,#7cb8ff);box-shadow:0 0 0 2px var(--gam-tok-info-soft,rgba(74,158,255,.15))}
+.gam-t-check:hover{border-color:var(--gam-tok-info,#7cb8ff)}
+.gam-t-check-on{background:var(--gam-tok-info,#7cb8ff);border-color:var(--gam-tok-info,#7cb8ff)}
+.gam-t-check-on::after{content:'\u2713';color:var(--gam-tok-on-accent-light,#ffffff);font-size:11px;font-weight:700}
 .gam-t-user-info{min-width:0;overflow:hidden}
 /* ── Loop-2: typography pass ── */
 .gam-t-user-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:3px;line-height:1.2}
 .gam-t-user-meta{margin-top:0;font-size:10px;line-height:1.1}
-.gam-t-user-name-text:hover{color:${C.AMBER};text-decoration:underline}
-.gam-t-user-meta{font-size:9px;color:${C.TEXT3};display:flex;gap:6px;align-items:center;margin-top:1px;line-height:1.3}
-.gam-t-ip{font-size:10px;color:${C.TEXT3};font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.2px}
+.gam-t-user-name-text:hover{color:var(--gam-tok-accent,#ff9933);text-decoration:underline}
+.gam-t-user-meta{font-size:9px;color:var(--gam-tok-ink-faint,#7a7672);display:flex;gap:6px;align-items:center;margin-top:1px;line-height:1.3}
+.gam-t-ip{font-size:10px;color:var(--gam-tok-ink-faint,#7a7672);font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.2px}
 /* v5.1.9 UI Loop 2: larger risk dots + subtle glow for faster scanning */
 .gam-t-risk{width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0}
-.gam-t-risk-high{background:${C.RED};box-shadow:0 0 5px 1px rgba(240,64,64,.65),0 0 0 2px rgba(240,64,64,.15)}
-.gam-t-risk-med{background:${C.WARN};box-shadow:0 0 4px 1px rgba(240,160,64,.5)}
+.gam-t-risk-high{background:var(--gam-tok-danger,#f04040);box-shadow:0 0 5px 1px var(--gam-tok-danger-soft,rgba(240,64,64,.65)),0 0 0 2px var(--gam-tok-danger-soft,rgba(240,64,64,.15))}
+.gam-t-risk-med{background:var(--gam-tok-warn,#f0a040);box-shadow:0 0 4px 1px var(--gam-tok-warn-soft,rgba(240,160,64,.5))}
 /* Cluster-IP background tint on the IP cell for 2-second recognition */
-.gam-t-row[data-incluster="1"] .gam-t-ip{background:rgba(240,160,64,.12);padding:2px 4px;border-radius:3px;color:${C.WARN}}
+.gam-t-row[data-incluster="1"] .gam-t-ip{background:var(--gam-tok-warn-soft,rgba(240,160,64,.12));padding:2px 4px;border-radius:3px;color:var(--gam-tok-warn,#f0a040)}
 /* Prior-ban badge: make the COUNT loud (the label is just context) */
-.gam-t-prior{font-weight:800;font-size:10px;padding:1px 6px;background:rgba(240,64,64,.2);color:${C.RED};border:1px solid rgba(240,64,64,.4);border-radius:3px;letter-spacing:.3px}
+.gam-t-prior{font-weight:800;font-size:10px;padding:1px 6px;background:var(--gam-tok-danger-soft,rgba(240,64,64,.2));color:var(--gam-tok-danger,#f04040);border:1px solid var(--gam-tok-danger-soft,rgba(240,64,64,.4));border-radius:3px;letter-spacing:.3px}
 /* Banned rows look final - slight strikethrough + darker */
-.gam-t-row-banned .gam-t-user-name-text{text-decoration:line-through;color:${C.TEXT3}}
-.gam-t-cluster-tag{font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:rgba(240,160,64,.15);color:${C.WARN};text-transform:uppercase;letter-spacing:.5px}
-.gam-t-prior{font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:rgba(240,64,64,.15);color:${C.RED}}
+.gam-t-row-banned .gam-t-user-name-text{text-decoration:line-through;color:var(--gam-tok-ink-faint,#7a7672)}
+.gam-t-cluster-tag{font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:var(--gam-tok-warn-soft,rgba(240,160,64,.15));color:var(--gam-tok-warn,#f0a040);text-transform:uppercase;letter-spacing:.5px}
+.gam-t-prior{font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:var(--gam-tok-danger-soft,rgba(240,64,64,.15));color:var(--gam-tok-danger,#f04040)}
 .gam-t-status{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
 .gam-t-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:3px;display:inline-block;width:fit-content;text-transform:uppercase;letter-spacing:.6px}
-.gam-t-badge-new{background:rgba(255,153,51,.12);color:${C.AMBER}}
-.gam-t-badge-suspect{background:rgba(240,160,64,.15);color:${C.WARN}}
-.gam-t-badge-cleared{background:rgba(61,214,140,.12);color:${C.GREEN}}
-.gam-t-badge-watching{background:rgba(255,214,10,.12);color:${C.YELLOW}}
-.gam-t-badge-deathrow{background:rgba(167,139,250,.12);color:${C.PURPLE}}
-.gam-t-badge-banned{background:rgba(240,64,64,.12);color:${C.RED}}
-.gam-t-countdown{font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:9px;color:${C.PURPLE};background:rgba(167,139,250,.1);padding:1px 5px;border-radius:3px;border:1px solid rgba(167,139,250,.2)}
-.gam-t-verified{font-size:9px;color:${C.GREEN};font-weight:700;letter-spacing:.3px}
-.gam-t-unverified{font-size:9px;color:${C.WARN};font-weight:700;letter-spacing:.3px}
+.gam-t-badge-new{background:var(--gam-tok-accent-soft,rgba(255,153,51,.12));color:var(--gam-tok-accent,#ff9933)}
+.gam-t-badge-suspect{background:var(--gam-tok-warn-soft,rgba(240,160,64,.15));color:var(--gam-tok-warn,#f0a040)}
+.gam-t-badge-cleared{background:var(--gam-tok-success-soft,rgba(61,214,140,.12));color:var(--gam-tok-success,#3dd68c)}
+.gam-t-badge-watching{background:var(--gam-tok-warn-soft,rgba(255,214,10,.12));color:var(--gam-tok-warn,#f0a040)}
+.gam-t-badge-deathrow{background:var(--gam-tok-special-soft,rgba(167,139,250,.12));color:var(--gam-tok-special,#a78bfa)}
+.gam-t-badge-banned{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));color:var(--gam-tok-danger,#f04040)}
+/* WP-12 #6: death-row countdown — danger-soft bg + danger ink + tabular digits + danger keyline
+   so it reads as time-pressure and is visually distinct from the status badges. */
+.gam-t-countdown{font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-variant-numeric:tabular-nums;font-size:9px;color:var(--gam-tok-danger,#f04040);background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));padding:1px 5px;border-radius:3px;border:1px solid var(--gam-tok-danger,#f04040);border-left-width:3px}
+.gam-t-verified{font-size:9px;color:var(--gam-tok-success,#3dd68c);font-weight:700;letter-spacing:.3px}
+.gam-t-unverified{font-size:9px;color:var(--gam-tok-warn,#f0a040);font-weight:700;letter-spacing:.3px}
 .gam-t-actions{display:flex;gap:3px;position:relative;justify-content:flex-end;align-items:center}
-.gam-t-done{font-size:10px;color:${C.TEXT3};text-transform:uppercase;letter-spacing:.5px;align-self:center}
-.gam-t-act{width:22px;height:22px;border:1px solid ${C.BORDER};border-radius:3px;background:transparent;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:background .1s,border-color .1s,transform .1s;color:${C.TEXT2};flex-shrink:0;position:relative;padding:0 4px;box-sizing:content-box}
+.gam-t-done{font-size:10px;color:var(--gam-tok-ink-faint,#7a7672);text-transform:uppercase;letter-spacing:.5px;align-self:center}
+.gam-t-act{width:22px;height:22px;border:1px solid var(--gam-tok-border,#2a2f38);border-radius:3px;background:transparent;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:background .1s,border-color .1s,transform .1s;color:var(--gam-tok-ink-muted,#b0b5bc);flex-shrink:0;position:relative;padding:0 4px;box-sizing:content-box}
 /* v10.13.2 W5 (UIUX2-34 P0): 34px tap zone within 34px row via ::after extension */
 /* v10.13.5 P0-C (RALPH AUDIT CLICK-TARGETS C-3): inset:-6px caused 9px
    horizontal overlap between adjacent action chips (Ban beats Pattern beats
@@ -25183,20 +25199,20 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
    without stealing clicks from horizontal neighbors. Box-sizing:content-box
    + padding:0 4px on the chip itself recovers the lost horizontal hit zone. */
 .gam-t-act::after{content:'';position:absolute;inset:-6px 0;pointer-events:auto}
-.gam-t-act:hover{color:${C.TEXT};border-color:${C.BORDER2};transform:scale(1.08)}
+.gam-t-act:hover{color:var(--gam-tok-ink,#e8e6e1);border-color:var(--gam-tok-border-strong,#3a3f48);transform:scale(1.08)}
 .gam-t-act:active{transform:scale(.96)}
 .gam-t-stat-val{font-size:20px}
 .gam-t-alert-flush{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.gam-t-flush-btn{margin-left:auto;background:${C.RED};color:var(--gam-tok-on-accent-light,#ffffff);border:none;border-radius:4px;padding:6px 14px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:700;cursor:pointer;letter-spacing:.3px;text-transform:uppercase;transition:opacity .15s}
+.gam-t-flush-btn{margin-left:auto;background:var(--gam-tok-danger,#f04040);color:var(--gam-tok-on-accent-light,#ffffff);border:none;border-radius:4px;padding:6px 14px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:700;cursor:pointer;letter-spacing:.3px;text-transform:uppercase;transition:opacity .15s}
 .gam-t-flush-btn:hover{opacity:.9}
 .gam-t-flush-btn:disabled{opacity:.5;cursor:not-allowed}
 
 /* v5.1.3: Possible Tards top section + tard row highlight */
-.gam-t-section-tards{color:${C.RED}!important;background:rgba(240,64,64,.05);border-radius:4px;padding-left:8px;padding-right:8px;margin-left:-4px;margin-right:-4px;border:1px solid rgba(240,64,64,.12)}
-.gam-t-section-why{font-size:9px;font-weight:400;color:${C.TEXT3};margin-left:4px;text-transform:none;letter-spacing:0;font-style:italic;opacity:.8}
-.gam-t-row-tard{background:rgba(240,64,64,.08);border-left:3px solid ${C.RED};padding-left:5px}
-.gam-t-row-tard:hover{background:rgba(240,64,64,.18);border-color:${C.RED}}
-.gam-t-row-tard .gam-t-user-name-text{color:${C.RED}!important;font-weight:700}
+.gam-t-section-tards{color:var(--gam-tok-danger,#f04040)!important;background:var(--gam-tok-danger-soft,rgba(240,64,64,.05));border-radius:4px;padding-left:8px;padding-right:8px;margin-left:-4px;margin-right:-4px;border:1px solid var(--gam-tok-danger-soft,rgba(240,64,64,.12))}
+.gam-t-section-why{font-size:9px;font-weight:400;color:var(--gam-tok-ink-faint,#7a7672);margin-left:4px;text-transform:none;letter-spacing:0;font-style:italic;opacity:.8}
+.gam-t-row-tard{background:var(--gam-tok-danger-soft,rgba(240,64,64,.08));border-left:3px solid var(--gam-tok-danger,#f04040);padding-left:5px}
+.gam-t-row-tard:hover{background:var(--gam-tok-danger-soft,rgba(240,64,64,.18));border-color:var(--gam-tok-danger,#f04040)}
+.gam-t-row-tard .gam-t-user-name-text{color:var(--gam-tok-danger,#f04040)!important;font-weight:700}
 
 /* v5.1.9 UI Loop 1: Mod Console BAN tab wears its danger loudly */
 /* WP-02: BAN tab carries the danger severity in BOTH states. Inactive = danger
@@ -25206,11 +25222,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-mc-tab[data-tab="ban"].gam-mc-tab-active{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));border-color:var(--gam-tok-danger,${C.RED});border-bottom:2px solid var(--gam-tok-danger,${C.RED});color:var(--gam-tok-danger,${C.RED})}
 .gam-mc-tab[data-tab="ban"].gam-mc-tab-active::before{color:var(--gam-tok-danger,${C.RED})}
 .gam-mc-tab[data-tab="ban"]:not(.gam-mc-tab-active):hover{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12))}
-.gam-t-act-clear:hover{background:rgba(61,214,140,.12);border-color:rgba(61,214,140,.3);color:${C.GREEN}}
-.gam-t-act-watch:hover{background:rgba(255,214,10,.12);border-color:rgba(255,214,10,.3);color:${C.YELLOW}}
-.gam-t-act-dr:hover{background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.3);color:${C.PURPLE}}
-.gam-t-act-ban:hover{background:rgba(240,64,64,.12);border-color:rgba(240,64,64,.3);color:${C.RED}}
-.gam-t-empty{text-align:center;color:${C.TEXT3};padding:32px;font-size:13px}
+.gam-t-act-clear:hover{background:var(--gam-tok-success-soft,rgba(61,214,140,.12));border-color:var(--gam-tok-success-soft,rgba(61,214,140,.3));color:var(--gam-tok-success,#3dd68c)}
+.gam-t-act-watch:hover{background:var(--gam-tok-warn-soft,rgba(255,214,10,.12));border-color:var(--gam-tok-warn-soft,rgba(255,214,10,.3));color:var(--gam-tok-warn,#f0a040)}
+.gam-t-act-dr:hover{background:var(--gam-tok-special-soft,rgba(167,139,250,.12));border-color:var(--gam-tok-special-soft,rgba(167,139,250,.3));color:var(--gam-tok-special,#a78bfa)}
+.gam-t-act-ban:hover{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));border-color:var(--gam-tok-danger-soft,rgba(240,64,64,.3));color:var(--gam-tok-danger,#f04040)}
+.gam-t-empty{text-align:center;color:var(--gam-tok-ink-faint,#7a7672);padding:32px;font-size:13px}
 
 /* /ban page */
 .gam-ban-search-wrap{display:flex;gap:12px;align-items:center;margin:12px 0;padding:8px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px}
