@@ -10012,7 +10012,7 @@ Analyze this comment against the community rules. Then write a brief, profession
         <input type="text" class="gam-input" id="mc-ban-subj" placeholder="Subject line...">
       </div>
       <div class="gam-mc-field">
-        <label>\u{1F4DD} Team macros (shared) <span style="color:#666;font-weight:400;font-size:10px">\u2014 manage in popup</span></label>
+        <label>\u{1F4DD} Team macros (shared) <span style="color:' + GAM_TOK.inkFaint + ';font-weight:400;font-size:10px">\u2014 manage in popup</span></label>
         <select class="gam-input" id="mc-ban-macro-pick">
           <option value="">-- Pick a team macro --</option>
         </select>
@@ -10052,16 +10052,16 @@ Analyze this comment against the community rules. Then write a brief, profession
         <button class="gam-btn gam-btn-cancel" id="mc-ban-cancel">Cancel</button>
         <button class="gam-btn gam-btn-danger" id="mc-ban-go">\u{1F528} BAN (reason sent as message)</button>
       </div>
-      <div id="mc-ban-status"></div>
+      <div id="mc-ban-status" class="gam-mc-ban-status"></div>
       <!-- v10.13.4 W4 (P0): UNBAN demoted to a ghost link beneath the status div.
            v10.14.2 MM7: rendered ONLY when banned-status signal is positive. -->
       ${_isBannedHint ? `<div style="margin-top:6px;font-size:10px;text-align:right;letter-spacing:0.04em">
-        <a href="#" id="mc-ban-unban" style="color:#44dd66;text-decoration:underline;cursor:pointer;background:transparent;border:none;padding:0;font:inherit">already banned — unban instead</a>` : `<div style="display:none">`}
+        <a href="#" id="mc-ban-unban" style="color:' + GAM_TOK.success + ';text-decoration:underline;cursor:pointer;background:transparent;border:none;padding:0;font:inherit">already banned — unban instead</a>` : `<div style="display:none">`}
       </div>
       <!-- v9.9.0 - AI ban-summary -> auto-add to user notes (max 15 words). -->
       <div class="gam-mc-field" id="mc-ban-summary-wrap" style="margin-top:8px;display:none">
-        <label style="font-size:10px;color:#9b9892;text-transform:uppercase;letter-spacing:0.08em">\u{1F916} AI summary (auto-appended to notes after BAN)</label>
-        <div id="mc-ban-summary-preview" style="background:#0a0a0b;border:1px solid #2a2825;padding:6px 8px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px;color:#e8e6e1;line-height:1.4">
+        <label style="font-size:10px;color:' + GAM_TOK.inkMuted + ';text-transform:uppercase;letter-spacing:0.08em">\u{1F916} AI summary (auto-appended to notes after BAN)</label>
+        <div id="mc-ban-summary-preview" style="background:' + GAM_TOK.surfaceSunken + ';border:1px solid ' + GAM_TOK.border + ';border-left:3px solid ' + GAM_TOK.special + ';padding:6px 8px;font-size:11px;color:' + GAM_TOK.ink + ';line-height:1.4">
           (the AI will summarize the ban reason into <=15 words and append to ` + JSON.stringify(username) + ` notes after the ban succeeds)
         </div>
       </div>
@@ -10415,7 +10415,9 @@ Analyze this comment against the community rules. Then write a brief, profession
       _banSummaryTextarea = document.createElement('textarea');
       _banSummaryTextarea.id = 'mc-ban-summary-edit';
       _banSummaryTextarea.rows = 3;
-      _banSummaryTextarea.style.cssText = 'width:100%;box-sizing:border-box;background:#0a0a0b;border:1px solid #2a2825;padding:6px 8px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px;color:#e8e6e1;line-height:1.4;resize:vertical;';
+      _banSummaryTextarea.style.cssText = 'width:100%;box-sizing:border-box;background:'+GAM_TOK.surfaceSunken+';border:1px solid '+GAM_TOK.border+';border-left:3px solid '+GAM_TOK.accent+';padding:6px 8px;font-size:11px;color:'+GAM_TOK.ink+';line-height:1.4;resize:vertical;';
+        _banSummaryTextarea.addEventListener('input', function(){ try { _banSummaryTextarea.style.borderLeftColor = GAM_TOK.accent; } catch(_){} });
+        _banSummaryTextarea.addEventListener('blur', function(){ try { if ((_banSummaryTextarea.value||'').trim().length >= 10) _banSummaryTextarea.style.borderLeftColor = GAM_TOK.success; } catch(_){} });
       _banSummaryTextarea.placeholder = '(preview loads after you write a reason...)';
       _banSummaryPreview.replaceWith(_banSummaryTextarea);
       // Debounced preview: fires 1.2s after last keystroke in reason field
@@ -24434,24 +24436,34 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-mc-hist-t{color:${C.TEXT3};font-size:10px}
 
 .gam-mc-durs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
-.gam-mc-dur{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:${C.TEXT2};cursor:pointer;transition:all .15s}
-.gam-mc-dur:hover{border-color:${C.BORDER2};color:${C.TEXT}}
-.gam-mc-dur-active{background:${C.RED};border-color:${C.RED};color:var(--gam-tok-on-accent-light,#ffffff)}
-.gam-mc-dur-active:hover{opacity:.9;color:var(--gam-tok-on-accent-light,#ffffff)}
+.gam-mc-dur{position:relative;background:var(--gam-tok-surface-overlay,${C.BG3});border:1px solid var(--gam-tok-border-strong,${C.BORDER2});border-radius:6px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:var(--gam-tok-ink-muted,${C.TEXT2});cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+.gam-mc-dur:hover{border-color:var(--gam-tok-accent-line,rgba(255,153,51,0.28));color:var(--gam-tok-ink,${C.TEXT})}
+.gam-mc-dur-active{background:var(--gam-tok-danger-soft,rgba(240,64,64,0.12));border-color:var(--gam-tok-danger,${C.RED});color:var(--gam-tok-danger,${C.RED});box-shadow:inset 3px 0 0 var(--gam-tok-danger,${C.RED}),inset 0 0 0 1px var(--gam-tok-danger,${C.RED})}
+.gam-mc-dur-active::after{content:'\\2B23';position:absolute;top:3px;right:5px;font-size:9px;line-height:1;color:var(--gam-tok-danger,${C.RED});opacity:.9}
+.gam-mc-dur-active:hover{opacity:1;color:var(--gam-tok-danger,${C.RED});border-color:var(--gam-tok-danger,${C.RED})}
 
 .gam-mc-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 .gam-mc-actions .gam-btn{min-width:160px}
+/* WP-05.2: #mc-ban-status default banner shell -- an empty/bare-innerHTML status
+   still reads as a structured slot (border-strong + surface-sunken inset). When a
+   .gam-mc-banner child is injected it visually nests inside this shell. Empty (no
+   children) collapses to zero height so it never shows an orphan box pre-action. */
+.gam-mc-ban-status:not(:empty){margin-top:10px;padding:2px;border-radius:6px;border:1px solid var(--gam-tok-border-strong,${C.BORDER2});background:var(--gam-tok-surface-sunken,${C.POPUP_BG})}
+.gam-mc-ban-status:not(:empty) .gam-mc-banner{margin-top:0}
+/* WP-05.5: confirm-ban GO button sits on a danger-soft well so it is visually
+   weightier than the benign Cancel sibling. Scoped to the ban actions row. */
+.gam-mc-actions #mc-ban-go{background:var(--gam-tok-danger-soft,rgba(240,64,64,0.12));border:1px solid var(--gam-tok-danger,${C.RED});box-shadow:inset 0 0 0 1px var(--gam-tok-danger,${C.RED})}
 .gam-mc-field{margin-bottom:12px}
 .gam-mc-field label{display:block;font-size:11px;font-weight:600;color:${C.TEXT2};text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
 .gam-mc-hint{font-size:10px;font-weight:400;color:${C.TEXT3};text-transform:none;letter-spacing:0;margin-left:8px}
 .gam-mc-checkbox{display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;color:${C.TEXT2};cursor:pointer}
 .gam-mc-checkbox input{accent-color:${C.ACCENT}}
 
-.gam-mc-banner{padding:8px 12px;border-radius:4px;font-size:12px;margin-top:10px;line-height:1.4}
-.gam-mc-banner-warn{background:rgba(240,160,64,.1);color:${C.WARN};border:1px solid rgba(240,160,64,.25)}
-.gam-mc-banner-info{background:rgba(74,158,255,.1);color:${C.ACCENT};border:1px solid rgba(74,158,255,.25)}
-.gam-mc-banner-green{background:rgba(61,214,140,.1);color:${C.GREEN};border:1px solid rgba(61,214,140,.25)}
-.gam-mc-banner-red{background:rgba(240,64,64,.1);color:${C.RED};border:1px solid rgba(240,64,64,.25)}
+.gam-mc-banner{padding:8px 12px;border-radius:6px;font-size:12px;margin-top:10px;line-height:1.4;border:1px solid var(--gam-tok-border,${C.BORDER});border-left-width:3px}
+.gam-mc-banner-warn{background:var(--gam-tok-warn-soft,rgba(240,160,64,.12));color:var(--gam-tok-warn,${C.WARN});border-color:var(--gam-tok-warn,${C.WARN})}
+.gam-mc-banner-info{background:var(--gam-tok-info-soft,rgba(74,158,255,.10));color:var(--gam-tok-info,#7cb8ff);border-color:var(--gam-tok-info,#7cb8ff)}
+.gam-mc-banner-green{background:var(--gam-tok-success-soft,rgba(61,214,140,.12));color:var(--gam-tok-success,${C.GREEN});border-color:var(--gam-tok-success,${C.GREEN})}
+.gam-mc-banner-red{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));color:var(--gam-tok-danger,${C.RED});border-color:var(--gam-tok-danger,${C.RED})}
 
 .gam-mc-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
 .gam-mc-quick-group{margin-bottom:12px}
@@ -25083,9 +25095,14 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-mc-ai-use{font-size:11px!important;padding:4px 10px!important;align-self:flex-end}
 
 /* v5.2.9: custom ban message history */
-.gam-mc-custom-hist{display:flex;flex-direction:column;gap:4px;max-height:130px;overflow-y:auto;margin-top:6px}
-.gam-mc-custom-hist-item{background:${C.BG3};border:1px solid ${C.BORDER};border-radius:4px;padding:5px 8px;font-size:11px;color:${C.TEXT2};cursor:pointer;line-height:1.4;transition:border-color .1s,color .1s}
-.gam-mc-custom-hist-item:hover{border-color:${C.ACCENT};color:${C.TEXT}}
+/* WP-05.3: thin token-styled scrollbar + bottom fade-mask so 130px overflow is visible; overflow:clip-safe focus ring via scroll-padding so a focused item's ring isn't hidden under the fade. */
+.gam-mc-custom-hist{position:relative;display:flex;flex-direction:column;gap:4px;max-height:130px;overflow-y:auto;margin-top:6px;scrollbar-width:thin;scrollbar-color:var(--gam-tok-accent-line,rgba(255,153,51,0.28)) transparent;-webkit-mask-image:linear-gradient(to bottom,black calc(100% - 14px),transparent 100%);mask-image:linear-gradient(to bottom,black calc(100% - 14px),transparent 100%)}
+.gam-mc-custom-hist::-webkit-scrollbar{width:6px}
+.gam-mc-custom-hist::-webkit-scrollbar-thumb{background:var(--gam-tok-accent-line,rgba(255,153,51,0.28));border-radius:999px}
+.gam-mc-custom-hist::-webkit-scrollbar-track{background:transparent}
+.gam-mc-custom-hist-item{background:var(--gam-tok-surface-overlay,${C.BG3});border:1px solid var(--gam-tok-border,${C.BORDER});border-radius:6px;padding:5px 8px;font-size:11px;color:var(--gam-tok-ink-muted,${C.TEXT2});cursor:pointer;line-height:1.4;transition:border-color .1s,color .1s,background .1s}
+.gam-mc-custom-hist-item:hover{border-color:var(--gam-tok-accent,${C.ACCENT});color:var(--gam-tok-ink,${C.TEXT});background:var(--gam-tok-accent-soft,rgba(255,153,51,0.10))}
+.gam-mc-custom-hist-item:focus-visible{outline:2px solid var(--gam-tok-accent,${C.ACCENT});outline-offset:2px}
 
 /* v5.2.9: settings small input */
 .gam-settings-input-sm{background:${C.BG};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT};font:11px 'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;padding:5px 8px;outline:none;transition:border-color .15s}
