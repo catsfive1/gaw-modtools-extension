@@ -15518,15 +15518,15 @@ Analyze this comment against the community rules. Then write a brief, profession
             if (!head) return;
             dot = document.createElement('span');
             dot.id = 'gam-users-live-dot';
-            dot.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-left:8px;font-size:10px;color:#3dd68c;font-weight:600';
+            dot.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-left:8px;font-size:10px;color:'+GAM_TOK.success+';font-weight:600';
             head.appendChild(dot);
           }
           if (state === 'fetch'){
-            dot.innerHTML = '<span style="color:var(--bb-amber-warm)">●</span> fetching…';
+            dot.innerHTML = '<span style="color:var(--gam-tok-warn,#f0a040)">●</span> fetching…';
           } else if (state === 'idle' || state == null){
-            dot.innerHTML = '<span style="color:#3dd68c">●</span> live (60s)';
+            dot.innerHTML = '<span style="color:var(--gam-tok-success,#3dd68c)">●</span> live (60s)';
           } else if (state === 'paused'){
-            dot.innerHTML = '<span style="color:#5c6370">●</span> paused (tab hidden)';
+            dot.innerHTML = '<span style="color:var(--gam-tok-ink-faint,#7a7672)">●</span> paused (tab hidden)';
           }
         } catch(_){}
       };
@@ -24930,7 +24930,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-dr-rule-meta{color:${C.TEXT3};font-size:9px;flex-shrink:0}
 /* v6.3.1: dotted underline on hover so the click-to-edit affordance is visible */
 .gam-t-dr-rule-pat,.gam-t-dr-rule-meta{border-bottom:1px dotted transparent;transition:border-color .15s}
-.gam-t-dr-rule-pat:hover,.gam-t-dr-rule-meta:hover{border-bottom-color:rgba(74,158,255,.6)}
+.gam-t-dr-rule-pat:hover,.gam-t-dr-rule-meta:hover{border-bottom-color:var(--gam-tok-info,#7cb8ff)}
 .gam-t-dr-rule-toggle{display:flex;align-items:center;flex-shrink:0;cursor:pointer}
 .gam-t-dr-rule-toggle input{cursor:pointer;accent-color:${C.PURPLE};width:12px;height:12px}
 .gam-t-dr-rule-del{background:transparent;border:none;color:${C.TEXT3};cursor:pointer;font-size:12px;padding:0 2px;line-height:1;transition:color .1s;flex-shrink:0}
@@ -24955,7 +24955,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
    Larger padding + amber primary instead of muted red so it's the obvious
    primary action when the panel first renders. */
 .gam-t-dr-sweep-top{margin-top:0;margin-bottom:8px;padding:0 0 6px;border-bottom:1px solid ${C.BORDER}}
-.gam-t-dr-sweep-btn-top{background:rgba(255,153,51,0.15);border:1px solid var(--bb-amber);color:var(--bb-amber);font-size:11px;padding:6px 12px;letter-spacing:.4px}
+.gam-t-dr-sweep-btn-top{background:rgba(255,153,51,0.15);border:1px solid var(--gam-tok-accent,#ff9933);color:var(--gam-tok-accent,#ff9933);font-size:11px;padding:6px 12px;letter-spacing:.4px}
 .gam-t-dr-sweep-btn-top:hover{background:rgba(255,153,51,0.25);box-shadow:0 0 8px rgba(255,153,51,0.3)}
 .gam-t-dr-sweep-btn:hover:not(:disabled){background:rgba(240,64,64,.22);border-color:${C.RED}}
 .gam-t-dr-sweep-btn:disabled{opacity:.5;cursor:progress}
@@ -24973,7 +24973,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-toolbar{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
 .gam-t-filter{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;padding:5px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:${C.TEXT2};cursor:pointer;transition:border-color .12s,color .12s,background .12s;letter-spacing:.1px}
 .gam-t-filter:hover{border-color:${C.BORDER2};color:${C.TEXT}}
-.gam-t-filter-active{background:${C.ACCENT};border-color:${C.ACCENT};color:#fff}
+.gam-t-filter-active{background:${C.ACCENT};border-color:${C.ACCENT};color:var(--gam-tok-on-accent-dark,#0a0a0b)}
 .gam-t-filter-count{font-size:10px;opacity:.7;margin-left:4px}
 .gam-t-cluster-badge{background:rgba(240,160,64,.15);color:${C.WARN};padding:4px 10px;border-radius:4px;font-size:11px;font-weight:600;margin-left:8px}
 .gam-t-cluster-clear{cursor:pointer;margin-left:4px;opacity:.7}
@@ -25012,7 +25012,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-check:hover{border-color:${C.ACCENT};box-shadow:0 0 0 2px rgba(74,158,255,.15)}
 .gam-t-check:hover{border-color:${C.ACCENT}}
 .gam-t-check-on{background:${C.ACCENT};border-color:${C.ACCENT}}
-.gam-t-check-on::after{content:'\u2713';color:#fff;font-size:11px;font-weight:700}
+.gam-t-check-on::after{content:'\u2713';color:var(--gam-tok-on-accent-dark,#0a0a0b);font-size:11px;font-weight:700}
 .gam-t-user-info{min-width:0;overflow:hidden}
 /* ── Loop-2: typography pass ── */
 .gam-t-user-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:3px;line-height:1.2}
@@ -25057,7 +25057,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-act:active{transform:scale(.96)}
 .gam-t-stat-val{font-size:20px}
 .gam-t-alert-flush{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.gam-t-flush-btn{margin-left:auto;background:${C.RED};color:#fff;border:none;border-radius:4px;padding:6px 14px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:700;cursor:pointer;letter-spacing:.3px;text-transform:uppercase;transition:opacity .15s}
+.gam-t-flush-btn{margin-left:auto;background:${C.RED};color:var(--gam-tok-on-accent-light,#ffffff);border:none;border-radius:4px;padding:6px 14px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:700;cursor:pointer;letter-spacing:.3px;text-transform:uppercase;transition:opacity .15s}
 .gam-t-flush-btn:hover{opacity:.9}
 .gam-t-flush-btn:disabled{opacity:.5;cursor:not-allowed}
 
