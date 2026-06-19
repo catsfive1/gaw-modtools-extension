@@ -6845,7 +6845,7 @@
       if (p.authored_by) metaBits.push('by ' + String(p.authored_by));
       if (p.marked_at)   metaBits.push(_drawerFmtTs(p.marked_at));
       row.appendChild(el('div', {cls: 'gam-precedent-meta'}, metaBits.join(' \u00B7 ')));
-      if (p.reason) row.appendChild(el('div', {style: 'font-size:11px;color:#a0aec0;margin-top:2px;'}, String(p.reason)));
+      if (p.reason) row.appendChild(el('div', {style: 'font-size:11px;color:'+GAM_TOK.inkMuted+';margin-top:2px;'}, String(p.reason)));
       const applyBtn = el('button', {cls: 'gam-precedent-apply'}, 'Apply same');
       applyBtn.addEventListener('click', e => {
         e.stopPropagation();
@@ -6918,12 +6918,12 @@
       // v10.8.0 M10 (TARD-2): NEW account badge in drawer header
       if (profile && profile.is_new_account) {
         const newBadge = el('span', {
-          style: 'display:inline-block;background:rgba(167,139,250,0.15);border:1px solid #a78bfa;color:#a78bfa;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;padding:0 5px;text-transform:uppercase;margin-left:6px'
+          style: 'display:inline-block;background:'+GAM_TOK.specialSoft+';border:1px solid '+GAM_TOK.special+';color:'+GAM_TOK.special+';font:700 11px -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-variant-numeric:tabular-nums;letter-spacing:0.04em;padding:0 6px;text-transform:uppercase;margin-left:6px;border-radius:6px'
         }, profile.account_age_days != null ? ('NEW ' + profile.account_age_days + 'd') : 'NEW');
         const pNode = body.querySelector('p');
         if (pNode) pNode.appendChild(newBadge);
       }
-      body.appendChild(el('p', {style: 'color:#a0aec0;font-size:12px;'}, bits.length ? bits.join(' \u00B7 ') : 'No profile metadata.'));
+      body.appendChild(el('p', {style: 'color:'+GAM_TOK.inkMuted+';font-size:12px;'}, bits.length ? bits.join(' \u00B7 ') : 'No profile metadata.'));
 
       // v10.8.0 M9 (TARD-1): cadence chip \u2014 fetch async, render inline
       const cadenceSlot = el('div', {style: 'margin-top:4px;min-height:18px'});
@@ -6935,13 +6935,14 @@
           try { _newAccountCache.set(String(id).toLowerCase(), { is_new: !!cad.is_new_account, age_days: cad.account_age_days || 0 }); _susApplyDecorations(false); } catch(_) {}
         }
         const label = String(cad.cadence_label || '');
-        const color = label === 'BURSTING' ? '#ff3b3b'
-                    : label === 'HEAVY'    ? C.AMBER
-                    : label === 'NEW'      ? '#a78bfa'
-                    : '#9b9892';
+        // WP-10.1: cadence tone map -> tokens at consistent saturation (no ad-hoc runtime hex).
+        const color = label === 'BURSTING' ? GAM_TOK.danger
+                    : label === 'HEAVY'    ? GAM_TOK.warn
+                    : label === 'NEW'      ? GAM_TOK.special
+                    : GAM_TOK.inkMuted;
         const cpd = (typeof cad.comments_per_day_avg === 'number') ? cad.comments_per_day_avg.toFixed(1) : '?';
         const chip = el('span', {
-          style: 'display:inline-flex;align-items:center;gap:4px;background:rgba(0,0,0,0.3);border:1px solid ' + color + ';color:' + color + ';font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;padding:1px 5px'
+          style: 'display:inline-flex;align-items:center;gap:4px;background:'+GAM_TOK.surfaceSunken+';border:1px solid '+color+';color:'+color+';font:600 11px ui-monospace,monospace;font-variant-numeric:tabular-nums;letter-spacing:0.04em;text-transform:uppercase;padding:1px 6px;border-radius:6px'
         }, cpd + ' comments/day \u00B7 ' + (label || 'normal'));
         cadenceSlot.appendChild(chip);
       }).catch(function() {});
@@ -6959,7 +6960,7 @@
             .filter(function(r) { return r.target_user === id && /ban/i.test(r.action) && !/unban/i.test(r.action); })
             .sort(function(a, b) { return b.ts - a.ts; });
           if (bans.length === 0) {
-            histDiv.appendChild(el('em', {style: 'color:#718096;font-size:11px;'}, 'No ban records in recent audit window.'));
+            histDiv.appendChild(el('em', {style: 'color:'+GAM_TOK.inkMuted+';font-size:11px;'}, 'No ban records in recent audit window.'));
           } else {
             for (let bi = 0; bi < Math.min(bans.length, 10); bi++) {
               const brow = bans[bi];
@@ -7006,8 +7007,8 @@
       body.appendChild(el('p', null,
         'Contribution Quality: ', el('strong', null, String(quality)),
         ' ', stateChip({kind:'ai_conf', value:'LOW'}),
-        ' ', el('span', {style: 'color:#718096;font-size:10px;'}, '(NAIVE v7.0)')));
-      body.appendChild(el('p', {style:'color:#a0aec0;font-size:11px;'},
+        ' ', el('span', {style: 'color:'+GAM_TOK.inkFaint+';font-size:10px;'}, '(NAIVE v7.0)')));
+      body.appendChild(el('p', {style:'color:'+GAM_TOK.inkMuted+';font-size:11px;'},
         `approved: ${approved} \u00B7 removed: ${removed} \u00B7 banned: ${banned}`));
       return { id: 2, body };
     }
@@ -7191,7 +7192,7 @@
       const body = el('div', { cls: 'sim-panel' });
       body.appendChild(el('div', { cls: 'sim-panel-header' }, 'SIMILAR ACCOUNTS'));
       // Loading skeleton
-      const loadEl = el('div', { style: 'color:#3a5a7a;font-size:10px;padding:4px 0;' }, 'Scanning co-commenter graph...');
+      const loadEl = el('div', { style: 'color:'+GAM_TOK.inkMuted+';font-size:10px;padding:4px 0;' }, 'Scanning co-commenter graph...');
       body.appendChild(loadEl);
       try {
         const tok = getModToken();
@@ -7207,7 +7208,7 @@
         const d = await r.json();
         loadEl.remove();
         if (!d.ok || !d.candidates || !d.candidates.length) {
-          body.appendChild(el('div', { style: 'color:#3a5a7a;font-size:10px;padding:4px 0;font-style:italic;' },
+          body.appendChild(el('div', { style: 'color:'+GAM_TOK.inkMuted+';font-size:10px;padding:4px 0;font-style:italic;' },
             'No lookalikes found -- this user appears unique'));
           return { id: 8, label: 'Lookalikes', body };
         }
@@ -24720,12 +24721,12 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-at-wrap{padding:8px 14px;font:11px ui-monospace,SFMono-Regular,Consolas,monospace}
 .gam-at-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:${C.TEXT2};font-size:10px;font-variant-numeric:tabular-nums;letter-spacing:.3px}
 .gam-at-spark{display:flex;align-items:flex-end;gap:1px;height:16px}
-.gam-at-spark-bar{width:3px;background:#f5a623;opacity:.7;border-radius:1px 1px 0 0;min-height:1px}
+.gam-at-spark-bar{width:3px;background:var(--gam-tok-accent-line,rgba(255,153,51,.28));border-radius:1px 1px 0 0;min-height:1px;max-height:16px}
 .gam-at-row{display:grid;grid-template-columns:42px 20px 1fr;gap:0 6px;padding:3px 0;border-top:1px solid ${C.BG3};cursor:pointer;line-height:1.35;transition:background .08s}
 .gam-at-row:hover{background:rgba(255,255,255,.04)}
 .gam-at-time{color:${C.TEXT2};font-variant-numeric:tabular-nums}
-.gam-at-kind-p{color:#f5a623;font-weight:700}
-.gam-at-kind-c{color:#e8c84a}
+.gam-at-kind-p{color:var(--gam-tok-accent,#ff9933);font-weight:700}
+.gam-at-kind-c{color:var(--gam-tok-warn,#f0a040)}
 .gam-at-title{color:${C.TEXT};overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gam-at-removed{text-decoration:line-through;color:${C.RED};opacity:.7}
 .gam-at-meta{color:${C.TEXT3};font-size:10px;margin-top:1px}
@@ -26667,16 +26668,16 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-empty-card.gam-empty-error .gam-empty-cta { border-color: var(--bb-red); color: var(--bb-red); }
 .gam-empty-card.gam-empty-error .gam-empty-cta:hover { background: var(--bb-red-bg); }
 /* ---- v10.3: User Similarity (Patch 1) ---- */
-.sim-panel { border-top:1px solid #1e2a3a; padding:8px 12px; font-family:'IBM Plex Mono',monospace; font-size:11px; }
-.sim-panel-header { color:#5b8db8; font-size:10px; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:6px; }
-.sim-row { display:flex; align-items:center; gap:8px; padding:3px 0; border-bottom:1px solid #111c27; cursor:pointer; }
-.sim-row:hover { background:#0d1820; }
-.sim-username { flex:1; color:#c8d8e8; font-weight:500; }
+.sim-panel { border-top:1px solid var(--gam-tok-border,#2a2f38); padding:8px 12px; font-family:'IBM Plex Mono',monospace; font-size:11px; }
+.sim-panel-header { color:var(--gam-tok-accent,#ff9933); font-size:11px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; margin-bottom:6px; }
+.sim-row { display:flex; align-items:center; gap:8px; padding:3px 0; border-bottom:1px solid var(--gam-tok-border,#2a2f38); cursor:pointer; }
+.sim-row:hover { background:var(--gam-tok-accent-soft,rgba(255,153,51,.10)); }
+.sim-username { flex:1; color:var(--gam-tok-ink,#e8e6e1); font-weight:500; }
 .sim-pill { font-size:9px; font-weight:700; letter-spacing:0.06em; padding:1px 5px; border-radius:2px; }
-.sim-pill--HIGH { background:#3d1a1a; color:#ff6b6b; border:1px solid #7a2020; }
-.sim-pill--MEDIUM { background:#2a2a12; color:#d4b44a; border:1px solid #5a4a10; }
-.sim-pill--WATCH { background:#162030; color:#5b8db8; border:1px solid #1e3850; }
-.sim-meta { color:#3a5a7a; font-size:10px; }
+.sim-pill--HIGH { background:var(--gam-tok-danger-soft,rgba(240,64,64,.12)); color:var(--gam-tok-danger,#f04040); border:1px solid var(--gam-tok-danger,#f04040); }
+.sim-pill--MEDIUM { background:var(--gam-tok-warn-soft,rgba(240,160,64,.12)); color:var(--gam-tok-warn,#f0a040); border:1px solid var(--gam-tok-warn,#f0a040); }
+.sim-pill--WATCH { background:var(--gam-tok-surface-overlay,#252a31); color:var(--gam-tok-ink-muted,#b0b5bc); border:1px solid var(--gam-tok-border,#2a2f38); }
+.sim-meta { color:var(--gam-tok-ink-muted,#b0b5bc); font-size:10px; }
 /* ---- v10.3: Search Palette (Patch 2) ---- */
 #gam-search-palette { position:fixed; bottom:36px; left:50%; transform:translateX(-50%); width:480px; max-width:95vw; background:#0a0c0f; border:1px solid #4A9EFF; z-index:9999999; box-shadow:0 -4px 24px rgba(0,0,0,0.7); display:none; }
 #gam-search-palette.gam-sp-open { display:block; }
