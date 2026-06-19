@@ -7994,6 +7994,7 @@
       '#gam-intel-backdrop',          // intel drawer (line ~4505)
       '#gam-token-onboard-backdrop',  // token onboarding modal (line ~14061)
       '.gam-preflight-wrap',          // v5.1.1 preflight confirmation (line ~14102)
+      '#mc-esc-confirm',              // ESC-confirm row: orphaned if Mod Console is torn down while it is visible (any close route except its own Discard/Keep buttons). Listeners live on its child buttons + die with .remove(); the per-element cleanup loop below is a safe no-op for it.
       '[data-gam-orphan-backdrop]'    // opt-in marker for any future backdrops
     ].join(', ');
     document.querySelectorAll(SEL).forEach(e => {
