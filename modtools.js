@@ -6070,6 +6070,18 @@
     return e;
   }
 
+  // WP-10.5: explicit empty-state for zero-length section arrays. The brief
+  // requires an ink-faint "no signal" block (NOT bare gam-muted / ambiguous
+  // muted) so an empty slot reads as a deliberate "nothing here" rather than
+  // unstyled-looking text. Inline ink-faint is used because var() is forbidden
+  // in inline cssText and these are single-line intel-section slots.
+  function gamSectionEmpty(label) {
+    return el('div', {
+      cls: 'gam-empty-state',
+      style: 'color:'+GAM_TOK.inkFaint+';font-size:10px;font-style:italic;padding:4px 0;letter-spacing:.02em;'
+    }, String(label || 'No signal.'));
+  }
+
   // ╔══════════════════════════════════════════════════════════════════╗
   // ║  v7.0 STATE-CHIP GRAMMAR                                         ║
   // ╚══════════════════════════════════════════════════════════════════╝
@@ -6800,7 +6812,7 @@
       const mainFn = handlers[payload.action];
 
       resultWrap.appendChild(el('p', null, stateChip({kind:'ai_conf', value: conf}), ' ', String(payload.action || 'DO_NOTHING')));
-      if (payload.reason) resultWrap.appendChild(el('p', {style: 'color:#a0aec0;font-size:12px;'}, String(payload.reason)));
+      if (payload.reason) resultWrap.appendChild(el('p', {style: 'color:'+GAM_TOK.inkMuted+';font-size:12px;'}, String(payload.reason)));
 
       const btnRow = el('div', {style: 'margin-top:6px;'});
       if (mainFn) btnRow.appendChild(_drawerActionButton(payload.action, 'Do it: ' + payload.action, mainFn, 'gam-nba-action-primary'));
@@ -7036,7 +7048,7 @@
       const profile = (res && res.ok && res.data && res.data.users) ? res.data.users[id.toLowerCase()] : null;
       const notes = (profile && Array.isArray(profile.notes)) ? profile.notes : [];
       const body = el('div');
-      if (notes.length === 0) body.appendChild(el('em', {cls: 'gam-muted'}, 'No team notes yet.'));
+      if (notes.length === 0) body.appendChild(gamSectionEmpty('No team notes yet — no signal.'));
       for (const n of notes.slice(-20).reverse()) {
         const row = el('div', {cls: 'gam-drawer-note-row'},
           el('span', {cls: 'gam-drawer-note-author'}, String(n.author || 'unknown')),
@@ -7134,11 +7146,16 @@
         const hoursAgo = Math.floor((atNow - it._ts) / 3600);
         if (hoursAgo >= 0 && hoursAgo < 24) atBuckets[23 - hoursAgo]++;
       });
-      const atMaxB = Math.max(1, Math.max.apply(null, atBuckets));
+      // WP-10.3: normalized CSS height scale shared across users (NOT per-user
+      // max). A fixed reference of AT_SPARK_REF comments/hr maps to the tallest
+      // bar; the 0..8 level drives a CSS [data-h] height class (no inline px),
+      // so a user peaking at 2/hr and one at 40/hr render at comparable weight.
+      const AT_SPARK_REF = 6; // comments/hr that saturates a bar
       const spark = el('div', { cls: 'gam-at-spark' });
       atBuckets.forEach(function(v) {
         const bar = el('div', { cls: 'gam-at-spark-bar' });
-        bar.style.height = Math.max(1, Math.round((v / atMaxB) * 16)) + 'px';
+        const lvl = v <= 0 ? 0 : Math.min(8, Math.max(1, Math.ceil((v / AT_SPARK_REF) * 8)));
+        bar.setAttribute('data-h', String(lvl));
         spark.appendChild(bar);
       });
 
@@ -7223,8 +7240,7 @@
         const d = await r.json();
         loadEl.remove();
         if (!d.ok || !d.candidates || !d.candidates.length) {
-          body.appendChild(el('div', { style: 'color:'+GAM_TOK.inkMuted+';font-size:10px;padding:4px 0;font-style:italic;' },
-            'No lookalikes found -- this user appears unique'));
+          body.appendChild(gamSectionEmpty('No lookalikes found -- this user appears unique'));
           return { id: 8, label: 'Lookalikes', body };
         }
         for (const c of d.candidates) {
@@ -7249,7 +7265,7 @@
           });
           body.appendChild(row);
         }
-        body.appendChild(el('div', { style: 'color:#3a5a7a;font-size:9px;padding:3px 0 0;' },
+        body.appendChild(el('div', { style: 'color:'+GAM_TOK.inkFaint+';font-size:9px;padding:3px 0 0;' },
           'Co-commenter graph - ' + (d.min_overlap_used || 2) + ' shared threads min - ' + (d.query_ms || 0) + 'ms'));
       } catch (err) {
         loadEl.textContent = 'Lookalikes error: ' + (err && err.message || err);
@@ -7266,17 +7282,17 @@
           const userDels = res.deletes.filter(function(d) { return String(d.author || '').toLowerCase() === String(id).toLowerCase(); });
           if (userDels.length > 0) {
             const chip = el('span', {
-              style: 'display:inline-flex;align-items:center;gap:5px;background:rgba(255,59,59,0.1);border:1px solid #ff3b3b;color:#ff3b3b;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;padding:2px 7px'
+              style: 'display:inline-flex;align-items:center;gap:5px;background:'+GAM_TOK.dangerSoft+';border:1px solid '+GAM_TOK.danger+';color:'+GAM_TOK.danger+';font:700 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;padding:2px 7px'
             }, userDels.length + ' OP self-deleted post' + (userDels.length !== 1 ? 's' : '') + ' in last 30d');
             body.appendChild(chip);
           } else {
-            body.appendChild(el('em', { style: 'color:#9b9892;font-size:10px' }, 'No OP self-deletions in last 30d.'));
+            body.appendChild(gamSectionEmpty('No OP self-deletions in last 30d.'));
           }
         } else {
-          body.appendChild(el('em', { style: 'color:#9b9892;font-size:10px' }, 'No data.'));
+          body.appendChild(gamSectionEmpty('No data.'));
         }
       } catch(err) {
-        body.appendChild(el('em', { style: 'color:#9b9892;font-size:10px' }, 'OP delete data unavailable.'));
+        body.appendChild(gamSectionEmpty('OP delete data unavailable.'));
       }
       return { id: 9, label: 'OP Deletes', body };
     }
@@ -7289,12 +7305,12 @@
           const score = typeof res.similarity_score === 'number' ? Math.round(res.similarity_score * 100) : '?';
           const matched = escapeHtml(String(res.matched_banned_user || ''));
           const wrap = el('div', {
-            style: 'background:rgba(255,59,59,0.08);border:1px solid #ff3b3b;padding:6px 9px;display:flex;align-items:center;gap:8px'
+            style: 'background:'+GAM_TOK.dangerSoft+';border:1px solid '+GAM_TOK.danger+';padding:6px 9px;display:flex;align-items:center;gap:8px'
           });
-          const label = el('span', { style: 'color:#ff3b3b;font:700 10px ui-monospace,monospace;flex:1' },
+          const label = el('span', { style: 'color:'+GAM_TOK.danger+';font:700 10px ui-monospace,monospace;flex:1' },
             '⚠ LOOKALIKE: matches banned user ‘' + matched + '’ (similarity ' + score + '%)');
           const viewBtn = el('button', {
-            style: 'background:transparent;border:1px solid #ff3b3b;color:#ff3b3b;padding:2px 7px;cursor:pointer;font:600 9px ui-monospace,monospace;white-space:nowrap'
+            style: 'background:transparent;border:1px solid '+GAM_TOK.danger+';color:'+GAM_TOK.danger+';padding:2px 7px;cursor:pointer;font:600 9px ui-monospace,monospace;white-space:nowrap'
           }, 'View matched user');
           viewBtn.addEventListener('click', function(e) {
             e.stopPropagation();
@@ -7304,10 +7320,10 @@
           wrap.appendChild(viewBtn);
           body.appendChild(wrap);
         } else {
-          body.appendChild(el('em', { style: 'color:#9b9892;font-size:10px' }, 'No confirmed lookalike on record.'));
+          body.appendChild(gamSectionEmpty('No confirmed lookalike on record.'));
         }
       } catch(err) {
-        body.appendChild(el('em', { style: 'color:#9b9892;font-size:10px' }, 'Lookalike data unavailable.'));
+        body.appendChild(gamSectionEmpty('Lookalike data unavailable.'));
       }
       return { id: 10, label: 'Lookalike', body };
     }
@@ -7337,7 +7353,7 @@
       const body = el('div');
       body.appendChild(el('p', null, stateChip({kind:'primary', value: 'OPEN'}), ' ', el('strong', null, String(seedSubject || 'Modmail thread'))));
       if (participants.length) {
-        const row = el('p', {style: 'font-size:12px;color:#a0aec0;'}, 'Participants: ');
+        const row = el('p', {style: 'font-size:12px;color:'+GAM_TOK.inkMuted+';'}, 'Participants: ');
         participants.forEach((p, idx) => {
           const btn = el('button', {cls: 'gam-nba-action-alt', style:'padding:1px 8px;font-size:11px;margin-right:4px;'}, String(p));
           btn.addEventListener('click', e => {
@@ -7353,8 +7369,8 @@
     }
     async function sec2() {
       const body = el('div');
-      body.appendChild(el('p', {style:'color:#a0aec0;font-size:12px;'}, 'Thread triage summary not yet computed in v7.0.'));
-      body.appendChild(el('p', null, 'Confidence: ', stateChip({kind:'ai_conf', value:'LOW'}), ' ', el('span', {style:'color:#718096;font-size:10px;'}, '(NAIVE v7.0)')));
+      body.appendChild(el('p', {style:'color:'+GAM_TOK.inkMuted+';font-size:12px;'}, 'Thread triage summary not yet computed in v7.0.'));
+      body.appendChild(el('p', null, 'Confidence: ', stateChip({kind:'ai_conf', value:'LOW'}), ' ', el('span', {style:'color:'+GAM_TOK.inkFaint+';font-size:10px;'}, '(NAIVE v7.0)')));
       return { id: 2, body };
     }
     async function sec3() {
@@ -7405,7 +7421,7 @@
         row.appendChild(btn);
         b.appendChild(row);
       }
-      if (body) b.appendChild(el('p', {style:'color:#a0aec0;font-size:12px;max-height:90px;overflow:auto;'}, String(body).slice(0, 400)));
+      if (body) b.appendChild(el('p', {style:'color:'+GAM_TOK.inkMuted+';font-size:12px;max-height:90px;overflow:auto;'}, String(body).slice(0, 400)));
       return { id: 1, body: b };
     }
     async function sec2() {
@@ -7424,9 +7440,9 @@
       const quality = Math.max(0, Math.min(100, 50 + 2*approved - 5*removed - 10*banned));
       const b = el('div');
       if (author) {
-        b.appendChild(el('p', null, 'Author Contribution Quality: ', el('strong', null, String(quality)), ' ', stateChip({kind:'ai_conf', value:'LOW'}), ' ', el('span', {style:'color:#718096;font-size:10px;'}, '(NAIVE v7.0)')));
+        b.appendChild(el('p', null, 'Author Contribution Quality: ', el('strong', null, String(quality)), ' ', stateChip({kind:'ai_conf', value:'LOW'}), ' ', el('span', {style:'color:'+GAM_TOK.inkFaint+';font-size:10px;'}, '(NAIVE v7.0)')));
       } else {
-        b.appendChild(el('em', {cls: 'gam-muted'}, 'No author signal available.'));
+        b.appendChild(gamSectionEmpty('No author signal available.'));
       }
       return { id: 2, body: b };
     }
@@ -7439,7 +7455,7 @@
       const b = el('div');
       const profile = (r && r.ok && r.data && r.data.users && author) ? r.data.users[String(author).toLowerCase()] : null;
       const notes = (profile && Array.isArray(profile.notes)) ? profile.notes : [];
-      if (notes.length === 0) b.appendChild(el('em', {cls: 'gam-muted'}, 'No author notes yet.'));
+      if (notes.length === 0) b.appendChild(gamSectionEmpty('No author notes yet — no signal.'));
       for (const n of notes.slice(-10).reverse()) {
         const row = el('div', {cls: 'gam-drawer-note-row'},
           el('span', {cls: 'gam-drawer-note-author'}, String(n.author || 'unknown')),
@@ -24837,7 +24853,16 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-at-wrap{padding:8px 14px;font:11px ui-monospace,SFMono-Regular,Consolas,monospace}
 .gam-at-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:${C.TEXT2};font-size:10px;font-variant-numeric:tabular-nums;letter-spacing:.3px}
 .gam-at-spark{display:flex;align-items:flex-end;gap:1px;height:16px}
-.gam-at-spark-bar{width:3px;background:var(--gam-tok-accent-line,rgba(255,153,51,.28));border-radius:1px 1px 0 0;min-height:1px;max-height:16px}
+.gam-at-spark-bar{width:3px;background:var(--gam-tok-accent-line,rgba(255,153,51,.28));border-radius:1px 1px 0 0;min-height:1px;max-height:16px;height:1px}
+.gam-at-spark-bar[data-h="0"]{height:1px}
+.gam-at-spark-bar[data-h="1"]{height:2px}
+.gam-at-spark-bar[data-h="2"]{height:4px}
+.gam-at-spark-bar[data-h="3"]{height:6px}
+.gam-at-spark-bar[data-h="4"]{height:8px}
+.gam-at-spark-bar[data-h="5"]{height:10px}
+.gam-at-spark-bar[data-h="6"]{height:12px}
+.gam-at-spark-bar[data-h="7"]{height:14px}
+.gam-at-spark-bar[data-h="8"]{height:16px}
 .gam-at-row{display:grid;grid-template-columns:42px 20px 1fr;gap:0 6px;padding:3px 0;border-top:1px solid ${C.BG3};cursor:pointer;line-height:1.35;transition:background .08s}
 .gam-at-row:hover{background:rgba(255,255,255,.04)}
 .gam-at-time{color:${C.TEXT2};font-variant-numeric:tabular-nums}
