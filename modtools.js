@@ -5858,21 +5858,31 @@
       _apEl.setAttribute('role', 'dialog');
       _apEl.setAttribute('aria-modal', 'true');
       _apEl.setAttribute('aria-label', 'ModTools command palette');
-      _apEl.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999990;background:rgba(0,0,0,0.55);backdrop-filter:blur(2px);display:none;align-items:flex-start;justify-content:center;padding-top:80px;font:13px ui-monospace,JetBrains Mono,monospace';
+      _apEl.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999995;background:'+GAM_TOK.scrim+';display:none;align-items:flex-start;justify-content:center;padding-top:80px;font:13px -apple-system,BlinkMacSystemFont,\'Segoe UI\',system-ui,sans-serif;font-variant-numeric:tabular-nums';
       _apEl.innerHTML =
-        '<div id="gam-cmdk-card" style="background:#0a0a0b;border:1px solid var(--bb-amber,#ff9933);width:min(560px,92vw);max-height:65vh;display:flex;flex-direction:column;box-shadow:0 12px 48px rgba(0,0,0,0.7),0 0 0 1px rgba(255,153,51,0.15);border-radius:4px;overflow:hidden">' +
-          '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(255,153,51,0.25);background:linear-gradient(180deg,#13130f 0%,#0a0a0b 100%)">' +
-            '<span style="color:var(--bb-amber,#ff9933);font-weight:700;font-size:11px;letter-spacing:0.12em;text-transform:uppercase">CMD</span>' +
-            '<input id="gam-cmdk-input" type="text" placeholder="Type a command or filter…" aria-label="Filter commands" autocomplete="off" spellcheck="false" style="flex:1;background:transparent;border:none;outline:none;color:#e8e6e1;font:13px ui-monospace,JetBrains Mono,monospace">' +
-            '<span style="color:#7a7672;font-size:10px;letter-spacing:0.06em">ESC to close</span>' +
+        '<div id="gam-cmdk-card" style="background:'+GAM_TOK.surfacePanel+';border:1px solid '+GAM_TOK.borderStrong+';width:min(560px,92vw);max-height:65vh;display:flex;flex-direction:column;box-shadow:0 8px 24px '+GAM_TOK.scrim+';border-radius:8px;overflow:hidden">' +
+          '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid '+GAM_TOK.border+';background:'+GAM_TOK.surfaceSunken+'">' +
+            '<span style="color:'+GAM_TOK.accent+';font-weight:600;font-size:11px;letter-spacing:0.04em;text-transform:uppercase">CMD</span>' +
+            '<input id="gam-cmdk-input" type="text" placeholder="Filter actions — e.g. ban, modmail, intel…" aria-label="Filter commands" autocomplete="off" spellcheck="false" style="flex:1;background:transparent;border:none;outline:none;color:'+GAM_TOK.ink+';font:13px -apple-system,BlinkMacSystemFont,\'Segoe UI\',system-ui,sans-serif">' +
+            '<span style="display:inline-flex;align-items:center;gap:6px;color:'+GAM_TOK.inkMuted+';font-size:11px;letter-spacing:0.04em"><kbd style="background:'+GAM_TOK.surfaceOverlay+';border:1px solid '+GAM_TOK.border+';border-radius:4px;padding:1px 6px;font:inherit;color:'+GAM_TOK.inkMuted+'">Esc</kbd> close</span>' +
           '</div>' +
-          '<div id="gam-cmdk-list" role="listbox" aria-label="Available commands" style="overflow-y:auto;padding:6px 0;max-height:calc(65vh - 50px)"></div>' +
-          '<div style="padding:6px 14px;border-top:1px solid rgba(255,153,51,0.12);color:#7a7672;font-size:10px;letter-spacing:0.04em;display:flex;justify-content:space-between">' +
-            '<span>↑↓ navigate · ↵ execute</span>' +
+          '<div id="gam-cmdk-list" role="listbox" aria-label="Available commands" class="gam-cmdk-scroll" style="overflow-y:auto;padding:6px 0;max-height:calc(65vh - 50px)"></div>' +
+          '<div style="padding:6px 14px;border-top:1px solid '+GAM_TOK.border+';background:'+GAM_TOK.surfacePanel+';color:'+GAM_TOK.inkMuted+';font-size:11px;letter-spacing:0.04em;display:flex;justify-content:space-between;align-items:center">' +
+            '<span style="display:inline-flex;align-items:center;gap:6px"><kbd style="background:'+GAM_TOK.surfaceOverlay+';border:1px solid '+GAM_TOK.border+';border-radius:4px;padding:1px 6px;font:inherit;color:'+GAM_TOK.inkMuted+'">↑↓</kbd> navigate <kbd style="background:'+GAM_TOK.surfaceOverlay+';border:1px solid '+GAM_TOK.border+';border-radius:4px;padding:1px 6px;font:inherit;color:'+GAM_TOK.inkMuted+'">⏎</kbd> execute</span>' +
             '<span>Ctrl+Shift+P</span>' +
           '</div>' +
         '</div>';
       document.body.appendChild(_apEl);
+      // WP-11: token-styled thin scrollbar for the command list (can't be set inline).
+      if (!document.getElementById('gam-cmdk-scroll-style')) {
+        const _apScrollStyle = document.createElement('style');
+        _apScrollStyle.id = 'gam-cmdk-scroll-style';
+        _apScrollStyle.textContent = '.gam-cmdk-scroll{scrollbar-width:thin;scrollbar-color:var(--gam-tok-accent-line,rgba(255,153,51,0.28)) transparent}'
+          + '.gam-cmdk-scroll::-webkit-scrollbar{width:8px}'
+          + '.gam-cmdk-scroll::-webkit-scrollbar-track{background:transparent}'
+          + '.gam-cmdk-scroll::-webkit-scrollbar-thumb{background:var(--gam-tok-accent-line,rgba(255,153,51,0.28));border-radius:4px}';
+        document.head.appendChild(_apScrollStyle);
+      }
       _apInput = _apEl.querySelector('#gam-cmdk-input');
       _apList = _apEl.querySelector('#gam-cmdk-list');
       // Click outside card to close
@@ -5906,8 +5916,8 @@
       _apList.innerHTML = '';
       if (_apFiltered.length === 0) {
         const empty = document.createElement('div');
-        empty.style.cssText = 'padding:14px 16px;color:#7a7672;font-style:italic';
-        empty.textContent = 'No commands match "' + q + '"';
+        empty.style.cssText = 'padding:14px 16px;color:'+GAM_TOK.inkMuted+';font-size:12px;text-align:center;font-style:italic';
+        empty.textContent = q ? ('No commands match "' + q + '" — try fewer words') : 'No commands match — try fewer words';
         _apList.appendChild(empty);
         return;
       }
@@ -5915,9 +5925,10 @@
         const row = document.createElement('div');
         row.setAttribute('role', 'option');
         row.setAttribute('aria-selected', i === _apIdx ? 'true' : 'false');
-        row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid ' + (i === _apIdx ? 'var(--bb-amber,#ff9933)' : 'transparent') + ';background:' + (i === _apIdx ? 'rgba(255,153,51,0.07)' : 'transparent');
+        row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:'+GAM_TOK.ink+';border-left:2px solid ' + (i === _apIdx ? GAM_TOK.accent : 'transparent') + ';background:' + (i === _apIdx ? GAM_TOK.accentSoft : 'transparent');
         /* v10.16.46 A7-P1-7: long labels overflow → ellipsis (was unbounded, wrapped + broke row rhythm). */
-        row.innerHTML = '<span style="color:var(--bb-amber,#ff9933);width:16px;text-align:center;font-size:14px;flex:0 0 16px">' + (item.icon || '•') + '</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + item.label.replace(/</g,'&lt;') + '</span>';
+        row.innerHTML = '<span style="color:'+GAM_TOK.accent+';width:20px;text-align:center;font-size:13px;flex:0 0 20px;font-variant-numeric:tabular-nums">' + (item.icon || '•') + '</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + item.label.replace(/</g,'&lt;') + '</span>';
+        if (i === _apIdx) row.scrollIntoView({ block: 'nearest' });
         row.addEventListener('mouseenter', () => { _apIdx = i; _apRender(); });
         row.addEventListener('mousedown', (ev) => { ev.preventDefault(); _apIdx = i; _apExecuteCurrent(); });
         _apList.appendChild(row);
