@@ -9359,7 +9359,7 @@
           <div id="gam-mc-modnote-mount"></div>
           <!-- v10.17.0: AI Explain button -->
           <div id="gam-mc-ai-explain-wrap" style="margin-top:8px;position:relative">
-            <button id="gam-mc-ai-explain-btn" class="gam-btn" title="Ask AI why this user is suspicious (Llama, 80% cheaper than Grok)" style="background:rgba(255,153,51,0.08);border:1px solid rgba(255,153,51,0.35);color:var(--bb-amber,#ff9933);width:100%">✨ AI Explain</button>
+            <button id="gam-mc-ai-explain-btn" class="gam-btn" title="Ask AI why this user is suspicious (Llama, 80% cheaper than Grok)" style="background:'+GAM_TOK.accentSoft+';border:1px solid '+GAM_TOK.accentLine+';color:'+GAM_TOK.accent+';width:100%">✨ AI Explain</button>
           </div>
           <div class="gam-mc-intel-tip">\u{1F4A1} Hovering any username anywhere on GAW now shows this same intel instantly.</div>
         </div>
@@ -9406,7 +9406,7 @@
           }
           const d = (res.data && res.data.data) || res.data || {};
           const conf = typeof d.confidence === 'number' ? d.confidence : null;
-          const confColor = conf === null ? '#9b9892' : conf >= 80 ? '#44dd66' : conf >= 50 ? 'var(--bb-amber,#ff9933)' : '#ff4444';
+          const confColor = conf === null ? GAM_TOK.inkMuted : conf >= 80 ? GAM_TOK.success : conf >= 50 ? GAM_TOK.warn : GAM_TOK.danger;
           // v10.16.47 A8-P0-2: always render the chip, even when confidence is
           // null. Pre-fix the empty label hid the chip entirely — operator
           // got AI text with zero reliability signal. Now: 'CONF UNKNOWN'
@@ -9416,13 +9416,13 @@
           const explanation = d.explanation || d.text || '(no explanation returned)';
           // Build popover
           const pop = document.createElement('div');
-          pop.style.cssText = 'position:absolute;top:calc(100% + 4px);left:0;width:380px;max-height:300px;overflow-y:auto;background:#0a0a0b;border:1px solid var(--bb-amber,#ff9933);border-radius:4px;box-shadow:0 8px 24px rgba(0,0,0,0.6);z-index:99999999;padding:10px 12px;font-size:12px;color:#e8e6e1;line-height:1.5;box-sizing:border-box';
+          pop.style.cssText = 'position:absolute;top:calc(100% + 4px);left:0;width:380px;max-height:300px;overflow-y:auto;background:'+GAM_TOK.surfacePanel+';border:1px solid '+GAM_TOK.borderStrong+';border-radius:8px;box-shadow:0 8px 24px '+GAM_TOK.scrim+';z-index:var(--z-t-popover,10000010);padding:10px 12px;font-size:12px;color:'+GAM_TOK.ink+';line-height:1.5;box-sizing:border-box';
           const closeX = document.createElement('button');
           closeX.textContent = '✕';
-          closeX.style.cssText = 'position:absolute;top:6px;right:8px;background:transparent;border:none;color:#9b9892;cursor:pointer;font-size:14px;line-height:1;padding:0';
+          closeX.style.cssText = 'position:absolute;top:6px;right:8px;background:transparent;border:none;color:'+GAM_TOK.inkMuted+';cursor:pointer;font-size:14px;line-height:1;padding:0';
           closeX.addEventListener('click', _aeClosePopover);
           const header = document.createElement('div');
-          header.style.cssText = 'font-weight:700;color:var(--bb-amber,#ff9933);margin-bottom:6px;padding-right:20px;font-size:13px';
+          header.style.cssText = 'font-weight:700;color:'+GAM_TOK.accent+';margin-bottom:6px;padding-right:20px;font-size:13px';
           header.textContent = '✨ AI Explanation';
           const chipWrap = document.createElement('div');
           chipWrap.style.cssText = 'margin-bottom:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap';
@@ -9432,7 +9432,7 @@
           // 'CONF UNKNOWN' as fallback so operator never gets AI text with
           // zero reliability signal.
           const chip = document.createElement('span');
-          chip.style.cssText = 'background:rgba(0,0,0,0.3);border:1px solid ' + confColor + ';color:' + confColor + ';border-radius:3px;padding:1px 6px;font-size:10px;font-weight:700;letter-spacing:0.06em';
+          chip.style.cssText = 'background:'+GAM_TOK.surfaceSunken+';border:1px solid ' + confColor + ';color:' + confColor + ';border-radius:6px;padding:1px 6px;font-size:10px;font-weight:700;letter-spacing:0.06em';
           chip.textContent = 'Confidence: ' + confLabel;
           chipWrap.appendChild(chip);
           // v10.16.48 A8-P0-1: thumbs-down feedback button. Fire-and-forget
@@ -9444,7 +9444,7 @@
           thumbDown.type = 'button';
           thumbDown.textContent = '👎 wrong';
           thumbDown.title = 'Tell the AI this output was incorrect — helps tune future suggestions';
-          thumbDown.style.cssText = 'background:transparent;border:1px solid #7a7672;color:#9b9892;border-radius:3px;padding:1px 6px;font-size:10px;font-weight:600;letter-spacing:0.03em;cursor:pointer;font-family:inherit';
+          thumbDown.style.cssText = 'background:transparent;border:1px solid '+GAM_TOK.inkFaint+';color:'+GAM_TOK.inkMuted+';border-radius:6px;padding:1px 6px;font-size:10px;font-weight:600;letter-spacing:0.03em;cursor:pointer;font-family:inherit';
           thumbDown.addEventListener('click', function (ev) {
             ev.stopPropagation();
             try {
@@ -9457,11 +9457,11 @@
               }).catch(function () {});
             } catch (_) {}
             thumbDown.textContent = '✓ Noted';
-            thumbDown.style.color = '#44dd66';
-            thumbDown.style.borderColor = '#44dd66';
+            thumbDown.style.color = GAM_TOK.success;
+            thumbDown.style.borderColor = GAM_TOK.success;
             thumbDown.disabled = true;
             setTimeout(function () {
-              try { thumbDown.textContent = '👎 wrong'; thumbDown.style.color = '#9b9892'; thumbDown.style.borderColor = '#7a7672'; thumbDown.disabled = false; } catch (_) {}
+              try { thumbDown.textContent = '👎 wrong'; thumbDown.style.color = GAM_TOK.inkMuted; thumbDown.style.borderColor = GAM_TOK.inkFaint; thumbDown.disabled = false; } catch (_) {}
             }, 2000);
           });
           chipWrap.appendChild(thumbDown);
@@ -9474,11 +9474,11 @@
           pop.appendChild(body);
           if (citations.length > 0) {
             const cHead = document.createElement('div');
-            cHead.style.cssText = 'font-weight:700;color:#9b9892;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:4px';
+            cHead.style.cssText = 'font-weight:700;color:'+GAM_TOK.inkMuted+';font-size:10px;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:4px';
             cHead.textContent = 'Citations:';
             pop.appendChild(cHead);
             const cList = document.createElement('ul');
-            cList.style.cssText = 'margin:0;padding-left:16px;color:#9b9892;font-size:11px';
+            cList.style.cssText = 'margin:0;padding-left:16px;color:'+GAM_TOK.inkMuted+';font-size:11px';
             citations.forEach(function(c) {
               const li = document.createElement('li');
               li.textContent = String(c);
@@ -24402,7 +24402,7 @@ Analyze this comment against the community rules. Then write a brief, profession
 
 /* v9.4.0: section margin 16→12, header margin 8→6 — same hierarchy, less air. */
 .gam-mc-section{margin-bottom:12px}
-.gam-mc-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:${C.TEXT2};margin-bottom:6px}
+.gam-mc-h{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--gam-tok-accent,${C.ACCENT});margin-bottom:6px}
 .gam-mc-empty{padding:12px;background:${C.BG2};border:1px dashed ${C.BORDER};border-radius:4px;color:${C.TEXT3};font-size:12px;text-align:center}
 .gam-mc-loading{padding:12px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT2};font-size:12px;font-style:italic}
 /* v10.16.39 PRM gate: spinner animation was running for vestibular-disorder users */
@@ -25235,17 +25235,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-mc-intel-compact{display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;margin-bottom:12px}
 .gam-mc-chips{display:flex;flex-wrap:wrap;gap:4px}
 .gam-mc-chip{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:${C.BG3};color:${C.TEXT2};border:1px solid ${C.BORDER}}
-.gam-mc-chip-ok{background:rgba(61,214,140,.12);color:${C.GREEN};border-color:rgba(61,214,140,.25)}
-.gam-mc-chip-bad{background:rgba(240,64,64,.12);color:${C.RED};border-color:rgba(240,64,64,.25)}
-.gam-mc-chip-warn{background:rgba(240,160,64,.12);color:${C.WARN};border-color:rgba(240,160,64,.25)}
-.gam-mc-chip-mini{background:rgba(255,214,10,.12);color:${C.YELLOW};border-color:rgba(255,214,10,.25)}
+.gam-mc-chip-ok{background:var(--gam-tok-success-soft,rgba(61,214,140,.12));color:var(--gam-tok-success,${C.GREEN});border-color:var(--gam-tok-success-soft,rgba(61,214,140,.12))}
+.gam-mc-chip-bad{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));color:var(--gam-tok-danger,${C.RED});border-color:var(--gam-tok-danger-soft,rgba(240,64,64,.12))}
+.gam-mc-chip-warn{background:var(--gam-tok-warn-soft,rgba(240,160,64,.12));color:var(--gam-tok-warn,${C.WARN});border-color:var(--gam-tok-warn-soft,rgba(240,160,64,.12))}
+.gam-mc-chip-mini{background:var(--gam-tok-warn-soft,rgba(240,160,64,.12));color:var(--gam-tok-warn,${C.WARN});border-color:var(--gam-tok-warn-soft,rgba(240,160,64,.12))}
 .gam-mc-score-dense{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:${C.TEXT}}
 .gam-mc-score-dim{color:${C.TEXT3};font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:10px}
-.gam-mc-score-hits{color:${C.WARN};font-size:10px}
-.gam-mc-note-inline{padding:8px 10px;background:rgba(74,158,255,.08);border:1px solid rgba(74,158,255,.2);border-radius:4px;color:${C.TEXT};font-size:12px;line-height:1.45}
-.gam-mc-note-inline b{color:${C.ACCENT};margin-right:4px}
-.gam-mc-empty-dense{padding:6px 10px;background:${C.BG};border:1px dashed ${C.BORDER};border-radius:4px;color:${C.TEXT3};font-size:11px;text-align:center}
-.gam-mc-intel-tip{font-size:10px;color:${C.TEXT3};margin-top:10px;padding:6px 10px;background:rgba(74,158,255,.05);border-left:2px solid ${C.ACCENT};border-radius:3px}
+.gam-mc-score-hits{color:var(--gam-tok-warn,${C.WARN});font-size:10px}
+.gam-mc-note-inline{padding:8px 10px;background:var(--gam-tok-info-soft,rgba(74,158,255,.08));border:1px solid var(--gam-tok-info-soft,rgba(74,158,255,.2));border-radius:6px;color:var(--gam-tok-ink,${C.TEXT});font-size:12px;line-height:1.45}
+.gam-mc-note-inline b{color:var(--gam-tok-info,${C.ACCENT});margin-right:4px}
+.gam-mc-empty-dense{padding:6px 10px;background:var(--gam-tok-surface-raised,${C.BG});border:1px dashed var(--gam-tok-border,${C.BORDER});border-radius:6px;color:var(--gam-tok-ink-muted,${C.TEXT3});font-size:11px;text-align:center}
+.gam-mc-intel-tip{font-size:12px;color:var(--gam-tok-ink-muted,${C.TEXT3});margin-top:10px;padding:6px 10px;background:var(--gam-tok-info-soft,rgba(74,158,255,.05));border-left:2px solid var(--gam-tok-info,${C.ACCENT});border-radius:6px}
 /* v9.4.0: hard-coded greys (#2a2d33, #a0a8b6, #666, #16181d) replaced
    with C palette tokens so the Note tab inherits the global theme. */
 .gam-mc-note{margin-top:10px;padding-top:10px;border-top:1px solid ${C.BORDER}}
