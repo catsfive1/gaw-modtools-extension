@@ -3816,7 +3816,7 @@
         __v80_park_modal_open = true;
         const overlay = el('div', {
           cls: 'gam-v80-park-overlay',
-          style: 'position:fixed;top:0;left:0;right:0;bottom:0;background:'+GAM_TOK.scrim+';z-index:var(--z-modal,9999995);display:flex;align-items:center;justify-content:center;'
+          style: 'position:fixed;top:0;left:0;right:0;bottom:0;background:'+GAM_TOK.scrim+';z-index:9999995;display:flex;align-items:center;justify-content:center;'
         });
         // v8.1 ux kbd-audit: flag-on marks Park modal as a dialog.
         const __axPark = { tabindex: '-1', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Park for senior review' };
@@ -24822,12 +24822,15 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-drawer-note-author { color:${C.TEXT2}; font-size:11px; font-weight:600; margin-right:6px; }
 .gam-drawer-note-ts { color:${C.TEXT3}; font-size:10px; }
 .gam-drawer-note-body { color:${C.TEXT}; font-size:12px; white-space:pre-wrap; margin:2px 0 0; line-height:1.45; }
-.gam-repeat-halo{display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 4px;border:2px solid var(--gam-tok-accent,#ff9933);border-radius:4px;box-shadow:0 0 0 3px var(--gam-tok-accent-line,rgba(255,153,51,0.28));cursor:pointer;}
+.gam-repeat-halo{display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 4px;border:2px solid var(--gam-tok-accent,#ff9933);border-radius:4px;box-shadow:0 0 0 2px var(--gam-tok-accent-line,rgba(255,153,51,0.28));cursor:pointer;}
 .gam-repeat-badge{display:inline-block;font-size:9px;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;background:var(--gam-tok-danger,#f04040);color:var(--gam-tok-on-accent-light,#ffffff);}
 .gam-repeat-label{font-size:9px;color:var(--gam-tok-accent,#ff9933);text-transform:uppercase;letter-spacing:1px;border-left:2px solid var(--gam-tok-accent,#ff9933);padding-left:6px;margin:8px 0 4px;}
 .gam-repeat-history{margin-top:2px;}
-@keyframes gam-halo-pulse{0%{box-shadow:0 0 0 3px var(--gam-tok-accent-line,rgba(255,153,51,0.28))}50%{box-shadow:0 0 0 6px var(--gam-tok-accent-line,rgba(255,153,51,0.28))}100%{box-shadow:0 0 0 3px var(--gam-tok-accent-line,rgba(255,153,51,0.28))}}
-/* v10.16.28 (QA-UI-8 P0): PRM-gate the halo pulse. */
+@keyframes gam-halo-pulse{0%{box-shadow:0 0 0 2px var(--gam-tok-accent-line,rgba(255,153,51,0.28))}50%{box-shadow:0 0 0 6px var(--gam-tok-accent-line,rgba(255,153,51,0.28))}100%{box-shadow:0 0 0 2px var(--gam-tok-accent-line,rgba(255,153,51,0.28))}}
+/* v10.16.28 (QA-UI-8 P0): PRM-gate the halo pulse. The persistent 2px box-shadow
+   ring on .gam-repeat-halo above is the glanceable-on-every-render signal that
+   survives re-render AND reduced-motion; the pulse below is the PRM-gated
+   enhancement only, not the only signal. */
 @media (prefers-reduced-motion: no-preference){
   .gam-repeat-halo--pulse{animation:gam-halo-pulse 600ms ease-out 1;}
 }
