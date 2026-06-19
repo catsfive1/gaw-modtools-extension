@@ -8180,9 +8180,9 @@
           // Visual feedback on the button
           const orig = copy.textContent;
           copy.textContent = via ? '✓ Copied' : '✕ failed';
-          copy.style.background = via ? 'rgba(61,214,140,0.18)' : 'rgba(240,64,64,0.18)';
+          copy.style.background = via ? GAM_TOK.successSoft : GAM_TOK.dangerSoft;
           setTimeout(() => {
-            try { copy.textContent = orig; copy.style.background = 'transparent'; } catch (_) {}
+            try { copy.textContent = orig; copy.style.background = 'transparent'; } catch (_) {} /* WP-13: revert to transparent; styled bg handled by .gam-toast-btn */
           }, 1800);
         } catch (_) {}
       });
@@ -26153,36 +26153,72 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 
 /* ── Iter 18 ── Auth-fail banner: square, popping red, no rounded silliness */
 #gam-auth-fail-banner {
-  background: var(--bb-panel) !important;
-  border: 1px solid var(--bb-red) !important;
+  /* WP-13: single token system. Floating notification shell: surface-panel base, border-strong, scrim shadow. Severity background + keyline + title color are set per [data-severity] below so the inline _sev tint actually surfaces (no more CSS-var vs inline-rgba mismatch). */
+  background: var(--gam-tok-surface-panel, #181b20) !important;
+  border: 1px solid var(--gam-tok-border-strong, #3a3f48) !important;
+  border-left-width: 3px !important;
   border-radius: var(--bb-r) !important;
-  box-shadow: 0 0 0 1px var(--bb-red-bg), 0 8px 24px rgba(0,0,0,0.6) !important;
+  box-shadow: 0 8px 24px var(--gam-tok-scrim, rgba(0,0,0,0.6)) !important;
   font: var(--bb-t-sm)/1.4 var(--bb-font) !important;
-  color: var(--bb-ink) !important;
+  color: var(--gam-tok-ink, #e8e6e1) !important;
   padding: var(--bb-s4) var(--bb-s5) !important;
   max-width: 380px;
 }
+#gam-auth-fail-banner[data-severity='setup'] {
+  background: var(--gam-tok-info-soft, rgba(74,158,255,0.10)) !important;
+  border-color: var(--gam-tok-info, #7cb8ff) !important;
+}
+#gam-auth-fail-banner[data-severity='connectivity'],
+#gam-auth-fail-banner[data-severity='credential'] {
+  background: var(--gam-tok-warn-soft, rgba(240,160,64,0.12)) !important;
+  border-color: var(--gam-tok-warn, #f0a040) !important;
+}
+#gam-auth-fail-banner[data-severity='unknown'] {
+  background: var(--gam-tok-danger-soft, rgba(240,64,64,0.12)) !important;
+  border-color: var(--gam-tok-danger, #f04040) !important;
+}
 #gam-auth-fail-banner > div:first-child {
-  color: var(--bb-red) !important;
+  /* Title color reconciled to token severity (base danger; overridden per tier). */
+  color: var(--gam-tok-danger, #f04040) !important;
   font-weight: 600 !important;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-size: var(--bb-t-xs);
 }
+#gam-auth-fail-banner[data-severity='setup'] > div:first-child {
+  color: var(--gam-tok-info, #7cb8ff) !important;
+}
+#gam-auth-fail-banner[data-severity='connectivity'] > div:first-child,
+#gam-auth-fail-banner[data-severity='credential'] > div:first-child {
+  color: var(--gam-tok-warn, #f0a040) !important;
+}
 #gam-auth-fail-banner button {
-  background: var(--bb-bg) !important;
-  border: 1px solid var(--bb-line-hot) !important;
+  /* One shared toast-button treatment. */
+  background: var(--gam-tok-surface-overlay, #252a31) !important;
+  border: 1px solid var(--gam-tok-border-strong, #3a3f48) !important;
   border-radius: var(--bb-r) !important;
-  color: var(--bb-ink) !important;
+  color: var(--gam-tok-ink, #e8e6e1) !important;
   font: var(--bb-t-xs)/1 var(--bb-font) !important;
   padding: var(--bb-s2) var(--bb-s4) !important;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  transition: background .12s, border-color .12s, color .12s, opacity .12s;
 }
 #gam-auth-fail-banner button:hover {
-  background: var(--bb-amber-bg) !important;
-  border-color: var(--bb-amber) !important;
-  color: var(--bb-amber) !important;
+  background: var(--gam-tok-accent-soft, rgba(255,153,51,0.10)) !important;
+  border-color: var(--gam-tok-accent, #ff9933) !important;
+  color: var(--gam-tok-accent, #ff9933) !important;
+}
+#gam-auth-fail-banner button:focus-visible {
+  outline: 2px solid var(--gam-tok-focus-ring, #ff9933) !important;
+  outline-offset: 2px !important;
+}
+#gam-auth-fail-banner button:disabled {
+  opacity: 0.5 !important;
+  cursor: default !important;
+  background: var(--gam-tok-surface-sunken, #050507) !important;
+  border-color: var(--gam-tok-border, #2a2f38) !important;
+  color: var(--gam-tok-ink-faint, #7a7672) !important;
 }
 
 /* ── Iter 19 ── Mod chat panel: square dock, terminal grid */
@@ -30309,8 +30345,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         // 5% RGB-distance apart; spec G.2 promised 4 distinct tiers but effective
         // count was 3. Setup is the lowest-stakes mode (no credential ever entered)
         // so blue/info connotes "fresh start" vs credential's amber "needs update".
-        bg: 'rgba(74, 158, 255, .95)',
-        borderColor: 'rgba(170, 210, 255, .35)',
+        bg: GAM_TOK.infoSoft,
+        borderColor: GAM_TOK.info,
         title: 'GAW ModTools: setup needed',
         label: reason === 'short_token' ? 'Token incomplete' : 'Setup needed'
       };
@@ -30319,8 +30355,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       return {
         kind: 'connectivity',
         // yellow (transient network)
-        bg: 'rgba(217, 197, 36, .95)',
-        borderColor: 'rgba(255, 240, 150, .35)',
+        bg: GAM_TOK.warnSoft,
+        borderColor: GAM_TOK.warn,
         title: 'GAW ModTools: connection issue',
         label: 'Connection issue'
       };
@@ -30329,8 +30365,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       return {
         kind: 'credential',
         // amber (token rotated/expired -- needs update, not network)
-        bg: 'rgba(240, 160, 64, .95)',
-        borderColor: 'rgba(255, 220, 150, .35)',
+        bg: GAM_TOK.warnSoft,
+        borderColor: GAM_TOK.warn,
         title: 'GAW ModTools: token needs update',
         label: 'Token needs update'
       };
@@ -30338,8 +30374,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     return {
       kind: 'unknown',
       // red (true error / catch-all)
-      bg: 'rgba(220, 40, 40, .95)',
-      borderColor: 'rgba(255, 255, 255, .15)',
+      bg: GAM_TOK.dangerSoft,
+      borderColor: GAM_TOK.danger,
       title: 'GAW ModTools: auth failed',
       label: 'Auth error'
     };
@@ -30439,14 +30475,14 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       b.id = 'gam-auth-fail-banner';
       b.dataset.severity = _sev.kind;
       b.style.cssText = [
-        'position:fixed','top:8px','right:8px','z-index:2147483640',
+        'position:fixed','top:8px','right:8px','z-index:var(--z-toast,9999999)',
         'max-width:380px','padding:10px 12px','background:' + _sev.bg,
-        'color:#fff','font:12px/1.45 -apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif',
-        'border-radius:8px','box-shadow:0 4px 16px rgba(0,0,0,.5)',
+        'color:'+GAM_TOK.ink,'font:12px/1.45 -apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif',
+        'border-radius:8px','box-shadow:0 4px 16px ' + GAM_TOK.scrim,
         'border:1px solid ' + _sev.borderColor
       ].join(';');
       const title = document.createElement('div');
-      title.style.cssText = 'font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:6px';
+      title.style.cssText = 'font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:6px;color:'+GAM_TOK.ink;
       // v10.27.0: dignified title when a returning LEAD's token dropped out.
       const __leadTitle = (function(){ try { return getSetting('gam_was_lead', false) === true && __authReasonIsCredential(authResult && authResult.reason); } catch(_) { return false; } })();
       title.textContent = '\u{1F512} ' + (__leadTitle ? 'GAW ModTools: lead access dropped' : _sev.title);
@@ -30467,7 +30503,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       row.style.cssText = 'display:flex;gap:6px;justify-content:flex-end';
       const btnRetry = document.createElement('button');
       btnRetry.textContent = 'Force re-hydrate';
-      btnRetry.style.cssText = 'padding:4px 10px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.15);color:#fff;border-radius:4px;cursor:pointer;font:inherit';
+      btnRetry.className = 'gam-toast-btn';
+      btnRetry.style.cssText = 'padding:4px 10px;border:1px solid '+GAM_TOK.borderStrong+';background:'+GAM_TOK.surfaceOverlay+';color:'+GAM_TOK.ink+';border-radius:4px;cursor:pointer;font:inherit';
       btnRetry.addEventListener('click', async () => {
         btnRetry.disabled = true;
         btnRetry.textContent = 'Re-hydrating...';
@@ -30509,7 +30546,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       if (showOpenPopup) {
         btnOpen = document.createElement('button');
         btnOpen.textContent = 'Open ModTools popup';
-        btnOpen.style.cssText = 'padding:4px 10px;border:1px solid #fff;background:#fff;color:#a02020;border-radius:4px;cursor:pointer;font:inherit;font-weight:700';
+        btnOpen.className = 'gam-toast-btn gam-toast-btn--primary';
+        btnOpen.style.cssText = 'padding:4px 10px;border:1px solid '+GAM_TOK.accent+';background:'+GAM_TOK.accent+';color:'+GAM_TOK.onAccentDark+';border-radius:4px;cursor:pointer;font:inherit;font-weight:700';
         btnOpen.addEventListener('click', async () => {
           btnOpen.disabled = true;
           btnOpen.textContent = 'Opening...';
@@ -30531,7 +30569,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       }
       const btnDismiss = document.createElement('button');
       btnDismiss.textContent = 'Dismiss';
-      btnDismiss.style.cssText = 'padding:4px 10px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;border-radius:4px;cursor:pointer;font:inherit;opacity:.85';
+      btnDismiss.className = 'gam-toast-btn';
+      btnDismiss.style.cssText = 'padding:4px 10px;border:1px solid '+GAM_TOK.border+';background:transparent;color:'+GAM_TOK.inkMuted+';border-radius:4px;cursor:pointer;font:inherit';
       btnDismiss.addEventListener('click', () => { try { b.remove(); } catch(_){} });
       if (btnOpen) row.appendChild(btnOpen);
       row.appendChild(btnRetry);
