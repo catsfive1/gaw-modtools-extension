@@ -8359,11 +8359,19 @@
     const pinBtn = (id === 'gam-mc-panel')
       ? el('button',{cls:'gam-modal-pin', title:'Toggle dock position (modal \u2192 right \u2192 left \u2192 modal)', html: dock==='modal'?'\u{1F4CC}':'\u{1F4CD}'})
       : null;
-    const p=el('div',{id, cls, style: isDock ? {} : {width:w}},
+    // WP-02 (in-page redesign — global modal a11y, applied in the foundational
+    // package per §2.7): every showModal panel is a proper dialog. role=dialog +
+    // aria-modal=true + aria-labelledby pointing at the title node so screen
+    // readers announce the modal and its name. These are ADDITIVE attributes;
+    // they do not rename or remove any locked selector. Title gets a unique id.
+    const _titleId = 'gam-modal-title-' + id;
+    const _titleNode = el('div',{cls:'gam-modal-title', id:_titleId});
+    _titleNode.innerHTML = title;  // title is caller-built trusted markup (pre-existing behavior)
+    const p=el('div',{id, cls, role:'dialog', 'aria-modal':'true', 'aria-labelledby':_titleId, style: isDock ? {} : {width:w}},
       el('div',{cls:'gam-modal-header'},
-        el('div',{cls:'gam-modal-title', html:title}),
+        _titleNode,
         pinBtn,
-        el('button',{cls:'gam-modal-close', onclick:closeAllPanels, html:'&times;'})
+        el('button',{cls:'gam-modal-close', onclick:closeAllPanels, 'aria-label':'Close', html:'&times;'})
       ),
       el('div',{cls:'gam-modal-body'}, content)
     );
@@ -8384,7 +8392,7 @@
     if (isDock){
       requestAnimationFrame(()=>{ p.style.opacity='1'; p.style.transform='translateX(0)'; });
     } else {
-      requestAnimationFrame(()=>{ p.style.opacity='1'; p.style.transform='translate(-50%,-50%) scale(1)'; });
+      requestAnimationFrame(()=>{ p.style.opacity='1'; p.style.transform='translateX(-50%) scale(1)'; });
     }
     // v8.6.1: ESC closes the modal. Capture-phase so it wins against any
     // lower-level keydown handler that might stopPropagation. Cleanup is
@@ -8887,17 +8895,31 @@
     const roster = getRoster()[username.toLowerCase()];
 
     // Status pill strip
-    const pills = [];
-    if (w) pills.push(`<span class="gam-mc-pill gam-mc-pill-watch">\u{1F440} Watched</span>`);
-    if (bans>0) pills.push(`<span class="gam-mc-pill gam-mc-pill-ban">\u{1F528} ${bans} prior ban${bans>1?'s':''}</span>`);
-    if (verified===true) pills.push(`<span class="gam-mc-pill gam-mc-pill-verified">\u2713\u2713 verified banned</span>`);
-    if (roster && roster.status==='deathrow') pills.push(`<span class="gam-mc-pill gam-mc-pill-dr">\u{1F480} on death row</span>`);
-    if (bans===0 && !w) pills.push(`<span class="gam-mc-pill gam-mc-pill-clean">\u2713 clean record</span>`);
+    // WP-02 (\u00a7WP-02.3 + \u00a71.7 verdict/attribute split): VERDICT pills
+    // (watched / prior-ban / death-row) are solid-fill, render FIRST on a
+    // single non-wrapping row, and overflow into a "+N" chip; ATTRIBUTE pills
+    // (verified / clean) are outline+tint, demoted to a second wrapping row.
+    // Each pill carries a LEADING severity glyph so a truncated chip stays
+    // parseable. The .gam-mc-pill* classes are LOCKED (restyle only) \u2014 order &
+    // grouping changed here, class names unchanged.
+    const VERDICT_CAP = 3; // single-row cap; remainder collapses to "+N"
+    const verdictPills = [];
+    if (w) verdictPills.push(`<span class="gam-mc-pill gam-mc-pill-watch">\u{1F440} Watched</span>`);
+    if (bans>0) verdictPills.push(`<span class="gam-mc-pill gam-mc-pill-ban">\u{1F528} ${bans} prior ban${bans>1?'s':''}</span>`);
+    if (roster && roster.status==='deathrow') verdictPills.push(`<span class="gam-mc-pill gam-mc-pill-dr">\u{1F480} on death row</span>`);
+    const attrPills = [];
+    if (verified===true) attrPills.push(`<span class="gam-mc-pill gam-mc-pill-verified">\u2713\u2713 verified banned</span>`);
+    if (bans===0 && !w) attrPills.push(`<span class="gam-mc-pill gam-mc-pill-clean">\u2713 clean record</span>`);
+    // Single-row cap for verdict pills with a "+N" overflow chip.
+    let verdictRow = verdictPills.slice(0, VERDICT_CAP).join('');
+    const overflow = verdictPills.length - VERDICT_CAP;
+    if (overflow > 0) verdictRow += `<span class="gam-mc-pill gam-mc-pill-more">+${overflow}</span>`;
 
     const titleHtml = `<div class="gam-mc-titlebar">
       <span class="gam-mc-shield">\u{1F6E1}</span>
       <span class="gam-mc-user">${escapeHtml(username)}</span>
-      <span class="gam-mc-pills">${pills.join('')}</span>
+      <span class="gam-mc-pills gam-mc-pills-verdict">${verdictRow}</span>
+      <span class="gam-mc-pills gam-mc-pills-attr">${attrPills.join('')}</span>
     </div>`;
 
     const body = el('div', { cls:'gam-mc-body' });
@@ -8919,14 +8941,13 @@
       nav.querySelectorAll('.gam-mc-tab').forEach(t=>{
         const isActive = (t.dataset.tab === id);
         t.classList.toggle('gam-mc-tab-active', isActive);
-        // v10.13.4 W4: rebuild label so active state strips number prefix
-        const numStr = t.dataset.num;
-        const tabDef = tabs.find(tt => tt.id === t.dataset.tab);
-        if (tabDef && numStr) {
-          t.textContent = isActive
-            ? (tabDef.icon + ' ' + tabDef.label)
-            : (numStr + '·' + tabDef.label.toUpperCase());
-        }
+        // WP-02 (in-page redesign §WP-02.2): the "1·" number prefix is now a
+        // CSS ::before counter keyed off [data-num] (NOT JS textContent), and
+        // the active state no longer swaps in an icon. textContent is the
+        // STABLE uppercase label so the accessible name stays "INTEL" across
+        // active/inactive — fixes the prior unstable name (was "1·INTEL" vs
+        // "📊 Intel"). aria-selected mirrors active for screen readers.
+        t.setAttribute('aria-selected', isActive ? 'true' : 'false');
       });
       // Track current tab on the modal so the keydown handler can route Ctrl+Enter.
       try {
@@ -8956,6 +8977,11 @@
     // BAN-tab styling already lives in the .gam-mc-tab[data-tab="ban"]
     // selectors (popup.css ~21812). The data-tab attribute is the styling
     // hook; the redundant class added zero rendering signal.
+    // WP-02 (§WP-02.2 + a11y): nav is the tablist; each tab is role=tab with
+    // aria-selected. The leading "N·" number is rendered by a CSS ::before
+    // counter from [data-num] — NOT baked into textContent — so the accessible
+    // name is the stable uppercase label ("INTEL", "BAN", ...) in every state.
+    try { nav.setAttribute('role', 'tablist'); } catch(_){}
     tabs.forEach((t, idx) => {
       const num = idx + 1;
       const isActive = (t.id === tab);
@@ -8963,10 +8989,10 @@
         cls: 'gam-mc-tab' + (isActive ? ' gam-mc-tab-active' : ''),
         'data-tab': t.id,
         'data-num': String(num),
+        role: 'tab',
+        'aria-selected': isActive ? 'true' : 'false',
         onclick: () => renderTab(t.id)
-      }, isActive
-            ? (t.icon + ' ' + t.label)
-            : (num + '·' + t.label.toUpperCase()));
+      }, t.label.toUpperCase());
       nav.appendChild(b);
     });
 
@@ -9103,10 +9129,15 @@
           confirmRow = document.createElement('div');
           confirmRow.id = 'mc-esc-confirm';
           confirmRow.setAttribute('role', 'alert');
-          confirmRow.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,153,51,0.10);border-top:1px solid #ff9933;border-bottom:1px solid #ff9933;font:11px ui-monospace,"JetBrains Mono",monospace;color:#e8e6e1';
+          // WP-02 (§WP-02.5): the ESC-confirm is a REAL confirm in a reserved
+          // fixed-height footer slot — warn-tinted caution row with a danger
+          // Discard action — so it never reflows the titlebar or orphans DOM.
+          // Inline cssText routes through GAM_TOK by concatenation (var() is
+          // forbidden in inline cssText per §2.1); #mc-esc-confirm id is LOCKED.
+          confirmRow.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;min-height:48px;box-sizing:border-box;background:'+GAM_TOK.warnSoft+';border-top:1px solid '+GAM_TOK.warn+';border-bottom:1px solid '+GAM_TOK.warn+';font:11px ui-monospace,"JetBrains Mono",monospace;color:'+GAM_TOK.ink;
           confirmRow.innerHTML = '<span style="flex:1">⚠ Unsaved draft text. Close anyway?</span>' +
-            '<button id="mc-esc-discard" style="background:transparent;color:#ff3b3b;border:1px solid #ff3b3b;padding:6px 12px;font:600 11px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;min-height:32px">Discard</button>' +
-            '<button id="mc-esc-keep" style="background:transparent;color:#9b9892;border:1px solid #3d3a35;padding:6px 12px;font:600 11px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;min-height:32px">Keep typing</button>';
+            '<button id="mc-esc-discard" style="background:transparent;color:'+GAM_TOK.danger+';border:1px solid '+GAM_TOK.danger+';padding:6px 12px;font:600 11px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;min-height:32px;border-radius:6px">Discard</button>' +
+            '<button id="mc-esc-keep" style="background:transparent;color:'+GAM_TOK.inkMuted+';border:1px solid '+GAM_TOK.borderStrong+';padding:6px 12px;font:600 11px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer;min-height:32px;border-radius:6px">Keep typing</button>';
           // Insert after head so it doesn't shift tab buttons
           if (head && head.parentNode) head.parentNode.insertBefore(confirmRow, head.nextSibling);
           else mc.insertBefore(confirmRow, mc.firstChild);
@@ -24244,26 +24275,41 @@ Analyze this comment against the community rules. Then write a brief, profession
         Note/Message tabs) — exactly what Commander sees.
    Two-part fix: kill backdrop blur (here) + scope chat-panel rule to
    [data-dock] so only the chat panel matches it (further down the file). */
-#gam-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:var(--z-backdrop-scrim,9999990);opacity:0;transition:opacity .2s}
+/* WP-02 (in-page redesign): backdrop = scrim token (collapses the old .55
+   bespoke overlay onto the canonical rgba(0,0,0,.60)). z stays on the ladder. */
+#gam-backdrop{position:fixed;inset:0;background:var(--gam-tok-scrim,rgba(0,0,0,.60));z-index:var(--z-backdrop-scrim,9999990);opacity:0;transition:opacity .2s}
 /* ── Iter-3: modal + console polish ── */
 /* v9.4.0: dropped the inset 1px highlight (the ",0 0 0 1px rgba(255,255,255,.04)"
    was pure visual noise on a 1px border). Shadow now a single clean layer. */
-.gam-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.97);z-index:var(--z-modal,9999995);background:${C.BG};border:1px solid ${C.BORDER2};border-radius:8px;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};opacity:0;transition:opacity .15s,transform .18s;box-shadow:0 24px 48px rgba(0,0,0,.6);max-height:85vh;max-width:95vw;display:flex;flex-direction:column;overflow:hidden}
+/* WP-02 (in-page redesign §1.5 elevation + §WP-02.4 positioning):
+   - surface-raised body + border-strong (floating-layer border) + single
+     0 8px 24px scrim shadow (the canonical floating elevation).
+   - Top-pinned: top:8vh + translateX-only (NO vertical translate-centering)
+     so the titlebar is always first-visible. Fixes mobile clip, subpixel
+     scale jank, and 200/400% reflow. max-height:88vh + overflow inside body.
+   - reveal transform is set by JS (showModal) to translateX(-50%) scale(1);
+     the dock variant overrides position entirely below. */
+.gam-modal{position:fixed;top:8vh;left:50%;transform:translateX(-50%) scale(.97);z-index:var(--z-modal,9999995);background:var(--gam-tok-surface-raised,${C.BG});border:1px solid var(--gam-tok-border-strong,${C.BORDER2});border-radius:8px;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:var(--gam-tok-ink,${C.TEXT});opacity:0;transition:opacity .15s,transform .18s;box-shadow:0 8px 24px var(--gam-tok-scrim,rgba(0,0,0,.6));max-height:88vh;max-width:95vw;display:flex;flex-direction:column;overflow:hidden}
 /* v9.4.0: header padding 11/16 → 10/14, body padding 16 → 12. Closes
    ~10px of vertical+horizontal whitespace per modal — substantial when
    stacked across stats / actions / form fields. */
-.gam-modal-header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid ${C.BORDER};background:linear-gradient(180deg,${C.BG2} 0%,${C.BG} 100%)}
-.gam-modal-title{font-weight:700;font-size:13px;letter-spacing:.1px;flex:1}
-.gam-modal-close{background:none;border:none;color:${C.TEXT3};font-size:18px;cursor:pointer;padding:2px 6px;line-height:1;transition:color .1s,background .1s;border-radius:4px;min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center} /* v10.14.1 CT5: 22x22 -> 32x32 to match .pop-drill-close */
-.gam-modal-close:hover{color:${C.TEXT};background:rgba(255,255,255,.06)}
-.gam-modal-body{padding:12px 14px;overflow-y:auto;flex:1}
-.gam-modal-pin{background:none;border:none;color:${C.TEXT3};font-size:14px;cursor:pointer;padding:0 6px;line-height:1;margin-right:4px;transition:color .15s}
-.gam-modal-pin:hover{color:${C.ACCENT}}
+/* WP-02: titlebar = surface-panel with a 1px border-strong bottom edge
+   (panel-over-canvas elevation step). Replaces the gradient. */
+.gam-modal-header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--gam-tok-border-strong,${C.BORDER2});background:var(--gam-tok-surface-panel,${C.BG2})}
+.gam-modal-title{font-weight:700;font-size:13px;letter-spacing:.1px;flex:1;color:var(--gam-tok-ink,${C.TEXT})}
+.gam-modal-close{background:none;border:none;color:var(--gam-tok-ink-muted,${C.TEXT3});font-size:18px;cursor:pointer;padding:2px 6px;line-height:1;transition:color .1s,background .1s;border-radius:4px;min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center} /* v10.14.1 CT5: 22x22 -> 32x32 to match .pop-drill-close */
+.gam-modal-close:hover{color:var(--gam-tok-ink,${C.TEXT});background:var(--gam-tok-accent-soft,rgba(255,153,51,.10))}
+/* WP-02: body on the surface-raised canvas (header is the panel step above). */
+.gam-modal-body{padding:12px 14px;overflow-y:auto;flex:1;background:var(--gam-tok-surface-raised,${C.BG})}
+.gam-modal-pin{background:none;border:none;color:var(--gam-tok-ink-muted,${C.TEXT3});font-size:14px;cursor:pointer;padding:0 6px;line-height:1;margin-right:4px;transition:color .15s}
+.gam-modal-pin:hover{color:var(--gam-tok-accent,${C.ACCENT})}
 /* v5.2.2: side-dock variant. Full-height vertical rail pinned to an edge. */
-.gam-modal-dock{top:0;left:auto;right:auto;transform:none;width:420px;max-width:40vw;height:100vh;max-height:100vh;border-radius:0;border-top:none;border-bottom:none}
+/* WP-02 (§WP-02.7 dock state): docked rail = surface-panel + 1px border-strong
+   on the inner edge (the documented drawer z-tier sits on the z-ladder). */
+.gam-modal-dock{top:0;left:auto;right:auto;transform:none;width:420px;max-width:40vw;height:100vh;max-height:100vh;border-radius:0;border-top:none;border-bottom:none;background:var(--gam-tok-surface-panel,${C.BG2})}
 .gam-modal-dock-right{right:0}
-.gam-modal-dock-left{left:0;border-left:none;border-right:1px solid ${C.BORDER2}}
-.gam-modal-dock-right.gam-modal{border-right:none;border-left:1px solid ${C.BORDER2}}
+.gam-modal-dock-left{left:0;border-left:none;border-right:1px solid var(--gam-tok-border-strong,${C.BORDER2})}
+.gam-modal-dock-right.gam-modal{border-right:none;border-left:1px solid var(--gam-tok-border-strong,${C.BORDER2})}
 @media (max-width:1100px){ .gam-modal-dock{width:360px} }
 
 /* Generic form fields
@@ -24295,25 +24341,48 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-btn-small{padding:4px 10px;font-size:11px}
 
 /* ── MOD CONSOLE ─────────────────────────────────────────────── */
-.gam-mc-titlebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+/* WP-02 (§WP-02.3 status pills): titlebar capped max-height so the pill rows
+   can never displace the tab row below it. align-items:flex-start so the
+   demoted attribute row stacks under the verdict row when it wraps. */
+.gam-mc-titlebar{display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;max-height:64px;overflow:hidden}
 .gam-mc-shield{font-size:18px}
-.gam-mc-user{font-size:15px;font-weight:700;color:${C.TEXT}}
-.gam-mc-pills{display:inline-flex;gap:6px;flex-wrap:wrap;margin-left:6px}
-.gam-mc-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:${C.BG3};color:${C.TEXT2};border:1px solid ${C.BORDER}}
-.gam-mc-pill-watch{background:rgba(255,214,10,.12);color:${C.YELLOW};border-color:rgba(255,214,10,.25)}
-.gam-mc-pill-ban{background:rgba(240,64,64,.12);color:${C.RED};border-color:rgba(240,64,64,.25)}
-.gam-mc-pill-verified{background:rgba(61,214,140,.12);color:${C.GREEN};border-color:rgba(61,214,140,.25)}
-.gam-mc-pill-dr{background:rgba(167,139,250,.12);color:${C.PURPLE};border-color:rgba(167,139,250,.25)}
-.gam-mc-pill-clean{background:rgba(61,214,140,.08);color:${C.GREEN};border-color:rgba(61,214,140,.2)}
+.gam-mc-user{font-size:15px;font-weight:700;color:var(--gam-tok-ink,${C.TEXT})}
+/* WP-02: verdict row = single non-wrapping line (overflow → "+N" chip);
+   attribute row = second line that may wrap. */
+.gam-mc-pills{display:inline-flex;gap:6px;align-items:center;min-width:0}
+.gam-mc-pills-verdict{flex-wrap:nowrap;overflow:hidden;margin-left:6px}
+.gam-mc-pills-attr{flex-wrap:wrap;flex-basis:100%;margin-left:30px}
+/* base pill: leading severity glyph kept in JS text; truncation-safe single line. */
+.gam-mc-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;letter-spacing:.3px;text-transform:uppercase;background:var(--gam-tok-surface-overlay,${C.BG3});color:var(--gam-tok-ink-muted,${C.TEXT2});border:1px solid var(--gam-tok-border,${C.BORDER});max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+/* VERDICT pills (banned / watched / death-row): solid fill + on-accent text.
+   on-accent split per §1.7: warn/success fills take on-accent-dark; danger/
+   special fills take on-accent-light. */
+.gam-mc-pill-watch{background:var(--gam-tok-warn,${C.WARN});color:var(--gam-tok-on-accent-dark,#0a0a0b);border-color:var(--gam-tok-warn,${C.WARN})}
+.gam-mc-pill-ban{background:var(--gam-tok-danger,${C.RED});color:var(--gam-tok-on-accent-light,#ffffff);border-color:var(--gam-tok-danger,${C.RED})}
+.gam-mc-pill-dr{background:var(--gam-tok-special,${C.PURPLE});color:var(--gam-tok-on-accent-light,#ffffff);border-color:var(--gam-tok-special,${C.PURPLE})}
+/* ATTRIBUTE pills (verified / clean record): outline + tinted bg, demoted. */
+.gam-mc-pill-verified{background:var(--gam-tok-success-soft,rgba(61,214,140,.12));color:var(--gam-tok-success,${C.GREEN});border-color:var(--gam-tok-success,${C.GREEN})}
+.gam-mc-pill-clean{background:var(--gam-tok-success-soft,rgba(61,214,140,.08));color:var(--gam-tok-success,${C.GREEN});border-color:var(--gam-tok-success,${C.GREEN})}
+/* +N overflow chip when verdict pills exceed the single-row cap. */
+.gam-mc-pill-more{background:var(--gam-tok-surface-overlay,${C.BG3});color:var(--gam-tok-ink-muted,${C.TEXT2});border-color:var(--gam-tok-border-strong,${C.BORDER2})}
 
 .gam-mc-body{display:flex;flex-direction:column;min-height:0}
 /* v9.4.0: tabs row tightened — padding 10→8, margin 14→10, tab padding
    6→5/12, font 12→11. Removes ~6px vertical real estate per console open. */
-.gam-mc-tabs{display:flex;gap:4px;padding:0 0 8px 0;border-bottom:1px solid ${C.BORDER};margin-bottom:10px;flex-wrap:wrap}
-.gam-mc-tab{background:transparent;border:1px solid ${C.BORDER};border-radius:4px;padding:5px 12px;color:${C.TEXT2};font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px}
-.gam-mc-tab:hover{border-color:${C.BORDER2};color:${C.TEXT}}
-.gam-mc-tab-active{background:${C.ACCENT};border-color:${C.ACCENT};color:var(--gam-tok-on-accent-light,#ffffff)}
-.gam-mc-tab-active:hover{opacity:.9;color:var(--gam-tok-on-accent-light,#ffffff)}
+/* WP-02: tabs strip = surface-panel feel with a 1px border-strong bottom edge. */
+.gam-mc-tabs{display:flex;gap:4px;padding:0 0 8px 0;border-bottom:1px solid var(--gam-tok-border-strong,${C.BORDER});margin-bottom:10px;flex-wrap:wrap}
+/* WP-02 (§WP-02.2 active-tab 3 redundant signals): inactive = transparent +
+   ink-muted; the number prefix is a CSS ::before counter (NOT JS textContent)
+   so the accessible name stays the stable label across active/inactive states. */
+.gam-mc-tab{background:transparent;border:1px solid var(--gam-tok-border,${C.BORDER});border-bottom:2px solid transparent;border-radius:6px 6px 0 0;padding:5px 12px;color:var(--gam-tok-ink-muted,${C.TEXT2});font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px}
+.gam-mc-tab::before{content:attr(data-num) "\\00B7";color:var(--gam-tok-ink-faint,${C.TEXT3});font-weight:700;margin-right:1px}
+.gam-mc-tab:hover{border-color:var(--gam-tok-border-strong,${C.BORDER2});color:var(--gam-tok-ink,${C.TEXT})}
+/* ACTIVE = accent-soft fill + 2px accent BOTTOM-border + bright ink label.
+   Three redundant signals (bg + bottom-rail + ink-weight) so the active tab is
+   readable in grayscale, never color-only. accent ::before counter brightens. */
+.gam-mc-tab-active{background:var(--gam-tok-accent-soft,rgba(255,153,51,.10));border-color:var(--gam-tok-accent-line,rgba(255,153,51,.28));border-bottom:2px solid var(--gam-tok-accent,${C.AMBER});color:var(--gam-tok-ink,${C.TEXT});font-weight:700}
+.gam-mc-tab-active::before{color:var(--gam-tok-accent,${C.AMBER})}
+.gam-mc-tab-active:hover{color:var(--gam-tok-ink,${C.TEXT})}
 .gam-mc-panels{}
 .gam-mc-panel{}
 
@@ -24914,9 +24983,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-row-tard .gam-t-user-name-text{color:${C.RED}!important;font-weight:700}
 
 /* v5.1.9 UI Loop 1: Mod Console BAN tab wears its danger loudly */
-.gam-mc-tab[data-tab="ban"]:not(.gam-mc-tab-active){border-color:rgba(240,64,64,.3);color:${C.RED}}
-.gam-mc-tab[data-tab="ban"].gam-mc-tab-active{background:${C.RED};border-color:${C.RED}}
-.gam-mc-tab[data-tab="ban"]:not(.gam-mc-tab-active):hover{background:rgba(240,64,64,.1)}
+/* WP-02: BAN tab carries the danger severity in BOTH states. Inactive = danger
+   ink + tinted border; active reuses the 3-signal contract but swaps accent→
+   danger (danger-soft fill + 2px danger bottom-rail + danger ink). */
+.gam-mc-tab[data-tab="ban"]:not(.gam-mc-tab-active){border-color:var(--gam-tok-danger,${C.RED});color:var(--gam-tok-danger,${C.RED})}
+.gam-mc-tab[data-tab="ban"].gam-mc-tab-active{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));border-color:var(--gam-tok-danger,${C.RED});border-bottom:2px solid var(--gam-tok-danger,${C.RED});color:var(--gam-tok-danger,${C.RED})}
+.gam-mc-tab[data-tab="ban"].gam-mc-tab-active::before{color:var(--gam-tok-danger,${C.RED})}
+.gam-mc-tab[data-tab="ban"]:not(.gam-mc-tab-active):hover{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12))}
 .gam-t-act-clear:hover{background:rgba(61,214,140,.12);border-color:rgba(61,214,140,.3);color:${C.GREEN}}
 .gam-t-act-watch:hover{background:rgba(255,214,10,.12);border-color:rgba(255,214,10,.3);color:${C.YELLOW}}
 .gam-t-act-dr:hover{background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.3);color:${C.PURPLE}}
@@ -25608,54 +25681,69 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 }
 
 /* ── Iter 8 ── Modal (Mod Console): square, no shadow softening */
+/* WP-02 (§1.5 elevation contract, in practice): the floating layer is
+   surface-raised body + 1px border-strong + a SINGLE 0 8px 24px scrim shadow
+   (8px radius for cards/modals). This is the canonical floating elevation —
+   replaces the prior double box-shadow + bb-panel + square radius. */
 .gam-modal {
-  background: var(--bb-panel) !important;
-  border: 1px solid var(--bb-line-hot) !important;
-  border-radius: var(--bb-r) !important;
-  box-shadow: 0 0 0 1px var(--bb-line), 0 12px 32px rgba(0,0,0,0.7) !important;
+  background: var(--gam-tok-surface-raised, #0f1114) !important;
+  border: 1px solid var(--gam-tok-border-strong, #3a3f48) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 24px var(--gam-tok-scrim, rgba(0,0,0,0.60)) !important;
   font: var(--bb-t-base)/1.4 var(--bb-font) !important;
-  color: var(--bb-ink) !important;
+  color: var(--gam-tok-ink, #e8e6e1) !important;
 }
+/* WP-02: titlebar = surface-panel (one step above the raised body) with a 1px
+   border-strong bottom edge. */
 .gam-modal-header {
-  background: var(--bb-bg) !important;
-  border-bottom: 1px solid var(--bb-line) !important;
+  background: var(--gam-tok-surface-panel, #181b20) !important;
+  border-bottom: 1px solid var(--gam-tok-border-strong, #3a3f48) !important;
   border-radius: 0 !important;
   padding: var(--bb-s4) var(--bb-s5) !important;
 }
 .gam-modal-title {
   font: 600 var(--bb-t-md)/1.2 var(--bb-font) !important;
-  color: var(--bb-amber) !important;
+  color: var(--gam-tok-accent, #ff9933) !important;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 .gam-modal-body {
   padding: var(--bb-s5) !important;
-  background: var(--bb-panel) !important;
+  background: var(--gam-tok-surface-raised, #0f1114) !important;
 }
 
 /* ── Iter 9 ── Backdrop: solid scrim, NO blur (blur reserved for modal-purposeful only) */
+/* WP-02 (§1.5 elevation, §WP-02.1 backdrop=scrim): collapse the bespoke 0.78
+   overlay onto the canonical scrim token. Dialog z-layers ABOVE this scrim on
+   the z-ladder (§WP-02.6), so in-dialog clicks physically cannot hit the
+   backdrop hit-area — no reliance on stopPropagation. */
 #gam-backdrop {
-  background: rgba(0,0,0,0.78) !important;
+  background: var(--gam-tok-scrim, rgba(0,0,0,0.60)) !important;
   backdrop-filter: none !important;
 }
 
 /* ── Iter 10 ── Mod Console tabs: flat top strip, square */
+/* WP-02: tabs strip = surface-panel with a 1px border-strong bottom edge. */
 .gam-mc-tabs,
 .gam-modal-tabs {
-  background: var(--bb-bg) !important;
-  border-bottom: 1px solid var(--bb-line) !important;
+  background: var(--gam-tok-surface-panel, #181b20) !important;
+  border-bottom: 1px solid var(--gam-tok-border-strong, #3a3f48) !important;
   border-radius: 0 !important;
   padding: 0 var(--bb-s4) !important;
   display: flex;
   gap: 0;
 }
+/* WP-02 (§WP-02.2): inactive tab = transparent fill + ink-muted label + a 2px
+   transparent bottom-rail placeholder (so the active rail doesn't shift layout).
+   The number prefix ("1·") is a CSS ::before counter — never JS textContent —
+   so the accessible name stays the stable label across active/inactive. */
 .gam-mc-tab,
 .gam-modal-tab {
   background: transparent !important;
   border: none !important;
   border-bottom: 2px solid transparent !important;
   border-radius: 0 !important;
-  color: var(--bb-ink-dim) !important;
+  color: var(--gam-tok-ink-muted, #b0b5bc) !important;
   font: var(--bb-t-sm)/1 var(--bb-font) !important;
   padding: var(--bb-s4) var(--bb-s5) !important;
   /* v10.14.1 CT3: 29 -> 32px; pre-existing min-height:32 in 21146 was being
@@ -25664,18 +25752,50 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   text-transform: uppercase;
   letter-spacing: 0.06em;
   cursor: pointer;
-  transition: color 100ms ease-out, border-color 100ms ease-out;
+  transition: color 100ms ease-out, border-color 100ms ease-out, background 100ms ease-out;
+}
+.gam-mc-tab::before {
+  content: attr(data-num) "\\00B7";
+  color: var(--gam-tok-ink-faint, #7a7672);
+  font-weight: 700;
+  margin-right: 2px;
 }
 .gam-mc-tab:hover,
 .gam-modal-tab:hover {
-  color: var(--bb-ink) !important;
+  color: var(--gam-tok-ink, #e8e6e1) !important;
+  background: var(--gam-tok-accent-soft, rgba(255,153,51,0.10)) !important;
 }
+/* WP-02 (§WP-02.2 — three redundant active signals, grayscale-readable):
+   accent-soft FILL + 2px accent BOTTOM-border + bright ink label at heavier
+   weight. NOT color-only. The selector now matches the REAL JS-toggled class
+   `.gam-mc-tab-active` (renderTab toggles this, NOT `.active`) plus the
+   mirrored aria-selected — pre-fix the active treatment never rendered because
+   the selector targeted a class the JS never set. */
+.gam-mc-tab.gam-mc-tab-active,
 .gam-mc-tab.active,
 .gam-mc-tab[aria-selected="true"],
-.gam-modal-tab.active {
-  color: var(--bb-amber) !important;
-  border-bottom-color: var(--bb-amber) !important;
-  font-weight: 600;
+.gam-modal-tab.gam-mc-tab-active,
+.gam-modal-tab.active,
+.gam-modal-tab[aria-selected="true"] {
+  color: var(--gam-tok-ink, #e8e6e1) !important;
+  background: var(--gam-tok-accent-soft, rgba(255,153,51,0.10)) !important;
+  border-bottom-color: var(--gam-tok-accent, #ff9933) !important;
+  font-weight: 700;
+}
+.gam-mc-tab.gam-mc-tab-active::before,
+.gam-mc-tab[aria-selected="true"]::before {
+  color: var(--gam-tok-accent, #ff9933);
+}
+/* BAN tab keeps its danger severity in the active state under the bb layer too. */
+.gam-mc-tab[data-tab="ban"].gam-mc-tab-active,
+.gam-mc-tab[data-tab="ban"][aria-selected="true"] {
+  color: var(--gam-tok-danger, #f04040) !important;
+  background: var(--gam-tok-danger-soft, rgba(240,64,64,0.12)) !important;
+  border-bottom-color: var(--gam-tok-danger, #f04040) !important;
+}
+.gam-mc-tab[data-tab="ban"].gam-mc-tab-active::before,
+.gam-mc-tab[data-tab="ban"][aria-selected="true"]::before {
+  color: var(--gam-tok-danger, #f04040);
 }
 
 /* ── Iter 11 ── Buttons: square, 1px border, no gradients, popping on hover */
