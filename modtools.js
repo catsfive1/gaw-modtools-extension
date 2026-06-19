@@ -1467,8 +1467,11 @@
     );
     body.appendChild(intro);
 
+    // WP-04: converge the field rhythm via the shared .gam-input-group class
+    // (label = 11px caps ink-muted; field on surface-sunken well + accent focus).
+    const fieldGroup = el('div', { cls:'gam-input-group' });
     const label = el('label', { cls:'gam-bug-report-lbl', for:'gam-bug-desc' }, 'Describe the bug (20-2000 chars):');
-    body.appendChild(label);
+    fieldGroup.appendChild(label);
 
     const ta = el('textarea', {
       id: 'gam-bug-desc',
@@ -1479,7 +1482,8 @@
     });
     // v8.1 ux: ensure label<->textarea linkage (idempotent; label already has for=).
     try { linkLabel(label, ta); } catch(e){}
-    body.appendChild(ta);
+    fieldGroup.appendChild(ta);
+    body.appendChild(fieldGroup);
 
     // v8.1 ux kbd-audit: flag-on makes the live char counter an aria-live polite region.
     const __axCounter = { tabindex: '0', role: 'status', 'aria-live': 'polite' };
@@ -25532,11 +25536,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-disc-input:disabled{opacity:.5}
 /* v7.1.2 Bug Report modal */
 .gam-bug-report-body{display:flex;flex-direction:column;gap:10px;padding:4px 2px}
-.gam-bug-report-intro{font-size:12px;color:${C.TEXT2};line-height:1.45}
-.gam-bug-report-lbl{font-size:11px;font-weight:600;color:${C.TEXT};letter-spacing:.02em}
-.gam-bug-report-textarea{width:100%;min-height:140px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;padding:8px 10px;color:${C.TEXT};font:12px ui-sans-serif,system-ui,sans-serif;resize:vertical;outline:none;box-sizing:border-box}
-.gam-bug-report-textarea:focus{border-color:${C.ACCENT}}
-.gam-bug-report-counter{font-size:10px;color:${C.TEXT3};text-align:right}
+.gam-bug-report-intro{font-size:12px;color:var(--gam-tok-ink-muted,${C.TEXT2});line-height:1.45}
+.gam-bug-report-lbl{font-size:11px;font-weight:600;color:var(--gam-tok-ink-muted,${C.TEXT2});letter-spacing:.02em}
+/* WP-04: field bg/border/color/focus now come from .gam-input-group>textarea
+   (surface-sunken ramp). This rule keeps only the bug-modal-specific min-height +
+   resize so all four modals share one field rhythm. */
+.gam-bug-report-textarea{min-height:140px;resize:vertical}
+.gam-bug-report-counter{font-size:10px;color:var(--gam-tok-ink-faint,${C.TEXT3});text-align:right}
 .gam-bug-report-snaprow{font-size:11px;color:${C.TEXT2};display:flex;gap:8px;align-items:flex-start;line-height:1.4;cursor:pointer;user-select:none}
 .gam-bug-report-snaprow input{margin-top:2px;flex-shrink:0}
 .gam-bug-report-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
