@@ -9530,9 +9530,29 @@
       let inFlight = false;
       let pendingAfterFlight = false;
 
-      const setStatus = (txt, color) => {
+      // WP-07 (in-page redesign): editing-vs-saved is now a CARD-LEVEL state,
+      // not a text-color whisper. setStatus takes a semantic state name; it maps
+      // to a GAM_TOK ink color (no literal hex), toggles .is-dirty / .is-saved on
+      // the .gam-mc-note wrap (warm-accent border while dirty, success on save +
+      // success-soft flash + a persistent saved micro-chip), and swaps the status
+      // glyph pencil -> check -> alert via [data-icon] (CSS ::before).
+      const __NOTE_STATE_INK = { editing: GAM_TOK.warn, saving: GAM_TOK.inkMuted, saved: GAM_TOK.success, error: GAM_TOK.danger };
+      const setStatus = (txt, state) => {
         status.textContent = txt;
-        status.style.color = color || '';
+        status.style.color = (state && __NOTE_STATE_INK[state]) ? __NOTE_STATE_INK[state] : '';
+        if (state === 'saved') {
+          wrap.classList.remove('is-dirty'); wrap.classList.add('is-saved');
+          status.setAttribute('data-icon', 'check');
+        } else if (state === 'editing' || state === 'saving') {
+          wrap.classList.add('is-dirty'); wrap.classList.remove('is-saved');
+          status.setAttribute('data-icon', 'pencil');
+        } else if (state === 'error') {
+          wrap.classList.add('is-dirty'); wrap.classList.remove('is-saved');
+          status.setAttribute('data-icon', 'alert');
+        } else {
+          wrap.classList.remove('is-dirty'); wrap.classList.remove('is-saved');
+          status.removeAttribute('data-icon');
+        }
       };
 
       async function loadExisting(){
@@ -9547,7 +9567,7 @@
           setStatus('');
         } catch(e){
           ta.disabled = false;
-          setStatus('load failed; you can still type to save', '#a0a8b6');
+          setStatus('load failed; you can still type to save', 'saving');
         }
       }
 
@@ -9556,7 +9576,7 @@
         const val = ta.value.slice(0, 500);
         if (val === lastSaved){ setStatus(''); return; }
         inFlight = true;
-        setStatus('saving\u2026', '#a0a8b6');
+        setStatus('saving\u2026', 'saving');
         try {
           // Pull latest profile again so we don't clobber a concurrent edit
           // to other fields (e.g. indexedAt, scoring data).
@@ -9572,12 +9592,12 @@
             currentProfile = nextProfile;
             // Invalidate the cloud profile cache so next read reflects this write
             try { _cloudProfilesCache = null; _cloudProfilesFetchedAt = 0; } catch(e){}
-            setStatus('saved', '#7fd67f');
+            setStatus('saved', 'saved');
           } else {
-            setStatus('error saving', '#ff6b6b');
+            setStatus('error saving', 'error');
           }
         } catch(e){
-          setStatus('error saving', '#ff6b6b');
+          setStatus('error saving', 'error');
         } finally {
           inFlight = false;
           if (pendingAfterFlight){
@@ -9589,7 +9609,7 @@
 
       ta.addEventListener('input', ()=>{
         if (saveTimer) clearTimeout(saveTimer);
-        setStatus('editing\u2026', '#a0a8b6');
+        setStatus('editing\u2026', 'editing');
         saveTimer = setTimeout(()=>{ doSave(); }, 1500);
       });
       ta.addEventListener('blur', ()=>{
@@ -11005,8 +11025,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     root.innerHTML = `
       <div class="gam-mc-section">
         <div class="gam-mc-h" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <span>Note history <span class="gam-mc-hint" id="mc-note-count">(loading...)</span> <span class="gam-mc-hint" style="color:#9b9892">· newest first</span></span>
-          <button class="gam-btn gam-btn-cancel" id="mc-note-clear-all" style="font-size:10px;padding:3px 8px" title="Archive prior notes with a marker entry (history preserved, visually divided)">\u{1F9F9} Clear all</button>
+          <span>Note history <span class="gam-mc-hint" id="mc-note-count">(loading...)</span> <span class="gam-mc-hint" style="color:'+GAM_TOK.inkMuted+'">· newest first</span></span>
+          <button class="gam-btn gam-btn-cancel" id="mc-note-clear-all" style="font-size:10px;padding:3px 8px" title="Archive prior notes with a marker entry (history preserved, visually divided)">\u{1F5D1}\u{FE0E} Clear all</button>
         </div>
         <div id="mc-note-history" class="gam-mc-note-history">\u{1F50D} loading notes...</div>
       </div>
@@ -11026,7 +11046,8 @@ Analyze this comment against the community rules. Then write a brief, profession
           </span>
         </div>
         <textarea class="gam-input gam-textarea" id="mc-note-body" rows="6" placeholder="Add your mod note here..."></textarea>
-        <div class="gam-mc-hint" id="mc-note-charcount" style="text-align:right;margin-top:3px;font-size:10px;color:#9b9892">0 chars</div>
+        <div class="gam-mc-note-chartrack" aria-hidden="true"><i id="mc-note-charfill" style="width:0%"></i></div>
+        <div class="gam-mc-hint" id="mc-note-charcount" style="text-align:right;margin-top:3px;font-size:10px;color:'+GAM_TOK.inkMuted+'">0 / 500</div>
       </div>
       <div id="mc-note-status"></div>
     `;
@@ -11062,10 +11083,18 @@ Analyze this comment against the community rules. Then write a brief, profession
     // past 500 chars (when the history-row preview clamps with an ellipsis).
     const charCountEl = root.querySelector('#mc-note-charcount');
     if (body && charCountEl) {
+      const __noteFillEl = root.querySelector('#mc-note-charfill');
       const __updateCharCount = () => {
         const n = (body.value || '').length;
-        charCountEl.textContent = n + ' char' + (n === 1 ? '' : 's');
-        charCountEl.style.color = (n > 500) ? 'var(--bb-amber-warm, #f0a040)' : '#9b9892'; /* v.next a11y: #5a5752 -> #9b9892 (2.5:1 -> 6.5:1) */
+        charCountEl.textContent = n + ' / 500';
+        const over = n > 500;
+        // WP-07 #2: counter ink + fill track climb toward warn as the 500 cap nears.
+        charCountEl.style.color = over ? GAM_TOK.warn : GAM_TOK.inkMuted;
+        if (__noteFillEl) {
+          const pct = Math.max(0, Math.min(100, (n / 500) * 100));
+          __noteFillEl.style.width = pct + '%';
+          __noteFillEl.style.background = over ? GAM_TOK.warn : (pct >= 80 ? GAM_TOK.accentLine : GAM_TOK.accent);
+        }
       };
       body.addEventListener('input', __updateCharCount);
       __updateCharCount();
@@ -25251,20 +25280,39 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-mc-note{margin-top:10px;padding-top:10px;border-top:1px solid ${C.BORDER}}
 .gam-mc-note-label{display:block;font-size:11px;font-weight:600;color:${C.TEXT2};margin-bottom:4px}
 .gam-mc-note-hint{color:${C.TEXT3};font-weight:400}
-.gam-mc-note-ta{width:100%;min-height:60px;background:${C.BG2};color:${C.TEXT};border:1px solid ${C.BORDER};border-radius:4px;padding:6px 8px;font:12px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;resize:vertical;box-sizing:border-box;outline:none;transition:border-color .15s}
-.gam-mc-note-ta:focus{border-color:${C.ACCENT}}
-.gam-mc-note-status{font-size:10px;color:${C.TEXT3};margin-top:4px;min-height:14px}
+.gam-mc-note-ta{width:100%;min-height:60px;background:var(--gam-tok-surface-panel,${C.BG2});color:var(--gam-tok-ink,${C.TEXT});border:1px solid var(--gam-tok-border,${C.BORDER});border-radius:4px;padding:6px 8px;font:12px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;resize:vertical;box-sizing:border-box;outline:none;transition:border-color .15s}
+.gam-mc-note-ta:focus{border-color:var(--gam-tok-accent,${C.ACCENT})}
+.gam-mc-note-status{font-size:10px;color:var(--gam-tok-ink-muted,${C.TEXT3});margin-top:4px;min-height:14px;display:flex;align-items:center;gap:5px}
+/* WP-07: pencil->check->alert glyph swap, drawn as a leading ::before so the
+   accessible status text (textContent) stays clean. */
+.gam-mc-note-status[data-icon]::before{content:'';font-style:normal;font-weight:600}
+.gam-mc-note-status[data-icon='pencil']::before{content:'\\270E'}
+.gam-mc-note-status[data-icon='check']::before{content:'\\2713';color:var(--gam-tok-success,${C.GREEN})}
+.gam-mc-note-status[data-icon='alert']::before{content:'\\26A0';color:var(--gam-tok-danger,${C.RED})}
+/* WP-07: editing-vs-saved as a CARD state. Dirty = warm-accent/amber left rail;
+   saved = success rail + a success-soft flash + a persistent 'saved' micro-chip. */
+.gam-mc-note{border-left:3px solid transparent;padding-left:8px;margin-left:-11px;transition:border-color .15s,background .3s}
+.gam-mc-note.is-dirty{border-left-color:var(--gam-tok-warn,${C.WARN})}
+.gam-mc-note.is-saved{border-left-color:var(--gam-tok-success,${C.GREEN});background:var(--gam-tok-success-soft,rgba(61,214,140,.12))}
+.gam-mc-note.is-saved .gam-mc-note-status::after{content:'saved';margin-left:auto;font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--gam-tok-success,${C.GREEN});background:var(--gam-tok-success-soft,rgba(61,214,140,.12));border:1px solid var(--gam-tok-success,${C.GREEN});border-radius:999px;padding:1px 6px}
+/* WP-07 #2: char-fill track surfacing the 500-char threshold proactively. */
+.gam-mc-note-chartrack{height:3px;margin-top:6px;border-radius:999px;background:var(--gam-tok-surface-sunken,${C.BG});overflow:hidden}
+.gam-mc-note-chartrack > i{display:block;height:100%;width:0;background:var(--gam-tok-accent,${C.ACCENT});border-radius:999px;transition:width .15s,background .15s}
 
 /* Note history (v5.1.3 Note tab)
    v9.4.0: removed max-height + overflow:auto. Note history was creating
    a NESTED scrollbar inside the already-scrolling modal-body — double
    scrollbar UX. Now the parent .gam-modal-body handles overflow. */
 .gam-mc-note-history{display:flex;flex-direction:column;gap:6px}
-.gam-mc-note-row{padding:8px 10px;background:${C.BG2};border:1px solid ${C.BORDER};border-left:3px solid ${C.ACCENT};border-radius:4px}
-.gam-mc-note-meta{font-size:10px;color:${C.TEXT2};margin-bottom:4px;display:flex;gap:8px;align-items:center}
-.gam-mc-note-meta b{color:${C.TEXT};font-weight:700}
-.gam-mc-note-time{color:${C.TEXT3};font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:10px;margin-left:auto}
-.gam-mc-note-body{font-size:12px;color:${C.TEXT};line-height:1.45;white-space:pre-wrap;word-break:break-word}
+.gam-mc-note-row{padding:8px 10px;background:var(--gam-tok-surface-panel,${C.BG2});border:1px solid var(--gam-tok-border,${C.BORDER});border-left:3px solid var(--gam-tok-accent,${C.ACCENT});border-radius:4px}
+/* WP-07 #4: min-width:0 clamps so a long mod-name + timestamp can't break the
+   flex row's alignment (name truncates with an ellipsis; time stays pinned right). */
+.gam-mc-note-meta{font-size:10px;color:var(--gam-tok-ink-muted,${C.TEXT2});margin-bottom:4px;display:flex;gap:8px;align-items:center;min-width:0}
+.gam-mc-note-meta b{color:var(--gam-tok-ink,${C.TEXT});font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gam-mc-note-time{color:var(--gam-tok-ink-muted,${C.TEXT3});font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:10px;margin-left:auto;flex:0 0 auto;white-space:nowrap}
+/* WP-07 #5: long history bodies clamp with a subtle bottom fade beyond the
+   existing 500-char ellipsis, signalling more content was truncated. */
+.gam-mc-note-body{font-size:12px;color:var(--gam-tok-ink,${C.TEXT});line-height:1.45;white-space:pre-wrap;word-break:break-word;max-height:8.7em;overflow:hidden;-webkit-mask-image:linear-gradient(180deg,black 78%,transparent);mask-image:linear-gradient(180deg,black 78%,transparent)}
 .gam-tip-note-meta{color:${C.TEXT3};font-weight:400;font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:10px;text-transform:none;letter-spacing:0}
 
 /* Triage row action button - pattern */
