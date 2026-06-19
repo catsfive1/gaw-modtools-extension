@@ -3712,7 +3712,8 @@
               // B.5 tooltip: click the badge to reveal provenance below it.
               const tooltip = el('span', {
                 cls: 'gam-shadow-why',
-                style: { display: 'none', marginLeft: '6px', fontSize: '10px', color: '#a0aec0' }
+                'aria-hidden': 'true',
+                style: { visibility: 'hidden', opacity: '0', transition: 'opacity .15s', marginLeft: '6px', fontSize: '10px', color: GAM_TOK.inkMuted }
               });
               tooltip.textContent =
                 'model=' + String(payload.model || '') +
@@ -3722,7 +3723,10 @@
                 ' \u00b7 at=' + (payload.generated_at ? new Date(payload.generated_at).toISOString() : '');
               badge.addEventListener('click', function(ev){
                 ev.stopPropagation();
-                tooltip.style.display = (tooltip.style.display === 'none') ? '' : 'none';
+                var __shown = tooltip.style.visibility !== 'hidden';
+                tooltip.style.visibility = __shown ? 'hidden' : 'visible';
+                tooltip.style.opacity = __shown ? '0' : '1';
+                tooltip.setAttribute('aria-hidden', __shown ? 'true' : 'false');
               });
               badge.style.cursor = 'pointer';
               badge.title = (badge.title || '') + ' (click: why?)';
@@ -3922,7 +3926,7 @@
           'data-gam-park-kind': String(kind),
           'data-gam-park-subject': String(subjectId),
           title: 'Park for senior review',
-          style: { background: 'transparent', border: '1px solid #4a5568', color: '#a0aec0', padding: '2px 6px', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', marginLeft: '4px' }
+          style: { background: 'transparent', border: '1px solid '+GAM_TOK.border, color: GAM_TOK.inkMuted, padding: '2px 6px', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', marginLeft: '4px' }
         });
         b.textContent = '\u23F8';
         return b;
@@ -4076,24 +4080,24 @@
         head.textContent = 'Parked items (' + rows.length + ')';
         pop.appendChild(head);
         if (!rows.length) {
-          const empty = el('div', { style: { color: '#a0aec0', fontStyle: 'italic' } });
+          const empty = el('div', { style: { color: GAM_TOK.inkMuted, fontStyle: 'italic' } });
           empty.textContent = 'Nothing parked for senior review.';
           pop.appendChild(empty);
         } else {
           for (const it of rows) {
-            const row = el('div', { style: { borderTop: '1px solid #2d3748', padding: '6px 0' } });
+            const row = el('div', { style: { borderTop: '1px solid '+GAM_TOK.border, padding: '6px 0' } });
             const head2 = el('div', { style: { fontWeight: '600' } });
             head2.textContent = '#' + String(it.id) + ' \u00b7 ' + String(it.kind) + ' \u00b7 ' + String(it.subject_id);
-            const meta = el('div', { style: { color: '#a0aec0', fontSize: '11px', marginTop: '2px' } });
+            const meta = el('div', { style: { color: GAM_TOK.inkMuted, fontSize: '11px', marginTop: '2px' } });
             meta.textContent = 'parker @' + String(it.parker || '?') + ' \u00b7 ' + new Date(it.created_at || it.ts || Date.now()).toLocaleString();
-            const note = el('div', { style: { color: '#cbd5e0', marginTop: '4px', whiteSpace: 'pre-wrap' } });
+            const note = el('div', { style: { color: GAM_TOK.ink, marginTop: '4px', whiteSpace: 'pre-wrap' } });
             note.textContent = String(it.note || '');
             row.appendChild(head2);
             row.appendChild(meta);
             row.appendChild(note);
             // Resolve mini-form.
             const form = el('div', { style: { marginTop: '6px', display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' } });
-            const sel = el('select', { style: { background: '#0f1419', color: '#e2e8f0', border: '1px solid #4a5568', borderRadius: '4px', padding: '2px 6px', fontSize: '11px' } });
+            const sel = el('select', { style: { background: GAM_TOK.surfaceSunken, color: GAM_TOK.ink, border: '1px solid '+GAM_TOK.border, borderRadius: '4px', padding: '2px 6px', fontSize: '11px' } });
             ['APPROVE','REMOVE','BAN','DISCARD','OTHER'].forEach(function(a){
               const o = document.createElement('option'); o.value = a; o.textContent = a; sel.appendChild(o);
             });
@@ -4101,10 +4105,10 @@
               type: 'text',
               maxlength: '240',
               placeholder: 'reason (<=240 chars)',
-              style: { flex: '1 1 160px', background: '#0f1419', color: '#e2e8f0', border: '1px solid #4a5568', borderRadius: '4px', padding: '2px 6px', fontSize: '11px' }
+              style: { flex: '1 1 160px', background: GAM_TOK.surfaceSunken, color: GAM_TOK.ink, border: '1px solid '+GAM_TOK.border, borderRadius: '4px', padding: '2px 6px', fontSize: '11px' }
             });
             const go = el('button', {
-              style: { background: '#4a9eff', color: '#fff', border: 'none', borderRadius: '4px', padding: '2px 10px', cursor: 'pointer', fontSize: '11px' }
+              style: { background: GAM_TOK.info, color: GAM_TOK.onAccentLight, border: 'none', borderRadius: '4px', padding: '2px 10px', cursor: 'pointer', fontSize: '11px' }
             });
             go.textContent = 'Resolve';
             go.addEventListener('click', async function(){
@@ -4172,15 +4176,15 @@
       document.__v80_park_styles_installed = true;
       const style = document.createElement('style');
       style.textContent = [
-        '.gam-park-btn{background:transparent;border:1px solid #4a5568;color:#a0aec0;padding:2px 6px;border-radius:4px;cursor:pointer;font-size:14px;margin-left:4px}',
-        '.gam-park-btn:hover{background:#2d3748;color:#e2e8f0}',
+        '.gam-park-btn{background:transparent;border:1px solid var(--gam-tok-border,#2a2f38);color:var(--gam-tok-ink-muted,#b0b5bc);padding:2px 6px;border-radius:4px;cursor:pointer;font-size:14px;margin-left:4px}',
+        '.gam-park-btn:hover{background:var(--gam-tok-surface-overlay,#252a31);color:var(--gam-tok-ink,#e8e6e1)}',
         '.gam-parked{opacity:.55}',
-        '.gam-parked::before{content:"\u23F8 ";color:#f6ad55;margin-right:4px}',
+        '.gam-parked::before{content:"\u23F8 ";color:var(--gam-tok-warn,#f0a040);margin-right:4px}',
         '.gam-shadow-badge{display:inline-flex;align-items:center;padding:2px 8px;margin-left:6px;font-size:11px;font-weight:600;border-radius:10px}',
-        '.gam-shadow-badge[data-action="APPROVE"]{background:#276749;color:#c6f6d5}',
-        '.gam-shadow-badge[data-action="REMOVE"]{background:#9b2c2c;color:#feb2b2}',
-        '.gam-shadow-badge[data-action="WATCH"]{background:#744210;color:#faf089}',
-        '.gam-shadow-armed{outline:2px dashed #4a9eff;outline-offset:1px}'
+        '.gam-shadow-badge[data-action="APPROVE"]{background:var(--gam-tok-success-soft,rgba(61,214,140,0.12));color:var(--gam-tok-success,#3dd68c);border:1px solid var(--gam-tok-success,#3dd68c)}',
+        '.gam-shadow-badge[data-action="REMOVE"]{background:var(--gam-tok-danger-soft,rgba(240,64,64,0.12));color:var(--gam-tok-danger,#f04040);border:1px solid var(--gam-tok-danger,#f04040)}',
+        '.gam-shadow-badge[data-action="WATCH"]{background:var(--gam-tok-warn-soft,rgba(240,160,64,0.12));color:var(--gam-tok-warn,#f0a040);border:1px solid var(--gam-tok-warn,#f0a040)}',
+        '.gam-shadow-armed{outline:2px dashed var(--gam-tok-info,#7cb8ff);outline-offset:1px}'
       ].join('\n');
       if (document.head) document.head.appendChild(style);
       else document.addEventListener('DOMContentLoaded', function(){ document.head.appendChild(style); }, { once: true });
@@ -24696,11 +24700,11 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-drawer-note-author { color:${C.TEXT2}; font-size:11px; font-weight:600; margin-right:6px; }
 .gam-drawer-note-ts { color:${C.TEXT3}; font-size:10px; }
 .gam-drawer-note-body { color:${C.TEXT}; font-size:12px; white-space:pre-wrap; margin:2px 0 0; line-height:1.45; }
-.gam-repeat-halo{display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 4px;border:2px solid #f5a623;border-radius:4px;box-shadow:0 0 0 3px rgba(245,166,35,.18);cursor:pointer;}
-.gam-repeat-badge{display:inline-block;font-size:9px;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;background:#f04040;color:#fff;}
-.gam-repeat-label{font-size:9px;color:#f5a623;text-transform:uppercase;letter-spacing:1px;border-left:2px solid #f5a623;padding-left:6px;margin:8px 0 4px;}
+.gam-repeat-halo{display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 4px;border:2px solid var(--gam-tok-accent,#ff9933);border-radius:4px;box-shadow:0 0 0 3px var(--gam-tok-accent-line,rgba(255,153,51,0.28));cursor:pointer;}
+.gam-repeat-badge{display:inline-block;font-size:9px;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;background:var(--gam-tok-danger,#f04040);color:var(--gam-tok-on-accent-light,#ffffff);}
+.gam-repeat-label{font-size:9px;color:var(--gam-tok-accent,#ff9933);text-transform:uppercase;letter-spacing:1px;border-left:2px solid var(--gam-tok-accent,#ff9933);padding-left:6px;margin:8px 0 4px;}
 .gam-repeat-history{margin-top:2px;}
-@keyframes gam-halo-pulse{0%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}50%{box-shadow:0 0 0 6px rgba(245,166,35,.35)}100%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}}
+@keyframes gam-halo-pulse{0%{box-shadow:0 0 0 3px var(--gam-tok-accent-line,rgba(255,153,51,0.28))}50%{box-shadow:0 0 0 6px var(--gam-tok-accent-line,rgba(255,153,51,0.28))}100%{box-shadow:0 0 0 3px var(--gam-tok-accent-line,rgba(255,153,51,0.28))}}
 /* v10.16.28 (QA-UI-8 P0): PRM-gate the halo pulse. */
 @media (prefers-reduced-motion: no-preference){
   .gam-repeat-halo--pulse{animation:gam-halo-pulse 600ms ease-out 1;}
