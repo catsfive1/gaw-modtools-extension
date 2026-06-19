@@ -7642,6 +7642,9 @@
     if (old) old.remove();
     const wrap = document.createElement('div');
     wrap.id = 'gam-undo';
+    // WP-03 §2.6 z-ladder: z-index 2147483610 = the --z-toast (top) tier. var()
+    // is forbidden in inline cssText, so the literal is DOCUMENTED onto the tier
+    // here. The undo/action toast carries the strongest toast-tier elevation.
     wrap.style.cssText = 'position:fixed;bottom:90px;right:16px;z-index:2147483610;background:'+GAM_TOK.surfacePanel+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.borderStrong+';border-left:3px solid '+GAM_TOK.warn+';border-radius:8px;padding:12px 16px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 8px 24px '+GAM_TOK.scrim+';display:flex;align-items:center;gap:8px';
     // v5.8.4 security fix (BUG-3): escape ${username}. GAW usernames are
     // typically alphanumeric + _ but defense-in-depth: a banned user with
@@ -7826,6 +7829,8 @@
     toast.id = toastId;
     toast.setAttribute('role', 'alert');
     toast.setAttribute('aria-live', 'assertive'); // WP-03 #6 a11y parity: _showUndoToast was role-only; pair with aria-live
+    // WP-03 §2.6 z-ladder: z-index 9999999 = the --z-toast (top) tier
+    // (var() forbidden in inline cssText — literal documented onto the tier).
     toast.style.cssText =
       'position:fixed;bottom:56px;right:16px;z-index:9999999;' +
       'background:'+GAM_TOK.surfacePanel+';border:1px solid '+GAM_TOK.borderStrong+';border-left:3px solid '+GAM_TOK.info+';border-radius:8px;' +
@@ -7841,16 +7846,23 @@
     undoBtn.style.cssText =
       'background:transparent;border:1px solid '+GAM_TOK.info+';border-radius:6px;' +
       'color:'+GAM_TOK.info+';font:600 11px inherit;padding:6px 10px;min-height:32px;cursor:pointer;flex-shrink:0;';
+    // WP-03 #4: single 2px accent progress track at card bottom. Under PRM the
+    // shrinking-width animation conveys nothing (the CSS transition is capped to
+    // ~0s, so it snaps to empty), so we render a STATIC persistent accent-line
+    // track instead — a meaningful "this toast is on a timer" signal that
+    // survives prefers-reduced-motion (brief §1.6 static fallback).
+    let _prmReduce = false;
+    try { _prmReduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch(_) {}
     const progress = document.createElement('div');
-    progress.style.cssText =
-      'position:absolute;bottom:0;left:0;height:2px;background:'+GAM_TOK.accent+';border-radius:0 0 8px 8px;' +
-      'width:100%;transition:width linear ' + (ttlMs / 1000) + 's;';
+    progress.style.cssText = _prmReduce
+      ? ('position:absolute;bottom:0;left:0;height:2px;background:'+GAM_TOK.accentLine+';border-radius:0 0 8px 8px;width:100%;')
+      : ('position:absolute;bottom:0;left:0;height:2px;background:'+GAM_TOK.accent+';border-radius:0 0 8px 8px;width:100%;transition:width linear ' + (ttlMs / 1000) + 's;');
     toast.style.position = 'fixed';
     toast.appendChild(lblEl);
     toast.appendChild(undoBtn);
     toast.appendChild(progress);
     document.body.appendChild(toast);
-    setTimeout(function() { progress.style.width = '0%'; }, 30);
+    if (!_prmReduce) setTimeout(function() { progress.style.width = '0%'; }, 30);
     undoBtn.focus();
 
     let done = false;
@@ -8047,6 +8059,8 @@
     if (document.getElementById('gam-sw-restart-snack')) return;
     const snackEl = document.createElement('div');
     snackEl.id = 'gam-sw-restart-snack';
+    // WP-03 §2.6 z-ladder: z-index 2147483640 = the --z-toast (top) tier
+    // (var() forbidden in inline cssText — literal documented onto the tier).
     snackEl.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483640;background:'+GAM_TOK.surfacePanel+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.borderStrong+';border-left:3px solid '+GAM_TOK.info+';border-radius:8px;padding:12px 16px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 8px 24px '+GAM_TOK.scrim+';display:flex;align-items:center;gap:8px;max-width:360px';
     const msgEl = document.createElement('span');
     // v10.14.0 V14-T7 (RALPH-RECOVERY R-04): differentiate from ext-reload banner.
@@ -8116,6 +8130,9 @@
       if (document.getElementById('gam-ext-orphaned-banner')) return;
       const b = document.createElement('div');
       b.id = 'gam-ext-orphaned-banner';
+      // WP-03 §2.6 z-ladder: z-index 99999999 = the --z-toast (top) tier — the
+      // ext-orphaned banner is page-blocking and must sit above all toasts
+      // (var() forbidden in inline cssText — literal documented onto the tier).
       b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999999;background:'+GAM_TOK.surfacePanel+';border-bottom:3px solid '+GAM_TOK.warn+';color:'+GAM_TOK.ink+';font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:12px 16px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 8px 24px '+GAM_TOK.scrim+'';
       b.innerHTML =
         '<span style="font-size:14px">↻</span>' +
@@ -8271,25 +8288,60 @@
       // Snack must accept clicks on the action button even though parent has pointer-events:none
       s.style.pointerEvents = 'auto';
     }
+    // WP-03 #6: EVERY toast (not just hasAction) gets a keyboard-reachable
+    // dismiss with a visible focus ring. Plain snacks pre-fix had NO dismiss
+    // control at all — auto-timeout only — so keyboard/SR users could not
+    // close them. Add a small ✕ dismiss button reusing the shared
+    // .gam-snack-action treatment (32px target + focus-visible ring) for
+    // every non-action snack. hasAction snacks already expose a button + ESC.
+    if (!hasAction) {
+      const dismissBtn = document.createElement('button');
+      dismissBtn.className = 'gam-snack-action';
+      dismissBtn.setAttribute('data-gam-dismiss', '1');
+      dismissBtn.type = 'button';
+      dismissBtn.setAttribute('aria-label', 'Dismiss notification');
+      dismissBtn.textContent = '✕'; // ✕
+      dismissBtn.addEventListener('click', function(ev){
+        ev.stopPropagation();
+        s.classList.remove('gam-snack-show');
+        setTimeout(function(){ try { s.remove(); } catch(_) {} }, 200);
+        if (s._gamCountdownInterval) { clearInterval(s._gamCountdownInterval); s._gamCountdownInterval = null; }
+        if (s._gamDismissTimer) { clearTimeout(s._gamDismissTimer); s._gamDismissTimer = null; }
+        if (s._gamSnackEsc) { try { document.removeEventListener('keydown', s._gamSnackEsc, true); } catch(_){} s._gamSnackEsc = null; }
+      });
+      s.appendChild(dismissBtn);
+      // Parent has pointer-events:none by default; the dismiss button needs clicks.
+      s.style.pointerEvents = 'auto';
+    }
     // Optional countdown bar at bottom (when actionDurationMs is set)
     if (hasCountdown) {
+      // WP-03 #4: single 2px accent progress track (matches _showUndoToast). Under
+      // PRM the JS-driven width shrink is suppressed in favor of a STATIC
+      // accent-line track — a persistent "on a timer" signal that survives
+      // prefers-reduced-motion rather than a moving bar (brief §1.6).
+      let _prmReduce = false;
+      try { _prmReduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch(_) {}
       const bar = document.createElement('div');
       bar.className = 'gam-snack-countdown-bar';
-      bar.style.cssText = 'position:absolute;left:0;bottom:0;height:2px;background:'+GAM_TOK.accent+';width:100%;transition:width 100ms linear;border-radius:0 0 8px 8px';
+      bar.style.cssText = _prmReduce
+        ? ('position:absolute;left:0;bottom:0;height:2px;background:'+GAM_TOK.accentLine+';width:100%;border-radius:0 0 8px 8px')
+        : ('position:absolute;left:0;bottom:0;height:2px;background:'+GAM_TOK.accent+';width:100%;transition:width 100ms linear;border-radius:0 0 8px 8px');
       s.appendChild(bar);
       // Make snack relatively-positioned so the bar absolute-positions inside it
       s.style.position = 'fixed'; // already fixed but ensure
       s.style.paddingBottom = '8px';
-      const startTs = Date.now();
-      s._gamCountdownInterval = setInterval(function(){
-        const elapsed = Date.now() - startTs;
-        const pct = Math.max(0, 1 - (elapsed / durationMs));
-        bar.style.width = (pct * 100).toFixed(1) + '%';
-        if (elapsed >= durationMs) {
-          clearInterval(s._gamCountdownInterval);
-          s._gamCountdownInterval = null;
-        }
-      }, 100);
+      if (!_prmReduce) {
+        const startTs = Date.now();
+        s._gamCountdownInterval = setInterval(function(){
+          const elapsed = Date.now() - startTs;
+          const pct = Math.max(0, 1 - (elapsed / durationMs));
+          bar.style.width = (pct * 100).toFixed(1) + '%';
+          if (elapsed >= durationMs) {
+            clearInterval(s._gamCountdownInterval);
+            s._gamCountdownInterval = null;
+          }
+        }, 100);
+      }
     }
     // v6.0.1: detect overlap with centered status bar; if viewport layout
     // places them on a collision course, snack bumps up to sit above the bar.
@@ -8352,6 +8404,20 @@
           setTimeout(function(){ try { actBtn.focus(); } catch(_){} }, 50);
         }
       } catch(_){}
+      s._gamSnackEsc = function(ev) {
+        if (ev.key !== 'Escape') return;
+        ev.preventDefault();
+        s.classList.remove('gam-snack-show');
+        setTimeout(function(){ try { s.remove(); } catch(_){} }, 200);
+        if (s._gamCountdownInterval) { clearInterval(s._gamCountdownInterval); s._gamCountdownInterval = null; }
+        if (s._gamDismissTimer) { clearTimeout(s._gamDismissTimer); s._gamDismissTimer = null; }
+        try { document.removeEventListener('keydown', s._gamSnackEsc, true); } catch(_){}
+      };
+      document.addEventListener('keydown', s._gamSnackEsc, true);
+    } else {
+      // WP-03 #6: plain (non-action) snacks are also ESC-dismissable. We do NOT
+      // auto-focus a plain notification (it must not steal focus mid-task), but
+      // ESC dismisses it via its keyboard-reachable ✕ button + this handler.
       s._gamSnackEsc = function(ev) {
         if (ev.key !== 'Escape') return;
         ev.preventDefault();
@@ -24315,10 +24381,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 /* v9.4.0: snack padding 7/14→6/12, single shadow layer (no inset stack). */
 .gam-snack{position:fixed;bottom:14px;right:100px;z-index:var(--z-toast,9999999);padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:var(--gam-tok-on-accent-light,#ffffff);opacity:0;transform:translateY(6px) scale(.97);transition:opacity .14s,transform .18s;pointer-events:none;box-shadow:0 8px 24px var(--gam-tok-scrim,rgba(0,0,0,.5));letter-spacing:.15px;max-width:340px}
 .gam-snack-show{opacity:1;transform:translateY(0)}
-.gam-snack-success{background:${C.GREEN};color:var(--gam-tok-on-accent-dark,#0a0a0b)}
-.gam-snack-error{background:${C.RED};color:var(--gam-tok-on-accent-light,#ffffff)}
-.gam-snack-info{background:${C.ACCENT};color:var(--gam-tok-on-accent-dark,#0a0a0b)}
-.gam-snack-warn{background:${C.WARN};color:var(--gam-tok-on-accent-dark,#0a0a0b)}
+.gam-snack-success{background:var(--gam-tok-success,#3dd68c);color:var(--gam-tok-on-accent-dark,#0a0a0b)}
+.gam-snack-error{background:var(--gam-tok-danger,#f04040);color:var(--gam-tok-on-accent-light,#ffffff)}
+.gam-snack-info{background:var(--gam-tok-info,#7cb8ff);color:var(--gam-tok-on-accent-light,#ffffff)}
+.gam-snack-warn{background:var(--gam-tok-warn,#f0a040);color:var(--gam-tok-on-accent-dark,#0a0a0b)}
 
 .mail.standard_page{transition:background .15s}
 .gam-mail-hover{background:rgba(74,158,255,.06)!important;box-shadow:inset 3px 0 0 ${C.ACCENT}}
@@ -24456,10 +24522,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 /* v9.4.0: section margin 16→12, header margin 8→6 — same hierarchy, less air. */
 .gam-mc-section{margin-bottom:12px}
 .gam-mc-h{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--gam-tok-accent,${C.ACCENT});margin-bottom:6px}
-.gam-mc-empty{padding:12px;background:${C.BG2};border:1px dashed ${C.BORDER};border-radius:4px;color:${C.TEXT3};font-size:12px;text-align:center}
-.gam-mc-loading{padding:12px;background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;color:${C.TEXT2};font-size:12px;font-style:italic}
+.gam-mc-empty{padding:12px;background:var(--gam-tok-surface-panel,#181b20);border:1px dashed var(--gam-tok-border,#2a2f38);border-radius:4px;color:var(--gam-tok-ink-faint,#7a7672);font-size:12px;text-align:center}
+.gam-mc-loading{padding:12px;background:var(--gam-tok-surface-panel,#181b20);border:1px solid var(--gam-tok-border,#2a2f38);border-radius:4px;color:var(--gam-tok-ink-muted,#b0b5bc);font-size:12px;font-style:italic}
 /* v10.16.39 PRM gate: spinner animation was running for vestibular-disorder users */
-.gam-mc-loading::before{content:'';display:inline-block;width:10px;height:10px;border:2px solid ${C.ACCENT};border-top-color:transparent;border-radius:50%;margin-right:8px;vertical-align:middle}
+.gam-mc-loading::before{content:'';display:inline-block;width:10px;height:10px;border:2px solid var(--gam-tok-accent,#ff9933);border-top-color:transparent;border-radius:50%;margin-right:8px;vertical-align:middle}
 @media (prefers-reduced-motion: no-preference){
   .gam-mc-loading::before{animation:gam-spin 1s linear infinite}
 }
@@ -24689,7 +24755,7 @@ Analyze this comment against the community rules. Then write a brief, profession
 @media (prefers-reduced-motion: reduce) { .gam-copy-flash { animation:none !important; } }
 /* v10.13.2 W5: snack action button (W3 ext) — Bloomberg ghost at rest, amber fill on hover */
 /* v10.16.40: 9px font was below readable threshold on high-DPI; bumped to 10px (on-grid) + padding to 4/10 to keep 32px WCAG tap target. */
-.gam-snack-action { background:transparent; border:1px solid var(--bb-amber); color:var(--bb-amber); padding:4px 10px; cursor:pointer; font:700 10px ui-monospace,'JetBrains Mono',monospace; letter-spacing:0.06em; text-transform:uppercase; transition:background 80ms,color 80ms; flex-shrink:0; pointer-events:auto; white-space:nowrap; }
+.gam-snack-action { background:transparent; border:1px solid var(--gam-tok-accent,#ff9933); color:var(--gam-tok-accent,#ff9933); padding:4px 10px; cursor:pointer; font:700 10px ui-monospace,'JetBrains Mono',monospace; letter-spacing:0.06em; text-transform:uppercase; transition:background 80ms,color 80ms; flex-shrink:0; pointer-events:auto; white-space:nowrap; }
 /* v10.16.40 STOP-BUTTON-FIX utility class (named guard): apply to any flex
    container whose children risk overflowing when one expands. Use sparingly
    on rows that hold a button which changes label mid-state (e.g., FIRE NOW →
@@ -24697,7 +24763,7 @@ Analyze this comment against the community rules. Then write a brief, profession
    prevents text wrap; this utility prevents row-level overflow. */
 .gam-stop-safe-flex { min-width: 0 !important; overflow: hidden !important; }
 .gam-stop-safe-flex > * { min-width: 0; }
-.gam-snack-action:hover { background:var(--bb-amber); color:var(--gam-tok-on-accent-dark,#0a0a0b); }
+.gam-snack-action:hover { background:var(--gam-tok-accent,#ff9933); color:var(--gam-tok-on-accent-dark,#0a0a0b); }
 /* WP-03 #2: one shared dismiss/action treatment for the toast/undo/snack/banner family.
    Transparent ghost at rest, 1px border, ink-muted text, 32px min target, accent-soft hover.
    The --warn modifier is the filled primary variant (solid warn + on-accent-dark), used by
@@ -26288,21 +26354,28 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   padding: var(--bb-s2) var(--bb-s4) !important;
 }
 
-/* ── Iter 21 ── Snack toasts: square, popping by type */
+/* ── Iter 21 ── Snack toasts → WP-03 floating-card shell.
+   This bb-layer rule WINS the cascade (later + !important), so it must paint
+   the WP-03 shell, NOT a divergent bb-hex surface. One shell across all snacks:
+   surface-panel bg + 1px border-strong + scrim shadow + 8px radius, plus a 3px
+   severity-colored LEFT keyline per outcome (info/success/warn/danger). Tokens
+   route through --gam-tok-* (GAM_TOK mirror), zero raw hex. */
 .gam-snack {
-  background: var(--bb-panel) !important;
-  border-radius: var(--bb-r) !important;
-  font: 600 var(--bb-t-xs)/1.4 var(--bb-font) !important;
-  text-transform: uppercase;
+  background: var(--gam-tok-surface-panel,#181b20) !important;
+  border-radius: 8px !important;
+  font: 600 12px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif !important;
   letter-spacing: 0.04em;
-  padding: var(--bb-s3) var(--bb-s5) !important;
-  border: 1px solid var(--bb-line) !important;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.6) !important;
+  padding: 12px 16px !important;
+  border: 1px solid var(--gam-tok-border-strong,#3a3f48) !important;
+  border-left-width: 3px !important;
+  border-left-color: var(--gam-tok-info,#7cb8ff) !important;
+  color: var(--gam-tok-ink,#e8e6e1) !important;
+  box-shadow: 0 8px 24px var(--gam-tok-scrim,rgba(0,0,0,0.60)) !important;
 }
-.gam-snack-success { background: var(--bb-green-bg) !important; border-color: var(--bb-green) !important; color: var(--bb-green) !important; }
-.gam-snack-error   { background: var(--bb-red-bg) !important;   border-color: var(--bb-red) !important;   color: var(--bb-red) !important; }
-.gam-snack-warn    { background: var(--bb-amber-bg) !important; border-color: var(--bb-amber) !important; color: var(--bb-amber) !important; }
-.gam-snack-info    { background: var(--bb-cyan-bg) !important;  border-color: var(--bb-cyan) !important;  color: var(--bb-cyan) !important; }
+.gam-snack-success { border-left-color: var(--gam-tok-success,#3dd68c) !important; }
+.gam-snack-error   { border-left-color: var(--gam-tok-danger,#f04040) !important; }
+.gam-snack-warn    { border-left-color: var(--gam-tok-warn,#f0a040) !important; }
+.gam-snack-info    { border-left-color: var(--gam-tok-info,#7cb8ff) !important; }
 
 /* ── Iter 22 ── Maintenance routines: data row, NOT card */
 .pop-maint-row {
