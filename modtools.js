@@ -2942,7 +2942,7 @@
         const backdrop = el('div', {
           cls: 'gam-modal-backdrop gam-v72-asktext-backdrop',
           style: { position:'fixed', left:'0', top:'0', right:'0', bottom:'0',
-            background:'rgba(0,0,0,0.55)', zIndex:'9999994',
+            background:GAM_TOK.scrim, zIndex:'9999994',
             display:'flex', alignItems:'center', justifyContent:'center' }
         });
         // v10.16.27 (QA-UI-4 P0): add aria-labelledby so SR announces the
@@ -2954,25 +2954,26 @@
         const __axPanel = { tabindex: '-1', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': _askTitleId };
         const panel = el('div', {
           cls: 'gam-modal gam-v72-asktext',
-          style: { background:'#1a1c20', color:'#e4e4e4', borderRadius:'8px',
+          style: { background:GAM_TOK.surfaceRaised, color:GAM_TOK.ink, borderRadius:'8px',
             padding:'16px 18px', minWidth:'320px', maxWidth:'520px',
-            boxShadow:'0 6px 24px rgba(0,0,0,0.6)',
+            border:'1px solid '+GAM_TOK.borderStrong,
+            boxShadow:'0 8px 24px '+GAM_TOK.scrim,
             fontFamily:'ui-sans-serif, system-ui, sans-serif' },
           ...__axPanel
         });
         const title = el('div', {
           id: _askTitleId,
-          style: { fontSize:'14px', fontWeight:'700', marginBottom:'8px', color:'#4A9EFF' }
+          style: { fontSize:'15px', fontWeight:'600', marginBottom:'8px', color:GAM_TOK.ink }
         }, String(o.title || 'Input required'));
         const labelRow = el('label', {
-          style: { display:'block', fontSize:'12px', color:'#aaa', marginBottom:'6px' }
+          style: { display:'block', fontSize:'11px', fontWeight:'600', letterSpacing:'.04em', textTransform:'uppercase', color:GAM_TOK.inkMuted, marginBottom:'6px' }
         }, String(o.label || ''));
         const input = el(o.multiline ? 'textarea' : 'input', {
           type: 'text',
           placeholder: String(o.placeholder || ''),
           maxlength: String((Number(o.max) || 500)),
-          style: { width:'100%', background:'#0f1114', color:'#e4e4e4',
-            border:'1px solid #2a2a2a', borderRadius:'4px', padding:'8px',
+          style: { width:'100%', background:GAM_TOK.surfaceSunken, color:GAM_TOK.ink,
+            border:'1px solid '+GAM_TOK.border, borderRadius:'6px', padding:'8px',
             fontSize:'13px', fontFamily:'inherit',
             minHeight: o.multiline ? '80px' : 'auto', boxSizing:'border-box' }
         });
@@ -2981,7 +2982,7 @@
         // v10.15.10 R4: a11y baseline (was __uxOn()-gated; ungated for SR validation-error announcement).
         const __axErr = { tabindex: '0', role: 'alert', 'aria-live': 'polite' };
         const err = el('div', {
-          style: { color:'#E74C3C', fontSize:'12px', marginTop:'6px',
+          style: { color:GAM_TOK.danger, fontSize:'12px', marginTop:'6px',
             minHeight:'16px' },
           ...__axErr
         });
@@ -2990,13 +2991,13 @@
         });
         const cancelBtn = el('button', {
           type: 'button',
-          style: { background:'#2a2a2a', color:'#e4e4e4', border:'0',
-            borderRadius:'4px', padding:'6px 12px', cursor:'pointer', fontSize:'13px' }
+          style: { background:'transparent', color:GAM_TOK.inkMuted, border:'1px solid '+GAM_TOK.border,
+            borderRadius:'6px', padding:'6px 12px', cursor:'pointer', fontSize:'13px', minHeight:'32px' }
         }, 'Cancel');
         const okBtn = el('button', {
           type: 'button',
-          style: { background:'#4A9EFF', color:'#fff', border:'0',
-            borderRadius:'4px', padding:'6px 12px', cursor:'pointer', fontSize:'13px' }
+          style: { background:GAM_TOK.accent, color:GAM_TOK.onAccentDark, border:'0',
+            borderRadius:'6px', padding:'6px 12px', cursor:'pointer', fontSize:'13px', fontWeight:'600', minHeight:'32px' }
         }, 'OK');
         btnRow.appendChild(cancelBtn);
         btnRow.appendChild(okBtn);
@@ -3807,26 +3808,26 @@
         __v80_park_modal_open = true;
         const overlay = el('div', {
           cls: 'gam-v80-park-overlay',
-          style: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.65)', zIndex: 10000000, display: 'flex', alignItems: 'center', justifyContent: 'center' }
+          style: 'position:fixed;top:0;left:0;right:0;bottom:0;background:'+GAM_TOK.scrim+';z-index:var(--z-modal,9999995);display:flex;align-items:center;justify-content:center;'
         });
         // v8.1 ux kbd-audit: flag-on marks Park modal as a dialog.
         const __axPark = { tabindex: '-1', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Park for senior review' };
         const modal = el('div', {
           cls: 'gam-v80-park-modal',
-          style: { background: '#1a202c', color: '#e2e8f0', padding: '18px 20px', borderRadius: '6px', minWidth: '380px', maxWidth: '520px', border: '1px solid #4a5568' },
+          style: { background: GAM_TOK.surfaceRaised, color: GAM_TOK.ink, padding: '18px 20px', borderRadius: '8px', minWidth: '380px', maxWidth: '520px', border: '1px solid '+GAM_TOK.borderStrong, boxShadow: '0 8px 24px '+GAM_TOK.scrim },
           ...__axPark
         });
         const title = el('div', { style: { fontWeight: '600', marginBottom: '10px', fontSize: '14px' } });
         title.textContent = 'Park ' + String(kind) + ' ' + String(subjectId) + ' for senior review';
         // v8.1 ux: accessible label for the park note textarea (flag-gated append below).
-        const parkNoteLbl = el('label', { style: { display: 'block', fontSize: '11px', color: '#a0aec0', marginBottom: '4px' } });
+        const parkNoteLbl = el('label', { style: { display: 'block', fontSize: '11px', fontWeight: '600', letterSpacing: '.04em', textTransform: 'uppercase', color: GAM_TOK.inkMuted, marginBottom: '4px' } });
         parkNoteLbl.textContent = 'Senior review note';
         const ta = el('textarea', {
           cls: 'gam-input',
           rows: '4',
           maxlength: '200',
           placeholder: 'needs senior review',
-          style: { width: '100%', padding: '6px 8px', background: '#0f1419', color: '#e2e8f0', border: '1px solid #4a5568', borderRadius: '4px', fontFamily: 'inherit', fontSize: '12px' }
+          style: { width: '100%', padding: '6px 8px', background: GAM_TOK.surfaceSunken, color: GAM_TOK.ink, border: '1px solid '+GAM_TOK.border, borderRadius: '6px', fontFamily: 'inherit', fontSize: '12px' }
         });
         ta.value = 'needs senior review';
         // v8.1 ux: link label to textarea (idempotent, flag-gated).
@@ -3834,17 +3835,17 @@
         const actions = el('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px' } });
         const cancel = el('button', {
           cls: 'gam-btn',
-          style: { background: '#2d3748', color: '#e2e8f0', border: '1px solid #4a5568', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }
+          style: { background: 'transparent', color: GAM_TOK.inkMuted, border: '1px solid '+GAM_TOK.border, padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', minHeight: '32px' }
         });
         cancel.textContent = 'Cancel';
         const submit = el('button', {
           cls: 'gam-btn gam-btn-accent',
-          style: { background: '#4a9eff', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }
+          style: { background: GAM_TOK.accent, color: GAM_TOK.onAccentDark, border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', minHeight: '32px' }
         });
         submit.textContent = '\u23F8 Park';
         // v8.1 ux kbd-audit: flag-on marks status region as aria-live for announcements.
         const __axStatus = { tabindex: '0', role: 'status', 'aria-live': 'polite' };
-        const status = el('div', { style: { fontSize: '11px', color: '#a0aec0', marginTop: '6px' }, ...__axStatus });
+        const status = el('div', { style: { fontSize: '11px', color: GAM_TOK.inkMuted, marginTop: '6px' }, ...__axStatus });
         function close(){
           // v8.1 ux: run focus-trap cleanup if installed.
           try { if (modal && modal._gamFocusCleanup) { modal._gamFocusCleanup(); modal._gamFocusCleanup = null; } } catch(e){}
@@ -6474,10 +6475,10 @@
       const existing = document.getElementById('gam-precedent-modal');
       if (existing) existing.remove();
 
-      const titleInput = el('input', {type: 'text', placeholder: 'Title (required)', style: 'width:100%;padding:6px;background:#0f1114;color:#e2e8f0;border:1px solid #2d3748;border-radius:4px;margin-bottom:6px;'});
-      const ruleInput  = el('input', {type: 'text', placeholder: 'Rule reference (optional)', style: 'width:100%;padding:6px;background:#0f1114;color:#e2e8f0;border:1px solid #2d3748;border-radius:4px;margin-bottom:6px;'});
-      const reasonInput = el('textarea', {placeholder: 'Reason (optional)', style: 'width:100%;padding:6px;background:#0f1114;color:#e2e8f0;border:1px solid #2d3748;border-radius:4px;margin-bottom:6px;min-height:48px;resize:vertical;font:inherit;'});
-      const actionSel  = el('select', {style: 'width:100%;padding:6px;background:#0f1114;color:#e2e8f0;border:1px solid #2d3748;border-radius:4px;margin-bottom:8px;'});
+      const titleInput = el('input', {type: 'text', placeholder: 'Title (required)', style: 'width:100%;padding:6px;background:'+GAM_TOK.surfaceSunken+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.border+';border-radius:6px;margin-bottom:6px;'});
+      const ruleInput  = el('input', {type: 'text', placeholder: 'Rule reference (optional)', style: 'width:100%;padding:6px;background:'+GAM_TOK.surfaceSunken+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.border+';border-radius:6px;margin-bottom:6px;'});
+      const reasonInput = el('textarea', {placeholder: 'Reason (optional)', style: 'width:100%;padding:6px;background:'+GAM_TOK.surfaceSunken+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.border+';border-radius:6px;margin-bottom:6px;min-height:48px;resize:vertical;font:inherit;'});
+      const actionSel  = el('select', {style: 'width:100%;padding:6px;background:'+GAM_TOK.surfaceSunken+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.border+';border-radius:6px;margin-bottom:8px;'});
       ['APPROVE','REMOVE','BAN','WATCH','NOTE','LOCK','STICKY','SPAM','ESCALATE','DO_NOTHING'].forEach(a => {
         const o = document.createElement('option'); o.value = a; o.textContent = a;
         actionSel.appendChild(o);
@@ -6486,11 +6487,11 @@
       const saveBtn = el('button', {cls: 'gam-nba-action-primary'}, 'Save');
       const cancelBtn = el('button', {cls: 'gam-nba-action-alt'}, 'Cancel');
 
-      const modal = el('div', {id: 'gam-precedent-modal', style: 'position:fixed;inset:0;z-index:2147483650;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;'},
-        el('div', {style: 'background:#1a202c;color:#e2e8f0;padding:16px;border-radius:6px;width:min(420px,90vw);border:1px solid #2d3748;'},
+      const modal = el('div', {id: 'gam-precedent-modal', style: 'position:fixed;inset:0;z-index:var(--z-modal,9999995);background:'+GAM_TOK.scrim+';display:flex;align-items:center;justify-content:center;'},
+        el('div', {style: 'background:'+GAM_TOK.surfaceRaised+';color:'+GAM_TOK.ink+';padding:16px;border-radius:8px;width:min(420px,90vw);border:1px solid '+GAM_TOK.borderStrong+';box-shadow:0 8px 24px '+GAM_TOK.scrim+';'},
           el('h3', {style: 'margin:0 0 10px;font-size:14px;'}, 'Mark as precedent'),
           titleInput, ruleInput, reasonInput,
-          el('label', {style: 'font-size:11px;color:#a0aec0;'}, 'Action taken'),
+          el('label', {style: 'font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:'+GAM_TOK.inkMuted+';'}, 'Action taken'),
           actionSel,
           el('div', {style: 'display:flex;gap:6px;justify-content:flex-end;'}, cancelBtn, saveBtn)));
       document.body.appendChild(modal);
@@ -24325,6 +24326,13 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-input:hover,.gam-textarea:hover,.gam-select:hover{border-color:${C.BORDER2}}
 .gam-input:focus,.gam-textarea:focus,.gam-select:focus{border-color:${C.ACCENT}}
 .gam-textarea{resize:vertical;min-height:72px;font-family:inherit}
+/* WP-04: shared modal form-field rhythm. label = 11px caps ink-muted; field on
+   surface-sunken well + 1px border, focus -> accent ring. Apply via class so the
+   ~40 inline-styled modal fields converge on one look without per-element JS. */
+.gam-input-group{margin-bottom:10px}
+.gam-input-group>label{display:block;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--gam-tok-ink-muted,${C.TEXT2});margin-bottom:4px}
+.gam-input-group>input,.gam-input-group>textarea,.gam-input-group>select{width:100%;background:var(--gam-tok-surface-sunken,${C.BG});border:1px solid var(--gam-tok-border,${C.BORDER});border-radius:6px;color:var(--gam-tok-ink,${C.TEXT});font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:8px 10px;outline:none;box-sizing:border-box;transition:border-color .15s}
+.gam-input-group>input:focus,.gam-input-group>textarea:focus,.gam-input-group>select:focus{border-color:var(--gam-tok-accent,${C.ACCENT})}
 
 /* v10.16.39 STOP-BUTTON-FIX SYSTEMIC ROOT CAUSE: the .gam-btn base was missing
    white-space:nowrap. EVERY button using .gam-btn (and there are ~17 chip
