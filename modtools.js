@@ -4856,12 +4856,12 @@
       style.id = 'gam-v81-toast';
       style.textContent = [
         '/* v8.1 ux: toast-stack -- body.gam-ux-polish-on-scoped */',
-        'body.gam-ux-polish-on .gam-toast-stack{position:fixed;right:20px;bottom:20px;z-index:99999;display:flex;flex-direction:column-reverse;gap:8px;max-width:360px;pointer-events:none;}',
-        'body.gam-ux-polish-on .gam-toast{pointer-events:auto;padding:12px 16px;border-radius:6px;font-size:13px;line-height:1.4;color:#e5e5e8;background:#2a2a30;box-shadow:0 4px 12px rgba(0,0,0,0.35);opacity:0;transform:translateY(8px);transition:opacity 180ms ease,transform 180ms ease;min-height:44px;display:flex;align-items:center;}',
+        'body.gam-ux-polish-on .gam-toast-stack{position:fixed;right:20px;bottom:20px;z-index:var(--z-toast,9999999);display:flex;flex-direction:column-reverse;gap:8px;max-width:360px;pointer-events:none;}',
+        'body.gam-ux-polish-on .gam-toast{pointer-events:auto;padding:12px 16px;border-radius:8px;font-size:13px;line-height:1.4;color:var(--gam-tok-ink,#e8e6e1);background:var(--gam-tok-surface-panel,#181b20);border:1px solid var(--gam-tok-border-strong,#3a3f48);border-left:3px solid var(--gam-tok-info,#7cb8ff);box-shadow:0 8px 24px var(--gam-tok-scrim,rgba(0,0,0,0.60));opacity:0;transform:translateY(8px);transition:opacity 180ms ease,transform 180ms ease;min-height:44px;display:flex;align-items:center;gap:8px;}',
         'body.gam-ux-polish-on .gam-toast.gam-toast-show{opacity:1;transform:translateY(0);}',
-        'body.gam-ux-polish-on .gam-toast-success{background:#1f4d2e;color:#c6f6d5;}',
-        'body.gam-ux-polish-on .gam-toast-error{background:#5a2020;color:#fed7d7;}',
-        'body.gam-ux-polish-on .gam-toast-info{background:#2a2a30;color:#e5e5e8;}'
+        'body.gam-ux-polish-on .gam-toast-success{border-left-color:var(--gam-tok-success,#3dd68c);}',
+        'body.gam-ux-polish-on .gam-toast-error{border-left-color:var(--gam-tok-danger,#f04040);}',
+        'body.gam-ux-polish-on .gam-toast-info{border-left-color:var(--gam-tok-info,#7cb8ff);}'
       ].join('\n');
       if (document.head) document.head.appendChild(style);
       else document.addEventListener('DOMContentLoaded', function(){ document.head.appendChild(style); }, { once: true });
@@ -4928,7 +4928,8 @@
     (actions || []).forEach(function(action) {
       var btn = document.createElement('button');
       btn.textContent = action.label || 'Action';
-      btn.style.cssText = 'padding:2px 8px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.15);color:inherit;border-radius:3px;cursor:pointer;font:inherit;font-size:10px';
+      btn.className = 'gam-toast-btn';
+      btn.style.cssText = 'padding:6px 10px;min-height:32px;border:1px solid '+GAM_TOK.borderStrong+';background:transparent;color:'+GAM_TOK.inkMuted+';border-radius:6px;cursor:pointer;font:inherit;font-size:10px';
       btn.addEventListener('click', function() {
         try { t.remove(); } catch(_) {}
         try { if (typeof action.fn === 'function') action.fn(); } catch(e) {}
@@ -7616,11 +7617,11 @@
     if (old) old.remove();
     const wrap = document.createElement('div');
     wrap.id = 'gam-undo';
-    wrap.style.cssText = 'position:fixed;bottom:90px;right:16px;z-index:2147483610;background:#1a1c20;color:#eee;border:1px solid #444;border-radius:6px;padding:10px 14px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.5);display:flex;align-items:center;gap:10px';
+    wrap.style.cssText = 'position:fixed;bottom:90px;right:16px;z-index:2147483610;background:'+GAM_TOK.surfacePanel+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.borderStrong+';border-left:3px solid '+GAM_TOK.warn+';border-radius:8px;padding:12px 16px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 8px 24px '+GAM_TOK.scrim+';display:flex;align-items:center;gap:8px';
     // v5.8.4 security fix (BUG-3): escape ${username}. GAW usernames are
     // typically alphanumeric + _ but defense-in-depth: a banned user with
     // a crafted synthesized username would otherwise XSS the mod's session.
-    wrap.innerHTML = `<span>\u{1F518} ${escapeHtml(username)} banned</span><button style="background:var(--bb-amber-cool);color:#3a2500;border:none;border-radius:3px;padding:4px 10px;cursor:pointer;font-weight:600">Undo</button>`;
+    wrap.innerHTML = `<span>\u{1F518} ${escapeHtml(username)} banned</span><button class="gam-toast-btn" style="background:transparent;border:1px solid ${GAM_TOK.warn};color:${GAM_TOK.warn};border-radius:6px;padding:6px 10px;min-height:32px;cursor:pointer;font-weight:600">Undo</button>`;
     document.body.appendChild(wrap);
     let dismissed = false;
     const cleanup = ()=>{ if (!dismissed){ dismissed = true; wrap.remove(); }};
@@ -7799,12 +7800,13 @@
     const toast = document.createElement('div');
     toast.id = toastId;
     toast.setAttribute('role', 'alert');
+    toast.setAttribute('aria-live', 'assertive'); // WP-03 #6 a11y parity: _showUndoToast was role-only; pair with aria-live
     toast.style.cssText =
       'position:fixed;bottom:56px;right:16px;z-index:9999999;' +
-      'background:#1a1f28;border:1px solid #3a3f48;border-radius:4px;' +
-      'padding:10px 14px;display:flex;align-items:center;gap:10px;' +
+      'background:'+GAM_TOK.surfacePanel+';border:1px solid '+GAM_TOK.borderStrong+';border-left:3px solid '+GAM_TOK.info+';border-radius:8px;' +
+      'padding:12px 16px;display:flex;align-items:center;gap:8px;' +
       'font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;' +
-      'color:#e8eaed;box-shadow:0 4px 16px rgba(0,0,0,.6);' +
+      'color:'+GAM_TOK.ink+';box-shadow:0 8px 24px '+GAM_TOK.scrim+';' +
       'min-width:260px;max-width:380px;';
     const lblEl = document.createElement('span');
     lblEl.style.flex = '1';
@@ -7812,11 +7814,11 @@
     const undoBtn = document.createElement('button');
     undoBtn.textContent = undoLabel || 'Undo';
     undoBtn.style.cssText =
-      'background:transparent;border:1px solid #4A9EFF;border-radius:3px;' +
-      'color:#4A9EFF;font:600 11px inherit;padding:3px 10px;cursor:pointer;flex-shrink:0;';
+      'background:transparent;border:1px solid '+GAM_TOK.info+';border-radius:6px;' +
+      'color:'+GAM_TOK.info+';font:600 11px inherit;padding:6px 10px;min-height:32px;cursor:pointer;flex-shrink:0;';
     const progress = document.createElement('div');
     progress.style.cssText =
-      'position:absolute;bottom:0;left:0;height:2px;background:#4A9EFF;border-radius:0 0 4px 4px;' +
+      'position:absolute;bottom:0;left:0;height:2px;background:'+GAM_TOK.accent+';border-radius:0 0 8px 8px;' +
       'width:100%;transition:width linear ' + (ttlMs / 1000) + 's;';
     toast.style.position = 'fixed';
     toast.appendChild(lblEl);
@@ -8020,7 +8022,7 @@
     if (document.getElementById('gam-sw-restart-snack')) return;
     const snackEl = document.createElement('div');
     snackEl.id = 'gam-sw-restart-snack';
-    snackEl.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483640;background:#1a1c20;color:#eee;border:1px solid #444;border-radius:6px;padding:10px 14px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.5);display:flex;align-items:center;gap:10px;max-width:360px';
+    snackEl.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483640;background:'+GAM_TOK.surfacePanel+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.borderStrong+';border-left:3px solid '+GAM_TOK.info+';border-radius:8px;padding:12px 16px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 8px 24px '+GAM_TOK.scrim+';display:flex;align-items:center;gap:8px;max-width:360px';
     const msgEl = document.createElement('span');
     // v10.14.0 V14-T7 (RALPH-RECOVERY R-04): differentiate from ext-reload banner.
     // Pre-fix both said "Extension was reloaded." This is SW restart (different
@@ -8028,14 +8030,16 @@
     msgEl.textContent = 'Connection re-established -- click Retry to resume.';
     const retryBtn = document.createElement('button');
     retryBtn.textContent = 'Retry';
-    retryBtn.style.cssText = 'background:#4A9EFF;color:#fff;border:none;border-radius:3px;padding:4px 10px;cursor:pointer;font-weight:600;white-space:nowrap';
+    retryBtn.className = 'gam-toast-btn';
+    retryBtn.style.cssText = 'background:transparent;border:1px solid '+GAM_TOK.info+';color:'+GAM_TOK.info+';border-radius:6px;padding:6px 10px;min-height:32px;cursor:pointer;font-weight:600;white-space:nowrap';
     retryBtn.addEventListener('click', function() {
       try { snackEl.remove(); } catch(_){}
       try { rpcCall(rpcName, {}); } catch(_){}
     });
     const dismissBtn = document.createElement('button');
     dismissBtn.textContent = 'Dismiss';
-    dismissBtn.style.cssText = 'background:transparent;color:#9b9892;border:1px solid #7a7672;border-radius:3px;padding:4px 8px;cursor:pointer;white-space:nowrap'; /* v.next a11y: border 2.5:1 -> 4.1:1 (UI 3:1 pass) */
+    dismissBtn.className = 'gam-toast-btn';
+    dismissBtn.style.cssText = 'background:transparent;color:'+GAM_TOK.inkMuted+';border:1px solid '+GAM_TOK.borderStrong+';border-radius:6px;padding:6px 10px;min-height:32px;cursor:pointer;white-space:nowrap';
     dismissBtn.addEventListener('click', function() { try { snackEl.remove(); } catch(_){} });
     snackEl.appendChild(msgEl);
     snackEl.appendChild(retryBtn);
@@ -8087,14 +8091,14 @@
       if (document.getElementById('gam-ext-orphaned-banner')) return;
       const b = document.createElement('div');
       b.id = 'gam-ext-orphaned-banner';
-      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999999;background:#2a1d10;border-bottom:1px solid var(--bb-amber);color:#ffd84d;font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:8px 14px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 2px 8px rgba(0,0,0,0.6)';
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999999;background:'+GAM_TOK.surfacePanel+';border-bottom:3px solid '+GAM_TOK.warn+';color:'+GAM_TOK.ink+';font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:12px 16px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 8px 24px '+GAM_TOK.scrim+'';
       b.innerHTML =
         '<span style="font-size:14px">↻</span>' +
         '<span><b>ModTools updated.</b> The extension was reloaded — refresh this page to reconnect.</span>' +
         '<span style="flex:1"></span>' +
-        '<button id="gam-ext-orphaned-copy" style="background:transparent;border:1px solid #7a7672;color:#ffd84d;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase" title="Copy debug details to clipboard">📋 Copy</button>' +
-        '<button id="gam-ext-orphaned-reload" style="background:var(--bb-amber);border:none;color:#0a0a0b;padding:4px 12px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Reload page</button>' +
-        '<button id="gam-ext-orphaned-dismiss" style="background:transparent;border:1px solid #7a7672;color:#9b9892;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Dismiss</button>'; /* v.next a11y: border 2.5:1 -> 4.1:1 */
+        '<button id="gam-ext-orphaned-copy" class="gam-toast-btn" style="background:transparent;border:1px solid '+GAM_TOK.borderStrong+';color:'+GAM_TOK.inkMuted+';padding:6px 10px;min-height:32px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase" title="Copy debug details to clipboard">📋 Copy</button>' +
+        '<button id="gam-ext-orphaned-reload" class="gam-toast-btn gam-toast-btn--warn" style="background:'+GAM_TOK.warn+';border:1px solid '+GAM_TOK.warn+';color:'+GAM_TOK.onAccentDark+';padding:6px 12px;min-height:32px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Reload page</button>' +
+        '<button id="gam-ext-orphaned-dismiss" class="gam-toast-btn" style="background:transparent;border:1px solid '+GAM_TOK.borderStrong+';color:'+GAM_TOK.inkMuted+';padding:6px 10px;min-height:32px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase">Dismiss</button>';
       document.body.appendChild(b);
       const reload = b.querySelector('#gam-ext-orphaned-reload');
       const dismiss = b.querySelector('#gam-ext-orphaned-dismiss');
@@ -8246,7 +8250,7 @@
     if (hasCountdown) {
       const bar = document.createElement('div');
       bar.className = 'gam-snack-countdown-bar';
-      bar.style.cssText = 'position:absolute;left:0;bottom:0;height:2px;background:var(--bb-amber);width:100%;transition:width 100ms linear;border-radius:0 0 6px 6px';
+      bar.style.cssText = 'position:absolute;left:0;bottom:0;height:2px;background:'+GAM_TOK.accent+';width:100%;transition:width 100ms linear;border-radius:0 0 8px 8px';
       s.appendChild(bar);
       // Make snack relatively-positioned so the bar absolute-positions inside it
       s.style.position = 'fixed'; // already fixed but ensure
@@ -24620,7 +24624,16 @@ Analyze this comment against the community rules. Then write a brief, profession
    prevents text wrap; this utility prevents row-level overflow. */
 .gam-stop-safe-flex { min-width: 0 !important; overflow: hidden !important; }
 .gam-stop-safe-flex > * { min-width: 0; }
-.gam-snack-action:hover { background:var(--bb-amber); color:#0a0a0b; }
+.gam-snack-action:hover { background:var(--bb-amber); color:var(--gam-tok-on-accent-dark,#0a0a0b); }
+/* WP-03 #2: one shared dismiss/action treatment for the toast/undo/snack/banner family.
+   Transparent ghost at rest, 1px border, ink-muted text, 32px min target, accent-soft hover.
+   The --warn modifier is the filled primary variant (solid warn + on-accent-dark), used by
+   the orphaned-banner Reload button. focus-visible ring is provided by the WP-01 a11y block
+   that already enumerates .gam-toast-btn. */
+.gam-toast-btn { display:inline-flex; align-items:center; justify-content:center; min-height:32px; padding:6px 10px; border-radius:6px; border:1px solid var(--gam-tok-border-strong,#3a3f48); background:transparent; color:var(--gam-tok-ink-muted,#b0b5bc); cursor:pointer; font:600 11px inherit; letter-spacing:0.02em; transition:background 80ms,color 80ms,border-color 80ms; flex-shrink:0; white-space:nowrap; box-sizing:border-box; }
+.gam-toast-btn:hover { background:var(--gam-tok-accent-soft,rgba(255,153,51,0.10)); color:var(--gam-tok-ink,#e8e6e1); }
+.gam-toast-btn--warn { background:var(--gam-tok-warn,#f0a040); border-color:var(--gam-tok-warn,#f0a040); color:var(--gam-tok-on-accent-dark,#0a0a0b); }
+.gam-toast-btn--warn:hover { background:var(--gam-tok-warn,#f0a040); color:var(--gam-tok-on-accent-dark,#0a0a0b); filter:brightness(1.08); }
 .gam-muted { color:${C.TEXT3}; font-style:italic; font-size:11px; }
 .gam-nba-gen { background:${C.ACCENT}; color:#fff; border:none; border-radius:4px; padding:5px 12px; cursor:pointer; font-size:11px; font-weight:600; transition:opacity .15s; }
 .gam-nba-gen:hover { opacity:.9; }
