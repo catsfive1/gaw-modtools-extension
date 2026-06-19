@@ -9215,7 +9215,7 @@
       const hdrTitle = el('span', { style: 'flex:1' }, '\u{1F5D1} OP Self-Deletions — last ' + _filterLabel(_curHours));
       const sel = document.createElement('select');
       sel.id = 'mc-opdel-filter';
-      sel.style.cssText = 'background:#0e1115;color:#e8e6e1;border:1px solid #2a2e36;padding:3px 6px;font:11px ui-monospace,JetBrains Mono,monospace;cursor:pointer';
+      sel.style.cssText = 'background:'+GAM_TOK.surfaceRaised+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.border+';padding:3px 6px;font:11px ui-monospace,JetBrains Mono,monospace;cursor:pointer';
       FILTERS.forEach(function(f){
         const o = document.createElement('option');
         o.value = String(f.hours);
@@ -9238,15 +9238,15 @@
       rpcCall('modOpDeletes', { since: Date.now() - _curHours * 3600 * 1000, limit: 20 }).then(function(res) {
         list.remove();
         if (!res || !res.ok || !res.deletes || !res.deletes.length) {
-          root.appendChild(el('div', { style: 'color:#9b9892;font-size:11px;padding:6px' }, 'No OP self-deletions in the last ' + _filterLabel(_curHours) + '.'));
+          root.appendChild(el('div', { style: 'color:'+GAM_TOK.inkMuted+';font-size:11px;padding:6px' }, 'No OP self-deletions in the last ' + _filterLabel(_curHours) + '.'));
           return;
         }
         res.deletes.forEach(function(d) {
-          const row = el('div', { style: 'border-bottom:1px solid #2a2e36;padding:6px 0;font-size:11px' });
-          const titleEl = el('div', { style: 'color:#ff3b3b;font-weight:600' }, escapeHtml(d.title || '(no title)'));
+          const row = el('div', { style: 'border-bottom:1px solid '+GAM_TOK.border+';padding:6px 0;font-size:11px' });
+          const titleEl = el('div', { style: 'color:'+GAM_TOK.danger+';font-weight:600' }, escapeHtml(d.title || '(no title)'));
           // Meta line: author / subreddit / time / styled was_in_queue chip
           const meta = document.createElement('div');
-          meta.style.cssText = 'color:#9b9892;font-size:10px;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap';
+          meta.style.cssText = 'color:'+GAM_TOK.inkMuted+';font-size:10px;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap';
           meta.appendChild(document.createTextNode(
             'by ' + (d.author || '?') +
             (d.subreddit ? ' · ' + d.subreddit : '') +
@@ -9254,18 +9254,18 @@
           ));
           if (d.was_in_queue) {
             const chip = document.createElement('span');
-            chip.style.cssText = 'background:rgba(245,166,35,0.18);color:#f5a623;font-size:9px;padding:1px 6px;border-radius:8px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;border:1px solid rgba(245,166,35,0.3)';
+            chip.style.cssText = 'background:'+GAM_TOK.warnSoft+';color:'+GAM_TOK.warn+';font-size:9px;padding:1px 6px;border-radius:8px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;border:1px solid '+GAM_TOK.warnSoft;
             chip.textContent = 'WAS IN QUEUE';
             meta.appendChild(chip);
           }
-          const snippet = d.snippet ? el('div', { style: 'color:#a0aec0;font-size:10px;margin-top:2px;font-style:italic' }, '“' + escapeHtml(d.snippet.slice(0, 120)) + '”') : null;
+          const snippet = d.snippet ? el('div', { style: 'color:'+GAM_TOK.inkMuted+';font-size:10px;margin-top:2px;font-style:italic' }, '“' + escapeHtml(d.snippet.slice(0, 120)) + '”') : null;
           // Action buttons row
           const actions = document.createElement('div');
           actions.style.cssText = 'display:flex;gap:6px;margin-top:4px';
           if (d.permalink || d.url) {
             const openPost = document.createElement('button');
             openPost.className = 'gam-btn';
-            openPost.style.cssText = 'background:transparent;border:1px solid #2a2825;color:#9b9892;padding:2px 8px;cursor:pointer;font:600 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;text-transform:uppercase';
+            openPost.style.cssText = 'background:transparent;border:1px solid '+GAM_TOK.border+';color:'+GAM_TOK.inkMuted+';padding:2px 8px;cursor:pointer;font:600 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;text-transform:uppercase';
             openPost.textContent = '\u{1F517} Open post';
             openPost.addEventListener('click', function(ev){
               ev.stopPropagation();
@@ -9277,7 +9277,7 @@
           if (d.author) {
             const openConsole = document.createElement('button');
             openConsole.className = 'gam-btn';
-            openConsole.style.cssText = 'background:transparent;border:1px solid var(--bb-amber);color:var(--bb-amber);padding:2px 8px;cursor:pointer;font:600 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;text-transform:uppercase';
+            openConsole.style.cssText = 'background:transparent;border:1px solid '+GAM_TOK.warn+';color:'+GAM_TOK.warn+';padding:2px 8px;cursor:pointer;font:600 9px ui-monospace,JetBrains Mono,monospace;letter-spacing:0.06em;text-transform:uppercase';
             openConsole.textContent = '\u{1F6E1} Open console';
             openConsole.addEventListener('click', function(ev){
               ev.stopPropagation();
@@ -9293,7 +9293,7 @@
         });
       }).catch(function(err) {
         list.remove();
-        root.appendChild(el('div', { style: 'color:#ff3b3b;padding:8px;font-size:11px' }, 'Error loading OP deletions: ' + (err && err.message || err)));
+        root.appendChild(el('div', { style: 'color:'+GAM_TOK.danger+';padding:8px;font-size:11px' }, 'Error loading OP deletions: ' + (err && err.message || err)));
       });
     }
 
