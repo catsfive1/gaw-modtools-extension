@@ -4805,10 +4805,14 @@
   }
   // --- end v8.1 ux ---
 
-  // --- v8.1 ux: touch-targets ---
-  // 44x44 minimum hit-area per WCAG 2.5.5 (AAA) / Apple HIG / Material. All
-  // rules scoped under body.gam-ux-polish-on so flag-off leaves v8.0 button
-  // visuals byte-identical.
+  // --- v8.1 ux: touch-targets (REDESIGN-BRIEF WP-01 §2.7 — UNSCOPED) ---
+  // WP-01 transformation #5: the minimum-target floor is moved OFF
+  // body.gam-ux-polish-on so NO new interactive class can silently opt out.
+  // The 32px floor is the global minimum (44px for primary action chips), with
+  // a 24px absolute-floor ::before hit-area helper for deliberately-small
+  // visuals. This is the single min-target authority for the sheet — the
+  // foundation block at the GAM_CSS tail no longer carries a parallel rule.
+  // Channel-2 (<style>) so var(--gam-tok-*) fallbacks are safe.
   (function injectTouchTargetCSS(){
     if (document.__v81_touch_installed) return;
     document.__v81_touch_installed = true;
@@ -4816,17 +4820,21 @@
       var style = document.createElement('style');
       style.id = 'gam-v81-touch';
       style.textContent = [
-        '/* v8.1 ux: touch-targets -- body.gam-ux-polish-on-scoped */',
-        'body.gam-ux-polish-on .gam-bar-icon{min-width:44px;min-height:44px;padding:11px;background:transparent;border-radius:4px;box-sizing:content-box;}',
-        'body.gam-ux-polish-on .gam-bar-icon:hover{background:rgba(255,255,255,0.05);}',
-        'body.gam-ux-polish-on .gam-action-btn{min-height:44px;min-width:44px;padding:10px 12px;}',
-        'body.gam-ux-polish-on .gam-modal-close{min-width:44px;min-height:44px;padding:6px;font-size:20px;}',
-        'body.gam-ux-polish-on .gam-row-delete{min-width:44px;min-height:44px;padding:6px;}',
-        'body.gam-ux-polish-on .gam-chip{min-height:44px;padding:6px 10px;display:inline-flex;align-items:center;}',
-        'body.gam-ux-polish-on .gam-park-badge{min-width:44px;min-height:44px;padding:6px;display:inline-flex;align-items:center;justify-content:center;}',
-        'body.gam-ux-polish-on .gam-shadow-badge{min-width:44px;min-height:44px;padding:6px;display:inline-flex;align-items:center;justify-content:center;}',
-        'body.gam-ux-polish-on .gam-ctx-item{min-height:44px;}',
-        'body.gam-ux-polish-on .gam-btn{min-height:44px;min-width:44px;}'
+        '/* WP-01 §2.7: UNSCOPED min-target floor (was body.gam-ux-polish-on) */',
+        /* 44px PRIMARY action floor — primary chips/buttons keep the larger
+           target regardless of polish flag. */
+        '.gam-bar-icon{min-width:44px;min-height:44px;padding:11px;background:transparent;border-radius:4px;box-sizing:content-box;}',
+        '.gam-bar-icon:hover{background:var(--gam-tok-accent-soft,rgba(255,153,51,0.10));}',
+        '.gam-action-btn{min-height:44px;min-width:44px;padding:10px 12px;}',
+        '.gam-modal-close{min-width:44px;min-height:44px;padding:6px;font-size:20px;}',
+        '.gam-btn-accent,.gam-btn-danger{min-width:44px;min-height:44px;}',
+        /* 32px GENERAL floor for the remaining interactive base classes. */
+        '.gam-row-delete{min-width:32px;min-height:32px;padding:6px;}',
+        '.gam-chip{min-height:32px;padding:6px 10px;display:inline-flex;align-items:center;}',
+        '.gam-park-badge{min-width:32px;min-height:32px;padding:6px;display:inline-flex;align-items:center;justify-content:center;}',
+        '.gam-shadow-badge{min-width:32px;min-height:32px;padding:6px;display:inline-flex;align-items:center;justify-content:center;}',
+        '.gam-ctx-item{min-height:32px;}',
+        '.gam-btn{min-height:32px;min-width:32px;}'
       ].join('\n');
       if (document.head) document.head.appendChild(style);
       else document.addEventListener('DOMContentLoaded', function(){ document.head.appendChild(style); }, { once: true });
@@ -24214,12 +24222,12 @@ Analyze this comment against the community rules. Then write a brief, profession
 /* v6.0.1: snack sits 100px from the right edge (was right:14px). Status bar
    now centered, so notifications have clean real-estate on the right. */
 /* v9.4.0: snack padding 7/14→6/12, single shadow layer (no inset stack). */
-.gam-snack{position:fixed;bottom:14px;right:100px;z-index:var(--z-toast,9999999);padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;opacity:0;transform:translateY(6px) scale(.97);transition:opacity .14s,transform .18s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px}
+.gam-snack{position:fixed;bottom:14px;right:100px;z-index:var(--z-toast,9999999);padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:var(--gam-tok-on-accent-light,#ffffff);opacity:0;transform:translateY(6px) scale(.97);transition:opacity .14s,transform .18s;pointer-events:none;box-shadow:0 8px 24px var(--gam-tok-scrim,rgba(0,0,0,.5));letter-spacing:.15px;max-width:340px}
 .gam-snack-show{opacity:1;transform:translateY(0)}
-.gam-snack-success{background:${C.GREEN};color:#0f1114}
-.gam-snack-error{background:${C.RED};color:#fff}
-.gam-snack-info{background:${C.ACCENT};color:#fff}
-.gam-snack-warn{background:${C.WARN};color:#0f1114}
+.gam-snack-success{background:${C.GREEN};color:var(--gam-tok-on-accent-dark,#0a0a0b)}
+.gam-snack-error{background:${C.RED};color:var(--gam-tok-on-accent-light,#ffffff)}
+.gam-snack-info{background:${C.ACCENT};color:var(--gam-tok-on-accent-dark,#0a0a0b)}
+.gam-snack-warn{background:${C.WARN};color:var(--gam-tok-on-accent-dark,#0a0a0b)}
 
 .mail.standard_page{transition:background .15s}
 .gam-mail-hover{background:rgba(74,158,255,.06)!important;box-shadow:inset 3px 0 0 ${C.ACCENT}}
@@ -24280,8 +24288,8 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-btn:hover{opacity:.9}
 .gam-btn:active{transform:scale(.98)}
 .gam-btn:disabled{opacity:.5;cursor:not-allowed}
-.gam-btn-danger{background:${C.RED};color:#fff}
-.gam-btn-accent{background:${C.ACCENT};color:#fff}
+.gam-btn-danger{background:${C.RED};color:var(--gam-tok-on-accent-light,#ffffff)}
+.gam-btn-accent{background:${C.ACCENT};color:var(--gam-tok-on-accent-light,#ffffff)}
 .gam-btn-cancel{background:${C.BG3};color:${C.TEXT2};border:1px solid ${C.BORDER}}
 .gam-btn-cancel:hover{background:${C.BORDER};color:${C.TEXT};opacity:1}
 .gam-btn-small{padding:4px 10px;font-size:11px}
@@ -24304,8 +24312,8 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-mc-tabs{display:flex;gap:4px;padding:0 0 8px 0;border-bottom:1px solid ${C.BORDER};margin-bottom:10px;flex-wrap:wrap}
 .gam-mc-tab{background:transparent;border:1px solid ${C.BORDER};border-radius:4px;padding:5px 12px;color:${C.TEXT2};font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px}
 .gam-mc-tab:hover{border-color:${C.BORDER2};color:${C.TEXT}}
-.gam-mc-tab-active{background:${C.ACCENT};border-color:${C.ACCENT};color:#fff}
-.gam-mc-tab-active:hover{opacity:.9;color:#fff}
+.gam-mc-tab-active{background:${C.ACCENT};border-color:${C.ACCENT};color:var(--gam-tok-on-accent-light,#ffffff)}
+.gam-mc-tab-active:hover{opacity:.9;color:var(--gam-tok-on-accent-light,#ffffff)}
 .gam-mc-panels{}
 .gam-mc-panel{}
 
@@ -24347,8 +24355,8 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-mc-durs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
 .gam-mc-dur{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:${C.TEXT2};cursor:pointer;transition:all .15s}
 .gam-mc-dur:hover{border-color:${C.BORDER2};color:${C.TEXT}}
-.gam-mc-dur-active{background:${C.RED};border-color:${C.RED};color:#fff}
-.gam-mc-dur-active:hover{opacity:.9;color:#fff}
+.gam-mc-dur-active{background:${C.RED};border-color:${C.RED};color:var(--gam-tok-on-accent-light,#ffffff)}
+.gam-mc-dur-active:hover{opacity:.9;color:var(--gam-tok-on-accent-light,#ffffff)}
 
 .gam-mc-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 .gam-mc-actions .gam-btn{min-width:160px}
@@ -24367,7 +24375,7 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-mc-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
 .gam-mc-quick-group{margin-bottom:12px}
 .gam-mc-quick-group:last-of-type{margin-bottom:0}
-.gam-mc-quick-header{font:600 10px ui-monospace,"JetBrains Mono",monospace;color:#9b9892;text-transform:uppercase;letter-spacing:0.08em;padding:6px 4px 4px;border-bottom:1px solid #3d3a35;margin-bottom:8px}
+.gam-mc-quick-header{font:600 10px ui-monospace,"JetBrains Mono",monospace;color:var(--gam-tok-ink-muted,#b0b5bc);text-transform:uppercase;letter-spacing:0.08em;padding:6px 4px 4px;border-bottom:1px solid var(--gam-tok-border,#2a2f38);margin-bottom:8px}
 /* v9.4.0: quick-action tile padding 14→12, fits 4-up grid better. */
 .gam-mc-quick{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:5px;padding:12px;text-align:left;cursor:pointer;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:${C.TEXT};display:flex;flex-direction:column;gap:4px;transition:all .15s}
 .gam-mc-quick:hover{border-color:${C.BORDER2};background:${C.BG3}}
@@ -26730,20 +26738,20 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
 }
 
-/* §2.7 — UNSCOPED minimum target size. Moved OFF body.gam-ux-polish-on so new
-   interactive classes cannot silently opt out of the 32px floor (44px for the
-   primary action chips). box-sizing normalized so per-class padding stays on
-   grid. This duplicates the polish-on touch rule at the base level; identical
-   min values, so no visual change for already-polished surfaces. */
-.gam-btn, .gam-mc-send-btn, .gam-strip-btn, .gam-bar-btn, .gam-modal-close,
-.gam-empty-cta, .gam-mm-bar-btn, .gam-snack-action, .gam-tip-ctrl-btn,
-.gam-sus-dr-btn, .gam-drawer-close, .gam-t-flush-btn, .gam-park-btn,
-.gam-mc-tab, .gam-modal-tab, .gam-settings-promote-btn, .gam-action-btn,
-.gam-row-delete, .gam-chip, .gam-ctx-item, .gam-toast-btn {
+/* §2.7 — UNSCOPED minimum target size. The authoritative min-target floor
+   now lives in injectTouchTargetCSS (search "WP-01 §2.7: UNSCOPED") — moved
+   OFF body.gam-ux-polish-on there so new interactive classes cannot silently
+   opt out (32px floor, 44px for primary action chips). This block adds ONLY
+   the supplementary floor for the chrome/console base classes that the touch
+   block does not already cover, plus the 24px ::before helper below. No
+   parallel rule for classes the touch block owns, so the two cannot fight. */
+.gam-mc-send-btn, .gam-strip-btn, .gam-bar-btn, .gam-empty-cta,
+.gam-mm-bar-btn, .gam-snack-action, .gam-tip-ctrl-btn, .gam-sus-dr-btn,
+.gam-drawer-close, .gam-t-flush-btn, .gam-park-btn, .gam-mc-tab,
+.gam-modal-tab, .gam-settings-promote-btn, .gam-toast-btn {
   min-height: 32px; box-sizing: border-box;
 }
-.gam-btn-accent, .gam-btn-danger, .gam-bar-icon, .gam-bar-icon-brand,
-.gam-park-badge, .gam-shadow-badge {
+.gam-bar-icon-brand {
   min-width: 32px; min-height: 32px;
 }
 /* 24px absolute-floor hit-area helper for deliberately-small visuals: a
