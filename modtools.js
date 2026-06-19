@@ -9453,7 +9453,7 @@
           <div id="gam-mc-modnote-mount"></div>
           <!-- v10.17.0: AI Explain button -->
           <div id="gam-mc-ai-explain-wrap" style="margin-top:8px;position:relative">
-            <button id="gam-mc-ai-explain-btn" class="gam-btn" title="Ask AI why this user is suspicious (Llama, 80% cheaper than Grok)" style="background:'+GAM_TOK.accentSoft+';border:1px solid '+GAM_TOK.accentLine+';color:'+GAM_TOK.accent+';width:100%">✨ AI Explain</button>
+            <button id="gam-mc-ai-explain-btn" class="gam-btn" title="Ask AI why this user is suspicious (Llama, 80% cheaper than Grok)" style="background:${GAM_TOK.accentSoft};border:1px solid ${GAM_TOK.accentLine};color:${GAM_TOK.accent};width:100%">✨ AI Explain</button>
           </div>
           <div class="gam-mc-intel-tip">\u{1F4A1} Hovering any username anywhere on GAW now shows this same intel instantly.</div>
         </div>
@@ -9500,7 +9500,10 @@
           }
           const d = (res.data && res.data.data) || res.data || {};
           const conf = typeof d.confidence === 'number' ? d.confidence : null;
-          const confColor = conf === null ? GAM_TOK.inkMuted : conf >= 80 ? GAM_TOK.success : conf >= 50 ? GAM_TOK.warn : GAM_TOK.danger;
+          // WP-06: confidence maps to a TOKEN CLASS (success/warn/danger/unknown),
+          // not an inline hex/GAM_TOK value. JS only swaps the class; the colors
+          // live in the .gam-mc-ai-conf--* stylesheet rules (var()-safe there).
+          const confClass = conf === null ? 'gam-mc-ai-conf--unknown' : conf >= 80 ? 'gam-mc-ai-conf--ok' : conf >= 50 ? 'gam-mc-ai-conf--warn' : 'gam-mc-ai-conf--danger';
           // v10.16.47 A8-P0-2: always render the chip, even when confidence is
           // null. Pre-fix the empty label hid the chip entirely — operator
           // got AI text with zero reliability signal. Now: 'CONF UNKNOWN'
@@ -9526,7 +9529,8 @@
           // 'CONF UNKNOWN' as fallback so operator never gets AI text with
           // zero reliability signal.
           const chip = document.createElement('span');
-          chip.style.cssText = 'background:'+GAM_TOK.surfaceSunken+';border:1px solid ' + confColor + ';color:' + confColor + ';border-radius:6px;padding:1px 6px;font-size:10px;font-weight:700;letter-spacing:0.06em';
+          chip.className = 'gam-mc-ai-conf ' + confClass;
+          chip.style.cssText = 'background:'+GAM_TOK.surfaceSunken+';border-radius:6px;padding:1px 6px;font-size:10px;font-weight:700;letter-spacing:0.06em';
           chip.textContent = 'Confidence: ' + confLabel;
           chipWrap.appendChild(chip);
           // v10.16.48 A8-P0-1: thumbs-down feedback button. Fire-and-forget
@@ -9583,6 +9587,21 @@
           _aeWrap.style.position = 'relative';
           _aeWrap.appendChild(pop);
           _aePopover = pop;
+          // WP-06: viewport-edge clamp. The popover is left:0 / width:380px
+          // anchored to _aeWrap; if that overflows the right viewport edge,
+          // shift it left (negative offset relative to the anchor) so it stays
+          // fully on-screen. 8px margin off both edges.
+          try {
+            const _margin = 8;
+            const _rect = pop.getBoundingClientRect();
+            const _vw = window.innerWidth || document.documentElement.clientWidth;
+            const _overflowR = _rect.right - (_vw - _margin);
+            if (_overflowR > 0) {
+              // clamp so the left edge never crosses the left viewport margin
+              const _shift = Math.min(_overflowR, _rect.left - _margin);
+              pop.style.left = (-_shift) + 'px';
+            }
+          } catch (_clampErr) { /* positioning is best-effort */ }
           setTimeout(function() { document.addEventListener('click', _aeOutsideClick, true); }, 0);
         });
       })();
@@ -24527,17 +24546,19 @@ Analyze this comment against the community rules. Then write a brief, profession
 .gam-mc-panels{}
 .gam-mc-panel{}
 
-/* v9.4.0: section margin 16→12, header margin 8→6 — same hierarchy, less air. */
-.gam-mc-section{margin-bottom:12px}
+/* v9.4.0: section margin 16→12, header margin 8→6 — same hierarchy, less air.
+   WP-06: section cards = surface-raised, 16px padding, 1px border, NO shadow. */
+.gam-mc-section{margin-bottom:12px;background:var(--gam-tok-surface-raised,#0f1114);border:1px solid var(--gam-tok-border,#2a2f38);border-radius:6px;padding:16px}
 .gam-mc-h{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--gam-tok-accent,${C.ACCENT});margin-bottom:6px}
 .gam-mc-empty{padding:12px;background:var(--gam-tok-surface-panel,#181b20);border:1px dashed var(--gam-tok-border,#2a2f38);border-radius:4px;color:var(--gam-tok-ink-faint,#7a7672);font-size:12px;text-align:center}
-.gam-mc-loading{padding:12px;background:var(--gam-tok-surface-panel,#181b20);border:1px solid var(--gam-tok-border,#2a2f38);border-radius:4px;color:var(--gam-tok-ink-muted,#b0b5bc);font-size:12px;font-style:italic}
-/* v10.16.39 PRM gate: spinner animation was running for vestibular-disorder users */
-.gam-mc-loading::before{content:'';display:inline-block;width:10px;height:10px;border:2px solid var(--gam-tok-accent,#ff9933);border-top-color:transparent;border-radius:50%;margin-right:8px;vertical-align:middle}
+/* WP-06: loading state = the shared skeleton shimmer (WP-09), not the bespoke
+   spinner. Same shimmer treatment as .gam-skeleton: a surface-overlay block
+   with a left-to-right gradient sweep, PRM-gated. The text content stays
+   readable (ink-muted) layered over the shimmering block. */
+.gam-mc-loading{padding:12px;border:1px solid var(--gam-tok-border,#2a2f38);border-radius:4px;color:var(--gam-tok-ink-muted,#b0b5bc);font-size:12px;font-style:italic;background:linear-gradient(90deg,var(--gam-tok-surface-overlay,#252a31),var(--gam-tok-surface-panel,#181b20),var(--gam-tok-surface-overlay,#252a31));background-size:200% 100%}
 @media (prefers-reduced-motion: no-preference){
-  .gam-mc-loading::before{animation:gam-spin 1s linear infinite}
+  .gam-mc-loading{animation:gam-shimmer 1.2s infinite}
 }
-@keyframes gam-spin{to{transform:rotate(360deg)}}
 
 /* v9.4.0: stat tile padding 10→8, value 20→18 — same readability with
    ~20% less vertical chrome. */
@@ -25377,6 +25398,14 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-mc-chip-bad{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));color:var(--gam-tok-danger,${C.RED});border-color:var(--gam-tok-danger-soft,rgba(240,64,64,.12))}
 .gam-mc-chip-warn{background:var(--gam-tok-warn-soft,rgba(240,160,64,.12));color:var(--gam-tok-warn,${C.WARN});border-color:var(--gam-tok-warn-soft,rgba(240,160,64,.12))}
 .gam-mc-chip-mini{background:var(--gam-tok-warn-soft,rgba(240,160,64,.12));color:var(--gam-tok-warn,${C.WARN});border-color:var(--gam-tok-warn-soft,rgba(240,160,64,.12))}
+/* WP-06: AI-Explain confidence chip — colour is a TOKEN CLASS, not an inline
+   hex. JS swaps gam-mc-ai-conf--{ok,warn,danger,unknown}; border+text map to
+   success/warn/danger/ink-muted so the runtime never writes a colour value. */
+.gam-mc-ai-conf{border:1px solid var(--gam-tok-ink-muted,#b0b5bc);color:var(--gam-tok-ink-muted,#b0b5bc)}
+.gam-mc-ai-conf--ok{border-color:var(--gam-tok-success,#3dd68c);color:var(--gam-tok-success,#3dd68c)}
+.gam-mc-ai-conf--warn{border-color:var(--gam-tok-warn,#f0a040);color:var(--gam-tok-warn,#f0a040)}
+.gam-mc-ai-conf--danger{border-color:var(--gam-tok-danger,#f04040);color:var(--gam-tok-danger,#f04040)}
+.gam-mc-ai-conf--unknown{border-color:var(--gam-tok-ink-muted,#b0b5bc);color:var(--gam-tok-ink-muted,#b0b5bc)}
 .gam-mc-score-dense{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:${C.TEXT}}
 .gam-mc-score-dim{color:${C.TEXT3};font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:10px}
 .gam-mc-score-hits{color:var(--gam-tok-warn,${C.WARN});font-size:10px}
@@ -27077,7 +27106,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   .gam-intel-drawer, #gam-hot-now-panel, #gam-mc-panel,
   .gam-modal, #gam-backdrop, #gam-intel-backdrop { transition: none !important; }
   .gam-chip--risk-critical, .gam-thread-watch-btn--flagged,
-  .gam-repeat-halo--pulse, .gam-mc-loading::before,
+  .gam-repeat-halo--pulse, .gam-mc-loading,
   .gam-skeleton, .gam-snack { animation: none !important; }
 }
 
