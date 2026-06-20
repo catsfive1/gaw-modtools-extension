@@ -1,0 +1,27 @@
+&lt;!-- Auth-fail banner example (credential tier) --&gt;
+&lt;div id='gam-auth-fail-banner' data-severity='credential' style='position:fixed;top:8px;right:8px;z-index:2147483640;max-width:380px;padding:10px 12px;background:rgba(240, 160, 64, .95);color:#fff;font:12px/1.45 -apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.5);border:1px solid rgba(255, 220, 150, .35)'&gt;
+  &lt;div style='font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:6px;color:rgba(240, 160, 64, .95);font-size:11px;text-transform:uppercase;letter-spacing:0.06em'&gt;🔒 GAW ModTools: token needs update&lt;/div&gt;
+  &lt;div style='margin-bottom:8px;opacity:.95'&gt;
+    &lt;ol style='margin:0;padding-left:18px'&gt;
+      &lt;li style='margin-bottom:3px'&gt;Step 1 of 3: Your token was rotated. Click "Open ModTools popup" (button below).&lt;/li&gt;
+      &lt;li style='margin-bottom:3px'&gt;Step 2 of 3: Open the popup, expand the Tokens card, and click "Re-enter credentials" (bottom of card) or paste the new token directly into the Team Mod Token field.&lt;/li&gt;
+      &lt;li style='margin-bottom:3px'&gt;Step 3 of 3: Ask your lead for your current rotation token or a fresh invite link. Paste it in the popup. Click Save.&lt;/li&gt;
+      &lt;li style='margin-bottom:3px'&gt;Still stuck? You may be using a lead token in the mod slot (or vice versa). Ask your lead which token type you need.&lt;/li&gt;
+    &lt;/ol&gt;
+  &lt;/div&gt;
+  &lt;div style='display:flex;gap:6px;justify-content:flex-end'&gt;
+    &lt;button style='padding:4px 10px;border:1px solid #fff;background:#fff;color:#a02020;border-radius:4px;cursor:pointer;font:inherit;font-weight:700'&gt;Open ModTools popup&lt;/button&gt;
+    &lt;button style='padding:4px 10px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.15);color:#fff;border-radius:4px;cursor:pointer;font:inherit'&gt;Force re-hydrate&lt;/button&gt;
+    &lt;button style='padding:4px 10px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;border-radius:4px;cursor:pointer;font:inherit;opacity:.85'&gt;Dismiss&lt;/button&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+
+&lt;!-- Ext-orphaned banner --&gt;
+&lt;div id='gam-ext-orphaned-banner' style='position:fixed;top:0;left:0;right:0;z-index:99999999;background:#2a1d10;border-bottom:1px solid var(--bb-amber);color:#ffd84d;font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:8px 14px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 2px 8px rgba(0,0,0,0.6)'&gt;
+  &lt;span style='font-size:14px'&gt;↻&lt;/span&gt;
+  &lt;span&gt;&lt;b&gt;ModTools updated.&lt;/b&gt; The extension was reloaded — refresh this page to reconnect.&lt;/span&gt;
+  &lt;span style='flex:1'&gt;&lt;/span&gt;
+  &lt;button id='gam-ext-orphaned-copy' style='background:transparent;border:1px solid #7a7672;color:#ffd84d;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase' title='Copy debug details to clipboard'&gt;📋 Copy&lt;/button&gt;
+  &lt;button id='gam-ext-orphaned-reload' style='background:var(--bb-amber);border:none;color:#0a0a0b;padding:4px 12px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase'&gt;Reload page&lt;/button&gt;
+  &lt;button id='gam-ext-orphaned-dismiss' style='background:transparent;border:1px solid #7a7672;color:#9b9892;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase'&gt;Dismiss&lt;/button&gt;
+&lt;/div&gt;

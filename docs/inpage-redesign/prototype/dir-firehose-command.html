@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GAW ModTools — Firehose Hunt-Command</title>
+<style>
+  /* ===== Unified design tokens (DESIGN-TOKENS.md) ===== */
+  :root{
+    --surface:#0a0a0b; --surface-sunken:#050507; --surface-raised:#0f1114;
+    --surface-panel:#181b20; --surface-overlay:#252a31;
+    --border:#2a2f38; --border-strong:#3a3f48;
+    --ink:#e8e6e1; --ink-muted:#b0b5bc; --ink-faint:#7a7672;
+    --on-accent:#ffffff;
+    --accent:#ff9933; --accent-soft:rgba(255,153,51,0.10); --accent-line:rgba(255,153,51,0.28);
+    --focus-ring:#ff9933;
+    --info:#7cb8ff; --info-soft:rgba(74,158,255,0.10);
+    --danger:#f04040; --danger-soft:rgba(240,64,64,0.12);
+    --warn:#f0a040; --warn-soft:rgba(240,160,64,0.12);
+    --success:#3dd68c; --success-soft:rgba(61,214,140,0.12);
+    --special:#a78bfa; --special-soft:rgba(167,139,250,0.12);
+    --scrim:rgba(0,0,0,0.60);
+    /* audited badge pairs */
+    --ok-bg:#276749; --ok-text:#c6f6d5;
+    --danger-bg:#9b2c2c; --danger-text:#fed7d7;
+    --warn-bg:#744210; --warn-text:#ffe5b0;
+    --mono:'SF Mono','Roboto Mono','JetBrains Mono',Consolas,'Courier New',monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--surface);color:var(--ink);font-family:var(--sans);
+    font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased}
+  body{padding:18px 22px 60px;max-width:1320px;margin:0 auto}
+  .tnum{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+  .mono{font-family:var(--mono)}
+
+  /* ===== top chrome ===== */
+  .topbar{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;letter-spacing:.2px}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 0 3px var(--accent-soft)}
+  .brand small{font-weight:500;color:var(--ink-faint);font-size:11px;letter-spacing:.4px;text-transform:uppercase}
+  .topbar .spacer{flex:1}
+  .livepill{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-muted);
+    background:var(--surface-panel);border:1px solid var(--border);border-radius:999px;padding:5px 11px 5px 9px}
+  .livepill .ping{width:7px;height:7px;border-radius:50%;background:var(--success);position:relative}
+  .livepill .ping::after{content:'';position:absolute;inset:-4px;border-radius:50%;
+    background:var(--success);opacity:.35;animation:ping 1.6s ease-out infinite}
+  @keyframes ping{0%{transform:scale(.6);opacity:.5}100%{transform:scale(2.2);opacity:0}}
+  .me{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-muted)}
+  .me b{color:var(--accent);font-weight:600}
+
+  /* ===== layout ===== */
+  .grid{display:grid;grid-template-columns:1fr 332px;gap:16px;align-items:start}
+  @media(max-width:1060px){.grid{grid-template-columns:1fr}}
+
+  .panel{background:var(--surface-raised);border:1px solid var(--border);border-radius:12px}
+  .panel-h{display:flex;align-items:center;gap:9px;padding:11px 14px;border-bottom:1px solid var(--border)}
+  .panel-h .ttl{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--ink-muted)}
+  .panel-h .ttl .hero{color:var(--accent)}
+  .panel-h .cnt{margin-left:auto;font-size:11px;color:var(--ink-faint)}
+  .panel-h .cnt b{color:var(--ink);font-weight:600}
+
+  /* ===== HERO: command bar ===== */
+  .hero-wrap{position:relative;background:
+    radial-gradient(120% 140% at 0% 0%, rgba(255,153,51,0.07), transparent 55%),
+    var(--surface-raised);
+    border:1px solid var(--accent-line);border-radius:12px;overflow:hidden}
+  .hero-wrap::before{content:'';position:absolute;inset:0;border-radius:12px;pointer-events:none;
+    box-shadow:inset 0 0 0 1px rgba(255,153,51,0.05)}
+  .cmdbar{display:flex;align-items:center;gap:10px;padding:13px 15px 11px}
+  .cmd-glyph{font-size:15px;color:var(--accent);font-weight:700}
+  .cmd-input{flex:1;display:flex;align-items:center;gap:2px;flex-wrap:wrap;
+    background:var(--surface-sunken);border:1px solid var(--border-strong);border-radius:9px;
+    padding:8px 11px;min-height:42px}
+  .cmd-input:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  /* parsed query tokens */
+  .qtok{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:12px;
+    padding:3px 8px;border-radius:6px;margin:1px 3px 1px 0;white-space:nowrap}
+  .qtok .k{color:var(--ink-muted)}
+  .qtok .op{color:var(--accent);font-weight:700}
+  .qtok .v{color:var(--ink);font-weight:600}
+  .qtok.t-age{background:var(--special-soft);box-shadow:inset 0 0 0 1px rgba(167,139,250,.3)}
+  .qtok.t-age .v{color:var(--special)}
+  .qtok.t-vel{background:var(--warn-soft);box-shadow:inset 0 0 0 1px rgba(240,160,64,.3)}
+  .qtok.t-vel .v{color:var(--warn)}
+  .qtok.t-hist{background:var(--danger-soft);box-shadow:inset 0 0 0 1px rgba(240,64,64,.3)}
+  .qtok.t-hist .v{color:var(--danger)}
+  .qtok .x{color:var(--ink-faint);cursor:pointer;font-weight:700;margin-left:1px}
+  .qtok .x:hover{color:var(--ink)}
+  .cmd-caret{width:1px;height:18px;background:var(--accent);animation:blink 1.1s step-end infinite;margin-left:3px}
+  .cmd-ghost{color:var(--ink-faint);font-family:var(--mono);font-size:12px;padding-left:4px}
+  @keyframes blink{50%{opacity:0}}
+  .cmd-run{display:flex;align-items:center;gap:7px;background:var(--accent);color:#1a1206;
+    font-weight:700;font-size:12px;letter-spacing:.3px;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;
+    text-transform:uppercase;box-shadow:0 1px 0 rgba(0,0,0,.3)}
+  .cmd-run:hover{filter:brightness(1.08)}
+  .cmd-run kbd{font-family:var(--mono);font-size:10px;background:rgba(0,0,0,.22);border-radius:4px;padding:1px 4px}
+
+  /* signal-chip filter rail */
+  .chiprail{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:2px 15px 13px}
+  .chiprail .lbl{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-faint);margin-right:3px}
+  .schip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;
+    border-radius:7px;padding:5px 10px;cursor:pointer;border:1px solid var(--border);
+    background:var(--surface-panel);color:var(--ink-muted);user-select:none;transition:.12s}
+  .schip:hover{border-color:var(--border-strong);color:var(--ink)}
+  .schip .ic{width:14px;height:14px;display:grid;place-items:center;font-size:11px}
+  .schip.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
+  .schip.on.s-vel{background:var(--warn-soft);border-color:rgba(240,160,64,.4);color:var(--warn)}
+  .schip.on.s-new{background:var(--special-soft);border-color:rgba(167,139,250,.4);color:var(--special)}
+  .schip.on.s-sock{background:var(--danger-soft);border-color:rgba(240,64,64,.4);color:var(--danger)}
+  .schip.on.s-slop{background:rgba(240,160,64,.10);border-color:rgba(240,160,64,.4);color:var(--warn)}
+  .schip.on.s-team{background:var(--info-soft);border-color:rgba(124,184,255,.4);color:var(--info)}
+  .schip .n{font-family:var(--mono);font-size:10px;opacity:.85}
+  .schip.add{border-style:dashed;color:var(--ink-faint)}
+
+  /* saved hunts row */
+  .savedhunts{display:flex;align-items:center;gap:8px;padding:0 15px 14px;flex-wrap:wrap}
+  .savedhunts .lbl{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-faint)}
+  .hunt{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-muted);
+    background:var(--surface-sunken);border:1px solid var(--border);border-radius:999px;padding:4px 11px;cursor:pointer}
+  .hunt:hover{border-color:var(--accent-line);color:var(--ink)}
+  .hunt .star{color:var(--accent);font-size:10px}
+  .hunt .hits{font-family:var(--mono);font-size:10px;color:var(--danger);font-weight:700}
+  .hunt.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+
+  /* result meta strip */
+  .resmeta{display:flex;align-items:center;gap:14px;padding:9px 15px;border-top:1px solid var(--border);
+    border-bottom:1px solid var(--border);background:var(--surface-panel);font-size:11px;color:var(--ink-muted)}
+  .resmeta b{color:var(--ink)}
+  .resmeta .sortby{margin-left:auto;display:flex;align-items:center;gap:6px}
+  .resmeta select{background:var(--surface-overlay);color:var(--ink);border:1px solid var(--border);
+    border-radius:6px;font-size:11px;padding:3px 7px;font-family:var(--sans)}
+  .resmeta .danger-c{color:var(--danger);font-weight:700}
+
+  /* ===== ranked result rows ===== */
+  .results{padding:6px}
+  .row{display:grid;grid-template-columns:30px 232px 1fr auto;gap:12px;align-items:center;
+    padding:11px 12px;border-radius:10px;border:1px solid transparent;cursor:pointer;transition:.1s}
+  .row:hover{background:var(--surface-panel);border-color:var(--border)}
+  .row + .row{margin-top:2px}
+  /* rank + risk gutter — severity by POSITION (left rail) + SHAPE */
+  .rank{display:flex;flex-direction:column;align-items:center;gap:3px}
+  .rank .pos{font-family:var(--mono);font-size:11px;color:var(--ink-faint);font-weight:700}
+  .riskbar{width:4px;height:30px;border-radius:3px;background:var(--border)}
+  .riskbar.r-crit{background:var(--danger);box-shadow:0 0 7px rgba(240,64,64,.5)}
+  .riskbar.r-high{background:var(--warn)}
+  .riskbar.r-watch{background:var(--special)}
+  .riskbar.r-ok{background:var(--success)}
+
+  /* identity cell */
+  .idcell{min-width:0}
+  .idline{display:flex;align-items:center;gap:7px}
+  .uname{font-weight:700;font-size:13.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vflag{color:var(--success);font-size:11px}
+  /* the in-feed scan badge — the SAME glanceable unit shown in surface (A) */
+  .scanbadge{display:inline-flex;align-items:stretch;border-radius:6px;overflow:hidden;
+    border:1px solid var(--border);font-family:var(--mono);font-size:10px;line-height:1;margin-top:5px;
+    box-shadow:0 1px 2px rgba(0,0,0,.4)}
+  .scanbadge>span{display:flex;align-items:center;gap:3px;padding:4px 6px;font-weight:700}
+  .sb-age{background:var(--special-soft);color:var(--special)}
+  .sb-vel{background:var(--warn-soft);color:var(--warn)}
+  .sb-hist{background:var(--danger-soft);color:var(--danger)}
+  .sb-verd{background:var(--surface-overlay);color:var(--ink-muted);font-weight:800;letter-spacing:.4px}
+  .sb-verd.v-remove{background:var(--danger-bg);color:var(--danger-text)}
+  .sb-verd.v-watch{background:var(--warn-bg);color:var(--warn-text)}
+  .sb-verd.v-approve{background:var(--ok-bg);color:var(--ok-text)}
+  .scanbadge>span+span{border-left:1px solid var(--surface)}
+
+  /* shared-mod-intel cell — the KILLER feature, inline on every row */
+  .intelcell{min-width:0;display:flex;flex-direction:column;gap:5px}
+  .intel-strip{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .ichip{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;
+    border-radius:5px;padding:3px 7px;white-space:nowrap}
+  .ichip .ic{font-size:10px}
+  .ichip.flagged{background:var(--danger-soft);color:var(--danger);box-shadow:inset 0 0 0 1px rgba(240,64,64,.25)}
+  .ichip.notes{background:var(--info-soft);color:var(--info);box-shadow:inset 0 0 0 1px rgba(124,184,255,.25)}
+  .ichip.socks{background:var(--special-soft);color:var(--special);box-shadow:inset 0 0 0 1px rgba(167,139,250,.25)}
+  .ichip.action{background:var(--surface-overlay);color:var(--ink-muted)}
+  .ichip.action b{color:var(--ink)}
+  .intel-last{font-size:11px;color:var(--ink-muted);display:flex;align-items:center;gap:6px}
+  .intel-last .mod{color:var(--info);font-weight:600}
+  .intel-last .verb{color:var(--danger);font-weight:600}
+  .intel-last .ago{color:var(--ink-faint);font-family:var(--mono);font-size:10px}
+  .intel-quote{font-size:11px;color:var(--ink-muted);font-style:italic;
+    border-left:2px solid var(--info);padding-left:8px;opacity:.9;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .intel-fresh{font-size:10px;color:var(--ink-faint)}
+  .intel-fresh.none{color:var(--ink-faint);opacity:.6;font-style:italic}
+
+  /* one-click actions */
+  .rowact{display:flex;align-items:center;gap:6px}
+  .abtn{font-size:11px;font-weight:700;border-radius:7px;padding:7px 11px;cursor:pointer;
+    border:1px solid var(--border);background:var(--surface-panel);color:var(--ink-muted);letter-spacing:.2px}
+  .abtn:hover{border-color:var(--border-strong);color:var(--ink)}
+  .abtn.ban{background:var(--danger-bg);border-color:transparent;color:var(--danger-text)}
+  .abtn.ban:hover{filter:brightness(1.12)}
+  .abtn.watch{background:var(--warn-soft);border-color:rgba(240,160,64,.3);color:var(--warn)}
+  .abtn.ok{background:var(--success-soft);border-color:rgba(61,214,140,.3);color:var(--success)}
+  .abtn.more{padding:7px 9px}
+
+  /* cluster group header (cross-mod cluster query result) */
+  .clusterhead{display:flex;align-items:center;gap:9px;padding:9px 14px;margin:8px 4px 2px;
+    background:var(--special-soft);border:1px solid rgba(167,139,250,.28);border-radius:9px}
+  .clusterhead .badge{font-family:var(--mono);font-size:10px;font-weight:800;color:var(--special);
+    background:var(--surface-sunken);border:1px solid rgba(167,139,250,.3);border-radius:5px;padding:3px 7px;letter-spacing:.5px}
+  .clusterhead .txt{font-size:12px;color:var(--ink);font-weight:600}
+  .clusterhead .txt b{color:var(--special)}
+  .clusterhead .meta{margin-left:auto;font-size:11px;color:var(--ink-muted);font-family:var(--mono)}
+  .row.in-cluster{margin-left:14px;border-left:2px solid rgba(167,139,250,.3);border-radius:0 10px 10px 0}
+
+  /* ===== RIGHT COLUMN ===== */
+  /* surface (B): shared-mod-intel verdict header (the user-card hero detail) */
+  .vhdr{padding:14px}
+  .vhdr-top{display:flex;align-items:flex-start;gap:11px}
+  .vhdr .av{width:42px;height:42px;border-radius:10px;flex-shrink:0;
+    background:linear-gradient(135deg,var(--surface-overlay),var(--surface-panel));
+    border:1px solid var(--border-strong);display:grid;place-items:center;font-weight:800;font-size:17px;color:var(--special)}
+  .vhdr .who{min-width:0;flex:1}
+  .vhdr .who .nm{font-size:15px;font-weight:800;display:flex;align-items:center;gap:6px}
+  .vhdr .who .sub{font-size:11px;color:var(--ink-muted);font-family:var(--mono);margin-top:2px}
+  .verdict-stamp{margin-left:auto;text-align:right}
+  .verdict-stamp .vd{font-size:13px;font-weight:800;letter-spacing:.5px;color:var(--danger-text);
+    background:var(--danger-bg);border-radius:7px;padding:5px 10px;display:inline-block}
+  .verdict-stamp .conf{font-size:10px;color:var(--ink-faint);font-family:var(--mono);margin-top:4px}
+
+  /* the team-knowledge block — "what the team already knows" */
+  .teamknow{margin-top:13px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:9px;overflow:hidden}
+  .teamknow .tk-h{display:flex;align-items:center;gap:7px;padding:8px 11px;
+    background:var(--info-soft);border-bottom:1px solid var(--border)}
+  .teamknow .tk-h .t{font-size:10px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--info)}
+  .teamknow .tk-h .c{margin-left:auto;font-size:10px;color:var(--ink-faint);font-family:var(--mono)}
+  .tk-item{display:flex;gap:9px;padding:9px 11px;font-size:11.5px;border-top:1px solid var(--border)}
+  .tk-item:first-of-type{border-top:none}
+  .tk-item .av2{width:22px;height:22px;border-radius:6px;flex-shrink:0;display:grid;place-items:center;
+    font-size:10px;font-weight:700;background:var(--surface-overlay);color:var(--info)}
+  .tk-item .body{min-width:0;flex:1}
+  .tk-item .body .ln1{display:flex;align-items:baseline;gap:6px}
+  .tk-item .body .mod{color:var(--info);font-weight:700;font-size:11px}
+  .tk-item .body .act{color:var(--ink-muted)}
+  .tk-item .body .act b{color:var(--danger)}
+  .tk-item .body .act .b-watch{color:var(--warn)}
+  .tk-item .body .when{margin-left:auto;font-size:10px;color:var(--ink-faint);font-family:var(--mono);white-space:nowrap}
+  .tk-item .body .note{color:var(--ink-muted);font-style:italic;margin-top:3px;line-height:1.4}
+
+  /* signal stats mini-grid */
+  .sigstats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:12px}
+  .sstat{background:var(--surface-sunken);border:1px solid var(--border);border-radius:8px;padding:9px 11px}
+  .sstat .k{font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--ink-faint)}
+  .sstat .v{font-size:17px;font-weight:800;margin-top:3px;font-family:var(--mono)}
+  .sstat .v.age{color:var(--special)} .sstat .v.vel{color:var(--warn)}
+  .sstat .v.slop{color:var(--warn)} .sstat .v.rep{color:var(--danger)}
+  .sstat .v small{font-size:10px;color:var(--ink-faint);font-weight:500}
+
+  .addnote{display:flex;gap:7px;margin-top:12px}
+  .addnote input{flex:1;background:var(--surface-sunken);border:1px solid var(--border);border-radius:8px;
+    padding:9px 11px;color:var(--ink);font-size:11.5px;font-family:var(--sans)}
+  .addnote input::placeholder{color:var(--ink-faint)}
+  .addnote button{background:var(--info-soft);border:1px solid rgba(124,184,255,.3);color:var(--info);
+    border-radius:8px;padding:0 13px;font-size:11px;font-weight:700;cursor:pointer}
+
+  /* in-feed badge demo card (surface A) */
+  .feeddemo{padding:13px}
+  .fd-post{background:var(--surface-sunken);border:1px solid var(--border);border-radius:9px;padding:11px 12px;position:relative}
+  .fd-post .fd-meta{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-muted)}
+  .fd-post .fd-meta .u{font-weight:700;color:var(--ink)}
+  .fd-post .fd-title{font-size:12.5px;color:var(--ink);margin-top:7px;line-height:1.4;opacity:.85}
+  .fd-post .scanbadge{position:absolute;top:10px;right:10px;margin-top:0}
+  .fd-cap{font-size:11px;color:var(--ink-muted);margin-top:10px;line-height:1.5}
+  .fd-cap b{color:var(--accent)}
+  .fd-feed-arrow{font-size:10px;color:var(--ink-faint);text-align:center;margin:9px 0 4px;letter-spacing:.4px}
+
+  .legend{display:flex;flex-wrap:wrap;gap:5px 12px;padding:12px 14px;font-size:10.5px;color:var(--ink-muted)}
+  .legend .li{display:flex;align-items:center;gap:5px}
+  .legend .sw{width:9px;height:9px;border-radius:3px}
+  footer{margin-top:22px;font-size:10.5px;color:var(--ink-faint);text-align:center;line-height:1.6}
+  footer code{color:var(--ink-muted);font-family:var(--mono)}
+  .new-badge{font-size:8.5px;font-weight:800;letter-spacing:.5px;color:var(--special);
+    background:var(--special-soft);border:1px solid rgba(167,139,250,.3);border-radius:4px;padding:1px 4px;vertical-align:middle}
+</style>
+</head>
+<body>
+
+  <!-- TOP CHROME -->
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span>GAW&nbsp;ModTools <small>Firehose&nbsp;Command</small></div>
+    <div class="spacer"></div>
+    <div class="livepill"><span class="ping"></span>LIVE · <b style="color:var(--ink);font-weight:700">+247</b>&nbsp;new accounts / 24h</div>
+    <div class="me">signed in as <b>mod_owl</b></div>
+  </div>
+
+  <div class="grid">
+
+    <!-- ======================= LEFT: HERO FIREHOSE ======================= -->
+    <div>
+      <!-- COMMAND BAR -->
+      <div class="hero-wrap" style="margin-bottom:14px">
+        <div class="cmdbar">
+          <span class="cmd-glyph">⌖</span>
+          <div class="cmd-input">
+            <span class="qtok t-age"><span class="k">age</span><span class="op">&lt;</span><span class="v">7d</span><span class="x">×</span></span>
+            <span class="qtok t-vel"><span class="k">velocity</span><span class="op">&gt;</span><span class="v">20/hr</span><span class="x">×</span></span>
+            <span class="qtok t-hist"><span class="k">history</span><span class="op">=</span><span class="v">none</span><span class="x">×</span></span>
+            <span class="cmd-ghost">cluster:* slop&gt;60 …</span>
+            <span class="cmd-caret"></span>
+          </div>
+          <button class="cmd-run">Hunt&nbsp;<kbd>⏎</kbd></button>
+        </div>
+
+        <!-- SIGNAL CHIP FILTERS -->
+        <div class="chiprail">
+          <span class="lbl">signals</span>
+          <span class="schip on"><span class="ic">◷</span>New&nbsp;account <span class="n">&lt;7d</span></span>
+          <span class="schip on s-vel"><span class="ic">▲</span>Bursting <span class="n">HEAVY</span></span>
+          <span class="schip s-new"><span class="ic">✦</span>No&nbsp;history</span>
+          <span class="schip s-sock"><span class="ic">⧉</span>Sock&nbsp;cluster <span class="n">HIGH</span></span>
+          <span class="schip s-slop"><span class="ic">▽</span>Slop&nbsp;score <span class="n">&gt;60</span></span>
+          <span class="schip s-team"><span class="ic">⚑</span>Team-flagged</span>
+          <span class="schip"><span class="ic">✓</span>Verified</span>
+          <span class="schip add">+ add signal</span>
+        </div>
+
+        <!-- SAVED HUNTS -->
+        <div class="savedhunts">
+          <span class="lbl">saved hunts</span>
+          <span class="hunt active"><span class="star">★</span>Raid&nbsp;throwaways <span class="hits">31</span></span>
+          <span class="hunt"><span class="star">★</span>Sock&nbsp;resurfacing <span class="hits">12</span></span>
+          <span class="hunt"><span class="star">★</span>What&nbsp;the&nbsp;team&nbsp;touched&nbsp;today <span class="hits">58</span></span>
+          <span class="hunt"><span class="star">★</span>Slop&nbsp;firehose <span class="hits">9</span></span>
+          <span class="hunt">+ save current</span>
+        </div>
+
+        <!-- RESULT META -->
+        <div class="resmeta">
+          <span><b>31</b> accounts matched</span>
+          <span>·</span>
+          <span><span class="danger-c">11</span> with team intel</span>
+          <span>·</span>
+          <span><span class="danger-c">6</span> in active sock cluster</span>
+          <div class="sortby">
+            sort
+            <select>
+              <option>Risk · highest</option>
+              <option>Velocity</option>
+              <option>Newest account</option>
+              <option>Most team flags</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- RANKED RESULT LIST -->
+        <div class="results">
+
+          <!-- R1 — critical, heavy team intel -->
+          <div class="row">
+            <div class="rank"><span class="pos">01</span><span class="riskbar r-crit"></span></div>
+            <div class="idcell">
+              <div class="idline"><span class="uname">PatriotStorm1776</span></div>
+              <div class="scanbadge">
+                <span class="sb-age">◷ 4d</span>
+                <span class="sb-vel">▲ 31/2h</span>
+                <span class="sb-hist">⊘ x3</span>
+                <span class="sb-verd v-remove">REMOVE 0.94</span>
+              </div>
+            </div>
+            <div class="intelcell">
+              <div class="intel-strip">
+                <span class="ichip flagged"><span class="ic">⚑</span>3 mods flagged</span>
+                <span class="ichip socks"><span class="ic">⧉</span>linked to 4 socks</span>
+                <span class="ichip notes"><span class="ic">✎</span>2 team notes</span>
+              </div>
+              <div class="intel-last">last action <span class="verb">banned alt</span> by <span class="mod">mod_raven</span><span class="ago">2d ago</span></div>
+              <div class="intel-quote">mod_raven: "same copypasta as the Jan raid wave — ban on sight"</div>
+            </div>
+            <div class="rowact">
+              <button class="abtn ban">BAN</button>
+              <button class="abtn more">⋯</button>
+            </div>
+          </div>
+
+          <!-- R2 -->
+          <div class="row">
+            <div class="rank"><span class="pos">02</span><span class="riskbar r-crit"></span></div>
+            <div class="idcell">
+              <div class="idline"><span class="uname">WWG1WGA_Eagle88</span></div>
+              <div class="scanbadge">
+                <span class="sb-age">◷ 2d</span>
+                <span class="sb-vel">▲ 47/1h</span>
+                <span class="sb-hist">⊘ x1</span>
+                <span class="sb-verd v-remove">REMOVE 0.89</span>
+              </div>
+            </div>
+            <div class="intelcell">
+              <div class="intel-strip">
+                <span class="ichip flagged"><span class="ic">⚑</span>2 mods flagged</span>
+                <span class="ichip socks"><span class="ic">⧉</span>IP-cluster #C-7744</span>
+              </div>
+              <div class="intel-last">last action <span class="verb">watch-listed</span> by <span class="mod">mod_owl</span> <span style="color:var(--ink-faint)">(you)</span><span class="ago">6h ago</span></div>
+              <div class="intel-quote">mod_owl: "burst posting from new VPN range, watch for raid escalation"</div>
+            </div>
+            <div class="rowact">
+              <button class="abtn ban">BAN</button>
+              <button class="abtn more">⋯</button>
+            </div>
+          </div>
+
+          <!-- CLUSTER GROUP HEADER -->
+          <div class="clusterhead">
+            <span class="badge">⧉ CLUSTER C-7744</span>
+            <span class="txt"><b>6 accounts</b> · 91% content similarity · same /16 IP block · 1 already banned</span>
+            <span class="meta">first seen 3d ago</span>
+          </div>
+
+          <!-- R3 in cluster -->
+          <div class="row in-cluster">
+            <div class="rank"><span class="pos">03</span><span class="riskbar r-high"></span></div>
+            <div class="idcell">
+              <div class="idline"><span class="uname">FreedomDigger_X</span></div>
+              <div class="scanbadge">
+                <span class="sb-age">◷ 3d</span>
+                <span class="sb-vel">▲ 22/3h</span>
+                <span class="sb-hist">⊘ x0</span>
+                <span class="sb-verd v-watch">WATCH 0.71</span>
+              </div>
+            </div>
+            <div class="intelcell">
+              <div class="intel-strip">
+                <span class="ichip socks"><span class="ic">⧉</span>cluster sibling</span>
+                <span class="ichip action">slop&nbsp;<b>78</b></span>
+              </div>
+              <div class="intel-last"><span class="intel-fresh none">no team intel yet — first mod to look</span></div>
+            </div>
+            <div class="rowact">
+              <button class="abtn watch">WATCH</button>
+              <button class="abtn ban">BAN</button>
+            </div>
+          </div>
+
+          <!-- R4 in cluster -->
+          <div class="row in-cluster">
+            <div class="rank"><span class="pos">04</span><span class="riskbar r-high"></span></div>
+            <div class="idcell">
+              <div class="idline"><span class="uname">GreatAwake_Now</span></div>
+              <div class="scanbadge">
+                <span class="sb-age">◷ 3d</span>
+                <span class="sb-vel">▲ 19/2h</span>
+                <span class="sb-hist">⊘ x0</span>
+                <span class="sb-verd v-watch">WATCH 0.68</span>
+              </div>
+            </div>
+            <div class="intelcell">
+              <div class="intel-strip">
+                <span class="ichip socks"><span class="ic">⧉</span>cluster sibling</span>
+                <span class="ichip notes"><span class="ic">✎</span>1 team note</span>
+              </div>
+              <div class="intel-last">flagged by <span class="mod">mod_hawk</span><span class="ago">19h ago</span></div>
+              <div class="intel-quote">mod_hawk: "same avatar hash as the banned C-7744 head account"</div>
+            </div>
+            <div class="rowact">
+              <button class="abtn ban">BAN</button>
+              <button class="abtn more">⋯</button>
+            </div>
+          </div>
+
+          <!-- R5 — lower risk, verified, contrast example -->
+          <div class="row">
+            <div class="rank"><span class="pos">05</span><span class="riskbar r-watch"></span></div>
+            <div class="idcell">
+              <div class="idline"><span class="uname">DarkToLight_Q</span> <span class="vflag">✓</span></div>
+              <div class="scanbadge">
+                <span class="sb-age">◷ 5d</span>
+                <span class="sb-vel">▲ 21/4h</span>
+                <span class="sb-hist">⊘ x0</span>
+                <span class="sb-verd v-watch">WATCH 0.55</span>
+              </div>
+            </div>
+            <div class="intelcell">
+              <div class="intel-strip">
+                <span class="ichip action">slop&nbsp;<b>41</b></span>
+                <span class="ichip action">cadence&nbsp;<b>BURSTING</b></span>
+              </div>
+              <div class="intel-last"><span class="intel-fresh none">no team intel yet — first mod to look</span></div>
+            </div>
+            <div class="rowact">
+              <button class="abtn watch">WATCH</button>
+              <button class="abtn more">⋯</button>
+            </div>
+          </div>
+
+          <!-- R6 — false-alarm / approve example to show verdict spread -->
+          <div class="row">
+            <div class="rank"><span class="pos">06</span><span class="riskbar r-ok"></span></div>
+            <div class="idcell">
+              <div class="idline"><span class="uname">MAGA_Granny_Sue</span> <span class="vflag">✓</span></div>
+              <div class="scanbadge">
+                <span class="sb-age">◷ 6d</span>
+                <span class="sb-vel">▲ 24/5h</span>
+                <span class="sb-hist">⊘ x0</span>
+                <span class="sb-verd v-approve">CLEAR 0.82</span>
+              </div>
+            </div>
+            <div class="intelcell">
+              <div class="intel-strip">
+                <span class="ichip notes"><span class="ic">✎</span>1 team note</span>
+                <span class="ichip action">slop&nbsp;<b>12</b></span>
+              </div>
+              <div class="intel-last">cleared by <span class="mod" style="color:var(--success)">mod_raven</span><span class="ago">1d ago</span></div>
+              <div class="intel-quote" style="border-color:var(--success)">mod_raven: "real grandma, high velocity but all substantive — leave alone"</div>
+            </div>
+            <div class="rowact">
+              <button class="abtn ok">CLEAR</button>
+              <button class="abtn more">⋯</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================= RIGHT: B + A surfaces ======================= -->
+    <div>
+
+      <!-- SURFACE B: SHARED-MOD-INTEL VERDICT HEADER -->
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-h"><span class="ttl">B · <span class="hero">Shared verdict header</span></span><span class="cnt">on row select</span></div>
+        <div class="vhdr">
+          <div class="vhdr-top">
+            <div class="av">P</div>
+            <div class="who">
+              <div class="nm">PatriotStorm1776</div>
+              <div class="sub">u/PatriotStorm1776 · joined 4d ago</div>
+            </div>
+            <div class="verdict-stamp">
+              <span class="vd">REMOVE</span>
+              <div class="conf">confidence 0.94</div>
+            </div>
+          </div>
+
+          <!-- signal stats -->
+          <div class="sigstats">
+            <div class="sstat"><div class="k">Account age</div><div class="v age">4d</div></div>
+            <div class="sstat"><div class="k">Velocity</div><div class="v vel">31<small>/2h</small></div></div>
+            <div class="sstat"><div class="k">Slop score</div><div class="v slop">86</div></div>
+            <div class="sstat"><div class="k">Repeat bans</div><div class="v rep">×3</div></div>
+          </div>
+
+          <!-- TEAM KNOWLEDGE — pooled across mods via Worker/D1 -->
+          <div class="teamknow">
+            <div class="tk-h"><span class="t">⚑ What the team already knows</span><span class="c">3 mods · 4 events</span></div>
+            <div class="tk-item">
+              <div class="av2">R</div>
+              <div class="body">
+                <div class="ln1"><span class="mod">mod_raven</span><span class="act"><b>banned alt</b> @PatriotStorm88</span><span class="when">2d ago</span></div>
+                <div class="note">"same copypasta as the Jan raid wave — ban on sight, don't bother with templates"</div>
+              </div>
+            </div>
+            <div class="tk-item">
+              <div class="av2">H</div>
+              <div class="body">
+                <div class="ln1"><span class="mod">mod_hawk</span><span class="act">linked <b>4 socks</b></span><span class="when">2d ago</span></div>
+                <div class="note">"avatar hash + posting fingerprint match cluster C-7744 head account"</div>
+              </div>
+            </div>
+            <div class="tk-item">
+              <div class="av2">O</div>
+              <div class="body">
+                <div class="ln1"><span class="mod">mod_owl</span><span class="act"><span class="b-watch">watch-listed</span></span><span class="when">6h ago</span></div>
+                <div class="note">"resurfaced on new VPN range — escalating, recommend permaban"</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- add to the pool -->
+          <div class="addnote">
+            <input placeholder="Add a team note — visible to every mod…">
+            <button>Post</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- SURFACE A: IN-FEED SCAN BADGE -->
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-h"><span class="ttl">A · In-feed scan badge</span><span class="cnt">over the GAW feed</span></div>
+        <div class="feeddemo">
+          <div class="fd-post">
+            <div class="scanbadge">
+              <span class="sb-age">◷ 4d</span>
+              <span class="sb-vel">▲ 31/2h</span>
+              <span class="sb-hist">⊘ x3</span>
+              <span class="sb-verd v-remove">REMOVE</span>
+            </div>
+            <div class="fd-meta"><span class="u">PatriotStorm1776</span> · 14 min ago · /c/Great_Awakening</div>
+            <div class="fd-title">THE STORM IS HERE — share this everywhere before they delete it!!! [link]</div>
+          </div>
+          <div class="fd-feed-arrow">▲ same intelligence unit, rendered inline as the mod scrolls ▲</div>
+          <div class="fd-cap">Every post & user in the live feed carries the badge: <b>age · velocity · history · verdict</b> — a verdict readable in one fixation, <b>no click required</b>. Tap the badge → it drops the account straight into the firehose above.</div>
+        </div>
+      </div>
+
+      <!-- LEGEND -->
+      <div class="panel">
+        <div class="panel-h"><span class="ttl">Severity by shape + position</span></div>
+        <div class="legend">
+          <span class="li"><span class="sw" style="background:var(--danger)"></span>CRIT · ban-now</span>
+          <span class="li"><span class="sw" style="background:var(--warn)"></span>HIGH · review</span>
+          <span class="li"><span class="sw" style="background:var(--special)"></span>WATCH · monitor</span>
+          <span class="li"><span class="sw" style="background:var(--success)"></span>CLEAR · ok</span>
+          <span class="li"><span style="color:var(--special)">◷</span>age</span>
+          <span class="li"><span style="color:var(--warn)">▲</span>velocity</span>
+          <span class="li"><span style="color:var(--danger)">⊘</span>prior bans</span>
+          <span class="li"><span style="color:var(--special)">⧉</span>sock cluster</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <footer>
+    <strong style="color:var(--ink-muted)">Firehose Hunt-Command</strong> — hero direction. &nbsp;Three surfaces, one stream.<br>
+    <code>Already-computed:</code> account age · modUserCadence velocity · scorePostQualityText slop · sock similarity clusters · repeat-offender count · shadow-triage verdict · IP-cluster · verified flag &nbsp;
+    <span class="new-badge">NEW WORKER/D1</span> <code>cross-mod intel pool: flags · team notes · per-user action log · saved hunts · alt-links — POOLED across the team via the Cloudflare Worker (D1)</code>
+  </footer>
+
+</body>
+</html>

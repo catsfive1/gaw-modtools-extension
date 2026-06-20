@@ -1,0 +1,122 @@
+{
+  "wp": "WP-05",
+  "edits": [
+    {
+      "oldString": ".gam-mc-dur{background:${C.BG2};border:1px solid ${C.BORDER};border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:${C.TEXT2};cursor:pointer;transition:all .15s}",
+      "newString": ".gam-mc-dur{position:relative;background:var(--gam-tok-surface-overlay,${C.BG3});border:1px solid var(--gam-tok-border-strong,${C.BORDER2});border-radius:6px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:var(--gam-tok-ink-muted,${C.TEXT2});cursor:pointer;transition:background .15s,border-color .15s,color .15s}",
+      "note": "WP-05.1 segmented control: inactive = ink-muted on surface-overlay with a ghost border-strong outline, 6px radius. position:relative reserves the stacking context for the active inset-ring/left-bar non-color mark added on .gam-mc-dur-active."
+    },
+    {
+      "oldString": ".gam-mc-dur:hover{border-color:${C.BORDER2};color:${C.TEXT}}",
+      "newString": ".gam-mc-dur:hover{border-color:var(--gam-tok-accent-line,rgba(255,153,51,0.28));color:var(--gam-tok-ink,${C.TEXT})}",
+      "note": "WP-05.1 hover lifts toward ink + an accent-line edge (chrome amber, never a verdict)."
+    },
+    {
+      "oldString": ".gam-mc-dur-active{background:${C.RED};border-color:${C.RED};color:var(--gam-tok-on-accent-light,#ffffff)}",
+      "newString": ".gam-mc-dur-active{background:var(--gam-tok-danger-soft,rgba(240,64,64,0.12));border-color:var(--gam-tok-danger,${C.RED});color:var(--gam-tok-danger,${C.RED});box-shadow:inset 3px 0 0 var(--gam-tok-danger,${C.RED}),inset 0 0 0 1px var(--gam-tok-danger,${C.RED})}\n.gam-mc-dur-active::after{content:'\\\\2B23';position:absolute;top:3px;right:5px;font-size:9px;line-height:1;color:var(--gam-tok-danger,${C.RED});opacity:.9}",
+      "note": "WP-05.1 fixes WCAG 1.4.1 (was color-only solid-red fill). Active = danger-soft fill + danger text + 1px danger border + a NON-COLOR active mark: 3px inset danger left-bar AND an octagon glyph (U+2B23) top-right. Survives grayscale; readable pre-click since JS pre-marks [data-v=\"1\"] (selectDuration(1))."
+    },
+    {
+      "oldString": ".gam-mc-dur-active:hover{opacity:.9;color:var(--gam-tok-on-accent-light,#ffffff)}",
+      "newString": ".gam-mc-dur-active:hover{opacity:1;color:var(--gam-tok-danger,${C.RED});border-color:var(--gam-tok-danger,${C.RED})}",
+      "note": "WP-05.1 keep active danger text on hover (the fill stays soft now, so on-accent-light white would be invisible)."
+    },
+    {
+      "oldString": ".gam-mc-banner{padding:8px 12px;border-radius:4px;font-size:12px;margin-top:10px;line-height:1.4}\n.gam-mc-banner-warn{background:rgba(240,160,64,.1);color:${C.WARN};border:1px solid rgba(240,160,64,.25)}\n.gam-mc-banner-info{background:rgba(74,158,255,.1);color:${C.ACCENT};border:1px solid rgba(74,158,255,.25)}\n.gam-mc-banner-green{background:rgba(61,214,140,.1);color:${C.GREEN};border:1px solid rgba(61,214,140,.25)}\n.gam-mc-banner-red{background:rgba(240,64,64,.1);color:${C.RED};border:1px solid rgba(240,64,64,.25)}",
+      "newString": ".gam-mc-banner{padding:8px 12px;border-radius:6px;font-size:12px;margin-top:10px;line-height:1.4;border:1px solid var(--gam-tok-border,${C.BORDER});border-left-width:3px}\n.gam-mc-banner-warn{background:var(--gam-tok-warn-soft,rgba(240,160,64,.12));color:var(--gam-tok-warn,${C.WARN});border-color:var(--gam-tok-warn,${C.WARN})}\n.gam-mc-banner-info{background:var(--gam-tok-info-soft,rgba(74,158,255,.10));color:var(--gam-tok-info,#7cb8ff);border-color:var(--gam-tok-info,#7cb8ff)}\n.gam-mc-banner-green{background:var(--gam-tok-success-soft,rgba(61,214,140,.12));color:var(--gam-tok-success,${C.GREEN});border-color:var(--gam-tok-success,${C.GREEN})}\n.gam-mc-banner-red{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));color:var(--gam-tok-danger,${C.RED});border-color:var(--gam-tok-danger,${C.RED})}",
+      "note": "WP-05.2 severity-soft bg + a colored 3px left keyline (border-left-width:3px on the severity-colored border) so every banner state reads as a structured banner. info color moves off legacy C.ACCENT(#4A9EFF) onto the WCAG-bumped info token #7cb8ff. Combined into one edit because the 5 rules are contiguous and the base rule now carries the shared keyline."
+    },
+    {
+      "oldString": "/* v5.2.9: custom ban message history */\n.gam-mc-custom-hist{display:flex;flex-direction:column;gap:4px;max-height:130px;overflow-y:auto;margin-top:6px}\n.gam-mc-custom-hist-item{background:${C.BG3};border:1px solid ${C.BORDER};border-radius:4px;padding:5px 8px;font-size:11px;color:${C.TEXT2};cursor:pointer;line-height:1.4;transition:border-color .1s,color .1s}\n.gam-mc-custom-hist-item:hover{border-color:${C.ACCENT};color:${C.TEXT}}",
+      "newString": "/* v5.2.9: custom ban message history */\n/* WP-05.3: thin token-styled scrollbar + bottom fade-mask so 130px overflow is visible; overflow:clip-safe focus ring via scroll-padding so a focused item's ring isn't hidden under the fade. */\n.gam-mc-custom-hist{position:relative;display:flex;flex-direction:column;gap:4px;max-height:130px;overflow-y:auto;margin-top:6px;scrollbar-width:thin;scrollbar-color:var(--gam-tok-accent-line,rgba(255,153,51,0.28)) transparent;-webkit-mask-image:linear-gradient(to bottom,black calc(100% - 14px),transparent 100%);mask-image:linear-gradient(to bottom,black calc(100% - 14px),transparent 100%)}\n.gam-mc-custom-hist::-webkit-scrollbar{width:6px}\n.gam-mc-custom-hist::-webkit-scrollbar-thumb{background:var(--gam-tok-accent-line,rgba(255,153,51,0.28));border-radius:999px}\n.gam-mc-custom-hist::-webkit-scrollbar-track{background:transparent}\n.gam-mc-custom-hist-item{background:var(--gam-tok-surface-overlay,${C.BG3});border:1px solid var(--gam-tok-border,${C.BORDER});border-radius:6px;padding:5px 8px;font-size:11px;color:var(--gam-tok-ink-muted,${C.TEXT2});cursor:pointer;line-height:1.4;transition:border-color .1s,color .1s,background .1s}\n.gam-mc-custom-hist-item:hover{border-color:var(--gam-tok-accent,${C.ACCENT});color:var(--gam-tok-ink,${C.TEXT});background:var(--gam-tok-accent-soft,rgba(255,153,51,0.10))}\n.gam-mc-custom-hist-item:focus-visible{outline:2px solid var(--gam-tok-accent,${C.ACCENT});outline-offset:2px}",
+      "note": "WP-05.3 custom-history (130px well): accent-line thin scrollbar (firefox + webkit) + a 14px bottom fade-mask so overflow is glanceable. Hover routes onto accent (amber chrome). Added :focus-visible offset ring; hist items are keyboard-clickable so the ring must be present. Item hex (C.BG3/C.BORDER/C.TEXT2/C.ACCENT) routed to tokens. The hover color migrates off legacy C.ACCENT to the canonical accent token."
+    },
+    {
+      "oldString": "      <div id=\"mc-ban-status\"></div>",
+      "newString": "      <div id=\"mc-ban-status\" class=\"gam-mc-ban-status\"></div>",
+      "note": "WP-05.2 give the status container a default banner shell class so even a bare innerHTML write (or empty state) reads as a structured slot. The id is LOCKED and preserved; only an additive class is appended. The class rule is defined in the appended CSS edit below."
+    },
+    {
+      "oldString": ".gam-mc-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}\n.gam-mc-actions .gam-btn{min-width:160px}",
+      "newString": ".gam-mc-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}\n.gam-mc-actions .gam-btn{min-width:160px}\n/* WP-05.2: #mc-ban-status default banner shell -- an empty/bare-innerHTML status\n   still reads as a structured slot (border-strong + surface-sunken inset). When a\n   .gam-mc-banner child is injected it visually nests inside this shell. Empty (no\n   children) collapses to zero height so it never shows an orphan box pre-action. */\n.gam-mc-ban-status:not(:empty){margin-top:10px;padding:2px;border-radius:6px;border:1px solid var(--gam-tok-border-strong,${C.BORDER2});background:var(--gam-tok-surface-sunken,${C.POPUP_BG})}\n.gam-mc-ban-status:not(:empty) .gam-mc-banner{margin-top:0}\n/* WP-05.5: confirm-ban GO button sits on a danger-soft well so it is visually\n   weightier than the benign Cancel sibling. Scoped to the ban actions row. */\n.gam-mc-actions #mc-ban-go{background:var(--gam-tok-danger-soft,rgba(240,64,64,0.12));border:1px solid var(--gam-tok-danger,${C.RED});box-shadow:inset 0 0 0 1px var(--gam-tok-danger,${C.RED})}",
+      "note": "WP-05.2 + WP-05.5 (appended after the contiguous .gam-mc-actions block, a stable ban-tab anchor): (a) .gam-mc-ban-status:not(:empty) gives the LOCKED #mc-ban-status a structured banner shell that nests the injected .gam-mc-banner and collapses when empty so no orphan box appears pre-action; (b) #mc-ban-go gains a danger-soft well + danger ring so the confirm-ban button outweighs Cancel. Both purely additive CSS; no selector renamed."
+    },
+    {
+      "oldString": "id=\"mc-ban-unban\" style=\"color:#44dd66;text-decoration:underline;cursor:pointer;background:transparent;border:none;padding:0;font:inherit\">already banned — unban instead</a>",
+      "newString": "id=\"mc-ban-unban\" style=\"color:' + GAM_TOK.success + ';text-decoration:underline;cursor:pointer;background:transparent;border:none;padding:0;font:inherit\">already banned — unban instead</a>",
+      "note": "WP-05.6 ghost unban link hex #44dd66 -> GAM_TOK.success (canonical verified-green). This is inside a template literal building root.innerHTML, so the string is broken to splice GAM_TOK.success via concatenation (no var() in inline). textContent 'already banned — unban instead' (the accessible name) is preserved verbatim; id mc-ban-unban locked."
+    },
+    {
+      "oldString": "<div id=\"mc-ban-summary-preview\" style=\"background:#0a0a0b;border:1px solid #2a2825;padding:6px 8px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px;color:#e8e6e1;line-height:1.4\">",
+      "newString": "<div id=\"mc-ban-summary-preview\" style=\"background:' + GAM_TOK.surfaceSunken + ';border:1px solid ' + GAM_TOK.border + ';border-left:3px solid ' + GAM_TOK.special + ';padding:6px 8px;font-size:11px;color:' + GAM_TOK.ink + ';line-height:1.4\">",
+      "note": "WP-05.4 AI-summary preview well routed to tokens (surfaceSunken bg, border, ink text). Added a 3px special(purple) left keyline -- this is the AI/auto-queue lane per severity language 1.7. Dropped the ui-monospace stack (cross-font consistency). Inside a template literal so spliced via GAM_TOK concatenation."
+    },
+    {
+      "oldString": "_banSummaryTextarea.style.cssText = 'width:100%;box-sizing:border-box;background:#0a0a0b;border:1px solid #2a2825;padding:6px 8px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px;color:#e8e6e1;line-height:1.4;resize:vertical;';",
+      "newString": "_banSummaryTextarea.style.cssText = 'width:100%;box-sizing:border-box;background:'+GAM_TOK.surfaceSunken+';border:1px solid '+GAM_TOK.border+';border-left:3px solid '+GAM_TOK.accent+';padding:6px 8px;font-size:11px;color:'+GAM_TOK.ink+';line-height:1.4;resize:vertical;';\n        _banSummaryTextarea.addEventListener('input', function(){ try { _banSummaryTextarea.style.borderLeftColor = GAM_TOK.accent; } catch(_){} });\n        _banSummaryTextarea.addEventListener('blur', function(){ try { if ((_banSummaryTextarea.value||'').trim().length >= 10) _banSummaryTextarea.style.borderLeftColor = GAM_TOK.success; } catch(_){} });",
+      "note": "WP-05.4 editing/saved state on the summary textarea: surfaceSunken well + tokenized border, with an amber(accent) 'editing' left-accent that flips to success(green) on blur once a real summary exists. Dropped ui-monospace. The textarea id mc-ban-summary-edit is set immediately after on the same element (locked, untouched). cssText is plain string concat per the inline channel rule (no var())."
+    },
+    {
+      "oldString": "label style=\"font-size:10px;color:#9b9892;text-transform:uppercase;letter-spacing:0.08em\">\\u{1F916} AI summary (auto-appended to notes after BAN)</label>",
+      "newString": "label style=\"font-size:10px;color:' + GAM_TOK.inkMuted + ';text-transform:uppercase;letter-spacing:0.08em\">\\u{1F916} AI summary (auto-appended to notes after BAN)</label>",
+      "note": "WP-05 instruction text hex #9b9892 -> GAM_TOK.inkMuted (all tertiary/instruction text routes to ink-muted per token spec 1.1). Inside the innerHTML template literal -> spliced via concatenation. Accessible label text preserved verbatim."
+    },
+    {
+      "oldString": "<label>\\u{1F4DD} Team macros (shared) <span style=\"color:#666;font-weight:400;font-size:10px\">\\u2014 manage in popup</span></label>",
+      "newString": "<label>\\u{1F4DD} Team macros (shared) <span style=\"color:' + GAM_TOK.inkFaint + ';font-weight:400;font-size:10px\">\\u2014 manage in popup</span></label>",
+      "note": "WP-05 hex #666 -> GAM_TOK.inkFaint (de-emphasized 'manage in popup' meta hint). Inside the innerHTML template literal -> spliced via concatenation."
+    }
+  ],
+  "lockedSelectors": [
+    "#mc-ban-viol",
+    "#mc-ban-subj",
+    "#mc-ban-msg",
+    "#mc-ban-durs",
+    "#mc-ban-modmail",
+    "#mc-ban-cancel",
+    "#mc-ban-go",
+    "#mc-ban-status",
+    "#mc-ban-unban",
+    "#mc-ban-custom-hist",
+    "#mc-ban-custom-hist-wrap",
+    ".gam-mc-custom-hist-item",
+    ".gam-mc-custom-hist",
+    "#mc-ban-macro-pick",
+    ".gam-mc-dur",
+    ".gam-mc-dur-active",
+    ".gam-mc-durs",
+    "#mc-ban-ai-wrap",
+    "#mc-ban-ai-engine",
+    "#mc-ban-ai-go",
+    "#mc-ban-ai-out",
+    "#mc-ban-ai-text",
+    "#mc-ban-ai-use",
+    "#mc-ban-ai-err",
+    "#mc-ban-summary-wrap",
+    "#mc-ban-summary-edit",
+    "#mc-ban-summary-preview",
+    "#mc-ai-preview",
+    ".gam-mc-field",
+    ".gam-mc-banner",
+    ".gam-mc-banner-red",
+    ".gam-mc-banner-warn",
+    ".gam-mc-banner-info",
+    ".gam-mc-banner-green",
+    ".gam-mc-evidence",
+    ".gam-mc-evidence-label",
+    ".gam-mc-evidence-text",
+    ".gam-mc-evidence-link",
+    ".gam-mc-actions",
+    ".gam-btn",
+    ".gam-btn-cancel",
+    ".gam-btn-danger",
+    ".gam-btn-accent",
+    ".gam-input",
+    ".gam-textarea",
+    ".gam-mc-checkbox",
+    "data-v",
+    "data-idx",
+    "aria-disabled"
+  ],
+  "summary": "WP-05 ban-tab: migrates every ban-tab-unique hardcoded hex to GAM_TOK (inline cssText/innerHTML via string concat) and var(--gam-tok-*) (style rules). 14 edits. (1) Duration buttons become a real segmented control on surface-overlay with a ghost border-strong outline; the active state is rebuilt off the old solid color-only red fill into danger-soft + danger text/border + a NON-COLOR active mark (3px inset danger left-bar + octagon glyph), fixing WCAG 1.4.1 -- and JS already pre-marks the default [data-v=1] so the active duration is readable pre-click. (2) The 4 .gam-mc-banner variants gain a severity-colored 3px left keyline + token soft fills, and #mc-ban-status gets an additive .gam-mc-ban-status shell rule (:not(:empty)) so even a bare innerHTML reads as a structured banner while collapsing to nothing when empty. (3) The 130px custom-history well gets an accent-line thin scrollbar (webkit+firefox) + a bottom fade-mask + a focus-visible offset ring, with item colors tokenized. (4) The AI ban-summary preview + dynamically-created #mc-ban-summary-edit textarea move to surface-sunken + tokens with a special/amber editing left-accent that flips to success(green) on blur once a real summary exists. (5) #mc-ban-go gains a danger-soft well so confirm-ban outweighs Cancel. (6) The unban ghost link's #44dd66 routes to GAM_TOK.success. All locked selectors and accessible-name textContent preserved; the shared AI-reply-card hex (ghost/card/body/fail) was deliberately excluded because those exact strings are NON-UNIQUE (duplicated in the intel tab / WP-06 shared path) and must be migrated by the shared-component owner to stay consistent."
+}

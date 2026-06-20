@@ -1,0 +1,157 @@
+{
+  "wp": "WP-03",
+  "summary": "Toasts / Snacks / Undo: unify all 7 notification functions onto the GAM_TOK floating-card shell (surface-panel bg, border-strong, scrim shadow, severity-colored 3px left keyline), introduce one shared .gam-toast-btn dismiss/action treatment, route every hardcoded hex (#1a1c20 #444 #eee #3a2500 #1a1f28 #e8eaed #4A9EFF #2a2a30 #1f4d2e #5a2020 #c6f6d5 #fed7d7 #e5e5e8 #2a1d10 #ffd84d #9b9892 #fff #0a0a0b stray) onto GAM_TOK (inline cssText) or var(--gam-tok-*) (<style> rules), collapse the 3 scattered countdown/progress styles to one accent-line->accent track, map z-literals to the --z-toast tier, and add aria-live to _showUndoToast plus a keyboard-reachable focus-ringed dismiss treatment on every toast button. Inline z-index literals stay numeric (var() forbidden in cssText per PART 2 §2.1) but are documented onto the --z-toast top tier; the injectToastCSS <style> z-index migrates to var(--z-toast).",
+  "lockedSelectors": [
+    "#gam-toast-stack",
+    ".gam-toast-stack",
+    ".gam-toast",
+    ".gam-toast-show",
+    ".gam-toast-success",
+    ".gam-toast-error",
+    ".gam-toast-info",
+    ".gam-toast-btn",
+    "#gam-undo",
+    "#gam-undo-toast-*",
+    ".gam-snack",
+    "[data-stack]",
+    ".gam-snack-show",
+    ".gam-snack-success",
+    ".gam-snack-error",
+    ".gam-snack-warn",
+    ".gam-snack-info",
+    ".gam-snack-action",
+    ".gam-snack-countdown-bar",
+    "#gam-sw-restart-snack",
+    "#gam-ext-orphaned-banner",
+    "#gam-ext-orphaned-reload",
+    "#gam-ext-orphaned-dismiss",
+    "#gam-ext-orphaned-copy",
+    "#gam-sr-live",
+    "#gam-status-bar",
+    "[role=alert]",
+    "[role=status]",
+    "[aria-live]"
+  ],
+  "edits": [
+    {
+      "oldString": "        'body.gam-ux-polish-on .gam-toast{pointer-events:auto;padding:12px 16px;border-radius:6px;font-size:13px;line-height:1.4;color:#e5e5e8;background:#2a2a30;box-shadow:0 4px 12px rgba(0,0,0,0.35);opacity:0;transform:translateY(8px);transition:opacity 180ms ease,transform 180ms ease;min-height:44px;display:flex;align-items:center;}',",
+      "newString": "        'body.gam-ux-polish-on .gam-toast{pointer-events:auto;padding:12px 16px;border-radius:8px;font-size:13px;line-height:1.4;color:var(--gam-tok-ink,#e8e6e1);background:var(--gam-tok-surface-panel,#181b20);border:1px solid var(--gam-tok-border-strong,#3a3f48);border-left:3px solid var(--gam-tok-info,#7cb8ff);box-shadow:0 8px 24px var(--gam-tok-scrim,rgba(0,0,0,0.60));opacity:0;transform:translateY(8px);transition:opacity 180ms ease,transform 180ms ease;min-height:44px;display:flex;align-items:center;gap:8px;}',",
+      "note": "injectToastCSS <style> .gam-toast base -> floating-card shell (transformation #1): surface-panel bg, border-strong, 8px radius, scrim shadow, 8px gap, 3px info left keyline. Removes hex #e5e5e8 #2a2a30 -> var(--gam-tok-*). var() safe (Channel-2 <style>)."
+    },
+    {
+      "oldString": "        'body.gam-ux-polish-on .gam-toast-success{background:#1f4d2e;color:#c6f6d5;}',",
+      "newString": "        'body.gam-ux-polish-on .gam-toast-success{border-left-color:var(--gam-tok-success,#3dd68c);}',",
+      "note": "injectToastCSS success variant: severity via the shared 3px left keyline (success) instead of full-fill. Removes #1f4d2e #c6f6d5."
+    },
+    {
+      "oldString": "        'body.gam-ux-polish-on .gam-toast-error{background:#5a2020;color:#fed7d7;}',",
+      "newString": "        'body.gam-ux-polish-on .gam-toast-error{border-left-color:var(--gam-tok-danger,#f04040);}',",
+      "note": "injectToastCSS error variant: danger keyline instead of full-fill. Removes #5a2020 #fed7d7."
+    },
+    {
+      "oldString": "        'body.gam-ux-polish-on .gam-toast-info{background:#2a2a30;color:#e5e5e8;}'",
+      "newString": "        'body.gam-ux-polish-on .gam-toast-info{border-left-color:var(--gam-tok-info,#7cb8ff);}'",
+      "note": "injectToastCSS info variant: info keyline. Removes #2a2a30 #e5e5e8. Closes the literal-to-zero on the toast-stack <style> block."
+    },
+    {
+      "oldString": "        'body.gam-ux-polish-on .gam-toast-stack{position:fixed;right:20px;bottom:20px;z-index:99999;display:flex;flex-direction:column-reverse;gap:8px;max-width:360px;pointer-events:none;}',",
+      "newString": "        'body.gam-ux-polish-on .gam-toast-stack{position:fixed;right:20px;bottom:20px;z-index:var(--z-toast,9999999);display:flex;flex-direction:column-reverse;gap:8px;max-width:360px;pointer-events:none;}',",
+      "note": "Z-hierarchy (transformation #5): map the 99999 literal onto the --z-toast top tier. <style> block, so var(--z-toast) is safe."
+    },
+    {
+      "oldString": "    wrap.style.cssText = 'position:fixed;bottom:90px;right:16px;z-index:2147483610;background:#1a1c20;color:#eee;border:1px solid #444;border-radius:6px;padding:10px 14px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.5);display:flex;align-items:center;gap:10px';",
+      "newString": "    wrap.style.cssText = 'position:fixed;bottom:90px;right:16px;z-index:2147483610;background:'+GAM_TOK.surfacePanel+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.borderStrong+';border-left:3px solid '+GAM_TOK.warn+';border-radius:8px;padding:12px 16px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 8px 24px '+GAM_TOK.scrim+';display:flex;align-items:center;gap:8px';",
+      "note": "showBanUndoToast shell -> GAM_TOK floating card (#1 + #3). #1a1c20->surfacePanel, #eee->ink, #444->borderStrong; warn keyline (undo is a reversible-caution action); 8px radius, scrim shadow, 8px gap, 12/16 pad. Inline z-literal 2147483610 stays numeric (var() forbidden in cssText) -- documented at --z-toast top tier."
+    },
+    {
+      "oldString": "    wrap.innerHTML = `<span>\\u{1F518} ${escapeHtml(username)} banned</span><button style=\"background:var(--bb-amber-cool);color:#3a2500;border:none;border-radius:3px;padding:4px 10px;cursor:pointer;font-weight:600\">Undo</button>`;",
+      "newString": "    wrap.innerHTML = `<span>\\u{1F518} ${escapeHtml(username)} banned</span><button class=\"gam-toast-btn\" style=\"background:transparent;border:1px solid ${GAM_TOK.warn};color:${GAM_TOK.warn};border-radius:6px;padding:6px 10px;min-height:32px;cursor:pointer;font-weight:600\">Undo</button>`;",
+      "note": "showBanUndoToast Undo button -> shared .gam-toast-btn treatment (#2): transparent bg, 1px border, warn-tinted text/border to match the keyline, 32px min target, 6px radius. Routes off var(--bb-amber-cool)/#3a2500. textContent 'Undo' preserved (accessible name). Class adds the focus-ring via the .gam-toast-btn rule."
+    },
+    {
+      "oldString": "    toast.id = toastId;\n    toast.setAttribute('role', 'alert');",
+      "newString": "    toast.id = toastId;\n    toast.setAttribute('role', 'alert');\n    toast.setAttribute('aria-live', 'assertive'); // WP-03 #6 a11y parity: _showUndoToast was role-only; pair with aria-live",
+      "note": "a11y parity (transformation #6 / acceptance): _showUndoToast omitted aria-live. role=alert is assertive, so aria-live=assertive matches. Anchored on the id+role pair (unique to _showUndoToast) so the new line inserts immediately after the role assignment."
+    },
+    {
+      "oldString": "      'background:#1a1f28;border:1px solid #3a3f48;border-radius:4px;' +",
+      "newString": "      'background:'+GAM_TOK.surfacePanel+';border:1px solid '+GAM_TOK.borderStrong+';border-left:3px solid '+GAM_TOK.info+';border-radius:8px;' +",
+      "note": "_showUndoToast shell line 1 -> GAM_TOK floating card (#1 + #3). #1a1f28->surfacePanel, #3a3f48->borderStrong; 3px info keyline (informational undo); 4->8px radius. z-index 9999999 (next line up) already = --z-toast value; kept numeric (cssText, var() forbidden)."
+    },
+    {
+      "oldString": "      'color:#e8eaed;box-shadow:0 4px 16px rgba(0,0,0,.6);' +",
+      "newString": "      'color:'+GAM_TOK.ink+';box-shadow:0 8px 24px '+GAM_TOK.scrim+';' +",
+      "note": "_showUndoToast shell line 2 -> #e8eaed->GAM_TOK.ink, shadow -> 0 8px 24px scrim (the floating-card scrim shadow)."
+    },
+    {
+      "oldString": "      'padding:10px 14px;display:flex;align-items:center;gap:10px;' +",
+      "newString": "      'padding:12px 16px;display:flex;align-items:center;gap:8px;' +",
+      "note": "_showUndoToast shell padding/gap -> the canonical floating-card 12/16 padding + 8px icon-gap (transformation #1). No hex on this line; spacing-only normalization."
+    },
+    {
+      "oldString": "      'background:transparent;border:1px solid #4A9EFF;border-radius:3px;' +",
+      "newString": "      'background:transparent;border:1px solid '+GAM_TOK.info+';border-radius:6px;' +",
+      "note": "_showUndoToast undo button line 1 -> shared .gam-toast-btn look (#2): transparent bg, 1px info border, 6px radius. #4A9EFF->GAM_TOK.info (WCAG-bumped)."
+    },
+    {
+      "oldString": "      'color:#4A9EFF;font:600 11px inherit;padding:3px 10px;cursor:pointer;flex-shrink:0;';",
+      "newString": "      'color:'+GAM_TOK.info+';font:600 11px inherit;padding:6px 10px;min-height:32px;cursor:pointer;flex-shrink:0;';",
+      "note": "_showUndoToast undo button line 2 -> info text matching keyline, 32px min target. #4A9EFF->GAM_TOK.info. undoBtn already calls .focus(); the focus ring resolves via the WP-01 :focus-visible block (and we add .gam-toast-btn-class buttons elsewhere)."
+    },
+    {
+      "oldString": "      'position:absolute;bottom:0;left:0;height:2px;background:#4A9EFF;border-radius:0 0 4px 4px;' +",
+      "newString": "      'position:absolute;bottom:0;left:0;height:2px;background:'+GAM_TOK.accent+';border-radius:0 0 8px 8px;' +",
+      "note": "One countdown/progress style (transformation #4): unify on the accent fill track at card bottom; #4A9EFF->GAM_TOK.accent, radius 4->8 to match the new card. PRM static fallback handled by the WP-01 global motion cap (neutralizes the width transition)."
+    },
+    {
+      "oldString": "    snackEl.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483640;background:#1a1c20;color:#eee;border:1px solid #444;border-radius:6px;padding:10px 14px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.5);display:flex;align-items:center;gap:10px;max-width:360px';",
+      "newString": "    snackEl.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483640;background:'+GAM_TOK.surfacePanel+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.borderStrong+';border-left:3px solid '+GAM_TOK.info+';border-radius:8px;padding:12px 16px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 8px 24px '+GAM_TOK.scrim+';display:flex;align-items:center;gap:8px;max-width:360px';",
+      "note": "_gamShowSwRestartSnack shell -> GAM_TOK floating card (#1 + #3). #1a1c20->surfacePanel, #eee->ink, #444->borderStrong; info keyline (connection re-established = informational); 8px radius, scrim shadow, 12/16 pad, 8px gap. Inline z 2147483640 kept numeric, documented at --z-toast tier."
+    },
+    {
+      "oldString": "    retryBtn.style.cssText = 'background:#4A9EFF;color:#fff;border:none;border-radius:3px;padding:4px 10px;cursor:pointer;font-weight:600;white-space:nowrap';",
+      "newString": "    retryBtn.className = 'gam-toast-btn';\n    retryBtn.style.cssText = 'background:transparent;border:1px solid '+GAM_TOK.info+';color:'+GAM_TOK.info+';border-radius:6px;padding:6px 10px;min-height:32px;cursor:pointer;font-weight:600;white-space:nowrap';",
+      "note": "_gamShowSwRestartSnack Retry button -> shared .gam-toast-btn (#2): transparent bg, 1px info border, info text, 32px min target, 6px radius. Routes off #4A9EFF/#fff. Class adds focus-ring (.gam-toast-btn rule). textContent 'Retry' preserved."
+    },
+    {
+      "oldString": "    dismissBtn.style.cssText = 'background:transparent;color:#9b9892;border:1px solid #7a7672;border-radius:3px;padding:4px 8px;cursor:pointer;white-space:nowrap'; /* v.next a11y: border 2.5:1 -> 4.1:1 (UI 3:1 pass) */",
+      "newString": "    dismissBtn.className = 'gam-toast-btn';\n    dismissBtn.style.cssText = 'background:transparent;color:'+GAM_TOK.inkMuted+';border:1px solid '+GAM_TOK.borderStrong+';border-radius:6px;padding:6px 10px;min-height:32px;cursor:pointer;white-space:nowrap';",
+      "note": "_gamShowSwRestartSnack Dismiss button -> shared .gam-toast-btn (#2): transparent bg, ink-muted text, border-strong, 32px min target, 6px radius. Routes off #9b9892->inkMuted, #7a7672->borderStrong (keeps/improves the prior a11y contrast bump). Class adds focus-ring. textContent 'Dismiss' preserved."
+    },
+    {
+      "oldString": "      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999999;background:#2a1d10;border-bottom:1px solid var(--bb-amber);color:#ffd84d;font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:8px 14px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 2px 8px rgba(0,0,0,0.6)';",
+      "newString": "      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999999;background:'+GAM_TOK.surfacePanel+';border-bottom:3px solid '+GAM_TOK.warn+';color:'+GAM_TOK.ink+';font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:12px 16px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 8px 24px '+GAM_TOK.scrim+'';",
+      "note": "_gamShowExtOrphanedBanner shell -> GAM_TOK (#1 + #3). #2a1d10->surfacePanel, #ffd84d->ink; the top-banner keyline lives on its existing border-bottom -> 3px warn (orphaned ext = caution). var(--bb-amber) border literal -> GAM_TOK.warn; scrim shadow; 12/16 pad. Inline z 99999999 kept numeric (cssText), documented at --z-toast tier."
+    },
+    {
+      "oldString": "        '<button id=\"gam-ext-orphaned-copy\" style=\"background:transparent;border:1px solid #7a7672;color:#ffd84d;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase\" title=\"Copy debug details to clipboard\">📋 Copy</button>' +",
+      "newString": "        '<button id=\"gam-ext-orphaned-copy\" class=\"gam-toast-btn\" style=\"background:transparent;border:1px solid '+GAM_TOK.borderStrong+';color:'+GAM_TOK.inkMuted+';padding:6px 10px;min-height:32px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase\" title=\"Copy debug details to clipboard\">📋 Copy</button>' +",
+      "note": "Orphaned-banner Copy button -> .gam-toast-btn (#2). #7a7672->borderStrong, #ffd84d->inkMuted, 32px min target. id #gam-ext-orphaned-copy preserved (locked). title + text'Copy' preserved. Class adds focus-ring."
+    },
+    {
+      "oldString": "        '<button id=\"gam-ext-orphaned-reload\" style=\"background:var(--bb-amber);border:none;color:#0a0a0b;padding:4px 12px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase\">Reload page</button>' +",
+      "newString": "        '<button id=\"gam-ext-orphaned-reload\" class=\"gam-toast-btn gam-toast-btn--warn\" style=\"background:'+GAM_TOK.warn+';border:1px solid '+GAM_TOK.warn+';color:'+GAM_TOK.onAccentDark+';padding:6px 12px;min-height:32px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase\">Reload page</button>' +",
+      "note": "Orphaned-banner primary Reload button: solid warn fill + on-accent-dark text per the on-accent split (PART 1 §1.7 black-on-amber passes 9.86:1). var(--bb-amber)->GAM_TOK.warn, #0a0a0b->onAccentDark. 32px min target. id #gam-ext-orphaned-reload preserved. Class adds focus-ring; --warn modifier marks the filled variant."
+    },
+    {
+      "oldString": "        '<button id=\"gam-ext-orphaned-dismiss\" style=\"background:transparent;border:1px solid #7a7672;color:#9b9892;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase\">Dismiss</button>'; /* v.next a11y: border 2.5:1 -> 4.1:1 */",
+      "newString": "        '<button id=\"gam-ext-orphaned-dismiss\" class=\"gam-toast-btn\" style=\"background:transparent;border:1px solid '+GAM_TOK.borderStrong+';color:'+GAM_TOK.inkMuted+';padding:6px 10px;min-height:32px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase\">Dismiss</button>';",
+      "note": "Orphaned-banner Dismiss button -> .gam-toast-btn (#2). #7a7672->borderStrong, #9b9892->inkMuted, 32px min target. id #gam-ext-orphaned-dismiss preserved (locked). text'Dismiss' preserved. Class adds focus-ring."
+    },
+    {
+      "oldString": "      btn.style.cssText = 'padding:2px 8px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.15);color:inherit;border-radius:3px;cursor:pointer;font:inherit;font-size:10px';",
+      "newString": "      btn.className = 'gam-toast-btn';\n      btn.style.cssText = 'padding:6px 10px;min-height:32px;border:1px solid '+GAM_TOK.borderStrong+';background:transparent;color:'+GAM_TOK.inkMuted+';border-radius:6px;cursor:pointer;font:inherit;font-size:10px';",
+      "note": "snackWithActions action button -> shared .gam-toast-btn (#2): transparent bg, border-strong, ink-muted text, 32px min target, 6px radius. Routes off rgba(255,255,255,.4)/.15. textContent (action.label) preserved. Class adds focus-ring."
+    },
+    {
+      "oldString": "      bar.style.cssText = 'position:absolute;left:0;bottom:0;height:2px;background:var(--bb-amber);width:100%;transition:width 100ms linear;border-radius:0 0 6px 6px';",
+      "newString": "      bar.style.cssText = 'position:absolute;left:0;bottom:0;height:2px;background:'+GAM_TOK.accent+';width:100%;transition:width 100ms linear;border-radius:0 0 8px 8px';",
+      "note": "snack() countdown bar -> the single accent progress style (transformation #4). var(--bb-amber)->GAM_TOK.accent (inline cssText: var() forbidden, GAM_TOK required), radius 6->8 to match the unified card. PRM static fallback via the WP-01 global motion cap."
+    },
+    {
+      "oldString": ".gam-snack-action:hover { background:var(--bb-amber); color:#0a0a0b; }",
+      "newString": ".gam-snack-action:hover { background:var(--bb-amber); color:var(--gam-tok-on-accent-dark,#0a0a0b); }\n/* WP-03 #2: one shared dismiss/action treatment for the toast/undo/snack/banner family.\n   Transparent ghost at rest, 1px border, ink-muted text, 32px min target, accent-soft hover.\n   The --warn modifier is the filled primary variant (solid warn + on-accent-dark), used by\n   the orphaned-banner Reload button. focus-visible ring is provided by the WP-01 a11y block\n   that already enumerates .gam-toast-btn. */\n.gam-toast-btn { display:inline-flex; align-items:center; justify-content:center; min-height:32px; padding:6px 10px; border-radius:6px; border:1px solid var(--gam-tok-border-strong,#3a3f48); background:transparent; color:var(--gam-tok-ink-muted,#b0b5bc); cursor:pointer; font:600 11px inherit; letter-spacing:0.02em; transition:background 80ms,color 80ms,border-color 80ms; flex-shrink:0; white-space:nowrap; box-sizing:border-box; }\n.gam-toast-btn:hover { background:var(--gam-tok-accent-soft,rgba(255,153,51,0.10)); color:var(--gam-tok-ink,#e8e6e1); }\n.gam-toast-btn--warn { background:var(--gam-tok-warn,#f0a040); border-color:var(--gam-tok-warn,#f0a040); color:var(--gam-tok-on-accent-dark,#0a0a0b); }\n.gam-toast-btn--warn:hover { background:var(--gam-tok-warn,#f0a040); color:var(--gam-tok-on-accent-dark,#0a0a0b); filter:brightness(1.08); }",
+      "note": "Two changes on a stable anchor: (a) the stray .gam-snack-action:hover literal #0a0a0b -> var(--gam-tok-on-accent-dark); (b) append the new shared .gam-toast-btn family (#2). var() is safe (Channel-2 <style>). The :focus-visible ring is already wired in the WP-01 a11y block (.gam-toast-btn enumerated at the focus-visible selector list), satisfying the 'every toast keyboard-dismissable with visible focus ring' criterion. Inline cssText edits on the JS buttons set GAM_TOK values that match this rule; adding the class delivers the focus ring + hover."
+    }
+  ]
+}

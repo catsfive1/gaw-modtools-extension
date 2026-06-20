@@ -1,0 +1,1299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GAW ModTools — COCKPIT v2 (data-driven shared-mod-intelligence)</title>
+<style>
+  /* ===================================================================== */
+  /* Unified design tokens — verbatim from DESIGN-TOKENS.md / GAM_TOK       */
+  /* ===================================================================== */
+  :root{
+    --surface:#0a0a0b; --surface-sunken:#050507; --surface-raised:#0f1114;
+    --surface-panel:#181b20; --surface-overlay:#252a31;
+    --border:#2a2f38; --border-strong:#3a3f48;
+    --ink:#e8e6e1; --ink-muted:#b0b5bc; --ink-faint:#7a7672;
+    --on-accent:#ffffff;
+    --accent:#ff9933; --accent-soft:rgba(255,153,51,0.10); --accent-line:rgba(255,153,51,0.28);
+    --focus-ring:#ff9933;
+    --info:#7cb8ff; --info-soft:rgba(74,158,255,0.10); --info-line:rgba(124,184,255,0.30);
+    --danger:#f04040; --danger-soft:rgba(240,64,64,0.12); --danger-line:rgba(240,64,64,0.34);
+    --warn:#f0a040; --warn-soft:rgba(240,160,64,0.12); --warn-line:rgba(240,160,64,0.32);
+    --success:#3dd68c; --success-soft:rgba(61,214,140,0.12); --success-line:rgba(61,214,140,0.30);
+    --special:#a78bfa; --special-soft:rgba(167,139,250,0.12); --special-line:rgba(167,139,250,0.30);
+    --scrim:rgba(0,0,0,0.60);
+    /* ===== SEVERITY LEGEND — SINGLE SOURCE OF TRUTH (frozen) ===========
+       VERDICT tints are INVARIANT across every surface:
+         REMOVE  = triangle + danger  (red)
+         WATCH   = diamond  + warn    (amber)
+         APPROVE = circle   + success (green)
+       PURPLE/special is RESERVED — it means ONLY sock/cluster/cross-mod-intel.
+       It NEVER renders a verdict.  (fixes blocker #1 + want #2) */
+    --v-remove:var(--danger);  --v-remove-soft:var(--danger-soft);  --v-remove-line:var(--danger-line);
+    --v-watch:var(--warn);     --v-watch-soft:var(--warn-soft);     --v-watch-line:var(--warn-line);
+    --v-approve:var(--success);--v-approve-soft:var(--success-soft);--v-approve-line:var(--success-line);
+    /* audited text-on-color badge pairs — do NOT regress */
+    --ok-bg:#276749;     --ok-text:#c6f6d5;
+    --danger-bg:#9b2c2c; --danger-text:#fed7d7;
+    --warn-bg:#744210;   --warn-text:#ffe5b0;
+    --mono: ui-monospace,'SF Mono','JetBrains Mono','Cascadia Mono',Menlo,Consolas,monospace;
+    --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{
+    background:var(--surface); color:var(--ink); font-family:var(--sans);
+    font-size:13px; line-height:1.45; -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums;
+  }
+  body{
+    background:
+      radial-gradient(1100px 520px at 80% -10%, rgba(255,153,51,0.05), transparent 60%),
+      radial-gradient(900px 480px at 4% 110%, rgba(167,139,250,0.04), transparent 55%),
+      var(--surface);
+    min-height:100vh; padding:18px 22px 70px; max-width:1420px; margin:0 auto;
+  }
+  .tnum{font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1}
+  .mono{font-family:var(--mono)}
+  :focus-visible{outline:2px solid var(--focus-ring); outline-offset:2px; border-radius:4px}
+
+  /* ===================================================================== */
+  /* Canonical VERDICT GLYPHS — shape language shared by ALL surfaces       */
+  /*   triangle = REMOVE · diamond = WATCH · circle = APPROVE               */
+  /* ===================================================================== */
+  .vg{display:inline-block; flex:none; vertical-align:middle}
+  .vg.tri{width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;
+    border-bottom:9px solid currentColor}
+  .vg.dia{width:8px;height:8px;background:currentColor;transform:rotate(45deg)}
+  .vg.cir{width:9px;height:9px;border-radius:50%;border:2.5px solid currentColor}
+  .vg.tri-sm{border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid currentColor}
+  .vg.dia-sm{width:7px;height:7px}
+  .vg.cir-sm{width:7px;height:7px;border-width:2px}
+  /* SVG geometric glyph vocabulary — replaces all emoji (fixes blocker #4) */
+  .gi{display:inline-block;flex:none;vertical-align:middle;width:1em;height:1em}
+  .gi svg{display:block;width:100%;height:100%}
+
+  /* ===================================================================== */
+  /* Top chrome                                                            */
+  /* ===================================================================== */
+  .topbar{display:flex; align-items:center; gap:14px; margin-bottom:16px; flex-wrap:wrap}
+  .brand{display:flex; align-items:center; gap:10px; font-weight:800; font-size:16px; letter-spacing:-0.2px}
+  .brand .mark{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;
+    background:linear-gradient(150deg, rgba(255,153,51,0.22), rgba(255,153,51,0.04));
+    border:1px solid var(--accent-line);color:var(--accent)}
+  .brand b{color:var(--accent)}
+  .brand small{font-weight:600;color:var(--ink-faint);font-size:10.5px;letter-spacing:1px;text-transform:uppercase}
+  .topbar .spacer{flex:1}
+  .livepill{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-muted);
+    background:var(--surface-panel);border:1px solid var(--border);border-radius:999px;padding:5px 12px 5px 10px}
+  .livepill .ping{width:7px;height:7px;border-radius:50%;background:var(--success);position:relative}
+  .livepill .ping::after{content:'';position:absolute;inset:-4px;border-radius:50%;
+    background:var(--success);opacity:.3;animation:ping 1.7s ease-out infinite}
+  @keyframes ping{0%{transform:scale(.6);opacity:.5}100%{transform:scale(2.4);opacity:0}}
+  .livepill b{color:var(--ink);font-weight:700}
+  .poolsync{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--special)}
+  .poolsync.degraded{color:var(--warn)}
+  .poolsync .pdot{width:6px;height:6px;border-radius:50%;background:var(--special);box-shadow:0 0 7px var(--special);animation:pulse 2s infinite}
+  .poolsync.degraded .pdot{background:var(--warn);box-shadow:0 0 7px var(--warn);animation:none}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  @keyframes livepulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .me{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-muted)}
+  .me b{color:var(--accent);font-weight:700}
+  .kbhint{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--ink-faint)}
+  .kbhint kbd{font-family:var(--mono);font-size:9.5px;background:var(--surface-panel);border:1px solid var(--border);
+    border-bottom-width:2px;border-radius:4px;padding:1px 5px;color:var(--ink-muted)}
+
+  /* section labels */
+  .sectlabel{display:flex;align-items:center;gap:9px;
+    font-size:10px;font-weight:800;letter-spacing:1.3px;text-transform:uppercase;
+    color:var(--ink-faint);margin:0 2px 10px}
+  .sectlabel .num{width:17px;height:17px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;
+    font-size:10px;font-weight:800;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent-line)}
+  .sectlabel.hero .num{background:var(--accent);color:var(--surface);border-color:var(--accent)}
+  .sectlabel.hero{color:var(--accent)}
+  .sectlabel .hero-tag{margin-left:auto;color:var(--accent);background:var(--accent-soft);
+    border:1px solid var(--accent-line);border-radius:999px;padding:2px 9px;letter-spacing:.8px;font-size:9px}
+  .sectnote{font-size:11px;color:var(--ink-faint);margin:-4px 2px 12px;line-height:1.5}
+  .sectnote b{color:var(--ink-muted)}
+  /* inline buildability tag — legible AT the component (fixes want #7) */
+  .src-tag{display:inline-flex;align-items:center;gap:3px;font-size:7.5px;font-weight:800;letter-spacing:.4px;
+    border-radius:3px;padding:0 4px;line-height:1.6;vertical-align:1px;text-transform:uppercase;cursor:help}
+  .src-tag.live{color:var(--success);background:var(--success-soft);box-shadow:inset 0 0 0 1px var(--success-line)}
+  .src-tag.new{color:var(--special);background:var(--special-soft);box-shadow:inset 0 0 0 1px var(--special-line)}
+  .src-tag .d{width:4px;height:4px;border-radius:50%;background:currentColor}
+
+  /* ===================================================================== */
+  /* HERO ROW: firehose (left, big) + verdict dossier (right rail)         */
+  /* ===================================================================== */
+  .toprow{display:grid;grid-template-columns:1fr 372px;gap:18px;align-items:start}
+  @media(max-width:1180px){.toprow{grid-template-columns:1fr}}
+
+  /* --------------------------------------------------------------------- */
+  /* SURFACE C — FIREHOSE HUNT (the hero).                                  */
+  /* --------------------------------------------------------------------- */
+  .hero-wrap{position:relative;border:1px solid var(--accent-line);border-radius:13px;overflow:hidden;
+    background:radial-gradient(120% 140% at 0% 0%, rgba(255,153,51,0.07), transparent 55%), var(--surface-raised);
+    box-shadow:0 24px 60px -34px rgba(0,0,0,.9)}
+  .cmdbar{display:flex;align-items:center;gap:10px;padding:13px 15px 11px}
+  .cmd-glyph{color:var(--accent)}
+  .cmd-input{flex:1;display:flex;align-items:center;gap:2px;flex-wrap:wrap;
+    background:var(--surface-sunken);border:1px solid var(--border-strong);border-radius:9px;
+    padding:8px 11px;min-height:44px}
+  .cmd-input:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .qtok{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:12px;
+    padding:3px 8px;border-radius:6px;margin:1px 3px 1px 0;white-space:nowrap}
+  .qtok .k{color:var(--ink-muted)}
+  .qtok .op{color:var(--accent);font-weight:700}
+  .qtok .v{color:var(--ink);font-weight:700}
+  .qtok.t-age{background:var(--info-soft);box-shadow:inset 0 0 0 1px var(--info-line)}
+  .qtok.t-age .v{color:var(--info)}
+  .qtok.t-vel{background:var(--warn-soft);box-shadow:inset 0 0 0 1px var(--warn-line)}
+  .qtok.t-vel .v{color:var(--warn)}
+  .qtok.t-hist{background:var(--danger-soft);box-shadow:inset 0 0 0 1px var(--danger-line)}
+  .qtok.t-hist .v{color:var(--danger)}
+  .qtok .x{color:var(--ink-faint);cursor:pointer;font-weight:700;margin-left:1px}
+  .qtok .x:hover{color:var(--ink)}
+  .cmd-ghost{color:var(--ink-faint);font-family:var(--mono);font-size:12px;padding-left:4px}
+  .cmd-caret{width:1.5px;height:18px;background:var(--accent);animation:blink 1.1s step-end infinite;margin-left:3px}
+  @keyframes blink{50%{opacity:0}}
+  .cmd-run{display:flex;align-items:center;gap:7px;background:var(--accent);color:#1a1206;
+    font-weight:800;font-size:12px;letter-spacing:.4px;border:none;border-radius:8px;padding:11px 17px;cursor:pointer;
+    text-transform:uppercase;box-shadow:0 1px 0 rgba(0,0,0,.3)}
+  .cmd-run:hover{filter:brightness(1.08)}
+  .cmd-run kbd{font-family:var(--mono);font-size:10px;background:rgba(0,0,0,.22);border-radius:4px;padding:1px 5px}
+
+  .chiprail{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:2px 15px 13px}
+  .chiprail .lbl{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-faint);margin-right:2px}
+  .schip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;
+    border-radius:7px;padding:5px 10px;cursor:pointer;border:1px solid var(--border);
+    background:var(--surface-panel);color:var(--ink-muted);user-select:none;transition:.12s}
+  .schip:hover{border-color:var(--border-strong);color:var(--ink)}
+  .schip .ic{width:13px;display:grid;place-items:center}
+  .schip .n{font-family:var(--mono);font-size:10px;opacity:.9}
+  .schip.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
+  .schip.on.s-vel{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn)}
+  .schip.on.s-new{background:var(--info-soft);border-color:var(--info-line);color:var(--info)}
+  .schip.on.s-sock{background:var(--special-soft);border-color:var(--special-line);color:var(--special)}
+  .schip.on.s-team{background:var(--special-soft);border-color:var(--special-line);color:var(--special)}
+  .schip.on.s-untouched{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
+  .schip.add{border-style:dashed;color:var(--ink-faint)}
+
+  .savedhunts{display:flex;align-items:center;gap:8px;padding:0 15px 14px;flex-wrap:wrap}
+  .savedhunts .lbl{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-faint)}
+  .shunt{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-muted);
+    background:var(--surface-sunken);border:1px solid var(--border);border-radius:999px;padding:4px 11px;cursor:pointer}
+  .shunt:hover{border-color:var(--accent-line);color:var(--ink)}
+  .shunt .star{color:var(--accent);font-size:10px}
+  .shunt .hits{font-family:var(--mono);font-size:10px;color:var(--danger);font-weight:800}
+  .shunt.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  .shunt.active .hits{color:var(--accent)}
+
+  .resmeta{display:flex;align-items:center;gap:13px;padding:9px 15px;border-top:1px solid var(--border);
+    border-bottom:1px solid var(--border);background:var(--surface-panel);font-size:11px;color:var(--ink-muted)}
+  .resmeta b{color:var(--ink);font-weight:700}
+  .resmeta .danger-c{color:var(--danger);font-weight:800}
+  .resmeta .special-c{color:var(--special);font-weight:800}
+  .resmeta .accent-c{color:var(--accent);font-weight:800}
+  .resmeta .sortby{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-faint)}
+  .resmeta select{background:var(--surface-overlay);color:var(--ink);border:1px solid var(--border);
+    border-radius:6px;font-size:11px;padding:3px 7px;font-family:var(--sans)}
+
+  /* ranked result rows */
+  .results{padding:6px}
+  .row{display:grid;grid-template-columns:30px 262px 1fr auto;gap:13px;align-items:center;
+    padding:11px 12px;border-radius:10px;border:1px solid transparent;cursor:pointer;transition:.1s;scroll-margin-top:80px}
+  .row:hover{background:var(--surface-panel);border-color:var(--border)}
+  .row.sel{background:var(--accent-soft);border-color:var(--accent-line)}
+  .row.kbcur{box-shadow:inset 3px 0 0 var(--accent)}
+  .row+.row{margin-top:2px}
+  /* rank + risk gutter — severity by POSITION (left rail) + SHAPE */
+  .rank{display:flex;flex-direction:column;align-items:center;gap:4px}
+  .rank .pos{font-family:var(--mono);font-size:11px;color:var(--ink-faint);font-weight:800}
+  .riskbar{width:4px;height:34px;border-radius:3px;background:var(--border)}
+  .riskbar.r-remove{background:var(--v-remove);box-shadow:0 0 7px rgba(240,64,64,.5)}
+  .riskbar.r-watch{background:var(--v-watch)}
+  .riskbar.r-approve{background:var(--v-approve)}
+
+  .idcell{min-width:0}
+  .idline{display:flex;align-items:center;gap:7px}
+  .idline .uname{font-weight:800;font-size:13.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vflag{color:var(--success);display:inline-flex}
+
+  /* ===== THE UNIFIED SCAN BADGE (compact inline form) — IDENTICAL unit ===== */
+  /* age | velocity(+trend) | history | density | verdict                       */
+  .scanbadge{display:inline-flex;align-items:stretch;border-radius:6px;overflow:hidden;
+    border:1px solid var(--border-strong);font-family:var(--mono);font-size:10px;line-height:1;margin-top:6px;
+    box-shadow:0 1px 2px rgba(0,0,0,.4)}
+  .scanbadge>.sb{display:flex;flex-direction:column;gap:2px;padding:4px 7px;font-weight:800;text-align:center;background:var(--surface-panel);justify-content:center}
+  .scanbadge>.sb+.sb{border-left:1px solid var(--surface)}
+  .sb .sk{font-size:7.5px;font-weight:700;color:var(--ink-faint);letter-spacing:.4px}
+  .sb-age{color:var(--info)} .sb-age.calm{color:var(--ink-muted)} .sb-age.good{color:var(--success)}
+  .sb-vel{color:var(--warn)} .sb-vel.hot{color:var(--danger)} .sb-vel.calm{color:var(--ink-muted)}
+  .sb-hist.bans{color:var(--danger)} .sb-hist.none{color:var(--ink-faint)} .sb-hist.clean{color:var(--success)}
+  /* velocity micro-trend row (fixes want #4) */
+  .sb-vel .vtrend{display:flex;align-items:center;justify-content:center;gap:3px;font-size:7px;margin-top:2px}
+  .sb-vel .vtrend .spark{width:24px;flex:none}
+  .sb-vel .vtrend.up{color:var(--danger)} .sb-vel .vtrend.down{color:var(--success)} .sb-vel .vtrend.flat{color:var(--ink-faint)}
+  .spark{display:inline-block;height:8px}
+  /* team-knowledge density mini-bar (fixes want #3) */
+  .sb-dens{color:var(--special)}
+  .densbar{display:flex;align-items:flex-end;gap:1px;height:9px;justify-content:center;margin-top:1px}
+  .densbar i{width:2.5px;background:var(--special);border-radius:1px;opacity:.30}
+  .densbar i.on{opacity:1}
+  .sb-dens.d0{color:var(--ink-faint)} .sb-dens.d0 .densbar i{background:var(--ink-faint)}
+  .sb-verd{display:flex;flex-direction:row;align-items:center;gap:4px;font-size:9.5px;letter-spacing:.4px;min-width:64px;justify-content:center}
+  .sb-verd.v-remove{background:var(--danger-bg);color:var(--danger-text)}
+  .sb-verd.v-watch{background:var(--warn-bg);color:var(--warn-text)}
+  .sb-verd.v-approve{background:var(--ok-bg);color:var(--ok-text)}
+
+  /* shared-mod-intel cell — inline on every row */
+  .intelcell{min-width:0;display:flex;flex-direction:column;gap:5px}
+  .intel-strip{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .ichip{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;
+    border-radius:5px;padding:3px 7px;white-space:nowrap}
+  .ichip .gi{font-size:11px}
+  .ichip.flagged{background:var(--danger-soft);color:var(--danger);box-shadow:inset 0 0 0 1px rgba(240,64,64,.25)}
+  .ichip.notes{background:var(--info-soft);color:var(--info);box-shadow:inset 0 0 0 1px rgba(124,184,255,.25)}
+  .ichip.socks{background:var(--special-soft);color:var(--special);box-shadow:inset 0 0 0 1px rgba(167,139,250,.25)}
+  .ichip.action{background:var(--surface-overlay);color:var(--ink-muted)}
+  .ichip.action b{color:var(--ink)}
+  .intel-last{font-size:11px;color:var(--ink-muted);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .intel-last .mod{color:var(--info);font-weight:700}
+  .intel-last .verb{color:var(--danger);font-weight:700}
+  .intel-last .verb.ok{color:var(--success)}
+  .intel-last .ago{color:var(--ink-faint);font-family:var(--mono);font-size:10px}
+  .intel-quote{font-size:11px;color:var(--ink-muted);font-style:italic;
+    border-left:2px solid var(--info);padding-left:8px;opacity:.92;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  /* cold-start / untouched — now a POSITIVE affordance (fixes blocker #6 + want #3) */
+  .intel-fresh{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-style:italic}
+  .intel-fresh.none{color:var(--accent);opacity:.92}
+  .intel-fresh .gi{font-size:11px;font-style:normal}
+  .intel-fresh.degraded{color:var(--warn);font-style:normal}
+
+  .rowact{display:flex;align-items:center;gap:6px}
+  .abtn{font-size:11px;font-weight:800;border-radius:7px;padding:7px 11px;cursor:pointer;
+    border:1px solid var(--border);background:var(--surface-panel);color:var(--ink-muted);letter-spacing:.2px}
+  .abtn:hover{border-color:var(--border-strong);color:var(--ink)}
+  .abtn.ban{background:var(--danger-bg);border-color:transparent;color:var(--danger-text)}
+  .abtn.ban:hover{filter:brightness(1.12)}
+  .abtn.watch{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn)}
+  .abtn.ok{background:var(--success-soft);border-color:var(--success-line);color:var(--success)}
+  .abtn.more{padding:7px 9px}
+
+  /* cluster group header + indented in-cluster rows — the kill-list */
+  .clusterhead{display:flex;align-items:center;gap:9px;padding:9px 14px;margin:9px 4px 2px;
+    background:var(--special-soft);border:1px solid var(--special-line);border-radius:9px}
+  .clusterhead .cbadge{font-family:var(--mono);font-size:10px;font-weight:800;color:var(--special);
+    background:var(--surface-sunken);border:1px solid var(--special-line);border-radius:5px;padding:3px 7px;letter-spacing:.5px;display:inline-flex;align-items:center;gap:5px}
+  .clusterhead .txt{font-size:12px;color:var(--ink);font-weight:600}
+  .clusterhead .txt b{color:var(--special)}
+  .clusterhead .meta{margin-left:auto;font-size:11px;color:var(--ink-muted);font-family:var(--mono)}
+  .row.in-cluster{margin-left:14px;border-left:2px solid var(--special-line);border-radius:0 10px 10px 0}
+
+  .batchbar{display:flex;align-items:center;gap:11px;padding:11px 15px;border-top:1px solid var(--border);background:var(--surface-panel)}
+  .batchbar .hint{color:var(--ink-faint);font-size:11px}
+
+  /* --------------------------------------------------------------------- */
+  /* SURFACE B — SHARED VERDICT DOSSIER (right rail).                        */
+  /* --------------------------------------------------------------------- */
+  .rail{display:flex;flex-direction:column;gap:18px;position:sticky;top:16px}
+  .dossier{background:var(--surface-raised);border:1px solid var(--border-strong);border-radius:14px;overflow:hidden;
+    box-shadow:0 18px 50px -30px rgba(240,64,64,.4), 0 0 0 1px var(--danger-line);transition:box-shadow .2s}
+  .dossier.dv-watch{box-shadow:0 18px 50px -30px rgba(240,160,64,.4), 0 0 0 1px var(--warn-line)}
+  .dossier.dv-approve{box-shadow:0 18px 50px -30px rgba(61,214,140,.4), 0 0 0 1px var(--success-line)}
+
+  /* verdict banner */
+  .verdict-banner{display:flex;align-items:stretch;border-bottom:1px solid var(--border)}
+  .dossier .verdict-banner{background:linear-gradient(100deg, var(--danger-soft), transparent 72%)}
+  .dossier.dv-watch .verdict-banner{background:linear-gradient(100deg, var(--warn-soft), transparent 72%)}
+  .dossier.dv-approve .verdict-banner{background:linear-gradient(100deg, var(--success-soft), transparent 72%)}
+  .vb-flag{width:6px;background:var(--danger);flex:none}
+  .dossier.dv-watch .vb-flag{background:var(--warn)} .dossier.dv-approve .vb-flag{background:var(--success)}
+  .vb-body{flex:1;padding:15px 16px}
+  .vb-top{display:flex;align-items:center;gap:9px;margin-bottom:4px}
+  .vb-action{font-size:20px;font-weight:900;letter-spacing:.2px;line-height:1;color:var(--danger);display:flex;align-items:center;gap:8px}
+  .dossier.dv-watch .vb-action{color:var(--warn)} .dossier.dv-approve .vb-action{color:var(--success)}
+  .vb-pillrec{font-size:9px;font-weight:800;letter-spacing:.6px;padding:3px 8px;border-radius:5px;
+    text-transform:uppercase;background:var(--danger-bg);color:var(--danger-text)}
+  .dossier.dv-watch .vb-pillrec{background:var(--warn-bg);color:var(--warn-text)}
+  .dossier.dv-approve .vb-pillrec{background:var(--ok-bg);color:var(--ok-text)}
+  .vb-conf{margin-left:auto;text-align:right}
+  .vb-conf .pct{font-size:19px;font-weight:900;color:var(--danger);line-height:1;font-family:var(--mono)}
+  .dossier.dv-watch .vb-conf .pct{color:var(--warn)} .dossier.dv-approve .vb-conf .pct{color:var(--success)}
+  .vb-conf .lbl{font-size:8px;letter-spacing:.8px;color:var(--ink-faint);text-transform:uppercase}
+  .vb-reason{font-size:11.5px;color:var(--ink-muted);margin-top:7px;line-height:1.45}
+  .vb-reason b{color:var(--ink)}
+  .confbar{height:5px;border-radius:3px;background:var(--surface-overlay);margin-top:10px;overflow:hidden}
+  .confbar i{display:block;height:100%;background:linear-gradient(90deg, var(--warn), var(--danger))}
+  .dossier.dv-watch .confbar i{background:linear-gradient(90deg, var(--ink-faint), var(--warn))}
+  .dossier.dv-approve .confbar i{background:linear-gradient(90deg, var(--ink-faint), var(--success))}
+
+  /* identity row + NEW/REPEAT badges */
+  .ident{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border)}
+  .ident .av{width:40px;height:40px;border-radius:10px;flex:none;
+    background:linear-gradient(135deg, var(--surface-overlay), var(--surface-panel));
+    border:1px solid var(--border-strong);display:grid;place-items:center;font-size:17px;font-weight:800;color:var(--danger)}
+  .dossier.dv-watch .ident .av{color:var(--warn)} .dossier.dv-approve .ident .av{color:var(--success)}
+  .ident .uname{font-size:15px;font-weight:800;letter-spacing:.1px}
+  .ident .sub{font-size:10.5px;color:var(--ink-faint);margin-top:2px}
+  .ident .sub .mono{color:var(--ink-muted)}
+  .ident-badges{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .ibadge{font-size:9.5px;font-weight:800;letter-spacing:.3px;padding:4px 8px;border-radius:5px;display:inline-flex;align-items:center;gap:5px}
+  .ibadge.new{background:var(--info-soft);color:var(--info);border:1px solid var(--info-line)}
+  .ibadge.repeat{background:var(--danger-soft);color:var(--danger);border:1px solid var(--danger-line)}
+  .ibadge.trusted{background:var(--success-soft);color:var(--success);border:1px solid var(--success-line)}
+
+  /* 4-up stat-chip grid with left flag-spines */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border-bottom:1px solid var(--border)}
+  .stat{background:var(--surface-raised);padding:11px 12px;position:relative}
+  .stat::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--border-strong)}
+  .stat.flag-info::before{background:var(--info)}       .stat.flag-info .v{color:var(--info)}
+  .stat.flag-danger::before{background:var(--danger)}   .stat.flag-danger .v{color:var(--danger)}
+  .stat.flag-warn::before{background:var(--warn)}        .stat.flag-warn .v{color:var(--warn)}
+  .stat.flag-success::before{background:var(--success)}  .stat.flag-success .v{color:var(--success)}
+  .stat .k{font-size:8.5px;letter-spacing:.7px;color:var(--ink-faint);text-transform:uppercase}
+  .stat .v{font-size:18px;font-weight:900;margin-top:3px;line-height:1;font-family:var(--mono);color:var(--ink)}
+  .stat .v small{font-size:10px;font-weight:700;color:var(--ink-faint)}
+  .stat .vsub{font-size:9px;color:var(--ink-muted);margin-top:4px}
+
+  /* SHARED MOD INTELLIGENCE block */
+  .intel{padding:14px 16px;background:radial-gradient(120% 100% at 0% 0%, var(--special-soft), transparent 60%)}
+  .intel-head{display:flex;align-items:center;gap:8px;margin-bottom:11px}
+  .intel-head .title{font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--special);display:flex;align-items:center;gap:6px}
+  .intel-head .pool{margin-left:auto;font-size:9.5px;color:var(--ink-muted);
+    background:var(--special-soft);border:1px solid var(--special-line);padding:3px 8px;border-radius:20px;font-weight:700}
+  .intel-head .pool.degraded{color:var(--warn);background:var(--warn-soft);border-color:var(--warn-line)}
+  .intel-summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .schip-int{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:6px 10px;border-radius:7px;background:var(--surface-panel);border:1px solid var(--border)}
+  .schip-int .n{font-size:14px;font-weight:900;font-family:var(--mono)}
+  .schip-int.flag{border-color:var(--danger-line);background:var(--danger-soft)} .schip-int.flag .n{color:var(--danger)}
+  .schip-int.note{border-color:var(--info-line);background:var(--info-soft)}   .schip-int.note .n{color:var(--info)}
+  .schip-int.sock{border-color:var(--special-line);background:var(--special-soft)} .schip-int.sock .n{color:var(--special)}
+
+  /* the headline */
+  .lastaction{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:9px;
+    background:var(--danger-soft);border:1px solid var(--danger-line);margin-bottom:13px}
+  .lastaction .ic{width:28px;height:28px;border-radius:7px;background:var(--danger-bg);color:var(--danger-text);
+    display:grid;place-items:center;flex:none;font-weight:800}
+  .lastaction .txt{font-size:11.5px;line-height:1.4;color:var(--ink-muted)}
+  .lastaction .txt b{color:var(--ink)}
+  .lastaction .txt .mod{color:var(--danger);font-weight:800}
+  .lastaction .when{margin-left:auto;font-size:10px;color:var(--ink-faint);white-space:nowrap;font-family:var(--mono)}
+
+  /* color-coded vertical timeline */
+  .timeline{position:relative;padding-left:18px;margin-bottom:11px}
+  .timeline::before{content:"";position:absolute;left:5px;top:5px;bottom:5px;width:2px;background:var(--border)}
+  .tl-item{position:relative;padding:0 0 11px}
+  .tl-item:last-child{padding-bottom:0}
+  .tl-item::before{content:"";position:absolute;left:-16px;top:4px;width:9px;height:9px;border-radius:50%;
+    background:var(--surface-overlay);border:2px solid var(--ink-faint)}
+  .tl-item.danger::before{background:var(--danger);border-color:var(--danger)}
+  .tl-item.note::before{background:var(--info);border-color:var(--info)}
+  .tl-item.sock::before{background:var(--special);border-color:var(--special)}
+  .tl-item.warn::before{background:var(--warn);border-color:var(--warn)}
+  .tl-row{display:flex;align-items:baseline;gap:7px}
+  .tl-row .mod{font-weight:800;font-size:11.5px}
+  .tl-row .mod.raven{color:var(--danger)} .tl-row .mod.owl{color:var(--info)}
+  .tl-row .mod.fox{color:var(--special)} .tl-row .mod.hawk{color:var(--warn)}
+  .tl-row .act{font-size:11.5px;color:var(--ink-muted)}
+  .tl-row .time{margin-left:auto;font-size:9.5px;color:var(--ink-faint);white-space:nowrap;font-family:var(--mono)}
+  .tl-quote{font-size:11px;color:var(--ink-muted);margin-top:4px;padding:6px 9px;
+    background:var(--surface-panel);border-left:2px solid var(--info);border-radius:0 6px 6px 0;font-style:italic;line-height:1.4}
+
+  /* linked-sock graph */
+  .socks-h{font-size:9px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:var(--ink-faint);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+  .socks{display:flex;gap:7px;flex-wrap:wrap}
+  .sock-link{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-family:var(--mono);font-weight:700;
+    padding:5px 9px;border-radius:6px;background:var(--special-soft);border:1px solid var(--special-line);color:#d6c8ff;cursor:pointer}
+  .sock-link:hover{border-color:var(--special)}
+  .sock-link .sim{font-size:9px;color:var(--special);background:var(--surface-sunken);padding:1px 5px;border-radius:10px;font-weight:800}
+  .sock-link.banned{opacity:.6;text-decoration:line-through;text-decoration-color:rgba(240,64,64,.6)}
+
+  /* COLD-START state — explicit "be the first to flag" (fixes blocker #6 + want #6) */
+  .coldstart{padding:16px;border:1px dashed var(--accent-line);border-radius:10px;background:var(--accent-soft);
+    display:flex;flex-direction:column;gap:9px;align-items:flex-start;margin-bottom:13px}
+  .coldstart .cs-h{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:800;color:var(--accent)}
+  .coldstart .cs-b{font-size:11px;color:var(--ink-muted);line-height:1.5}
+  .coldstart .cs-b b{color:var(--ink)}
+  .coldstart .cs-first{display:inline-flex;align-items:center;gap:6px;font-size:9px;font-weight:800;letter-spacing:.5px;
+    text-transform:uppercase;color:var(--accent);background:var(--surface-sunken);border:1px solid var(--accent-line);
+    border-radius:5px;padding:4px 9px}
+  /* degraded — D1 pool unreachable (fixes blocker #6) */
+  .pool-degraded{padding:13px 14px;border:1px solid var(--warn-line);border-radius:10px;background:var(--warn-soft);
+    display:flex;gap:10px;align-items:flex-start;margin-bottom:13px}
+  .pool-degraded .gi{color:var(--warn);font-size:16px;flex:none;margin-top:1px}
+  .pool-degraded .pd-h{font-size:11.5px;font-weight:800;color:var(--warn)}
+  .pool-degraded .pd-b{font-size:10.5px;color:var(--ink-muted);margin-top:2px;line-height:1.45}
+
+  /* add team note + primary action */
+  .addnote{display:flex;gap:8px;padding:12px 16px;background:var(--surface-sunken);border-top:1px solid var(--border)}
+  .addnote input{flex:1;background:var(--surface-raised);border:1px solid var(--border);border-radius:8px;
+    padding:9px 11px;color:var(--ink);font-size:11.5px;font-family:var(--sans)}
+  .addnote input::placeholder{color:var(--ink-faint)}
+  .addnote button{background:var(--info-soft);border:1px solid var(--info-line);color:var(--info);
+    border-radius:8px;padding:0 13px;font-size:11px;font-weight:800;cursor:pointer}
+  .actions{display:flex;gap:8px;padding:13px 16px;background:var(--surface-panel);border-top:1px solid var(--border)}
+  .btn{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;padding:11px;border-radius:9px;
+    font-size:12.5px;font-weight:800;letter-spacing:.3px;cursor:pointer;border:1px solid transparent;transition:transform .08s, filter .12s}
+  .btn:hover{filter:brightness(1.12)} .btn:active{transform:translateY(1px)}
+  .btn.primary{background:var(--danger);color:#fff;flex:1.7;box-shadow:0 4px 14px rgba(240,64,64,.35)}
+  .dossier.dv-watch .btn.primary{background:var(--warn);box-shadow:0 4px 14px rgba(240,160,64,.35)}
+  .dossier.dv-approve .btn.primary{background:var(--success);box-shadow:0 4px 14px rgba(61,214,140,.35)}
+  .btn .kbd{font-size:10px;opacity:.9;background:rgba(0,0,0,.28);padding:1px 6px;border-radius:4px;font-family:var(--mono)}
+  .btn.warn{background:transparent;color:var(--warn);border-color:var(--warn-line)}
+  .btn.approve{background:transparent;color:var(--success);border-color:var(--success-line)}
+  .btn.ghost{background:var(--surface-overlay);color:var(--ink-muted);border-color:var(--border-strong)}
+
+  /* ===================================================================== */
+  /* SURFACE A — IN-FEED SCAN BADGES on a realistic GAW feed frame          */
+  /* ===================================================================== */
+  .feedrow-wrap{margin-top:24px}
+  .feed-frame{background:var(--surface-raised);border:1px solid var(--border);border-radius:14px;overflow:hidden;
+    box-shadow:0 24px 60px -32px rgba(0,0,0,.9)}
+  .feed-topbar{display:flex;align-items:center;gap:10px;padding:10px 14px;
+    background:linear-gradient(180deg, var(--surface-panel), var(--surface-raised));border-bottom:1px solid var(--border)}
+  .feed-topbar .gaw-logo{font-weight:800;font-size:13px;color:var(--ink);letter-spacing:-0.3px}
+  .feed-topbar .gaw-logo b{color:#ffce6b}
+  .feed-topbar .url{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);
+    padding:3px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px}
+  .feed-topbar .scan-toggle{margin-left:auto;display:inline-flex;align-items:center;gap:7px;
+    font-size:10.5px;font-weight:800;letter-spacing:.5px;color:var(--accent);
+    padding:4px 10px;border-radius:999px;background:var(--accent-soft);border:1px solid var(--accent-line)}
+  .feed-topbar .scan-toggle .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);animation:livepulse 2s infinite}
+
+  .feed-list{padding:10px;display:flex;flex-direction:column;gap:9px}
+  .post{position:relative;display:grid;grid-template-columns:4px 1fr;background:var(--surface-panel);
+    border:1px solid var(--border);border-radius:11px;overflow:hidden;transition:border-color .15s, transform .15s, box-shadow .15s}
+  .post:hover{transform:translateY(-1px);border-color:var(--border-strong);box-shadow:0 10px 28px -18px rgba(0,0,0,.85)}
+  .post .spine{width:4px}
+  .post[data-verd="remove"]  .spine{background:var(--v-remove)}
+  .post[data-verd="watch"]   .spine{background:var(--v-watch)}
+  .post[data-verd="approve"] .spine{background:var(--v-approve)}
+  .post-body{padding:11px 13px 11px 12px;min-width:0;padding-right:158px}
+
+  .post-head{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+  .avatar{width:26px;height:26px;border-radius:50%;flex:none;
+    background:linear-gradient(135deg, var(--surface-overlay), var(--surface));border:1px solid var(--border-strong);
+    display:grid;place-items:center;font-size:11px;font-weight:800;color:var(--ink-muted)}
+  .uname2{font-weight:800;font-size:13px;color:var(--ink)}
+  .verified{color:var(--success);display:inline-flex}
+  .post-meta{font-size:11px;color:var(--ink-faint)}
+  .post-title{font-size:13.5px;font-weight:700;color:var(--ink);margin:2px 0 4px;line-height:1.35}
+  .post-snippet{font-size:12px;color:var(--ink-muted);line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .post-foot{display:flex;align-items:center;gap:14px;margin-top:9px;font-size:11px;color:var(--ink-faint)}
+  .post-foot b{color:var(--ink-muted);font-weight:700}
+
+  /* THE BADGE — pinned top-right, the in-feed scan unit. Real button → firehose. */
+  .badge{position:absolute;top:10px;right:10px;width:136px;border-radius:9px;background:var(--surface-sunken);
+    border:1px solid var(--border);box-shadow:0 4px 14px -8px rgba(0,0,0,.9), inset 0 0 0 1px rgba(255,255,255,.012);
+    overflow:hidden;cursor:pointer;transition:border-color .14s, box-shadow .14s, transform .14s;z-index:2;
+    text-align:left;font-family:inherit;padding:0;color:inherit;display:block}
+  .badge:hover{transform:translateY(-1px)}
+  .badge:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .post[data-verd="remove"]  .badge{border-color:var(--danger-line);box-shadow:0 4px 16px -6px rgba(240,64,64,.35)}
+  .post[data-verd="watch"]   .badge{border-color:var(--warn-line)}
+  .post[data-verd="approve"] .badge{border-color:var(--success-line)}
+  /* verdict strip */
+  .badge-verdict{display:flex;align-items:center;gap:6px;padding:5px 8px;font-size:10.5px;font-weight:900;letter-spacing:.6px}
+  .badge-verdict .vconf{margin-left:auto;font-size:9px;font-weight:800;opacity:.9;font-family:var(--mono)}
+  .post[data-verd="remove"]  .badge-verdict{background:var(--danger-bg);color:var(--danger-text)}
+  .post[data-verd="watch"]   .badge-verdict{background:var(--warn-bg);color:var(--warn-text)}
+  .post[data-verd="approve"] .badge-verdict{background:var(--ok-bg);color:var(--ok-text)}
+  /* metric grid: AGE | VELOCITY */
+  .badge-metrics{display:grid;grid-template-columns:1fr 1fr}
+  .bm{padding:6px 7px 7px;display:flex;flex-direction:column;gap:1px}
+  .bm+.bm{border-left:1px solid var(--border)}
+  .bm-label{font-size:7.5px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:var(--ink-faint)}
+  .bm-value{font-size:13px;font-weight:900;color:var(--ink);line-height:1.05;font-family:var(--mono);display:flex;align-items:center;gap:3px}
+  .bm-value small{font-size:8.5px;font-weight:700;color:var(--ink-faint)}
+  .bm-value.hot{color:var(--danger)} .bm-value.warm{color:var(--warn)} .bm-value.good{color:var(--success)} .bm-value.calm{color:var(--ink-muted)}
+  .bm-trend{font-size:8px;font-weight:800;font-family:var(--mono)}
+  .bm-trend.up{color:var(--danger)} .bm-trend.down{color:var(--success)} .bm-trend.flat{color:var(--ink-faint)}
+  /* history pill + team density */
+  .badge-foot{display:flex;align-items:center;gap:6px;padding:5px 8px;border-top:1px solid var(--border);background:var(--surface);font-size:9.5px}
+  .hist-pill{display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:5px;font-weight:800;font-size:9px}
+  .hist-pill.ban{background:var(--danger-soft);color:var(--danger);border:1px solid var(--danger-line)}
+  .hist-pill.clean{background:var(--success-soft);color:var(--success);border:1px solid var(--success-line)}
+  .hist-pill.none{background:var(--surface-overlay);color:var(--ink-faint);border:1px solid var(--border)}
+  /* team-density on the badge foot (fixes want #3) */
+  .badge-dens{margin-left:auto;display:inline-flex;align-items:center;gap:4px}
+  .badge-dens .densbar{height:10px}
+  .badge-dens .nmods{font-size:9px;font-weight:800;color:var(--special)}
+  .badge-dens.d0 .nmods{color:var(--ink-faint)}
+  .badge-dens.untouched .nmods{color:var(--accent)}
+  /* sock / IP cluster ribbons */
+  .sock-ribbon{display:flex;align-items:center;gap:5px;padding:4px 8px;font-size:9px;font-weight:800;letter-spacing:.3px}
+  .sock-ribbon .gi{font-size:10px}
+  .sock-ribbon.sock{background:var(--special-soft);color:#c9b6ff;border-top:1px solid var(--special-line)}
+  .sock-ribbon.ip{background:var(--danger-soft);color:#ffb3b3;border-top:1px solid var(--danger-line)}
+
+  /* hover-to-explode dossier popover — now on EVERY post with intel */
+  .post .pop{position:absolute;top:8px;right:152px;width:330px;z-index:30;opacity:0;visibility:hidden;transform:translateY(6px);
+    transition:opacity .16s, transform .16s, visibility .16s;
+    background:var(--surface-panel);border:1px solid var(--border-strong);border-radius:13px;overflow:hidden;
+    box-shadow:0 30px 70px -28px rgba(0,0,0,.95)}
+  .post:hover .pop, .post:focus-within .pop{opacity:1;visibility:visible;transform:translateY(0)}
+  .pop::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:linear-gradient(90deg, var(--danger), var(--special))}
+  .pop-head{padding:12px 14px;border-bottom:1px solid var(--border);background:linear-gradient(180deg, rgba(240,64,64,.06), transparent)}
+  .pop-user{display:flex;align-items:center;gap:9px}
+  .pop-user .avatar{width:28px;height:28px;font-size:12px}
+  .pop-uname{font-weight:800;font-size:14px;color:var(--ink)}
+  .pop-handle{font-size:10px;color:var(--ink-faint);font-family:var(--mono)}
+  .pop-verd{margin-left:auto;display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:7px;
+    font-size:10px;font-weight:800}
+  .pop-verd.v-remove{background:var(--danger-bg);color:var(--danger-text)}
+  .pop-verd.v-watch{background:var(--warn-bg);color:var(--warn-text)}
+  .pop-verd.v-approve{background:var(--ok-bg);color:var(--ok-text)}
+  .pop-sec{padding:11px 14px;border-bottom:1px solid var(--border)}
+  .pop-sec:last-child{border-bottom:0}
+  .pop-sec-t{display:flex;align-items:center;gap:6px;font-size:9px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:var(--special);margin-bottom:9px}
+  .pop-sec-t .c{margin-left:auto;color:var(--ink-faint);font-family:var(--mono);font-weight:700}
+  .pop-trow{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid rgba(42,47,56,.5)}
+  .pop-trow:last-child{border-bottom:0}
+  .pop-av{width:20px;height:20px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:8.5px;font-weight:800}
+  .pop-av.r{background:rgba(240,64,64,.16);color:var(--danger);border:1px solid var(--danger-line)}
+  .pop-av.o{background:rgba(124,184,255,.14);color:var(--info);border:1px solid var(--info-line)}
+  .pop-av.w{background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn-line)}
+  .pop-tmeta{min-width:0;flex:1}
+  .pop-tline{font-size:11.5px;color:var(--ink)}
+  .pop-tline .mod{color:var(--info);font-weight:800}
+  .pop-tline .vb{color:var(--danger);font-weight:800}
+  .pop-tsub{font-size:10px;color:var(--ink-faint);font-style:italic;margin-top:1px}
+  .pop-time{font-size:9px;color:var(--ink-faint);font-family:var(--mono);white-space:nowrap}
+  .pop-cold{padding:12px 14px;font-size:11px;color:var(--accent);font-style:italic;display:flex;align-items:center;gap:7px}
+
+  /* legend / honest footer */
+  .legend{margin-top:22px;padding:16px 18px;background:var(--surface-raised);border:1px solid var(--border);border-radius:12px}
+  .legend-title{font-size:10px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;color:var(--ink-faint);margin-bottom:14px}
+  .legend-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px 24px}
+  .leg-item{display:flex;gap:11px;align-items:flex-start}
+  .leg-glyph{flex:none;width:18px;display:flex;justify-content:center;align-items:center;margin-top:2px}
+  .leg-txt b{color:var(--ink);font-size:12px;display:flex;align-items:center;gap:6px}
+  .leg-txt span{color:var(--ink-faint);font-size:11px;display:block;margin-top:2px;line-height:1.4}
+  .leg-tint{display:inline-block;width:9px;height:9px;border-radius:2px;vertical-align:1px}
+  .leg-new-tag{display:inline-block;font-size:8px;font-weight:800;letter-spacing:.5px;color:var(--special);
+    background:var(--special-soft);border:1px solid var(--special-line);border-radius:4px;padding:0 4px;vertical-align:1px}
+
+  .foot{margin-top:22px;padding-top:14px;border-top:1px solid var(--border);font-size:10.5px;color:var(--ink-faint);line-height:1.7;text-align:center}
+  .foot code{color:var(--ink-muted);font-family:var(--mono)}
+  .foot .new-badge{font-size:8.5px;font-weight:800;letter-spacing:.5px;color:var(--special);
+    background:var(--special-soft);border:1px solid var(--special-line);border-radius:4px;padding:1px 5px}
+  .foot .real-badge{font-size:8.5px;font-weight:800;letter-spacing:.5px;color:var(--success);
+    background:var(--success-soft);border:1px solid var(--success-line);border-radius:4px;padding:1px 5px}
+
+  /* toast — proves a verdict actually round-tripped */
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);z-index:200;
+    display:flex;align-items:center;gap:10px;padding:11px 16px;border-radius:10px;font-size:12px;font-weight:700;
+    background:var(--surface-overlay);border:1px solid var(--border-strong);color:var(--ink);
+    box-shadow:0 18px 40px -14px rgba(0,0,0,.8);opacity:0;pointer-events:none;transition:opacity .2s, transform .2s}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast .gi{font-size:15px}
+  .toast.t-remove{border-color:var(--danger-line)} .toast.t-remove .gi{color:var(--danger)}
+  .toast.t-watch{border-color:var(--warn-line)} .toast.t-watch .gi{color:var(--warn)}
+  .toast.t-approve{border-color:var(--success-line)} .toast.t-approve .gi{color:var(--success)}
+
+  /* grayscale-verify toggle */
+  .gtoggle{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-muted);cursor:pointer;
+    background:var(--surface-panel);border:1px solid var(--border);border-radius:999px;padding:5px 11px;user-select:none}
+  .gtoggle input{accent-color:var(--accent)}
+  body.grayscale{filter:grayscale(1)}
+</style>
+</head>
+<body>
+
+  <!-- ===================== TOP CHROME ===================== -->
+  <div class="topbar">
+    <div class="brand">
+      <span class="mark"><span class="gi" id="brandmark"></span></span>
+      GAW<b>·</b>ModTools <small>Cockpit v2</small>
+    </div>
+    <div class="spacer"></div>
+    <div class="kbhint"><kbd>J</kbd><kbd>K</kbd> nav · <kbd>B</kbd> ban · <kbd>W</kbd> watch · <kbd>↵</kbd> hunt</div>
+    <label class="gtoggle"><input type="checkbox" id="gschk"> grayscale verify</label>
+    <div class="livepill"><span class="ping"></span>LIVE · <b>+247</b> new accts / 24h</div>
+    <div class="poolsync" id="poolsync"><span class="pdot"></span>4 mods online · pool synced 8s ago</div>
+    <div class="me">signed in as <b>mod_owl</b></div>
+  </div>
+
+  <!-- ===================== HERO ROW: firehose + dossier ===================== -->
+  <div class="toprow">
+
+    <!-- ============ SURFACE C — FIREHOSE HUNT (HERO) ============ -->
+    <div>
+      <div class="sectlabel hero"><span class="num">C</span> Firehose hunt-search <span class="hero-tag">★ HERO SURFACE</span></div>
+      <div class="sectnote">Hunt the live stream of new accounts by signal. <b>Search drives curation</b> — tap any in-feed badge to drop that account in here; <kbd style="font-family:var(--mono);font-size:9px;background:var(--surface-panel);border:1px solid var(--border);border-radius:3px;padding:0 4px">J/K</kbd> to walk rows, <kbd style="font-family:var(--mono);font-size:9px;background:var(--surface-panel);border:1px solid var(--border);border-radius:3px;padding:0 4px">B</kbd> to ban the selection.</div>
+
+      <div class="hero-wrap">
+        <!-- command bar -->
+        <div class="cmdbar">
+          <span class="cmd-glyph gi" id="cmdglyph"></span>
+          <div class="cmd-input">
+            <span class="qtok t-age"><span class="k">age</span><span class="op">&lt;</span><span class="v">7d</span><span class="x">×</span></span>
+            <span class="qtok t-vel"><span class="k">velocity</span><span class="op">&gt;</span><span class="v">20/hr</span><span class="x">×</span></span>
+            <span class="qtok t-hist"><span class="k">history</span><span class="op">=</span><span class="v">none</span><span class="x">×</span></span>
+            <span class="cmd-ghost">cluster:* slop&gt;60 team:untouched …</span>
+            <span class="cmd-caret"></span>
+          </div>
+          <button class="cmd-run" id="huntbtn">Hunt&nbsp;<kbd>⏎</kbd></button>
+        </div>
+
+        <!-- toggleable SIGNAL chip rail -->
+        <div class="chiprail">
+          <span class="lbl">signals</span>
+          <span class="schip on"><span class="ic gi" data-gi="clock"></span>New&nbsp;account <span class="n">&lt;7d</span></span>
+          <span class="schip on s-vel"><span class="ic gi" data-gi="tri"></span>Bursting <span class="n">HEAVY</span></span>
+          <span class="schip on s-new"><span class="ic gi" data-gi="spark"></span>No&nbsp;history</span>
+          <span class="schip s-sock"><span class="ic gi" data-gi="cluster"></span>Sock&nbsp;cluster <span class="n">HIGH</span></span>
+          <span class="schip s-slop"><span class="ic gi" data-gi="dtri"></span>Slop <span class="n">&gt;60</span></span>
+          <span class="schip s-team"><span class="ic gi" data-gi="flag"></span>Team-flagged</span>
+          <span class="schip s-untouched"><span class="ic gi" data-gi="eye"></span>Untouched <span class="n">0 mods</span></span>
+          <span class="schip add">+ add signal</span>
+        </div>
+
+        <!-- saved hunts -->
+        <div class="savedhunts">
+          <span class="lbl">saved hunts</span>
+          <span class="shunt active"><span class="star">★</span>Raid&nbsp;throwaways <span class="hits">31</span></span>
+          <span class="shunt"><span class="star">★</span>High-risk · <b style="color:var(--accent)">untouched</b> <span class="hits">14</span></span>
+          <span class="shunt"><span class="star">★</span>What&nbsp;the&nbsp;team&nbsp;touched&nbsp;today <span class="hits">58</span></span>
+          <span class="shunt"><span class="star">★</span>Slop&nbsp;firehose <span class="hits">9</span></span>
+          <span class="shunt">+ save current</span>
+        </div>
+
+        <!-- result-meta strip -->
+        <div class="resmeta">
+          <span><b>31</b> matched</span><span>·</span>
+          <span><span class="danger-c">11</span> with team intel</span><span>·</span>
+          <span><span class="accent-c">14</span> untouched <span style="color:var(--ink-faint)">(the gap)</span></span><span>·</span>
+          <span><span class="special-c">6</span> in active sock cluster</span>
+          <div class="sortby">sort
+            <select aria-label="sort results">
+              <option>Most team flags</option>
+              <option>Risk · highest</option>
+              <option>Untouched first (the gap)</option>
+              <option>Velocity</option>
+              <option>Newest account</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- ranked result rows — RENDERED FROM THE SHARED RECORD MODEL -->
+        <div class="results" id="results"><!-- rows injected by JS --></div>
+
+        <div class="batchbar">
+          <button class="cmd-run" style="text-transform:uppercase">▶ Batch-action 31</button>
+          <span class="hint">apply BAN / WATCH / APPROVE to all matched, or the active sock cluster only</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ SURFACE B — SHARED VERDICT DOSSIER ============ -->
+    <div class="rail">
+      <div>
+        <div class="sectlabel"><span class="num">B</span> Shared-intel verdict header</div>
+        <div class="sectnote" style="margin-bottom:10px">The call on the selected account — <b>recommended verdict + the whole team's memory</b>, inherited at a glance. Every number here is read from the <b>same record</b> the feed badge and firehose row use.</div>
+
+        <div class="dossier" id="dossier"><!-- rendered by JS --></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SURFACE A — IN-FEED SCAN BADGES ===================== -->
+  <div class="feedrow-wrap">
+    <div class="sectlabel"><span class="num">A</span> In-feed scan badges <span class="hero-tag" style="background:var(--special-soft);border-color:var(--special-line);color:var(--special)">over the live GAW feed</span></div>
+    <div class="sectnote">Every post the mod scrolls past carries the intelligence badge. Read the <b>left spine + verdict glyph</b> first — that's the one-fixation call. <b>Hover</b> any badge to explode the cross-mod dossier in place; <b>tap</b> it to drop the account into the firehose above and populate the dossier — try it.</div>
+
+    <div class="feed-frame">
+      <div class="feed-topbar">
+        <span class="gaw-logo">GREAT<b>AWAKENING</b>.win</span>
+        <span class="url">/?sort=new</span>
+        <span class="scan-toggle"><span class="dot"></span>SCAN ON · 6 rows · 3 flagged</span>
+      </div>
+      <div class="feed-list" id="feed"><!-- posts injected by JS --></div>
+    </div>
+  </div>
+
+  <!-- ===================== LEGEND — FROZEN SEVERITY TABLE ===================== -->
+  <div class="legend">
+    <div class="legend-title">Reading the cockpit — ONE invariant severity language across all three surfaces (toggle grayscale above to verify shape survives)</div>
+    <div class="legend-grid">
+      <div class="leg-item"><span class="leg-glyph" style="color:var(--v-remove)"><span class="vg tri"></span></span><div class="leg-txt"><b>Triangle = REMOVE <span class="leg-tint" style="background:var(--v-remove)"></span> danger / red</b><span>High-confidence kill. Spine far-left, hot age + velocity. Canonical verb everywhere: <b style="color:var(--ink-muted)">REMOVE</b>.</span></div></div>
+      <div class="leg-item"><span class="leg-glyph" style="color:var(--v-watch)"><span class="vg dia"></span></span><div class="leg-txt"><b>Diamond = WATCH <span class="leg-tint" style="background:var(--v-watch)"></span> warn / amber</b><span>Needs a look. Heavy cadence or slop, priors unclear. Canonical verb everywhere: <b style="color:var(--ink-muted)">WATCH</b>.</span></div></div>
+      <div class="leg-item"><span class="leg-glyph" style="color:var(--v-approve)"><span class="vg cir"></span></span><div class="leg-txt"><b>Circle = APPROVE <span class="leg-tint" style="background:var(--v-approve)"></span> success / green</b><span>Established, verified or trusted. Calm metrics. Canonical verb everywhere: <b style="color:var(--ink-muted)">APPROVE</b>.</span></div></div>
+      <div class="leg-item"><span class="leg-glyph" style="color:var(--special)"><span class="gi" data-gi="cluster"></span></span><div class="leg-txt"><b>Purple = sock / cluster / cross-mod intel ONLY <span class="leg-new-tag">NEW INTEL</span></b><span>Purple <b style="color:var(--special)">never</b> means a verdict. It marks pooled team knowledge, sock graphs, and IP clusters — nothing else.</span></div></div>
+      <div class="leg-item"><span class="leg-glyph" style="color:var(--special)"><div class="densbar" style="height:11px"><i class="on" style="height:4px"></i><i class="on" style="height:7px"></i><i class="on" style="height:10px"></i></div></span><div class="leg-txt"><b>Density bar = team-knowledge depth <span class="leg-new-tag">NEW INTEL</span></b><span>0 / low / med / high pooled intel per account. Hunt <b style="color:var(--accent)">untouched + high-risk</b> — the real curation gap nobody covers today.</span></div></div>
+      <div class="leg-item"><span class="leg-glyph" style="color:var(--ink-faint)">│</span><div class="leg-txt"><b>Left spine / rail = position</b><span>Risk readable by where the bar sits, before any color registers. Survives grayscale.</span></div></div>
+    </div>
+  </div>
+
+  <!-- ===================== HONEST FOOTER ===================== -->
+  <div class="foot">
+    <strong style="color:var(--ink-muted)">GAW ModTools · COCKPIT v2</strong> — three surfaces, one record per user, the whole team's memory inherited at a glance. <span class="real-badge">LIVE</span>/<span class="new-badge">NEW</span> tags ride each datum inline — no surface invents a number.<br>
+    <span class="real-badge">COMPUTED TODAY</span> <code>account age · modUserCadence velocity (NEW/HEAVY/BURSTING) · scorePostQualityText slop · sock-similarity clusters (HIGH/MED/WATCH) · repeat-offender badge ×N · shadow-triage verdict + confidence · IP-cluster · verified flag</code><br>
+    <span class="new-badge">NEW WORKER / D1</span> <code>the cross-mod pool — team flags · per-user team notes · per-user action log · alt-link graph · saved hunts · team-knowledge density · velocity trend delta — in the existing Bot Raid Shield learning loop</code>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+  /* ===================================================================== */
+  /*  GEOMETRIC GLYPH VOCABULARY — inline SVG, replaces ALL emoji          */
+  /*  (fixes blocker #4: no per-OS/font emoji, single stroke discipline)   */
+  /* ===================================================================== */
+  const GLYPH = {
+    radar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12 19 6"/></svg>',
+    crosshair:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5"/></svg>',
+    clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    tri:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4 22 20H2Z"/></svg>',
+    dtri:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20 2 4h20Z"/></svg>',
+    spark:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 14 9 21 11 14 13 12 20 10 13 3 11 10 9Z"/></svg>',
+    cluster:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><path d="M8 8l3 7M16 8l-3 7"/></svg>',
+    flag:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4h12l-2 4 2 4H5"/></svg>',
+    note:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12H8l-4 4Z"/><path d="M8 9h8M8 12h5"/></svg>',
+    eye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>',
+    ban:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6 18.4 18.4"/></svg>',
+    globe:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>',
+    link:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 15l6-6M8 12l-2 2a3.5 3.5 0 0 0 5 5l2-2M16 12l2-2a3.5 3.5 0 0 0-5-5l-2 2"/></svg>',
+    users:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/></svg>',
+    check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>',
+    warn:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 22 20H2Z"/><path d="M12 9v5M12 17.5v.5"/></svg>',
+    plug:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0Z M12 17v5"/></svg>',
+  };
+  function gi(name){ return GLYPH[name] || ''; }
+  // hydrate any pre-placed glyph hosts
+  document.getElementById('brandmark').innerHTML = gi('radar');
+  document.getElementById('cmdglyph').innerHTML = gi('crosshair');
+  document.querySelectorAll('[data-gi]').forEach(el => el.innerHTML = gi(el.getAttribute('data-gi')));
+
+  /* ===================================================================== */
+  /*  SINGLE SOURCE OF TRUTH — one record per user.                        */
+  /*  Feed badge, firehose row, AND dossier all render from THIS object so  */
+  /*  numbers can NEVER disagree across surfaces (fixes blocker #3).        */
+  /*  src: 'live' = computed today | 'new' = needs new worker/D1 work.      */
+  /* ===================================================================== */
+  const VERDICT = {
+    remove:  { verb:'REMOVE',  glyph:'tri', vgClass:'tri', tint:'danger',  banVerb:'REMOVE' },
+    watch:   { verb:'WATCH',   glyph:'dia', vgClass:'dia', tint:'warn',    banVerb:'WATCH'  },
+    approve: { verb:'APPROVE', glyph:'cir', vgClass:'cir', tint:'success', banVerb:'APPROVE'},
+  };
+
+  // velocity trend: delta over last hour vs prior hour (modUserCadence is live;
+  // the per-hour delta is the NEW intel — cheap, the cadence buckets exist).
+  // density 0..3 = pooled-intel depth (0 = untouched, the curation gap).
+  const USERS = [
+    {
+      id:'patriot1776', uname:'Patriot_Truth_1776', initial:'P', handle:'u/Patriot_Truth_1776',
+      verdict:'remove', confidence:91, verified:false, joined:'4d 6h', ip:'198.51.x',
+      age:'4d', ageBand:'<7d throwaway band', ageTone:'',
+      velocity:'31', velUnit:'/2h', velTone:'hot', velTrend:'up', velDelta:'+19 in last hr', velSpark:[3,5,8,12,19,31],
+      cadence:'BURSTING ~15/hr', slop:83, priorBans:2,
+      density:3, teamFlags:3, teamNotes:2, socksN:4, repeat:2,
+      reason:'<b>Bot-raid signature:</b> 4d-old account · bursting velocity · slop 0.83 · matches a HIGH sockpuppet cluster the team already banned twice.',
+      headline:{ verb:'banned an alt', mod:'mod_raven', target:'@Patriot_Truth_99', detail:'for ban-evasion', when:'2d ago', tone:'danger' },
+      intelLast:{ verb:'banned alt', mod:'mod_raven', you:false, ago:'2d ago', tone:'danger',
+                  quote:'mod_raven: "same copypasta as the Nov raid wave — ban on sight"' },
+      timeline:[
+        {tone:'danger', mod:'mod_raven', cls:'raven', act:'banned alt @Patriot_Truth_99 — ban-evasion', time:'2d ago'},
+        {tone:'note', mod:'mod_owl', cls:'owl', act:'added a team note', time:'2d ago',
+          quote:'"Same copypasta as the Nov raid wave — links to the 198.51 cluster. Ban on sight if it posts again."'},
+        {tone:'sock', mod:'mod_fox', cls:'fox', act:'linked 4 sockpuppets · HIGH similarity', time:'3d ago'},
+        {tone:'warn', mod:'mod_hawk', cls:'hawk', act:'flagged · awaiting verdict', time:'5d ago'},
+      ],
+      socks:[
+        {h:'@Patriot_Truth_99', sim:96, banned:true},
+        {h:'@TruthPatriot76', sim:92, banned:false},
+        {h:'@Q_Patriot_1776', sim:88, banned:false},
+        {h:'@1776_Storm', sim:81, banned:false},
+      ],
+      cluster:'C-7744',
+      post:{ meta:'· 14m ago · in /GreatAwakening', title:'WAKE UP SHEEPLE — they don\'t want you to see THIS [link]',
+        snippet:'drop everything and click here now before it gets deleted!! share share share this is HUGE the storm is coming you won\'t believe what...',
+        foot:'<span><b>2</b> comments</span><span><b>−4</b> points</span><span>scored.co · 3 dupes</span>',
+        ribbon:{type:'sock', text:'SOCK CLUSTER · linked to 4 alts'} },
+    },
+    {
+      id:'freedomeagle', uname:'FreedomEagle_2024x', initial:'F', handle:'u/FreedomEagle_2024x',
+      verdict:'remove', confidence:98, verified:false, joined:'2h', ip:'45.13.x (VPN)',
+      age:'2h', ageBand:'brand-new', ageTone:'',
+      velocity:'47', velUnit:'/hr', velTone:'hot', velTrend:'up', velDelta:'+28 in last hr', velSpark:[2,6,12,19,33,47],
+      cadence:'BURSTING ~47/hr', slop:90, priorBans:0,
+      density:2, teamFlags:2, teamNotes:1, socksN:0, repeat:0,
+      reason:'<b>Fresh raid head:</b> 2h-old VPN account · 47/hr burst · shortlink spam · seed of IP-cluster C-7744 (9 accounts, 14-min window).',
+      headline:{ verb:'watch-listed', mod:'mod_owl', target:'', detail:'as raid-escalation candidate', when:'6h ago', tone:'warn' },
+      intelLast:{ verb:'watch-listed', mod:'mod_owl', you:true, ago:'6h ago', tone:'warn',
+                  quote:'mod_owl: "burst posting from new VPN range — raid escalation likely"' },
+      timeline:[
+        {tone:'warn', mod:'mod_owl', cls:'owl', act:'watch-listed · raid-escalation candidate (you)', time:'6h ago',
+          quote:'"Burst posting from new VPN range — raid escalation likely. Watching the /16."'},
+        {tone:'sock', mod:'mod_hawk', cls:'hawk', act:'tagged into IP-cluster C-7744', time:'5h ago'},
+      ],
+      socks:[],
+      cluster:'C-7744',
+      post:{ meta:'· 8m ago · in /GreatAwakening', title:'CLICK HERE for the REAL truth they\'re hiding 🚨 [bit.ly]',
+        snippet:'limited time only patriots act fast this link expires soon don\'t let them silence us join the real movement at...',
+        foot:'<span><b>0</b> comments</span><span><b>−1</b> points</span><span>scored.co · shortlink</span>',
+        ribbon:{type:'ip', text:'IP CLUSTER · 9 accounts · 14-min window'} },
+    },
+    {
+      id:'freedomdigger', uname:'FreedomDigger_X', initial:'F', handle:'u/FreedomDigger_X',
+      verdict:'watch', confidence:71, verified:false, joined:'3d', ip:'45.13.x (VPN)',
+      age:'3d', ageBand:'<7d', ageTone:'',
+      velocity:'22', velUnit:'/3h', velTone:'', velTrend:'up', velDelta:'+6 in last hr', velSpark:[8,10,13,16,19,22],
+      cadence:'HEAVY ~7/hr', slop:78, priorBans:0,
+      density:0, teamFlags:0, teamNotes:0, socksN:0, repeat:0,
+      reason:'<b>Cluster sibling:</b> shares the C-7744 /16 IP block and 91% content similarity — but no mod has looked at this specific account yet.',
+      cold:true, clusterSibling:true, cluster:'C-7744',
+      post:null, // appears in firehose only (in-cluster), not the top-6 feed mock
+    },
+    {
+      id:'greatawake', uname:'GreatAwake_Now', initial:'G', handle:'u/GreatAwake_Now',
+      verdict:'watch', confidence:68, verified:false, joined:'3d', ip:'45.13.x (VPN)',
+      age:'3d', ageBand:'<7d', ageTone:'',
+      velocity:'19', velUnit:'/2h', velTone:'', velTrend:'flat', velDelta:'steady', velSpark:[14,16,17,18,18,19],
+      cadence:'HEAVY ~9/hr', slop:74, priorBans:0,
+      density:1, teamFlags:1, teamNotes:1, socksN:0, repeat:0,
+      reason:'<b>Cluster sibling:</b> avatar hash matches the banned C-7744 head account, per mod_hawk.',
+      clusterSibling:true, cluster:'C-7744',
+      intelLast:{ verb:'flagged', mod:'mod_hawk', you:false, ago:'19h ago', tone:'danger',
+                  quote:'mod_hawk: "same avatar hash as the banned C-7744 head account"' },
+      timeline:[
+        {tone:'warn', mod:'mod_hawk', cls:'hawk', act:'flagged · avatar-hash match', time:'19h ago',
+          quote:'"Same avatar hash as the banned C-7744 head account. Sibling, not the head."'},
+      ],
+      socks:[],
+      post:null,
+    },
+    {
+      id:'darktolight', uname:'DarkToLight_Q', initial:'D', handle:'u/DarkToLight_Q',
+      verdict:'watch', confidence:55, verified:true, joined:'5d', ip:'72.14.x',
+      age:'5d', ageBand:'<7d', ageTone:'calm',
+      velocity:'21', velUnit:'/4h', velTone:'', velTrend:'down', velDelta:'−4 in last hr', velSpark:[14,18,21,20,18,16],
+      cadence:'BURSTING', slop:41, priorBans:0,
+      density:0, teamFlags:0, teamNotes:0, socksN:0, repeat:0,
+      reason:'<b>Borderline:</b> new-ish but verified, decaying velocity, mid slop. No team intel yet — first mod to look.',
+      cold:true,
+      post:null,
+    },
+    {
+      id:'magagranny', uname:'MAGA_Granny_Sue', initial:'M', handle:'u/MAGA_Granny_Sue',
+      verdict:'approve', confidence:82, verified:true, joined:'3y', ip:'68.40.x',
+      age:'3y', ageBand:'established', ageTone:'good',
+      velocity:'24', velUnit:'/5h', velTone:'calm', velTrend:'flat', velDelta:'steady', velSpark:[20,22,23,24,24,24],
+      cadence:'normal', slop:12, priorBans:0,
+      density:1, teamFlags:0, teamNotes:1, socksN:0, repeat:0,
+      reason:'<b>Cleared:</b> 3-year account · all-substantive history · high velocity but reviewed and left alone by mod_raven.',
+      intelLast:{ verb:'cleared', mod:'mod_raven', you:false, ago:'1d ago', tone:'ok',
+                  quote:'mod_raven: "real grandma — high velocity but all substantive, leave alone"' },
+      timeline:[
+        {tone:'note', mod:'mod_raven', cls:'raven', act:'reviewed & cleared', time:'1d ago',
+          quote:'"Real grandma — high velocity but all substantive. Leave alone."'},
+      ],
+      socks:[],
+      post:{ meta:'· 3h ago · in /GreatAwakening', title:'Daily prayer thread + reminder to stay peaceful out there',
+        snippet:'good morning patriots, dropping the daily thread early today. remember we win by being the calm in the storm. God bless and WWG1WGA...',
+        foot:'<span><b>140</b> comments</span><span><b>+512</b> points</span><span>quality 88</span>',
+        ribbon:null },
+    },
+    {
+      id:'digitalsoldier', uname:'DigitalSoldier88', initial:'D', handle:'u/DigitalSoldier88',
+      verdict:'watch', confidence:78, verified:false, joined:'19d', ip:'24.88.x',
+      age:'19d', ageBand:'recent', ageTone:'',
+      velocity:'14', velUnit:'/hr', velTone:'warm', velTrend:'up', velDelta:'+5 in last hr', velSpark:[6,8,9,11,12,14],
+      cadence:'HEAVY', slop:71, priorBans:0,
+      density:1, teamFlags:0, teamNotes:1, socksN:0, repeat:0,
+      reason:'<b>Low-effort reposter:</b> sourceless Telegram screenshots, heavy cadence, slop 71. One team note, no priors.',
+      intelLast:{ verb:'noted', mod:'mod_fox', you:false, ago:'1d ago', tone:'warn',
+                  quote:'mod_fox: "telegram screenshot mill — warn, don\'t ban yet"' },
+      timeline:[
+        {tone:'note', mod:'mod_fox', cls:'fox', act:'added a team note', time:'1d ago',
+          quote:'"Telegram screenshot mill — warn, don\'t ban yet. Borderline slop."'},
+      ],
+      socks:[],
+      post:{ meta:'· 26m ago · in /Memes', title:'Found this on Telegram, thought you guys should see it',
+        snippet:'no source no context just vibes but it FEELS true and that\'s what matters right anons let me know what you think in the comments below...',
+        foot:'<span><b>11</b> comments</span><span><b>+8</b> points</span><span>slop 71</span>',
+        ribbon:null },
+    },
+    {
+      id:'truenorth', uname:'TrueNorthAwake', initial:'T', handle:'u/TrueNorthAwake',
+      verdict:'watch', confidence:61, verified:false, joined:'6d', ip:'99.20.x',
+      age:'6d', ageBand:'<7d', ageTone:'',
+      velocity:'3', velUnit:'/hr', velTone:'calm', velTrend:'flat', velDelta:'steady', velSpark:[2,3,3,2,3,3],
+      cadence:'normal', slop:36, priorBans:0,
+      density:0, teamFlags:0, teamNotes:0, socksN:2, repeat:0, // sock-SIM candidate, but untouched
+      reason:'<b>New but substantive:</b> sourced election-audit post, calm cadence. Sock-similarity WATCH band (2 candidates) — but no mod has confirmed.',
+      cold:true,
+      post:{ meta:'· 1h ago · in /News', title:'Local report: county election machines flagged for audit (with sources)',
+        snippet:'attaching the official county filing and the local news writeup. happy to answer questions, did my best to verify the dates against the public record...',
+        foot:'<span><b>34</b> comments</span><span><b>+62</b> points</span><span>quality 64</span>',
+        ribbon:{type:'sock', text:'SOCK-SIM · WATCH band · 2 candidates'} },
+    },
+    {
+      id:'rancher', uname:'RedPilledRancher', initial:'R', handle:'u/RedPilledRancher',
+      verdict:'approve', confidence:91, verified:false, joined:'1.8y', ip:'66.12.x',
+      age:'1.8y', ageBand:'established', ageTone:'good',
+      velocity:'5', velUnit:'/day', velTone:'calm', velTrend:'flat', velDelta:'steady', velSpark:[4,5,5,4,5,5],
+      cadence:'normal', slop:21, priorBans:0,
+      density:0, teamFlags:0, teamNotes:0, socksN:0, repeat:0,
+      reason:'<b>Established regular:</b> 1.8-year account, off-topic but on-quality, calm cadence. No team intel — and none needed.',
+      cold:true,
+      post:{ meta:'· 5h ago · in /Off-Topic', title:'Cattle prices update for the week — full breakdown inside',
+        snippet:'posting my weekly notes for anyone running a small operation. feed costs down slightly, here\'s what i\'m seeing at the local auction...',
+        foot:'<span><b>22</b> comments</span><span><b>+47</b> points</span><span>quality 79</span>',
+        ribbon:null },
+    },
+  ];
+  const byId = id => USERS.find(u => u.id === id);
+
+  /* ---- shared render helpers (used by every surface) ------------------ */
+  function vgFor(verdict, sm){ const v=VERDICT[verdict]; return '<span class="vg '+v.vgClass+(sm?'-sm':'')+'"></span>'; }
+  function densBar(d){ // 3-stick mini-bar, d=0..3
+    const h=[4,7,10]; let s='<div class="densbar">';
+    for(let i=0;i<3;i++){ s+='<i class="'+(i<d?'on':'')+'" style="height:'+h[i]+'px"></i>'; }
+    return s+'</div>';
+  }
+  function sparkSVG(arr, tone){ // tiny inline sparkline, width 26
+    const w=26,h=8,max=Math.max(...arr,1),pts=arr.map((v,i)=>{
+      const x=(i/(arr.length-1))*w, y=h-(v/max)*h; return x.toFixed(1)+','+y.toFixed(1);
+    }).join(' ');
+    const col=tone==='up'?'var(--danger)':tone==='down'?'var(--success)':'var(--ink-faint)';
+    return '<svg class="spark" width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none"><polyline points="'+pts+'" fill="none" stroke="'+col+'" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  }
+  function trendArrow(t){ return t==='up'?'▲':t==='down'?'▼':'■'; }
+  function ageToneCls(u){ return u.ageTone==='good'?'good':u.ageTone==='calm'?'calm':''; }
+  function histCls(u){ return u.priorBans>0?'bans':(u.verdict==='approve'?'clean':'none'); }
+  function histVal(u){ return u.priorBans>0?('×'+u.priorBans):(u.verdict==='approve'?'<span class="gi" style="font-size:8px">'+gi('check')+'</span>':'—'); }
+  function densSrc(u){ return u.density===0 ? 'untouched' : (u.teamFlags+' mods'); }
+
+  /* ===================================================================== */
+  /*  SURFACE A — FEED BADGE (rendered from the record)                    */
+  /* ===================================================================== */
+  function renderFeedPost(u){
+    const v=VERDICT[u.verdict];
+    const ribbon = u.post.ribbon ? '<div class="sock-ribbon '+u.post.ribbon.type+'"><span class="gi" data-gi="'+(u.post.ribbon.type==='ip'?'globe':'cluster')+'"></span>'+u.post.ribbon.text+'</div>' : '';
+    // density block on the badge foot
+    const densCls = u.density===0 ? 'd0 untouched' : '';
+    const densLabel = u.density===0 ? '0 mods' : (u.teamFlags||u.teamNotes||u.socksN ? densSrc(u) : '—');
+    const densBlock = '<span class="badge-dens '+densCls+'" title="team-knowledge density">'+densBar(u.density)+'<span class="nmods">'+densLabel+'</span></span>';
+    // hist pill
+    const histPill = u.priorBans>0 ? '<span class="hist-pill ban"><span class="gi" data-gi="ban" style="font-size:9px"></span> ×'+u.priorBans+' bans</span>'
+      : (u.verdict==='approve' && u.verified ? '<span class="hist-pill clean"><span class="gi" style="font-size:9px">'+gi('check')+'</span> trusted</span>'
+      : (u.verdict==='approve' ? '<span class="hist-pill clean"><span class="gi" style="font-size:9px">'+gi('check')+'</span> clean</span>'
+      : '<span class="hist-pill none">no priors</span>'));
+    // pop dossier (real cross-mod intel, or cold-start)
+    const pop = renderPop(u);
+    const verifiedMark = u.verified ? '<span class="verified gi" style="font-size:11px">'+gi('check')+'</span>' : '';
+    return ''+
+    '<div class="post" data-verd="'+u.verdict+'" data-uid="'+u.id+'">'+
+      '<div class="spine"></div>'+
+      '<div class="post-body">'+
+        '<div class="post-head"><div class="avatar">'+u.initial+'</div><span class="uname2">'+u.uname+'</span>'+verifiedMark+'<span class="post-meta">'+u.post.meta+'</span></div>'+
+        '<div class="post-title">'+u.post.title+'</div>'+
+        '<div class="post-snippet">'+u.post.snippet+'</div>'+
+        '<div class="post-foot">'+u.post.foot+'</div>'+
+        '<button class="badge" data-uid="'+u.id+'" aria-label="Open '+u.uname+' in firehose">'+
+          '<div class="badge-verdict">'+vgFor(u.verdict,true)+v.verb+'<span class="vconf">'+u.confidence+'%</span></div>'+
+          '<div class="badge-metrics">'+
+            '<div class="bm"><span class="bm-label">Age</span><span class="bm-value '+(u.ageTone||'')+' tnum">'+u.age+'</span></div>'+
+            '<div class="bm"><span class="bm-label">Velocity</span><span class="bm-value '+u.velTone+' tnum">'+u.velocity+'<small>'+u.velUnit+'</small> <span class="bm-trend '+u.velTrend+'">'+trendArrow(u.velTrend)+'</span></span></div>'+
+          '</div>'+
+          '<div class="badge-foot">'+histPill+densBlock+'</div>'+
+          ribbon+
+        '</button>'+
+        pop+
+      '</div>'+
+    '</div>';
+  }
+
+  function renderPop(u){
+    let inner;
+    if(u.density===0 || (!u.timeline || !u.timeline.length)){
+      inner = '<div class="pop-cold"><span class="gi" data-gi="eye"></span>No mod has touched this account yet — you\'d be the first. '+(u.socksN?('Sock-sim flagged '+u.socksN+' candidates.'):'')+'</div>';
+    } else {
+      const rows = u.timeline.slice(0,3).map(t=>{
+        const avCls = t.tone==='danger'?'r':t.tone==='note'?'o':'w';
+        const ab = t.mod.replace('mod_','').slice(0,2).toUpperCase();
+        const verb = t.tone==='danger' ? '<span class="vb">'+t.act+'</span>' : t.act;
+        const sub = t.quote ? '<div class="pop-tsub">'+t.quote+'</div>' : '';
+        return '<div class="pop-trow"><div class="pop-av '+avCls+'">'+ab+'</div><div class="pop-tmeta"><div class="pop-tline"><span class="mod">'+t.mod+'</span> '+verb+'</div>'+sub+'</div><div class="pop-time">'+t.time.replace(' ago','')+'</div></div>';
+      }).join('');
+      const sockSec = (u.socks && u.socks.length) ? (
+        '<div class="pop-sec"><div class="pop-sec-t"><span class="gi" data-gi="link"></span> Linked accounts <span class="c">'+u.socks.length+' socks</span></div><div class="socks">'+
+        u.socks.slice(0,2).map(s=>'<span class="sock-link'+(s.banned?' banned':'')+'">'+s.h+' <span class="sim">'+s.sim+'%</span></span>').join('')+
+        '</div></div>') : '';
+      inner = '<div class="pop-sec"><div class="pop-sec-t"><span class="gi" data-gi="users"></span> Shared cross-mod intel <span class="c">'+u.teamFlags+' mods · '+u.teamNotes+' notes</span></div>'+rows+'</div>'+sockSec;
+    }
+    return '<div class="pop"><div class="pop-head"><div class="pop-user"><div class="avatar">'+u.initial+'</div><div><div class="pop-uname">'+u.uname+'</div><div class="pop-handle">joined '+u.joined+' ago</div></div><span class="pop-verd v-'+u.verdict+'">'+vgFor(u.verdict,true)+VERDICT[u.verdict].verb+' · '+u.confidence+'%</span></div></div>'+inner+'</div>';
+  }
+
+  /* ===================================================================== */
+  /*  SURFACE C — FIREHOSE ROW (rendered from the record)                  */
+  /* ===================================================================== */
+  function renderRow(u, pos, inCluster){
+    const v=VERDICT[u.verdict];
+    const velTrendRow = '<div class="vtrend '+u.velTrend+'">'+sparkSVG(u.velSpark,u.velTrend)+trendArrow(u.velTrend)+' '+u.velDelta+'</div>';
+    const densCls = u.density===0 ? 'd0' : '';
+    // intel strip
+    let chips='';
+    if(u.teamFlags>0) chips+='<span class="ichip flagged"><span class="gi" data-gi="flag"></span>'+u.teamFlags+' mods flagged</span>';
+    if(u.socksN>0 && u.cluster && !u.clusterSibling) chips+='<span class="ichip socks"><span class="gi" data-gi="cluster"></span>'+u.socksN+' linked socks</span>';
+    if(u.clusterSibling) chips+='<span class="ichip socks"><span class="gi" data-gi="cluster"></span>cluster sibling</span>';
+    if(u.teamNotes>0) chips+='<span class="ichip notes"><span class="gi" data-gi="note"></span>'+u.teamNotes+' team note'+(u.teamNotes>1?'s':'')+'</span>';
+    if(u.density===0) chips+='<span class="ichip action">slop&nbsp;<b>'+u.slop+'</b></span>';
+    // intel last / cold-start
+    let last;
+    if(u.intelLast){
+      const il=u.intelLast;
+      const verbCls = il.tone==='ok' ? 'verb ok' : 'verb';
+      const youTag = il.you ? ' <span style="color:var(--ink-faint)">(you)</span>' : '';
+      last = '<div class="intel-last">last action <span class="'+verbCls+'">'+il.verb+'</span> by <span class="mod">'+il.mod+'</span>'+youTag+'<span class="ago">'+il.ago+'</span></div>';
+      if(il.quote) last += '<div class="intel-quote"'+(il.tone==='ok'?' style="border-color:var(--success)"':'')+'>'+il.quote+'</div>';
+    } else {
+      // cold-start as a POSITIVE first-mover affordance, not an empty box
+      last = '<div class="intel-fresh none"><span class="gi" data-gi="eye"></span>Untouched — be the first mod to flag</div>';
+    }
+    return ''+
+    '<div class="row'+(inCluster?' in-cluster':'')+'" data-uid="'+u.id+'" tabindex="0">'+
+      '<div class="rank"><span class="pos">'+String(pos).padStart(2,'0')+'</span><span class="riskbar r-'+u.verdict+'"></span></div>'+
+      '<div class="idcell">'+
+        '<div class="idline"><span class="uname">'+u.uname+'</span>'+(u.verified?'<span class="vflag gi" style="font-size:11px">'+gi('check')+'</span>':'')+'</div>'+
+        '<div class="scanbadge">'+
+          '<span class="sb sb-age '+ageToneCls(u)+'"><span class="sk">AGE</span>'+u.age+'</span>'+
+          '<span class="sb sb-vel '+u.velTone+'"><span class="sk">VEL</span>'+u.velocity+'<small>'+u.velUnit+'</small>'+velTrendRow+'</span>'+
+          '<span class="sb sb-hist '+histCls(u)+'"><span class="sk">HIST</span>'+histVal(u)+'</span>'+
+          '<span class="sb sb-dens '+densCls+'"><span class="sk">TEAM</span>'+densBar(u.density)+'</span>'+
+          '<span class="sb sb-verd v-'+u.verdict+'">'+vgFor(u.verdict,true)+v.verb+' '+(u.confidence/100).toFixed(2)+'</span>'+
+        '</div>'+
+      '</div>'+
+      '<div class="intelcell"><div class="intel-strip">'+chips+'</div>'+last+'</div>'+
+      '<div class="rowact">'+rowActions(u)+'</div>'+
+    '</div>';
+  }
+  function rowActions(u){
+    if(u.verdict==='remove') return '<button class="abtn ban" data-act="remove" data-uid="'+u.id+'">REMOVE</button><button class="abtn more">⋯</button>';
+    if(u.verdict==='watch') return '<button class="abtn watch" data-act="watch" data-uid="'+u.id+'">WATCH</button><button class="abtn ban" data-act="remove" data-uid="'+u.id+'">REMOVE</button>';
+    return '<button class="abtn ok" data-act="approve" data-uid="'+u.id+'">APPROVE</button><button class="abtn more">⋯</button>';
+  }
+
+  /* ===================================================================== */
+  /*  SURFACE B — DOSSIER (rendered from the record)                       */
+  /*  Confidence, verdict verb, age, velocity all read from the SAME       */
+  /*  record — they CANNOT disagree with the badge or row (blocker #3).    */
+  /* ===================================================================== */
+  let poolDegraded = false; // toggle to demo the D1-unreachable state
+  function renderDossier(u){
+    const v=VERDICT[u.verdict];
+    const repeatBadge = u.repeat>0
+      ? '<span class="ibadge repeat"><span class="gi" data-gi="warn" style="font-size:9px"></span> REPEAT ×'+u.repeat+'</span>' : '';
+    const newOrTrusted = u.verdict==='approve'
+      ? '<span class="ibadge trusted"><span class="gi" style="font-size:9px">'+gi('check')+'</span> '+(u.verified?'VERIFIED':'TRUSTED')+'</span>'
+      : (u.age.indexOf('d')>-1 || u.age.indexOf('h')>-1 ? '<span class="ibadge new"><span class="vg dia-sm"></span> NEW ACCT</span>' : '');
+
+    // stat flags map to severity, not arbitrary purple
+    const ageFlag = u.ageTone==='good' ? 'flag-success' : 'flag-info';
+    const velFlag = u.velTone==='hot' ? 'flag-danger' : u.velTone==='warm' ? 'flag-warn' : 'flag-info';
+    const banFlag = u.priorBans>0 ? 'flag-danger' : 'flag-success';
+    const slopFlag = u.slop>=70 ? 'flag-danger' : u.slop>=40 ? 'flag-warn' : 'flag-success';
+
+    // ---- intel block: full / cold-start / degraded ----
+    let intelBlock;
+    const poolLabel = poolDegraded
+      ? '<span class="pool degraded"><span class="gi" data-gi="plug" style="font-size:9px"></span> D1 pool unreachable — cached</span>'
+      : '<span class="pool">pooled across 4 mods · D1</span>';
+
+    if(poolDegraded){
+      intelBlock =
+        '<div class="pool-degraded"><span class="gi" data-gi="plug"></span><div><div class="pd-h">Shared pool unreachable</div>'+
+        '<div class="pd-b">Worker/D1 didn\'t answer in time. Showing the <b>last cached snapshot (8 min old)</b>. Verdict + velocity below are still LIVE (local compute); team flags/notes may be stale until the pool reconnects.</div></div></div>';
+    } else if(u.density===0){
+      // COLD-START — explicit, designed, "be the first" (blocker #6, want #6)
+      intelBlock =
+        '<div class="coldstart">'+
+          '<div class="cs-h"><span class="gi" data-gi="eye"></span>No pooled intel yet</div>'+
+          '<div class="cs-b">No mod on the team has flagged, noted, or linked <b>'+u.uname+'</b>. The shared pool <b>accretes</b> — your call is the first datum every other mod inherits.'+(u.socksN?(' Sock-similarity already flagged <b>'+u.socksN+' candidates</b> — worth a look.'):'')+'</div>'+
+          '<span class="cs-first"><span class="gi" data-gi="flag"></span>Be the first to flag</span>'+
+        '</div>';
+    } else {
+      const summary =
+        '<div class="intel-summary">'+
+          (u.teamFlags>0?'<span class="schip-int flag"><span class="n tnum">'+u.teamFlags+'</span> mods flagged</span>':'')+
+          (u.teamNotes>0?'<span class="schip-int note"><span class="n tnum">'+u.teamNotes+'</span> team note'+(u.teamNotes>1?'s':'')+'</span>':'')+
+          (u.socksN>0?'<span class="schip-int sock"><span class="n tnum">'+u.socksN+'</span> linked socks</span>':'')+
+        '</div>';
+      let headline='';
+      if(u.headline){
+        const hl=u.headline;
+        const icGlyph = hl.tone==='danger' ? 'ban' : 'eye';
+        headline =
+          '<div class="lastaction"'+(hl.tone==='warn'?' style="background:var(--warn-soft);border-color:var(--warn-line)"':'')+'>'+
+            '<div class="ic"'+(hl.tone==='warn'?' style="background:var(--warn-bg);color:var(--warn-text)"':'')+'><span class="gi" data-gi="'+icGlyph+'"></span></div>'+
+            '<div class="txt"><b>'+hl.verb.charAt(0).toUpperCase()+hl.verb.slice(1)+'</b> '+(hl.target?'<span class="mono" style="color:var(--ink)">'+hl.target+'</span> ':'')+'— <span class="mod"'+(hl.tone==='warn'?' style="color:var(--warn)"':'')+'>'+hl.mod+'</span> '+hl.detail+'</div>'+
+            '<div class="when">'+hl.when+'</div>'+
+          '</div>';
+      }
+      const tl = (u.timeline||[]).map(t=>{
+        const q = t.quote ? '<div class="tl-quote"'+(t.tone==='note'&&u.verdict==='approve'?' style="border-color:var(--success)"':'')+'>'+t.quote+'</div>' : '';
+        return '<div class="tl-item '+t.tone+'"><div class="tl-row"><span class="mod '+t.cls+'">'+t.mod+'</span><span class="act">'+t.act+'</span><span class="time">'+t.time+'</span></div>'+q+'</div>';
+      }).join('');
+      const timeline = tl ? '<div class="timeline">'+tl+'</div>' : '';
+      let socks='';
+      if(u.socks && u.socks.length){
+        socks = '<div class="socks-h"><span class="gi" data-gi="link"></span> Linked accounts · '+u.socks.length+' socks'+(u.cluster?(' · IP cluster '+u.cluster):'')+'</div><div class="socks">'+
+          u.socks.map(s=>'<span class="sock-link'+(s.banned?' banned':'')+'">'+s.h+' <span class="sim">'+s.sim+'%</span></span>').join('')+'</div>';
+      }
+      intelBlock = summary+headline+timeline+socks;
+    }
+
+    const html =
+    '<div class="verdict-banner">'+
+      '<div class="vb-flag"></div>'+
+      '<div class="vb-body">'+
+        '<div class="vb-top">'+
+          '<span class="vb-action">'+vgFor(u.verdict,false)+v.verb+'</span>'+
+          '<span class="vb-pillrec">Recommended</span>'+
+          '<div class="vb-conf"><div class="pct">'+u.confidence+'%</div><div class="lbl">confidence</div></div>'+
+        '</div>'+
+        '<div class="vb-reason">'+u.reason+'</div>'+
+        '<div class="confbar"><i style="width:'+u.confidence+'%"></i></div>'+   /* width DRIVEN by record (blocker #3) */
+      '</div>'+
+    '</div>'+
+    '<div class="ident">'+
+      '<div class="av">'+u.initial+'</div>'+
+      '<div><div class="uname">'+u.uname+'</div>'+
+        '<div class="sub"><span class="mono">'+u.handle+'</span> · joined <span class="mono">'+u.joined+'</span> ago · IP <span class="mono">'+u.ip+'</span></div></div>'+
+      '<div class="ident-badges">'+newOrTrusted+repeatBadge+'</div>'+
+    '</div>'+
+    '<div class="stats">'+
+      '<div class="stat '+ageFlag+'"><div class="k">Account age <span class="src-tag live"><span class="d"></span>LIVE</span></div><div class="v tnum">'+u.age+'</div><div class="vsub">'+u.ageBand+'</div></div>'+
+      '<div class="stat '+velFlag+'"><div class="k">Velocity <span class="src-tag live"><span class="d"></span>LIVE</span></div><div class="v tnum">'+u.velocity+'<small>'+u.velUnit+'</small></div><div class="vsub">'+trendArrow(u.velTrend)+' '+u.velDelta+'</div></div>'+
+      '<div class="stat '+banFlag+'"><div class="k">Prior bans <span class="src-tag '+(u.priorBans>0?'new':'live')+'"><span class="d"></span>'+(u.priorBans>0?'NEW':'LIVE')+'</span></div><div class="v tnum">'+u.priorBans+'</div><div class="vsub">'+(u.priorBans>0?'team-confirmed alts':'no priors')+'</div></div>'+
+      '<div class="stat '+slopFlag+'"><div class="k">Slop score <span class="src-tag live"><span class="d"></span>LIVE</span></div><div class="v tnum">'+u.slop+'</div><div class="vsub">'+u.cadence+'</div></div>'+
+    '</div>'+
+    '<div class="intel">'+
+      '<div class="intel-head"><span class="title"><span class="gi" data-gi="users"></span> Shared mod intelligence <span class="src-tag new"><span class="d"></span>NEW</span></span>'+poolLabel+'</div>'+
+      intelBlock+
+    '</div>'+
+    '<div class="addnote"><input placeholder="Add a team note — visible to every mod…" aria-label="add team note"><button>Post</button></div>'+
+    '<div class="actions">'+
+      '<button class="btn primary" data-act="'+u.verdict+'" data-uid="'+u.id+'">'+vgFor(u.verdict,false)+v.verb+' <span class="kbd">B</span></button>'+
+      (u.verdict!=='watch' ? '<button class="btn warn" data-act="watch" data-uid="'+u.id+'">'+vgFor('watch',true)+' Watch <span class="kbd">W</span></button>' : '<button class="btn approve" data-act="approve" data-uid="'+u.id+'">'+vgFor('approve',true)+' Approve <span class="kbd">A</span></button>')+
+      '<button class="btn ghost"><span class="gi" data-gi="note"></span> Note</button>'+
+    '</div>';
+
+    const dossier = document.getElementById('dossier');
+    dossier.className = 'dossier dv-'+u.verdict;
+    dossier.innerHTML = html;
+    dossier.querySelectorAll('[data-gi]').forEach(el=>el.innerHTML=gi(el.getAttribute('data-gi')));
+  }
+
+  /* ===================================================================== */
+  /*  WIRE-UP — the real badge → firehose → dossier round-trip loop        */
+  /* ===================================================================== */
+  // firehose ordering: top criticals, then the C-7744 cluster kill-list, then the rest
+  const FEED_ORDER = ['patriot1776','freedomeagle','digitalsoldier','truenorth','magagranny','rancher'];
+  const ROW_ORDER  = ['patriot1776','freedomeagle','freedomdigger','greatawake','darktolight','magagranny'];
+  const CLUSTER_AT = 'freedomdigger'; // cluster header injected before this row
+
+  let selectedId = 'patriot1776';
+  let kbIndex = 0; // keyboard cursor over firehose rows
+
+  function paintFeed(){
+    document.getElementById('feed').innerHTML = FEED_ORDER.map(id=>renderFeedPost(byId(id))).join('');
+    document.querySelectorAll('#feed [data-gi]').forEach(el=>el.innerHTML=gi(el.getAttribute('data-gi')));
+  }
+  function paintRows(){
+    let html='', pos=0;
+    ROW_ORDER.forEach(id=>{
+      pos++;
+      if(id===CLUSTER_AT){
+        html += '<div class="clusterhead"><span class="cbadge"><span class="gi" data-gi="cluster"></span> CLUSTER C-7744</span>'+
+          '<span class="txt"><b>6 accounts</b> · 91% content similarity · same /16 IP block · 1 already banned</span>'+
+          '<span class="meta">first seen 3d ago</span></div>';
+      }
+      const inCluster = (id==='freedomdigger' || id==='greatawake');
+      html += renderRow(byId(id), pos, inCluster);
+    });
+    const res=document.getElementById('results');
+    res.innerHTML=html;
+    res.querySelectorAll('[data-gi]').forEach(el=>el.innerHTML=gi(el.getAttribute('data-gi')));
+    syncSelection();
+  }
+  function syncSelection(){
+    document.querySelectorAll('#results .row').forEach((r,i)=>{
+      r.classList.toggle('sel', r.getAttribute('data-uid')===selectedId);
+      r.classList.toggle('kbcur', i===kbIndex);
+    });
+  }
+  function rowEls(){ return Array.from(document.querySelectorAll('#results .row')); }
+
+  function select(id, scroll){
+    if(!byId(id)) return;
+    selectedId=id;
+    const els=rowEls(); const idx=els.findIndex(r=>r.getAttribute('data-uid')===id);
+    if(idx>=0) kbIndex=idx;
+    syncSelection();
+    renderDossier(byId(id));
+    if(scroll){ const el=els[kbIndex]; if(el) el.scrollIntoView({block:'nearest',behavior:'smooth'}); }
+  }
+
+  function toast(verdict, uname){
+    const v=VERDICT[verdict];
+    const t=document.getElementById('toast');
+    t.className='toast show t-'+verdict;
+    t.innerHTML='<span class="gi" data-gi="'+(verdict==='remove'?'ban':verdict==='watch'?'eye':'check')+'"></span>'+v.verb+' applied to <b style="margin:0 2px">'+uname+'</b> · written to shared pool, every mod sees it now';
+    t.querySelectorAll('[data-gi]').forEach(el=>el.innerHTML=gi(el.getAttribute('data-gi')));
+    clearTimeout(t._tm); t._tm=setTimeout(()=>t.classList.remove('show'),2600);
+  }
+  function applyVerdict(verdict, id){
+    const u=byId(id)||byId(selectedId);
+    if(!u) return;
+    toast(verdict, u.uname);
+  }
+
+  /* ---- events ---- */
+  // tap an in-feed BADGE → select in firehose + populate dossier (the headline claim, now real)
+  document.getElementById('feed').addEventListener('click', e=>{
+    const badge=e.target.closest('.badge');
+    if(badge){ e.preventDefault(); const id=badge.getAttribute('data-uid'); select(id, false);
+      document.querySelector('.hero-wrap').scrollIntoView({block:'nearest',behavior:'smooth'}); }
+  });
+  // tap a firehose ROW → select + dossier; row action buttons → apply + toast
+  document.getElementById('results').addEventListener('click', e=>{
+    const actBtn=e.target.closest('[data-act]');
+    if(actBtn){ e.stopPropagation(); applyVerdict(actBtn.getAttribute('data-act'), actBtn.getAttribute('data-uid')); return; }
+    const row=e.target.closest('.row');
+    if(row) select(row.getAttribute('data-uid'), false);
+  });
+  // dossier action buttons → apply + toast
+  document.getElementById('dossier').addEventListener('click', e=>{
+    const actBtn=e.target.closest('[data-act]');
+    if(actBtn) applyVerdict(actBtn.getAttribute('data-act'), actBtn.getAttribute('data-uid'));
+  });
+  // signal chips toggle
+  document.querySelectorAll('.schip:not(.add)').forEach(c=>c.addEventListener('click',()=>c.classList.toggle('on')));
+  // grayscale verify
+  document.getElementById('gschk').addEventListener('change',e=>document.body.classList.toggle('grayscale',e.target.checked));
+
+  // KEYBOARD MODEL — J/K row nav, B ban, W watch, A approve, Enter hunt (want #5)
+  document.addEventListener('keydown', e=>{
+    const tag=(e.target && e.target.tagName || '').toLowerCase();
+    if(tag==='input'||tag==='textarea'||tag==='select') return;
+    const els=rowEls(); if(!els.length) return;
+    const k=e.key.toLowerCase();
+    if(k==='j'){ e.preventDefault(); kbIndex=Math.min(kbIndex+1,els.length-1); select(els[kbIndex].getAttribute('data-uid'),true); }
+    else if(k==='k'){ e.preventDefault(); kbIndex=Math.max(kbIndex-1,0); select(els[kbIndex].getAttribute('data-uid'),true); }
+    else if(k==='b'){ e.preventDefault(); applyVerdict('remove', selectedId); }
+    else if(k==='w'){ e.preventDefault(); applyVerdict('watch', selectedId); }
+    else if(k==='a'){ e.preventDefault(); applyVerdict('approve', selectedId); }
+    else if(k==='enter'){ e.preventDefault(); const b=document.getElementById('huntbtn'); b.style.filter='brightness(1.3)'; setTimeout(()=>b.style.filter='',200); }
+    else if(k==='d'){ /* hidden demo: toggle the degraded D1 state on the dossier */ e.preventDefault(); poolDegraded=!poolDegraded; renderDossier(byId(selectedId)); }
+  });
+  document.getElementById('huntbtn').addEventListener('click',()=>{ /* visual only in proto */ });
+
+  /* ---- boot ---- */
+  paintFeed();
+  paintRows();
+  select('patriot1776', false);
+  </script>
+</body>
+</html>

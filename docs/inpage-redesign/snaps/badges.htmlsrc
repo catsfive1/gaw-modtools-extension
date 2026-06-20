@@ -1,0 +1,111 @@
+<html>
+<head><style>
+.gam-park-btn{background:transparent;border:1px solid #4a5568;color:#a0aec0;padding:2px 6px;border-radius:4px;cursor:pointer;font-size:14px;margin-left:4px}
+.gam-park-btn:hover{background:#2d3748;color:#e2e8f0}
+.gam-shadow-badge{display:inline-flex;align-items:center;padding:2px 8px;margin-left:6px;font-size:11px;font-weight:600;border-radius:10px}
+.gam-shadow-badge[data-action="APPROVE"]{background:#276749;color:#c6f6d5}
+.gam-shadow-badge[data-action="REMOVE"]{background:#9b2c2c;color:#feb2b2}
+.gam-shadow-badge[data-action="WATCH"]{background:#744210;color:#faf089}
+.gam-parked{opacity:.55}
+.gam-parked::before{content:"\23F8 ";color:#f6ad55;margin-right:4px}
+.gam-repeat-halo{display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 4px;border:2px solid #f5a623;border-radius:4px;box-shadow:0 0 0 3px rgba(245,166,35,.18);cursor:pointer;}
+.gam-repeat-badge{display:inline-block;font-size:9px;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;background:#f04040;color:#fff;}
+@keyframes gam-halo-pulse{0%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}50%{box-shadow:0 0 0 6px rgba(245,166,35,.35)}100%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}}
+.gam-repeat-halo--pulse{animation:gam-halo-pulse 600ms ease-out 1;}
+.gam-bar-icon{background:none;border:none;color:#a0aec0;width:22px;height:22px;border-radius:11px;cursor:pointer;font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;transition:background .1s,color .1s,transform .1s;padding:0;position:relative}
+.gam-bar-icon:hover{background:rgba(255,255,255,.08);color:#e2e8f0;transform:scale(1.12)}
+.gam-bar-icon:active{transform:scale(.94)}
+.gam-bar-icon::after{content:'';position:absolute;inset:-5px;pointer-events:auto}
+</style>
+</head>
+<body style="background:#0a0a0b;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:20px;line-height:1.6">
+
+<div style="max-width:900px">
+
+<h2 style="font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0">1. Shadow Badge (AI Queue Recommendation)</h2>
+<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px;background:#1a202c;border-radius:6px;border:1px solid #2d3748">
+  <div style="flex:1;min-width:200px">
+    <span style="display:inline-flex;align-items:center;padding:2px 8px;margin-left:6px;font-size:11px;font-weight:600;border-radius:10px;background:#276749;color:#c6f6d5;data-action:APPROVE;data-gam-shadow-action:APPROVE;data-gam-shadow-confidence:92;title:'Shadow Queue: APPROVE (92%)'">
+      ✓ APPROVE 92%
+    </span>
+  </div>
+  <div style="flex:1;min-width:200px">
+    <span style="display:inline-flex;align-items:center;padding:2px 8px;margin-left:6px;font-size:11px;font-weight:600;border-radius:10px;background:#9b2c2c;color:#feb2b2;data-action:REMOVE;data-gam-shadow-action:REMOVE;data-gam-shadow-confidence:87;title:'Shadow Queue: REMOVE (87%)'">
+      🗑 REMOVE 87%
+    </span>
+  </div>
+  <div style="flex:1;min-width:200px">
+    <span style="display:inline-flex;align-items:center;padding:2px 8px;margin-left:6px;font-size:11px;font-weight:600;border-radius:10px;background:#744210;color:#faf089;data-action:WATCH;data-gam-shadow-action:WATCH;data-gam-shadow-confidence:76;title:'Shadow Queue: WATCH (76%)'">
+      ⏸ WATCH 76%
+    </span>
+  </div>
+</div>
+<p style="font-size:11px;color:#a0aec0;margin-top:8px">Confidence score embedded. Click to reveal why-tooltip (model, provider, prompt version, rules version, timestamp).</p>
+
+<h2 style="font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0">2. Repeat Offender Halo + Badge</h2>
+<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px;background:#1a202c;border-radius:6px;border:1px solid #2d3748">
+  <span style="display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 4px;border:2px solid #f5a623;border-radius:4px;box-shadow:0 0 0 3px rgba(245,166,35,.18);cursor:pointer;role:button;tabindex:0;title:'Click to expand ban history'">
+    <a href="/u/SuspiciousUser" target="_blank" rel="noopener" style="color:inherit;font-weight:700;text-decoration:none">SuspiciousUser</a>
+    <span style="display:inline-block;font-size:9px;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;background:#f04040;color:#fff">
+      ×5
+    </span>
+  </span>
+</div>
+<p style="font-size:11px;color:#a0aec0;margin-top:8px">Animated pulse on first render (600ms ease-out). Wraps username link + ban-count badge. Role=button for accessibility.</p>
+
+<h2 style="font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0">3. New Account Badge (in Drawer Header)</h2>
+<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px;background:#1a202c;border-radius:6px;border:1px solid #2d3748">
+  <p>
+    <span style="display:inline-block;background:rgba(167,139,250,0.15);border:1px solid #a78bfa;color:#a78bfa;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;padding:0 5px;text-transform:uppercase;margin-left:6px">
+      NEW 3d
+    </span>
+  </p>
+</div>
+<p style="font-size:11px;color:#a0aec0;margin-top:8px">Appended to drawer header p tag when profile.is_new_account = true. Shows account age in days.</p>
+
+<h2 style="font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0">4. Park ⏸ Button (per-row injection)</h2>
+<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px;background:#1a202c;border-radius:6px;border:1px solid #2d3748">
+  <button style="background:transparent;border:1px solid #4a5568;color:#a0aec0;padding:2px 6px;border-radius:4px;cursor:pointer;font-size:14px;margin-left:4px;data-gam-action:park;data-gam-park-kind:user;data-gam-park-subject:BadActor">
+    ⏸
+  </button>
+</div>
+<p style="font-size:11px;color:#a0aec0;margin-top:8px">Injected into actions cell on Triage, /queue, /u/*, /p/*, modmail threads. Triggers openParkModal on click (document delegate).</p>
+
+<h2 style="font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0">5. Senior Status-Bar Park Chip</h2>
+<div style="display:flex;gap:12px;align-items:center;padding:8px 10px;background:rgba(12,14,18,.95);border:1px solid #2d3748;border-radius:14px;backdrop-filter:blur(16px);position:relative">
+  <button id="gam-v80-park-chip" style="background:none;border:none;color:#a0aec0;width:22px;height:22px;border-radius:11px;cursor:pointer;font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;padding:0;title:'Parked items awaiting senior review'" class="gam-bar-icon">
+    ⏸ 7
+  </button>
+</div>
+<p style="font-size:11px;color:#a0aec0;margin-top:8px">Mounted on #gam-status-bar. Shows count. Click toggles parked-items popover. Visible only for lead mods when park feature on.</p>
+
+<h2 style="font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0">6. Park Modal (on button click)</h2>
+<div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1a202c;color:#e2e8f0;padding:18px 20px;border-radius:6px;border:1px solid #4a5568;min-width:380px;max-width:520px;role:dialog;aria-modal:true;aria-label:'Park for senior review'">
+  <div style="fontWeight:600;marginBottom:10px;fontSize:14px">
+    Park user BadUser for senior review
+  </div>
+  <label style="display:block;fontSize:11px;color:#a0aec0;marginBottom:4px">Senior review note</label>
+  <textarea style="width:100%;padding:6px 8px;background:#0f1419;color:#e2e8f0;border:1px solid #4a5568;border-radius:4px;fontFamily:inherit;fontSize:12px;rows:4;maxlength:200;placeholder:'needs senior review'">needs senior review</textarea>
+  <div style="display:flex;gap:8px;justifyContent:flex-end;marginTop:12px">
+    <button class="gam-btn" style="background:#2d3748;color:#e2e8f0;border:1px solid #4a5568;padding:6px 12px;border-radius:4px;cursor:pointer">Cancel</button>
+    <button class="gam-btn gam-btn-accent" style="background:#4a9eff;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer">⏸ Park</button>
+  </div>
+  <div role="status" aria-live="polite" style="fontSize:11px;color:#a0aec0;marginTop:6px"></div>
+</div>
+<p style="font-size:11px;color:#a0aec0;margin-top:8px">Modal with textarea (autofocused). Tab order: textarea → Cancel → Park. Focus-trapped. Overlay at rgba(0,0,0,0.65).</p>
+
+<h2 style="font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0">7. Parked Row (visual dimming)</h2>
+<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px;background:#1a202c;border-radius:6px;border:1px solid #2d3748;opacity:.55">
+  <span style="color:#f6ad55">⏸</span> BadUser — marked as parked for review
+</div>
+<p style="font-size:11px;color:#a0aec0;margin-top:8px">Class .gam-parked: opacity 55%, ::before pseudo adds ⏸ icon in amber. Applied to row.closest('.gam-t-row, .post, .comment, .mail, [data-gam-queue-row]') after park succeeds.</p>
+
+<h2 style="font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0">8. Shadow Badge "Why?" Tooltip</h2>
+<div style="display:block;margin-left:6px;font-size:10px;color:#a0aec0;background:#0f1419;padding:4px 6px;border-radius:3px;max-width:300px">
+  model=claude-opus-4 · provider=anthropic · prompt=v3.2.1 · rules=v2.8.0 · at=2026-06-19T14:32:15.847Z
+</div>
+<p style="font-size:11px;color:#a0aec0;margin-top:8px">Span.gam-shadow-why. Hidden by default (display:none). Click badge to toggle visibility. Contains provenance from payload.</p>
+
+</div>
+</body>
+</html>

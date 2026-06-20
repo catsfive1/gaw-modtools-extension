@@ -1,0 +1,95 @@
+{
+  "wp": "WP-13",
+  "summary": "Top Banners (auth-fail + ext-orphaned) migrated onto one token system. (1) ext-orphaned banner inline cssText: raw hex (#2a1d10/#ffd84d/#7a7672/#9b9892/#0a0a0b), var(--bb-amber), and the rgba feedback fills route to GAM_TOK; magic z-index 99999999 -> --z-toast. (2) auth-fail banner: __authBannerSeverity opaque .95 rgba bgs become severity-soft tints + solid severity borders mapped to GAM_TOK (info/warn/danger); z-index 2147483640 -> --z-toast; #fff / #a02020 / rgba(255,255,255,.x) button + container literals -> GAM_TOK; title cssText hex-free. (3) The AUTHORITATIVE auth-fail CSS block (26045-26076), which currently overrides the inline styles via !important and pulls from the parallel --bb-* system, is rewritten onto var(--gam-tok-*): severity-aware [data-severity] backgrounds (severity-soft + colored 3px left keyline + 1px severity border), title color reconciled to the token severity, and one shared button treatment with explicit hover/focus-visible + a disabled-state visual (auth-fail's btnRetry sets disabled with no feedback today). Net: both banners token-driven, no raw rgba/hex outside GAM_TOK, no dual style system, z-literals on the ladder. All locked selectors restyled in place, never renamed; no accessible-name textContent changed.",
+  "lockedSelectors": [
+    "#gam-auth-fail-banner",
+    "#gam-auth-fail-banner button",
+    "#gam-ext-orphaned-banner",
+    "#gam-ext-orphaned-copy",
+    "#gam-ext-orphaned-reload",
+    "#gam-ext-orphaned-dismiss",
+    "[data-severity]"
+  ],
+  "edits": [
+    {
+      "oldString": "      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999999;background:#2a1d10;border-bottom:1px solid var(--bb-amber);color:#ffd84d;font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:8px 14px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 2px 8px rgba(0,0,0,0.6)';",
+      "newString": "      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:var(--z-toast,9999999);background:'+GAM_TOK.warnSoft+';border-bottom:1px solid '+GAM_TOK.warn+';color:'+GAM_TOK.warn+';font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:8px 14px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 2px 8px '+GAM_TOK.scrim;",
+      "note": "Ext-orphaned shell: magic z-index 99999999 -> --z-toast ladder tier (inline can reference the CSS var here because it is a numeric z-index, not a color; safe per the brief's z-mapping). Hardcoded #2a1d10 warm-brown bg + var(--bb-amber) border + #ffd84d text collapse onto the warn token family (warnSoft bg + warn border/keyline + warn text) = severity-soft notification shell consistent with WP-03. rgba(0,0,0,0.6) shadow -> GAM_TOK.scrim. Kills the --bb-amber dependency + all raw hex on this line."
+    },
+    {
+      "oldString": "        '<button id=\"gam-ext-orphaned-copy\" style=\"background:transparent;border:1px solid #7a7672;color:#ffd84d;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase\" title=\"Copy debug details to clipboard\">📋 Copy</button>' +",
+      "newString": "        '<button id=\"gam-ext-orphaned-copy\" class=\"gam-toast-btn\" style=\"background:transparent;border:1px solid '+GAM_TOK.borderStrong+';color:'+GAM_TOK.warn+';padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase\" title=\"Copy debug details to clipboard\">📋 Copy</button>' +",
+      "note": "Copy button: #7a7672 ghost border -> borderStrong, #ffd84d text -> warn token (matches banner family). Adds shared .gam-toast-btn class for the one button treatment (hover/focus/disabled handled in CSS). Locked id #gam-ext-orphaned-copy + textContent untouched."
+    },
+    {
+      "oldString": "        '<button id=\"gam-ext-orphaned-reload\" style=\"background:var(--bb-amber);border:none;color:#0a0a0b;padding:4px 12px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase\">Reload page</button>' +",
+      "newString": "        '<button id=\"gam-ext-orphaned-reload\" class=\"gam-toast-btn gam-toast-btn--primary\" style=\"background:'+GAM_TOK.accent+';border:none;color:'+GAM_TOK.onAccentDark+';padding:4px 12px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase\">Reload page</button>' +",
+      "note": "Primary reload button: var(--bb-amber) fill -> GAM_TOK.accent (single amber), #0a0a0b text -> onAccentDark (WCAG black-on-amber 9.86). Shared .gam-toast-btn + --primary modifier. Locked id + 'Reload page' accessible name preserved."
+    },
+    {
+      "oldString": "        '<button id=\"gam-ext-orphaned-dismiss\" style=\"background:transparent;border:1px solid #7a7672;color:#9b9892;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase\">Dismiss</button>'; /* v.next a11y: border 2.5:1 -> 4.1:1 */",
+      "newString": "        '<button id=\"gam-ext-orphaned-dismiss\" class=\"gam-toast-btn\" style=\"background:transparent;border:1px solid '+GAM_TOK.borderStrong+';color:'+GAM_TOK.inkMuted+';padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase\">Dismiss</button>'; /* v.next a11y: border 2.5:1 -> 4.1:1 */",
+      "note": "Dismiss button: #7a7672 border -> borderStrong, #9b9892 (legacy ink-muted) -> GAM_TOK.inkMuted (WCAG-bumped #b0b5bc wins per brief 2.2). Shared .gam-toast-btn class. Locked id + 'Dismiss' name preserved."
+    },
+    {
+      "oldString": "          copy.style.background = via ? 'rgba(61,214,140,0.18)' : 'rgba(240,64,64,0.18)';",
+      "newString": "          copy.style.background = via ? GAM_TOK.successSoft : GAM_TOK.dangerSoft;",
+      "note": "Copy-feedback fills: raw success/danger rgba -> successSoft/dangerSoft tokens (the .18 alpha collapses to the canonical .12 soft tokens; visually equivalent tint, removes raw rgba)."
+    },
+    {
+      "oldString": "            try { copy.textContent = orig; copy.style.background = 'transparent'; } catch (_) {}",
+      "newString": "            try { copy.textContent = orig; copy.style.background = 'transparent'; } catch (_) {} /* WP-13: revert to transparent; styled bg handled by .gam-toast-btn */",
+      "note": "No color literal here (transparent is a keyword, not hex); annotated only to document the toast-btn revert path. Kept verbatim aside from trailing comment so the array stays self-consistent and the oldString is unambiguous."
+    },
+    {
+      "oldString": "        bg: 'rgba(74, 158, 255, .95)',\r\n        borderColor: 'rgba(170, 210, 255, .35)',",
+      "newString": "        bg: GAM_TOK.infoSoft,\r\n        borderColor: GAM_TOK.info,",
+      "note": "Auth-fail SETUP tier (no_token/short_token): opaque blue .95 fill -> infoSoft tint + solid info border. Authoritative bg/border come from the CSS [data-severity='setup'] rule below; inline kept hex-free as the var()-unsafe fallback."
+    },
+    {
+      "oldString": "        bg: 'rgba(217, 197, 36, .95)',\r\n        borderColor: 'rgba(255, 240, 150, .35)',",
+      "newString": "        bg: GAM_TOK.warnSoft,\r\n        borderColor: GAM_TOK.warn,",
+      "note": "Auth-fail CONNECTIVITY tier (fetch_failed/no_response): yellow .95 -> warnSoft tint + warn border. Routes onto the single warn token (the brief's caution/watch language)."
+    },
+    {
+      "oldString": "        bg: 'rgba(240, 160, 64, .95)',\r\n        borderColor: 'rgba(255, 220, 150, .35)',",
+      "newString": "        bg: GAM_TOK.warnSoft,\r\n        borderColor: GAM_TOK.warn,",
+      "note": "Auth-fail CREDENTIAL tier (whoami_status/whoami_empty): amber .95 -> warnSoft + warn. Both connectivity and credential are caution-class; they remain distinguishable by kind/title + the per-severity CSS keyline, not by a bespoke rgba."
+    },
+    {
+      "oldString": "      bg: 'rgba(220, 40, 40, .95)',\r\n      borderColor: 'rgba(255, 255, 255, .15)',",
+      "newString": "      bg: GAM_TOK.dangerSoft,\r\n      borderColor: GAM_TOK.danger,",
+      "note": "Auth-fail UNKNOWN/catch-all tier: opaque red .95 -> dangerSoft tint + solid danger border (#f04040 WCAG-bumped token wins over the old #dc2828). 6-space indent (return object, not nested in an if) keeps this oldString distinct from the indented tiers above."
+    },
+    {
+      "oldString": "      b.style.cssText = [\r\n        'position:fixed','top:8px','right:8px','z-index:2147483640',\r\n        'max-width:380px','padding:10px 12px','background:' + _sev.bg,\r\n        'color:#fff','font:12px/1.45 -apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif',\r\n        'border-radius:8px','box-shadow:0 4px 16px rgba(0,0,0,.5)',\r\n        'border:1px solid ' + _sev.borderColor\r\n      ].join(';');",
+      "newString": "      b.style.cssText = [\r\n        'position:fixed','top:8px','right:8px','z-index:var(--z-toast,9999999)',\r\n        'max-width:380px','padding:10px 12px','background:' + _sev.bg,\r\n        'color:'+GAM_TOK.ink,'font:12px/1.45 -apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif',\r\n        'border-radius:8px','box-shadow:0 4px 16px ' + GAM_TOK.scrim,\r\n        'border:1px solid ' + _sev.borderColor\r\n      ].join(';');",
+      "note": "Auth-fail shell: magic z-index 2147483640 -> --z-toast tier; #fff body text -> GAM_TOK.ink (CSS rule still wins via !important, but inline is now hex-free); rgba(0,0,0,.5) shadow -> GAM_TOK.scrim. _sev.bg/_sev.borderColor now carry tokens from __authBannerSeverity edits above."
+    },
+    {
+      "oldString": "      title.style.cssText = 'font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:6px';",
+      "newString": "      title.style.cssText = 'font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:6px;color:'+GAM_TOK.ink;",
+      "note": "Title inline gets an explicit ink color so the inline layer is self-consistent; the authoritative per-severity title color is set by the CSS [data-severity] > div:first-child rules (reconciles the prior CSS-var(--bb-red) vs inline mismatch called out in transformation #4)."
+    },
+    {
+      "oldString": "      btnRetry.style.cssText = 'padding:4px 10px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.15);color:#fff;border-radius:4px;cursor:pointer;font:inherit';",
+      "newString": "      btnRetry.className = 'gam-toast-btn';\r\n      btnRetry.style.cssText = 'padding:4px 10px;border:1px solid '+GAM_TOK.borderStrong+';background:'+GAM_TOK.surfaceOverlay+';color:'+GAM_TOK.ink+';border-radius:4px;cursor:pointer;font:inherit';",
+      "note": "Force re-hydrate button: translucent-white border/bg -> borderStrong + surfaceOverlay well, #fff text -> ink. Adds .gam-toast-btn so it inherits the shared hover/focus-visible/disabled treatment (this is the button that sets disabled with zero feedback today)."
+    },
+    {
+      "oldString": "        btnOpen.style.cssText = 'padding:4px 10px;border:1px solid #fff;background:#fff;color:#a02020;border-radius:4px;cursor:pointer;font:inherit;font-weight:700';",
+      "newString": "        btnOpen.className = 'gam-toast-btn gam-toast-btn--primary';\r\n        btnOpen.style.cssText = 'padding:4px 10px;border:1px solid '+GAM_TOK.accent+';background:'+GAM_TOK.accent+';color:'+GAM_TOK.onAccentDark+';border-radius:4px;cursor:pointer;font:inherit;font-weight:700';",
+      "note": "Open ModTools popup (primary CTA): white fill + #a02020 maroon text -> accent fill + onAccentDark text (single amber, WCAG-clean). .gam-toast-btn--primary modifier for the shared primary treatment."
+    },
+    {
+      "oldString": "      btnDismiss.style.cssText = 'padding:4px 10px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;border-radius:4px;cursor:pointer;font:inherit;opacity:.85';",
+      "newString": "      btnDismiss.className = 'gam-toast-btn';\r\n      btnDismiss.style.cssText = 'padding:4px 10px;border:1px solid '+GAM_TOK.border+';background:transparent;color:'+GAM_TOK.inkMuted+';border-radius:4px;cursor:pointer;font:inherit';",
+      "note": "Dismiss button: translucent-white border -> border token, #fff @ .85 opacity -> inkMuted (proper muted text instead of opacity hack). .gam-toast-btn shared class."
+    },
+    {
+      "oldString": "#gam-auth-fail-banner {\r\n  background: var(--bb-panel) !important;\r\n  border: 1px solid var(--bb-red) !important;\r\n  border-radius: var(--bb-r) !important;\r\n  box-shadow: 0 0 0 1px var(--bb-red-bg), 0 8px 24px rgba(0,0,0,0.6) !important;\r\n  font: var(--bb-t-sm)/1.4 var(--bb-font) !important;\r\n  color: var(--bb-ink) !important;\r\n  padding: var(--bb-s4) var(--bb-s5) !important;\r\n  max-width: 380px;\r\n}\r\n#gam-auth-fail-banner > div:first-child {\r\n  color: var(--bb-red) !important;\r\n  font-weight: 600 !important;\r\n  text-transform: uppercase;\r\n  letter-spacing: 0.06em;\r\n  font-size: var(--bb-t-xs);\r\n}\r\n#gam-auth-fail-banner button {\r\n  background: var(--bb-bg) !important;\r\n  border: 1px solid var(--bb-line-hot) !important;\r\n  border-radius: var(--bb-r) !important;\r\n  color: var(--bb-ink) !important;\r\n  font: var(--bb-t-xs)/1 var(--bb-font) !important;\r\n  padding: var(--bb-s2) var(--bb-s4) !important;\r\n  text-transform: uppercase;\r\n  letter-spacing: 0.04em;\r\n}\r\n#gam-auth-fail-banner button:hover {\r\n  background: var(--bb-amber-bg) !important;\r\n  border-color: var(--bb-amber) !important;\r\n  color: var(--bb-amber) !important;\r\n}",
+      "newString": "#gam-auth-fail-banner {\r\n  /* WP-13: single token system. Floating notification shell: surface-panel base, border-strong, scrim shadow. Severity background + keyline + title color are set per [data-severity] below so the inline _sev tint actually surfaces (no more CSS-var vs inline-rgba mismatch). */\r\n  background: var(--gam-tok-surface-panel, #181b20) !important;\r\n  border: 1px solid var(--gam-tok-border-strong, #3a3f48) !important;\r\n  border-left-width: 3px !important;\r\n  border-radius: var(--bb-r) !important;\r\n  box-shadow: 0 8px 24px var(--gam-tok-scrim, rgba(0,0,0,0.6)) !important;\r\n  font: var(--bb-t-sm)/1.4 var(--bb-font) !important;\r\n  color: var(--gam-tok-ink, #e8e6e1) !important;\r\n  padding: var(--bb-s4) var(--bb-s5) !important;\r\n  max-width: 380px;\r\n}\r\n#gam-auth-fail-banner[data-severity='setup'] {\r\n  background: var(--gam-tok-info-soft, rgba(74,158,255,0.10)) !important;\r\n  border-color: var(--gam-tok-info, #7cb8ff) !important;\r\n}\r\n#gam-auth-fail-banner[data-severity='connectivity'],\r\n#gam-auth-fail-banner[data-severity='credential'] {\r\n  background: var(--gam-tok-warn-soft, rgba(240,160,64,0.12)) !important;\r\n  border-color: var(--gam-tok-warn, #f0a040) !important;\r\n}\r\n#gam-auth-fail-banner[data-severity='unknown'] {\r\n  background: var(--gam-tok-danger-soft, rgba(240,64,64,0.12)) !important;\r\n  border-color: var(--gam-tok-danger, #f04040) !important;\r\n}\r\n#gam-auth-fail-banner > div:first-child {\r\n  /* Title color reconciled to token severity (base danger; overridden per tier). */\r\n  color: var(--gam-tok-danger, #f04040) !important;\r\n  font-weight: 600 !important;\r\n  text-transform: uppercase;\r\n  letter-spacing: 0.06em;\r\n  font-size: var(--bb-t-xs);\r\n}\r\n#gam-auth-fail-banner[data-severity='setup'] > div:first-child {\r\n  color: var(--gam-tok-info, #7cb8ff) !important;\r\n}\r\n#gam-auth-fail-banner[data-severity='connectivity'] > div:first-child,\r\n#gam-auth-fail-banner[data-severity='credential'] > div:first-child {\r\n  color: var(--gam-tok-warn, #f0a040) !important;\r\n}\r\n#gam-auth-fail-banner button {\r\n  /* One shared toast-button treatment. */\r\n  background: var(--gam-tok-surface-overlay, #252a31) !important;\r\n  border: 1px solid var(--gam-tok-border-strong, #3a3f48) !important;\r\n  border-radius: var(--bb-r) !important;\r\n  color: var(--gam-tok-ink, #e8e6e1) !important;\r\n  font: var(--bb-t-xs)/1 var(--bb-font) !important;\r\n  padding: var(--bb-s2) var(--bb-s4) !important;\r\n  text-transform: uppercase;\r\n  letter-spacing: 0.04em;\r\n  transition: background .12s, border-color .12s, color .12s, opacity .12s;\r\n}\r\n#gam-auth-fail-banner button:hover {\r\n  background: var(--gam-tok-accent-soft, rgba(255,153,51,0.10)) !important;\r\n  border-color: var(--gam-tok-accent, #ff9933) !important;\r\n  color: var(--gam-tok-accent, #ff9933) !important;\r\n}\r\n#gam-auth-fail-banner button:focus-visible {\r\n  outline: 2px solid var(--gam-tok-focus-ring, #ff9933) !important;\r\n  outline-offset: 2px !important;\r\n}\r\n#gam-auth-fail-banner button:disabled {\r\n  opacity: 0.5 !important;\r\n  cursor: default !important;\r\n  background: var(--gam-tok-surface-sunken, #050507) !important;\r\n  border-color: var(--gam-tok-border, #2a2f38) !important;\r\n  color: var(--gam-tok-ink-faint, #7a7672) !important;\r\n}",
+      "note": "Authoritative auth-fail CSS rewritten onto var(--gam-tok-*): kills the parallel --bb-panel/--bb-red/--bb-red-bg/--bb-ink/--bb-bg/--bb-line-hot/--bb-amber/--bb-amber-bg dependency (the dual style system). Adds [data-severity] severity-soft backgrounds + 3px colored left keyline + matching border + reconciled title color (transformation #1,#2,#4). Adds the missing button :focus-visible AND :disabled visual (transformation #3 — btnRetry sets disabled with zero feedback today). --bb-r (radius), --bb-t-* (type) and --bb-font are layout/type tokens, not colors, and are out of WP-13's color-migration scope, so they stay. rgba(0,0,0,0.6) shadow + the red ring-shadow collapse into the single scrim shadow. The locked selectors #gam-auth-fail-banner and '#gam-auth-fail-banner button' are restyled in place, never renamed; data-severity attr (set by JS at b.dataset.severity) is now wired to visible CSS variants."
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+<div id="gam-backdrop" style="position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:9999994;opacity:1"></div>
+<div id="gam-mc-panel" class="gam-modal" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(1);z-index:9999995;background:#0c0e12;border:1px solid #3a3f48;border-radius:8px;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e8e6e1;opacity:1;box-shadow:0 24px 48px rgba(0,0,0,.6);max-height:85vh;max-width:95vw;display:flex;flex-direction:column;overflow:hidden;width:680px">
+  <div class="gam-modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #2a2f38;background:linear-gradient(180deg, #181b20 0%, #0c0e12 100%)">
+    <div class="gam-modal-title" style="flex:1;font-weight:700;font-size:13px;letter-spacing:.1px">
+      <div class="gam-mc-titlebar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="gam-mc-shield" style="font-size:18px">🛡️</span>
+        <span class="gam-mc-user" style="font-size:15px;font-weight:700;color:#e8e6e1">@username_target</span>
+        <span class="gam-mc-pills" style="display:inline-flex;gap:6px;flex-wrap:wrap;margin-left:6px">
+          <span class="gam-mc-pill gam-mc-pill-watch" style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(255,214,10,.12);color:#ffd60a;border:1px solid rgba(255,214,10,.25)">👀 WATCHED</span>
+          <span class="gam-mc-pill gam-mc-pill-ban" style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(240,64,64,.12);color:#f04040;border:1px solid rgba(240,64,64,.25)">🔨 3 prior bans</span>
+          <span class="gam-mc-pill gam-mc-pill-verified" style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(61,214,140,.12);color:#44dd66;border:1px solid rgba(61,214,140,.25)">✓✓ verified banned</span>
+        </span>
+      </div>
+    </div>
+    <button class="gam-modal-pin" style="background:none;border:none;color:#5a5752;font-size:14px;cursor:pointer;padding:0 6px;line-height:1;margin-right:4px;transition:color .15s;min-height:32px;box-sizing:border-box" title="Toggle dock position">📌</button>
+    <button class="gam-modal-close" style="background:none;border:none;color:#5a5752;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1;transition:color .1s,background .1s;border-radius:4px;min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box" onclick="closeAllPanels()">&times;</button>
+  </div>
+  <div class="gam-mc-body" style="display:flex;flex-direction:column;min-height:0">
+    <div class="gam-mc-tabs" style="display:flex;gap:4px;padding:0 0 8px 0;border-bottom:1px solid #2a2f38;margin-bottom:10px;flex-wrap:wrap">
+      <button class="gam-mc-tab gam-mc-tab-active" data-tab="intel" data-num="1" style="background:#4A9EFF;border:1px solid #4A9EFF;border-radius:4px;padding:5px 12px;color:#fff;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box">📊 Intel</button>
+      <button class="gam-mc-tab" data-tab="ban" data-num="2" style="background:transparent;border:1px solid #2a2f38;border-radius:4px;padding:5px 12px;color:#9b9892;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box">2·BAN</button>
+      <button class="gam-mc-tab" data-tab="note" data-num="3" style="background:transparent;border:1px solid #2a2f38;border-radius:4px;padding:5px 12px;color:#9b9892;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box">3·NOTE</button>
+      <button class="gam-mc-tab" data-tab="message" data-num="4" style="background:transparent;border:1px solid #2a2f38;border-radius:4px;padding:5px 12px;color:#9b9892;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box">4·MESSAGE</button>
+      <button class="gam-mc-tab" data-tab="quick" data-num="5" style="background:transparent;border:1px solid #2a2f38;border-radius:4px;padding:5px 12px;color:#9b9892;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box">5·QUICK</button>
+      <button class="gam-mc-tab" data-tab="opdel" data-num="6" style="background:transparent;border:1px solid #2a2f38;border-radius:4px;padding:5px 12px;color:#9b9892;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box">6·OP DELETES</button>
+    </div>
+    <div class="gam-mc-panels" style="flex:1;overflow:hidden">
+      <div class="gam-mc-panel" style="overflow-y:auto;padding:12px">
+        <!-- INTEL TAB CONTENT (active) -->
+        <div class="gam-mc-section" style="margin-bottom:12px">
+          <div class="gam-mc-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px">
+            <div class="gam-mc-stat" style="background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px;text-align:center">
+              <div class="gam-mc-stat-v" style="font-size:18px;font-weight:700;line-height:1;color:#e8e6e1;letter-spacing:-.4px">3</div>
+              <div class="gam-mc-stat-l" style="font-size:9px;color:#5a5752;text-transform:uppercase;letter-spacing:.5px;margin-top:4px">Posts</div>
+            </div>
+            <div class="gam-mc-stat" style="background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px;text-align:center">
+              <div class="gam-mc-stat-v" style="font-size:18px;font-weight:700;line-height:1;color:#e8e6e1;letter-spacing:-.4px">12</div>
+              <div class="gam-mc-stat-l" style="font-size:9px;color:#5a5752;text-transform:uppercase;letter-spacing:.5px;margin-top:4px">Comments</div>
+            </div>
+            <div class="gam-mc-stat" style="background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px;text-align:center">
+              <div class="gam-mc-stat-v" style="font-size:18px;font-weight:700;line-height:1;color:#44dd66;letter-spacing:-.4px">42</div>
+              <div class="gam-mc-stat-l" style="font-size:9px;color:#5a5752;text-transform:uppercase;letter-spacing:.5px;margin-top:4px">Days Old</div>
+            </div>
+            <div class="gam-mc-stat" style="background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px;text-align:center">
+              <div class="gam-mc-stat-v" style="font-size:18px;font-weight:700;line-height:1;color:#5a5752;letter-spacing:-.4px">18%</div>
+              <div class="gam-mc-stat-l" style="font-size:9px;color:#5a5752;text-transform:uppercase;letter-spacing:.5px;margin-top:4px">Risk</div>
+            </div>
+          </div>
+        </div>
+        <div class="gam-mc-section" style="margin-bottom:12px">
+          <div class="gam-mc-h" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9b9892;margin-bottom:6px">Recent Activity</div>
+          <div class="gam-mc-summary-raw" style="font-size:11px;color:#5a5752;padding:8px;background:#181b20;border:1px solid #2a2f38;border-radius:4px;white-space:pre-wrap;line-height:1.5">Last post 2 days ago. Moderate engagement.</div>
+        </div>
+        <div class="gam-mc-section" style="margin-bottom:12px">
+          <div class="gam-mc-h" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9b9892;margin-bottom:6px">Mod Notes</div>
+          <div style="font-size:11px;color:#e8e6e1;background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px">Flagged for monitoring per operation X123. Investigate further.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

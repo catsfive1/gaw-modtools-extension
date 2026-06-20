@@ -1,0 +1,1747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GAW ModTools in-page UI — CURRENT (before redesign)</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; padding: 0; background: #0a0a0b; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    color: #e8eaed;
+    padding: 64px 24px 80px;
+  }
+  .legend {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    background: rgba(12,14,18,0.96); backdrop-filter: blur(10px);
+    border-bottom: 1px solid #2a2f38; padding: 10px 18px;
+    font-size: 12px; font-weight: 700; letter-spacing: 0.3px;
+    color: #ff9933; box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+  }
+  .legend small { color: #8b929e; font-weight: 500; margin-left: 8px; }
+  .gallery { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+  .snap-card { background: #0c0e12; border: 1px solid #2a2f38; border-radius: 8px; overflow: hidden; }
+  .snap-title {
+    margin: 0; padding: 12px 16px; font-size: 14px; font-weight: 700; color: #e8eaed;
+    border-bottom: 1px solid #2a2f38;
+    background: linear-gradient(180deg, #181b20 0%, #0c0e12 100%); letter-spacing: 0.2px;
+  }
+  .snap-key {
+    font-size: 10px; font-weight: 600; color: #5c6370;
+    font-family: ui-monospace, 'JetBrains Mono', Consolas, monospace;
+    margin-left: 8px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .snap-frame-wrap { background: #0a0a0b; }
+  .snap-frame { display: block; width: 100%; height: 560px; border: 0; background: #0a0a0b; }
+</style>
+</head>
+<body>
+  <div class="legend">GAW ModTools in-page UI — CURRENT (before redesign)<small>14 component snapshots · BEFORE baseline, styles preserved verbatim</small></div>
+  <div class="gallery">
+  <section class="snap-card">
+    <h2 class="snap-title">Mod Console Shell + Tabs + Backdrop <span class="snap-key">modconsole-shell</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="Mod Console Shell + Tabs + Backdrop" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body><div id=&quot;gam-backdrop&quot; style=&quot;position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:9999994;opacity:1&quot;></div>
+<div id=&quot;gam-mc-panel&quot; class=&quot;gam-modal&quot; style=&quot;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(1);z-index:9999995;background:#0c0e12;border:1px solid #3a3f48;border-radius:8px;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e8e6e1;opacity:1;box-shadow:0 24px 48px rgba(0,0,0,.6);max-height:85vh;max-width:95vw;display:flex;flex-direction:column;overflow:hidden;width:680px&quot;>
+  <div class=&quot;gam-modal-header&quot; style=&quot;display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #2a2f38;background:linear-gradient(180deg, #181b20 0%, #0c0e12 100%)&quot;>
+    <div class=&quot;gam-modal-title&quot; style=&quot;flex:1;font-weight:700;font-size:13px;letter-spacing:.1px&quot;>
+      <div class=&quot;gam-mc-titlebar&quot; style=&quot;display:flex;align-items:center;gap:10px;flex-wrap:wrap&quot;>
+        <span class=&quot;gam-mc-shield&quot; style=&quot;font-size:18px&quot;>🛡️</span>
+        <span class=&quot;gam-mc-user&quot; style=&quot;font-size:15px;font-weight:700;color:#e8e6e1&quot;>@username_target</span>
+        <span class=&quot;gam-mc-pills&quot; style=&quot;display:inline-flex;gap:6px;flex-wrap:wrap;margin-left:6px&quot;>
+          <span class=&quot;gam-mc-pill gam-mc-pill-watch&quot; style=&quot;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(255,214,10,.12);color:#ffd60a;border:1px solid rgba(255,214,10,.25)&quot;>👀 WATCHED</span>
+          <span class=&quot;gam-mc-pill gam-mc-pill-ban&quot; style=&quot;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(240,64,64,.12);color:#f04040;border:1px solid rgba(240,64,64,.25)&quot;>🔨 3 prior bans</span>
+          <span class=&quot;gam-mc-pill gam-mc-pill-verified&quot; style=&quot;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(61,214,140,.12);color:#44dd66;border:1px solid rgba(61,214,140,.25)&quot;>✓✓ verified banned</span>
+        </span>
+      </div>
+    </div>
+    <button class=&quot;gam-modal-pin&quot; style=&quot;background:none;border:none;color:#5a5752;font-size:14px;cursor:pointer;padding:0 6px;line-height:1;margin-right:4px;transition:color .15s;min-height:32px;box-sizing:border-box&quot; title=&quot;Toggle dock position&quot;>📌</button>
+    <button class=&quot;gam-modal-close&quot; style=&quot;background:none;border:none;color:#5a5752;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1;transition:color .1s,background .1s;border-radius:4px;min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box&quot; onclick=&quot;closeAllPanels()&quot;>&amp;times;</button>
+  </div>
+  <div class=&quot;gam-mc-body&quot; style=&quot;display:flex;flex-direction:column;min-height:0&quot;>
+    <div class=&quot;gam-mc-tabs&quot; style=&quot;display:flex;gap:4px;padding:0 0 8px 0;border-bottom:1px solid #2a2f38;margin-bottom:10px;flex-wrap:wrap&quot;>
+      <button class=&quot;gam-mc-tab gam-mc-tab-active&quot; data-tab=&quot;intel&quot; data-num=&quot;1&quot; style=&quot;background:#4A9EFF;border:1px solid #4A9EFF;border-radius:4px;padding:5px 12px;color:#fff;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box&quot;>📊 Intel</button>
+      <button class=&quot;gam-mc-tab&quot; data-tab=&quot;ban&quot; data-num=&quot;2&quot; style=&quot;background:transparent;border:1px solid #2a2f38;border-radius:4px;padding:5px 12px;color:#9b9892;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box&quot;>2·BAN</button>
+      <button class=&quot;gam-mc-tab&quot; data-tab=&quot;note&quot; data-num=&quot;3&quot; style=&quot;background:transparent;border:1px solid #2a2f38;border-radius:4px;padding:5px 12px;color:#9b9892;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box&quot;>3·NOTE</button>
+      <button class=&quot;gam-mc-tab&quot; data-tab=&quot;message&quot; data-num=&quot;4&quot; style=&quot;background:transparent;border:1px solid #2a2f38;border-radius:4px;padding:5px 12px;color:#9b9892;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box&quot;>4·MESSAGE</button>
+      <button class=&quot;gam-mc-tab&quot; data-tab=&quot;quick&quot; data-num=&quot;5&quot; style=&quot;background:transparent;border:1px solid #2a2f38;border-radius:4px;padding:5px 12px;color:#9b9892;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box&quot;>5·QUICK</button>
+      <button class=&quot;gam-mc-tab&quot; data-tab=&quot;opdel&quot; data-num=&quot;6&quot; style=&quot;background:transparent;border:1px solid #2a2f38;border-radius:4px;padding:5px 12px;color:#9b9892;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box&quot;>6·OP DELETES</button>
+    </div>
+    <div class=&quot;gam-mc-panels&quot; style=&quot;flex:1;overflow:hidden&quot;>
+      <div class=&quot;gam-mc-panel&quot; style=&quot;overflow-y:auto;padding:12px&quot;>
+        <!-- INTEL TAB CONTENT (active) -->
+        <div class=&quot;gam-mc-section&quot; style=&quot;margin-bottom:12px&quot;>
+          <div class=&quot;gam-mc-stats&quot; style=&quot;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px&quot;>
+            <div class=&quot;gam-mc-stat&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px;text-align:center&quot;>
+              <div class=&quot;gam-mc-stat-v&quot; style=&quot;font-size:18px;font-weight:700;line-height:1;color:#e8e6e1;letter-spacing:-.4px&quot;>3</div>
+              <div class=&quot;gam-mc-stat-l&quot; style=&quot;font-size:9px;color:#5a5752;text-transform:uppercase;letter-spacing:.5px;margin-top:4px&quot;>Posts</div>
+            </div>
+            <div class=&quot;gam-mc-stat&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px;text-align:center&quot;>
+              <div class=&quot;gam-mc-stat-v&quot; style=&quot;font-size:18px;font-weight:700;line-height:1;color:#e8e6e1;letter-spacing:-.4px&quot;>12</div>
+              <div class=&quot;gam-mc-stat-l&quot; style=&quot;font-size:9px;color:#5a5752;text-transform:uppercase;letter-spacing:.5px;margin-top:4px&quot;>Comments</div>
+            </div>
+            <div class=&quot;gam-mc-stat&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px;text-align:center&quot;>
+              <div class=&quot;gam-mc-stat-v&quot; style=&quot;font-size:18px;font-weight:700;line-height:1;color:#44dd66;letter-spacing:-.4px&quot;>42</div>
+              <div class=&quot;gam-mc-stat-l&quot; style=&quot;font-size:9px;color:#5a5752;text-transform:uppercase;letter-spacing:.5px;margin-top:4px&quot;>Days Old</div>
+            </div>
+            <div class=&quot;gam-mc-stat&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px;text-align:center&quot;>
+              <div class=&quot;gam-mc-stat-v&quot; style=&quot;font-size:18px;font-weight:700;line-height:1;color:#5a5752;letter-spacing:-.4px&quot;>18%</div>
+              <div class=&quot;gam-mc-stat-l&quot; style=&quot;font-size:9px;color:#5a5752;text-transform:uppercase;letter-spacing:.5px;margin-top:4px&quot;>Risk</div>
+            </div>
+          </div>
+        </div>
+        <div class=&quot;gam-mc-section&quot; style=&quot;margin-bottom:12px&quot;>
+          <div class=&quot;gam-mc-h&quot; style=&quot;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9b9892;margin-bottom:6px&quot;>Recent Activity</div>
+          <div class=&quot;gam-mc-summary-raw&quot; style=&quot;font-size:11px;color:#5a5752;padding:8px;background:#181b20;border:1px solid #2a2f38;border-radius:4px;white-space:pre-wrap;line-height:1.5&quot;>Last post 2 days ago. Moderate engagement.</div>
+        </div>
+        <div class=&quot;gam-mc-section&quot; style=&quot;margin-bottom:12px&quot;>
+          <div class=&quot;gam-mc-h&quot; style=&quot;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9b9892;margin-bottom:6px&quot;>Mod Notes</div>
+          <div style=&quot;font-size:11px;color:#e8e6e1;background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px&quot;>Flagged for monitoring per operation X123. Investigate further.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div></body></html>"></iframe>
+    </div>
+  </section>
+  <section class="snap-card">
+    <h2 class="snap-title">Intel Tab (renderIntelTab) <span class="snap-key">intel-tab</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="Intel Tab (renderIntelTab)" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body>
+<div class=&quot;gam-mc-intel-2col&quot; style=&quot;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start&quot;>
+  <div class=&quot;gam-mc-intel-col gam-mc-intel-col-left&quot; style=&quot;display:flex;flex-direction:column;gap:10px;min-width:0&quot;>
+    <div class=&quot;gam-mc-intel-compact&quot; style=&quot;display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:#181b20;border:1px solid #2a2f38;border-radius:4px;margin-bottom:12px&quot;>
+      <div id=&quot;gam-mc-intel-summary&quot; style=&quot;color:#e8eaed&quot;>
+        <div class=&quot;gam-mc-chips&quot; style=&quot;display:flex;flex-wrap:wrap;gap:4px&quot;>
+          <span class=&quot;gam-mc-chip&quot; style=&quot;display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:#252a31;color:#8b929e;border:1px solid #2a2f38&quot;>🕐 3 months</span>
+          <span class=&quot;gam-mc-chip&quot; style=&quot;display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:#252a31;color:#8b929e;border:1px solid #2a2f38&quot;>📝 1,247 posts</span>
+          <span class=&quot;gam-mc-chip&quot; style=&quot;display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:#252a31;color:#8b929e;border:1px solid #2a2f38&quot;>💬 3,891 comments</span>
+          <span class=&quot;gam-mc-chip gam-mc-chip-ok&quot; style=&quot;display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(61,214,140,.12);color:#3dd68c;border:1px solid rgba(61,214,140,.25)&quot;>🔨 0 bans</span>
+          <span class=&quot;gam-mc-chip gam-mc-chip-ok&quot; style=&quot;display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(61,214,140,.12);color:#3dd68c;border:1px solid rgba(61,214,140,.25)&quot;>🗑 0 removes</span>
+          <span class=&quot;gam-mc-chip&quot; style=&quot;display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:#252a31;color:#8b929e;border:1px solid #2a2f38&quot;>📋 2 notes</span>
+          <span class=&quot;gam-mc-chip gam-mc-chip-ok&quot; style=&quot;display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(61,214,140,.12);color:#3dd68c;border:1px solid rgba(61,214,140,.25)&quot;>not banned</span>
+        </div>
+      </div>
+      <div id=&quot;gam-mc-intel-score&quot; style=&quot;color:#e8eaed&quot;>
+        <div class=&quot;gam-mc-score-dense&quot; style=&quot;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:#e8eaed&quot;>
+          <span class=&quot;gam-mc-chip gam-mc-chip-ok&quot; style=&quot;display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(61,214,140,.12);color:#3dd68c;border:1px solid rgba(61,214,140,.25)&quot;>CLEAN</span>
+          <span class=&quot;gam-mc-score-dim&quot; style=&quot;color:#5c6370;font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:10px&quot;>score 8 · 15 recent · avg 24w</span>
+        </div>
+      </div>
+      <div id=&quot;gam-mc-intel-note&quot; style=&quot;color:#e8eaed&quot;>
+        <div class=&quot;gam-mc-note-inline&quot; style=&quot;padding:8px 10px;background:rgba(74,158,255,.08);border:1px solid rgba(74,158,255,.2);border-radius:4px;color:#e8eaed;font-size:12px;line-height:1.45&quot;>
+          <b style=&quot;color:#4A9EFF;margin-right:4px&quot;>📋 Latest note (2 total):</b> User shows consistent high-effort engagement. Flagged as trusted contributor. — PatriotMod · 2 days ago
+        </div>
+      </div>
+    </div>
+    <div class=&quot;gam-mc-section&quot; style=&quot;margin-bottom:12px&quot;>
+      <div class=&quot;gam-mc-h&quot; style=&quot;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#8b929e;margin-bottom:6px&quot;>📌 Reported comment</div>
+      <div class=&quot;gam-mc-evidence-text&quot; style=&quot;margin-bottom:4px;color:#e8eaed;font-style:italic;line-height:1.45&quot;>&quot;This is a critical piece of information about the latest Q drop that everyone needs to read...&quot;</div>
+      <a class=&quot;gam-mc-evidence-link&quot; href=&quot;#&quot; target=&quot;_blank&quot; style=&quot;display:inline-block;margin-top:4px;font-size:10px;color:#4A9EFF;text-decoration:none&quot;>🔗 view post</a>
+    </div>
+    <div class=&quot;gam-mc-section&quot; style=&quot;margin-bottom:12px&quot;>
+      <div class=&quot;gam-mc-h&quot; style=&quot;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#8b929e;margin-bottom:6px&quot;>Local mod history</div>
+      <div id=&quot;gam-mc-intel-hist&quot;>
+        <div class=&quot;gam-mc-hist-row&quot; style=&quot;display:grid;grid-template-columns:140px 1fr auto;gap:8px;padding:6px 0;border-bottom:1px solid #2a2f38;font-size:11px;align-items:center&quot;>
+          <span class=&quot;gam-mc-hist-type&quot; style=&quot;font-weight:600;color:#e8eaed&quot;>📌 Note</span>
+          <span class=&quot;gam-mc-hist-v&quot; style=&quot;color:#8b929e&quot;>Great contributor</span>
+          <span class=&quot;gam-mc-hist-t&quot; style=&quot;color:#5c6370;font-size:10px&quot;>2d ago</span>
+        </div>
+        <div class=&quot;gam-mc-hist-row&quot; style=&quot;display:grid;grid-template-columns:140px 1fr auto;gap:8px;padding:6px 0;border-bottom:none;font-size:11px;align-items:center&quot;>
+          <span class=&quot;gam-mc-hist-type&quot; style=&quot;font-weight:600;color:#e8eaed&quot;>🔍 Note</span>
+          <span class=&quot;gam-mc-hist-v&quot; style=&quot;color:#8b929e&quot;>High effort posts</span>
+          <span class=&quot;gam-mc-hist-t&quot; style=&quot;color:#5c6370;font-size:10px&quot;>5d ago</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class=&quot;gam-mc-intel-col gam-mc-intel-col-right&quot; style=&quot;display:flex;flex-direction:column;gap:10px;min-width:0&quot;>
+    <div class=&quot;gam-mc-ai-reply&quot; id=&quot;gam-mc-intel-ai-wrap&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-left:3px solid #a78bfa;border-radius:4px;padding:10px 12px;margin:10px 0&quot;>
+      <div class=&quot;gam-mc-ai-header&quot; style=&quot;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;font-weight:700;color:#a78bfa&quot;>
+        <span>🤖 AI Sidebar Conformity Check</span>
+        <select class=&quot;gam-mc-ai-engine&quot; id=&quot;gam-intel-ai-engine&quot; style=&quot;background:#252a31;border:1px solid #2a2f38;border-radius:4px;color:#8b929e;font-size:11px;padding:3px 6px;margin-left:auto&quot;>
+          <option value=&quot;llama3&quot; selected>Llama 3 (free, CF Worker)</option>
+          <option value=&quot;grok&quot;>Grok / xAI</option>
+        </select>
+        <button class=&quot;gam-btn gam-mc-ai-btn&quot; id=&quot;gam-intel-ai-go&quot; style=&quot;font-size:11px;padding:4px 10px;margin-left:4px;background:#4A9EFF;color:#fff;border:none;border-radius:4px;cursor:pointer&quot;>🧠 Analyze comments</button>
+      </div>
+      <div id=&quot;gam-intel-ai-out&quot; style=&quot;display:none;margin-top:8px;display:flex;flex-direction:column;gap:6px&quot;>
+        <textarea class=&quot;gam-input gam-textarea gam-mc-ai-text&quot; id=&quot;gam-intel-ai-text&quot; rows=&quot;6&quot; readonly placeholder=&quot;AI analysis will appear here...&quot; style=&quot;font-size:11px;line-height:1.5;color:#e8eaed;background:#0f1114;resize:vertical;border:1px solid #2a2f38;border-radius:4px;padding:8px;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif&quot;>Comment [1]: Excellent breakdown of Q drop #4567...
+Comment [2]: This connects to the earlier research...
+
+ANALYSIS:
+All comments demonstrate high-effort, Q-aligned engagement. No rule violations detected. User maintains civil tone and provides evidence-based reasoning. Overall conformity: COMPLIANT.</textarea>
+        <div style=&quot;display:flex;gap:6px;margin-top:4px&quot;>
+          <button class=&quot;gam-btn gam-mc-ai-use&quot; id=&quot;gam-intel-ai-copy&quot; style=&quot;font-size:11px;padding:4px 10px;background:#4A9EFF;color:#fff;border:none;border-radius:4px;cursor:pointer&quot;>📋 Copy</button>
+        </div>
+      </div>
+      <div id=&quot;gam-intel-ai-err&quot; class=&quot;gam-mc-banner gam-mc-banner-red&quot; style=&quot;display:none;padding:8px 12px;border-radius:4px;font-size:12px;margin-top:10px;line-height:1.4;background:rgba(240,64,64,.1);color:#f04040;border:1px solid rgba(240,64,64,.25)&quot;></div>
+    </div>
+    <div id=&quot;gam-mc-modnote-mount&quot;>
+      <div class=&quot;gam-mc-note&quot; style=&quot;margin-top:10px;padding-top:10px;border-top:1px solid #2a2f38&quot;>
+        <label class=&quot;gam-mc-note-label&quot; style=&quot;display:block;font-size:11px;font-weight:600;color:#8b929e;margin-bottom:4px&quot;>Mods-only note
+          <span class=&quot;gam-mc-note-hint&quot; style=&quot;color:#5c6370;font-weight:400&quot;>(visible only to mods; auto-saves on blur)</span>
+        </label>
+        <textarea class=&quot;gam-mc-note-ta&quot; style=&quot;width:100%;min-height:60px;background:#181b20;color:#e8eaed;border:1px solid #2a2f38;border-radius:4px;padding:6px 8px;font:12px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;resize:vertical;box-sizing:border-box;outline:none;transition:border-color .15s&quot; placeholder=&quot;Leave a short note for other mods about this user...&quot;>Potential watchlist candidate. Consistent high-effort contributions. Check profile activity monthly.</textarea>
+        <div class=&quot;gam-mc-note-status&quot; style=&quot;font-size:10px;color:#5c6370;margin-top:4px;min-height:14px&quot;>saved</div>
+      </div>
+    </div>
+    <div id=&quot;gam-mc-ai-explain-wrap&quot; style=&quot;margin-top:8px;position:relative&quot;>
+      <button id=&quot;gam-mc-ai-explain-btn&quot; class=&quot;gam-btn&quot; title=&quot;Ask AI why this user is suspicious (Llama, 80% cheaper than Grok)&quot; style=&quot;background:rgba(255,153,51,0.08);border:1px solid rgba(255,153,51,0.35);color:#ff9933;width:100%;padding:6px 12px;border-radius:4px;font-weight:600;cursor:pointer;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-size:12px&quot;>✨ AI Explain</button>
+    </div>
+    <div class=&quot;gam-mc-intel-tip&quot; style=&quot;font-size:10px;color:#5c6370;margin-top:10px;padding:6px 10px;background:rgba(74,158,255,.05);border-left:2px solid #4A9EFF;border-radius:3px&quot;>💡 Hovering any username anywhere on GAW now shows this same intel instantly.</div>
+  </div>
+</div>
+</body></html>"></iframe>
+    </div>
+  </section>
+  <section class="snap-card">
+    <h2 class="snap-title">Ban Tab + Custom History <span class="snap-key">ban-tab</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="Ban Tab + Custom History" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body><div class=&quot;gam-mc-panel&quot; data-dock=&quot;right&quot; style=&quot;position:fixed;top:0;bottom:0;max-width:95vw;background:#181b20;z-index:9999988;display:flex;flex-direction:column;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e8eaed;transition:transform .2s ease-out,width .2s ease-out;padding-bottom:56px;box-sizing:border-box&quot;>
+  <div class=&quot;gam-mc-head&quot; style=&quot;display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #2a2f38;background:#181b20;min-height:44px;box-sizing:border-box&quot;>
+    <span style=&quot;font-weight:700;font-size:13px&quot;>🔨 BAN jsmith (Repeat offender)</span>
+    <button class=&quot;gam-mc-close&quot; style=&quot;background:none;border:none;color:#5c6370;font-size:20px;cursor:pointer;padding:2px 8px;line-height:1;border-radius:4px;transition:color .1s,background .1s&quot;>✕</button>
+  </div>
+
+  <div style=&quot;flex:1;overflow-y:auto;padding:14px 12px&quot;>
+    <!-- Evidence Section -->
+    <div class=&quot;gam-mc-evidence&quot; style=&quot;background:#252a31;border:1px solid #2a2f38;border-left:3px solid #4A9EFF;border-radius:4px;padding:8px 12px;margin-bottom:10px;font-size:12px&quot;>
+      <div class=&quot;gam-mc-evidence-label&quot; style=&quot;font-size:10px;font-weight:700;color:#5c6370;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px&quot;>📎 Evidence (comment c123abc)</div>
+      <div class=&quot;gam-mc-evidence-text&quot; style=&quot;color:#e8eaed;font-style:italic;line-height:1.45&quot;>&quot;This is a sample comment that violates rule policy and should be moderated immediately...&quot;</div>
+      <a class=&quot;gam-mc-evidence-link&quot; href=&quot;#&quot; target=&quot;_blank&quot; style=&quot;display:inline-block;margin-top:4px;font-size:10px;color:#4A9EFF;text-decoration:none&quot;>🔗 open in new tab</a>
+    </div>
+
+    <!-- Repeat Offender Banner -->
+    <div class=&quot;gam-mc-banner gam-mc-banner-red&quot; style=&quot;padding:8px 12px;border-radius:4px;font-size:12px;margin-top:10px;line-height:1.4;background:rgba(240,64,64,.1);color:#f04040;border:1px solid rgba(240,64,64,.25)&quot;>
+      ⚠️ Repeat offender: 2 prior bans on file. Durations auto-escalate.
+    </div>
+
+    <!-- Violation Type Field -->
+    <div class=&quot;gam-mc-field&quot; style=&quot;margin-bottom:12px;margin-top:12px&quot;>
+      <label style=&quot;display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px&quot;>Violation type</label>
+      <select class=&quot;gam-input&quot; id=&quot;mc-ban-viol&quot; style=&quot;width:100%;background:#252a31;border:1px solid #2a2f38;border-radius:4px;color:#e8eaed;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 10px;outline:none;box-sizing:border-box;transition:border-color .15s&quot;>
+        <option value=&quot;&quot;>-- Select violation --</option>
+        <option value=&quot;doxxing&quot;>🚨 Doxing / Personal Info</option>
+        <option value=&quot;incivility&quot;>🚫 Incivility / Divisive Language</option>
+        <option value=&quot;self_promo&quot;>💰 Self-Promotion / PAYtriot</option>
+        <option value=&quot;doomer_shill&quot;>🤡 Doomer / Shill / Low-Effort</option>
+        <option value=&quot;fringe&quot;>🔭 Off-Topic / Fringe Conspiracy</option>
+        <option value=&quot;grief_mods&quot;>📢 Griefing Mods / Modmail Bypass</option>
+        <option value=&quot;duplicate&quot;>♻️ Duplicate / Low-Quality Post</option>
+        <option value=&quot;clickbait&quot;>🎬 Clickbait / Fame-Fagging</option>
+        <option value=&quot;cross_win&quot;>🌐 Bad Conduct on Other .WINs</option>
+        <option value=&quot;other&quot;>✏️ Other (Custom)</option>
+      </select>
+    </div>
+
+    <!-- Custom History (hidden by default) -->
+    <div class=&quot;gam-mc-field&quot; id=&quot;mc-ban-custom-hist-wrap&quot; style=&quot;display:none;margin-bottom:12px&quot;>
+      <label style=&quot;display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px&quot;>📋 Previous custom messages (click to use)</label>
+      <div id=&quot;mc-ban-custom-hist&quot; class=&quot;gam-mc-custom-hist&quot; style=&quot;display:flex;flex-direction:column;gap:4px;max-height:130px;overflow-y:auto;margin-top:6px&quot;>
+        <div class=&quot;gam-mc-custom-hist-item&quot; data-idx=&quot;0&quot; title=&quot;Previous custom ban reason from 2 weeks ago about rule violations&quot; style=&quot;background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:5px 8px;font-size:11px;color:#8b929e;cursor:pointer;line-height:1.4;transition:border-color .1s,color .1s&quot;>
+          Previous custom ban reason from 2 weeks ago about…
+        </div>
+        <div class=&quot;gam-mc-custom-hist-item&quot; data-idx=&quot;1&quot; title=&quot;Another previous message discussing inappropriate content patterns&quot; style=&quot;background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:5px 8px;font-size:11px;color:#8b929e;cursor:pointer;line-height:1.4;transition:border-color .1s,color .1s&quot;>
+          Another previous message discussing inappropriate content…
+        </div>
+      </div>
+    </div>
+
+    <!-- Subject Field -->
+    <div class=&quot;gam-mc-field&quot; style=&quot;margin-bottom:12px&quot;>
+      <label style=&quot;display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px&quot;>Subject (sent to user)</label>
+      <input type=&quot;text&quot; class=&quot;gam-input&quot; id=&quot;mc-ban-subj&quot; placeholder=&quot;Subject line...&quot; style=&quot;width:100%;background:#252a31;border:1px solid #2a2f38;border-radius:4px;color:#e8eaed;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 10px;outline:none;box-sizing:border-box;transition:border-color .15s&quot; value=&quot;Rule Violation: Incivility / Divisive Language&quot;>
+    </div>
+
+    <!-- Team Macros Field -->
+    <div class=&quot;gam-mc-field&quot; style=&quot;margin-bottom:12px&quot;>
+      <label style=&quot;display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px&quot;>📝 Team macros (shared) <span style=&quot;color:#666;font-weight:400;font-size:10px&quot;>— manage in popup</span></label>
+      <select class=&quot;gam-input&quot; id=&quot;mc-ban-macro-pick&quot; style=&quot;width:100%;background:#252a31;border:1px solid #2a2f38;border-radius:4px;color:#e8eaed;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 10px;outline:none;box-sizing:border-box;transition:border-color .15s&quot;>
+        <option value=&quot;&quot;>-- Pick a team macro --</option>
+      </select>
+    </div>
+
+    <!-- Message Textarea -->
+    <div class=&quot;gam-mc-field&quot; style=&quot;margin-bottom:12px&quot;>
+      <label style=&quot;display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px&quot;>📝 Message — post URL auto-prepended ✓</label>
+      <textarea class=&quot;gam-input gam-textarea&quot; id=&quot;mc-ban-msg&quot; rows=&quot;7&quot; placeholder=&quot;Ban reason / message to user...&quot; style=&quot;width:100%;background:#252a31;border:1px solid #2a2f38;border-radius:4px;color:#e8eaed;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 8px;outline:none;box-sizing:border-box;transition:border-color .15s;resize:vertical;min-height:52px;max-height:140px;font:inherit;font-size:13px&quot;>https://greatawakening.win/c/GreatAwakening/12345/comment/c123abc
+
+Your post/comment was removed for divisive or uncivil language. Remember: &quot;They want you divided...&quot;</textarea>
+    </div>
+
+    <!-- Duration Selection -->
+    <div class=&quot;gam-mc-field&quot; style=&quot;margin-bottom:12px&quot;>
+      <label style=&quot;display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px&quot;>Duration</label>
+      <div class=&quot;gam-mc-durs&quot; id=&quot;mc-ban-durs&quot; style=&quot;display:grid;grid-template-columns:repeat(4,1fr);gap:6px&quot;>
+        <button class=&quot;gam-mc-dur&quot; data-v=&quot;0&quot; style=&quot;background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s&quot;>Warning Only</button>
+        <button class=&quot;gam-mc-dur gam-mc-dur-active&quot; data-v=&quot;1&quot; style=&quot;background:#f04040;border:1px solid #f04040;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;cursor:pointer;transition:all .15s&quot;>1 Day</button>
+        <button class=&quot;gam-mc-dur&quot; data-v=&quot;3&quot; style=&quot;background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s&quot;>3 Days</button>
+        <button class=&quot;gam-mc-dur&quot; data-v=&quot;7&quot; style=&quot;background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s&quot;>7 Days</button>
+        <button class=&quot;gam-mc-dur&quot; data-v=&quot;14&quot; style=&quot;background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s&quot;>14 Days</button>
+        <button class=&quot;gam-mc-dur&quot; data-v=&quot;30&quot; style=&quot;background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s&quot;>30 Days</button>
+        <button class=&quot;gam-mc-dur&quot; data-v=&quot;90&quot; style=&quot;background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s&quot;>90 Days</button>
+        <button class=&quot;gam-mc-dur&quot; data-v=&quot;-1&quot; style=&quot;background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s&quot;>Permanent</button>
+      </div>
+    </div>
+
+    <!-- Modmail Checkbox -->
+    <div class=&quot;gam-mc-field&quot; style=&quot;margin-bottom:12px&quot;>
+      <label class=&quot;gam-mc-checkbox&quot; style=&quot;display:flex;align-items:center;gap:8px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e8eaed;cursor:pointer&quot;>
+        <input type=&quot;checkbox&quot; id=&quot;mc-ban-modmail&quot; style=&quot;cursor:pointer&quot;>
+        Also send a separate modmail message (in addition to ban-delivered reason)
+      </label>
+    </div>
+
+    <!-- AI Reply Section -->
+    <div class=&quot;gam-mc-ai-reply&quot; id=&quot;mc-ban-ai-wrap&quot; style=&quot;margin-top:10px&quot;>
+      <div class=&quot;gam-mc-ai-header&quot; style=&quot;display:flex;align-items:center;gap:8px;margin-bottom:8px&quot;>
+        <span style=&quot;color:#a78bfa;font-weight:600&quot;>🤖 Custom AI Reply</span>
+        <select class=&quot;gam-mc-ai-engine&quot; id=&quot;mc-ban-ai-engine&quot; style=&quot;font:10px -apple-system,system-ui,sans-serif;padding:3px 6px;background:#252a31;border:1px solid #2a2f38;color:#e8eaed;border-radius:3px;cursor:pointer&quot;>
+          <option value=&quot;llama3&quot;>Llama 3 (free, via CF Worker)</option>
+          <option value=&quot;grok&quot;>Grok / xAI (API key req.)</option>
+        </select>
+        <button class=&quot;gam-btn gam-mc-ai-btn&quot; id=&quot;mc-ban-ai-go&quot; style=&quot;padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font:12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:opacity .15s,transform .1s,background .15s;letter-spacing:.2px;white-space:nowrap;background:#4A9EFF;color:#fff;margin-left:auto&quot;>⚡ Generate</button>
+      </div>
+      <div id=&quot;mc-ban-ai-out&quot; class=&quot;gam-mc-ai-out&quot; style=&quot;display:none&quot;>
+        <textarea class=&quot;gam-input gam-textarea gam-mc-ai-text&quot; id=&quot;mc-ban-ai-text&quot; rows=&quot;4&quot; readonly style=&quot;width:100%;background:#252a31;border:1px solid #2a2f38;border-radius:4px;color:#e8eaed;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 8px;outline:none;box-sizing:border-box;transition:border-color .15s;margin-bottom:6px&quot;></textarea>
+        <button class=&quot;gam-btn gam-btn-accent gam-mc-ai-use&quot; id=&quot;mc-ban-ai-use&quot; style=&quot;padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font:12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:opacity .15s,transform .1s,background .15s;letter-spacing:.2px;white-space:nowrap;background:#4A9EFF;color:#fff;width:100%&quot;>⬇️ Use this reply</button>
+      </div>
+      <div id=&quot;mc-ban-ai-err&quot; class=&quot;gam-mc-banner gam-mc-banner-red&quot; style=&quot;display:none;padding:8px 12px;border-radius:4px;font-size:12px;margin-top:10px;line-height:1.4;background:rgba(240,64,64,.1);color:#f04040;border:1px solid rgba(240,64,64,.25)&quot;></div>
+    </div>
+
+    <!-- AI Summary Preview (hidden by default) -->
+    <div class=&quot;gam-mc-field&quot; id=&quot;mc-ban-summary-wrap&quot; style=&quot;margin-top:8px;display:none&quot;>
+      <label style=&quot;font-size:10px;color:#9b9892;text-transform:uppercase;letter-spacing:0.08em&quot;>🤖 AI summary (auto-appended to notes after BAN)</label>
+      <textarea id=&quot;mc-ban-summary-edit&quot; rows=&quot;3&quot; style=&quot;width:100%;box-sizing:border-box;background:#0a0a0b;border:1px solid #2a2825;padding:6px 8px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px;color:#e8e6e1;line-height:1.4;resize:vertical&quot;></textarea>
+    </div>
+  </div>
+
+  <!-- Status Messages -->
+  <div id=&quot;mc-ban-status&quot; style=&quot;padding:0 12px&quot;></div>
+
+  <!-- Unban Link (conditional) -->
+  <div style=&quot;margin-top:6px;font-size:10px;text-align:right;letter-spacing:0.04em;padding:0 12px&quot;>
+    <a href=&quot;#&quot; id=&quot;mc-ban-unban&quot; style=&quot;color:#44dd66;text-decoration:underline;cursor:pointer;background:transparent;border:none;padding:0;font:inherit&quot;>already banned — unban instead</a>
+  </div>
+
+  <!-- Action Buttons -->
+  <div class=&quot;gam-mc-actions&quot; style=&quot;display:flex;gap:8px;padding:10px 12px;border-top:1px solid #2a2f38;background:#0f1114&quot;>
+    <button class=&quot;gam-btn gam-btn-cancel&quot; id=&quot;mc-ban-cancel&quot; style=&quot;padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font:12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:opacity .15s,transform .1s,background .15s;letter-spacing:.2px;white-space:nowrap;background:#252a31;color:#8b929e;border:1px solid #2a2f38;min-width:160px;flex:1&quot;>Cancel</button>
+    <button class=&quot;gam-btn gam-btn-danger&quot; id=&quot;mc-ban-go&quot; style=&quot;padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font:12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:opacity .15s,transform .1s,background .15s;letter-spacing:.2px;white-space:nowrap;background:#f04040;color:#fff;min-width:160px;flex:1&quot;>🔨 BAN 1d (reason sent as message)</button>
+  </div>
+</div></body></html>"></iframe>
+    </div>
+  </section>
+  <section class="snap-card">
+    <h2 class="snap-title">Note Tab + Mod Note + History (renderNoteTab, mountModNote, renderHistory) <span class="snap-key">note-tab</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="Note Tab + Mod Note + History (renderNoteTab, mountModNote, renderHistory)" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body><div style=&quot;background:#0a0a0b;padding:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;max-width:600px&quot;>
+
+  <!-- Mods-only note (mountModNote) -->
+  <div class=&quot;gam-mc-note&quot; style=&quot;margin-top:10px;padding-top:10px;border-top:1px solid #2a2f38&quot;>
+    <label class=&quot;gam-mc-note-label&quot; style=&quot;display:block;font-size:11px;font-weight:600;color:#8b929e;margin-bottom:4px&quot;>
+      Mods-only note
+      <span class=&quot;gam-mc-note-hint&quot; style=&quot;color:#5c6370;font-weight:400&quot;>(visible only to mods; auto-saves on blur)</span>
+    </label>
+    <textarea class=&quot;gam-mc-note-ta&quot; style=&quot;width:100%;min-height:60px;background:#181b20;color:#e8eaed;border:1px solid #2a2f38;border-radius:4px;padding:6px 8px;font:12px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;resize:vertical;box-sizing:border-box;outline:none;transition:border-color .15s&quot; placeholder=&quot;Leave a short note for other mods about this user...&quot;>Quick flagging user for coordinated spam review</textarea>
+    <div class=&quot;gam-mc-note-status&quot; style=&quot;font-size:10px;color:#5c6370;margin-top:4px;min-height:14px&quot;>saved</div>
+  </div>
+
+  <!-- Note Tab Content -->
+  <div style=&quot;margin-top:20px&quot;>
+
+    <!-- Note History Section -->
+    <div class=&quot;gam-mc-section&quot; style=&quot;margin-bottom:12px&quot;>
+      <div class=&quot;gam-mc-h&quot; style=&quot;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#8b929e;margin-bottom:6px&quot;>
+        <span>Note history <span class=&quot;gam-mc-hint&quot; id=&quot;mc-note-count&quot; style=&quot;font-size:10px;color:#5c6370;text-transform:none;letter-spacing:0;margin-left:0&quot;>(3 entries)</span> <span class=&quot;gam-mc-hint&quot; style=&quot;color:#9b9892;font-size:10px;text-transform:none;letter-spacing:0&quot;>· newest first</span></span>
+        <button class=&quot;gam-btn gam-btn-cancel&quot; id=&quot;mc-note-clear-all&quot; style=&quot;font-size:10px;padding:3px 8px;background:#252a31;color:#8b929e;border:1px solid #2a2f38;border-radius:4px;cursor:pointer;font-weight:600;transition:opacity .15s,transform .1s;white-space:nowrap&quot; title=&quot;Archive prior notes with a marker entry&quot;>🧹 Clear all</button>
+      </div>
+
+      <div id=&quot;mc-note-history&quot; class=&quot;gam-mc-note-history&quot; style=&quot;display:flex;flex-direction:column;gap:6px&quot;>
+
+        <div class=&quot;gam-mc-note-row&quot; style=&quot;padding:8px 10px;background:#181b20;border:1px solid #2a2f38;border-left:3px solid #4A9EFF;border-radius:4px&quot;>
+          <div class=&quot;gam-mc-note-meta&quot; style=&quot;font-size:10px;color:#8b929e;margin-bottom:4px;display:flex;gap:8px;align-items:center&quot;>
+            <b style=&quot;color:#e8eaed;font-weight:700&quot;>JudgeMod_1</b>
+            <span class=&quot;gam-mc-note-time&quot; style=&quot;color:#5c6370;font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:10px;margin-left:auto&quot;>2 hours ago</span>
+          </div>
+          <div class=&quot;gam-mc-note-body&quot; style=&quot;font-size:12px;color:#e8eaed;line-height:1.45;white-space:pre-wrap;word-break:break-word&quot;>Repeated pattern matching Rule 7.2 — third violation this month. Escalating to Shadow Ban review queue.</div>
+        </div>
+
+        <div class=&quot;gam-mc-note-row&quot; style=&quot;padding:8px 10px;background:#181b20;border:1px solid #2a2f38;border-left:3px solid #4A9EFF;border-radius:4px&quot;>
+          <div class=&quot;gam-mc-note-meta&quot; style=&quot;font-size:10px;color:#8b929e;margin-bottom:4px;display:flex;gap:8px;align-items:center&quot;>
+            <b style=&quot;color:#e8eaed;font-weight:700&quot;>SuperMod_Alpha</b>
+            <span class=&quot;gam-mc-note-time&quot; style=&quot;color:#5c6370;font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:10px;margin-left:auto&quot;>1 day ago</span>
+          </div>
+          <div class=&quot;gam-mc-note-body&quot; style=&quot;font-size:12px;color:#e8eaed;line-height:1.45;white-space:pre-wrap;word-break:break-word&quot;>Watch for coordinated spam campaigns using domain variations.</div>
+        </div>
+
+        <div class=&quot;gam-mc-note-row&quot; style=&quot;padding:8px 10px;background:#181b20;border:1px solid #2a2f38;border-left:3px solid #4A9EFF;border-radius:4px&quot;>
+          <div class=&quot;gam-mc-note-meta&quot; style=&quot;font-size:10px;color:#8b929e;margin-bottom:4px;display:flex;gap:8px;align-items:center&quot;>
+            <b style=&quot;color:#e8eaed;font-weight:700&quot;>ShadowMod</b>
+            <span class=&quot;gam-mc-note-time&quot; style=&quot;color:#5c6370;font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:10px;margin-left:auto&quot;>5 days ago</span>
+          </div>
+          <div class=&quot;gam-mc-note-body&quot; style=&quot;font-size:12px;color:#e8eaed;line-height:1.45;white-space:pre-wrap;word-break:break-word&quot;>Initial report: suspicious account creation pattern. Flagged for Intel review.</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Template Selector -->
+    <div class=&quot;gam-mc-field&quot; style=&quot;margin-bottom:12px&quot;>
+      <label style=&quot;display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px&quot;>Quick template</label>
+      <select class=&quot;gam-input&quot; id=&quot;mc-note-tpl&quot; style=&quot;width:100%;background:#181b20;border:1px solid #2a2f38;border-radius:4px;color:#e8eaed;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 10px;outline:none;box-sizing:border-box;transition:border-color .15s&quot;>
+        <option value=&quot;&quot;>-- Choose template --</option>
+        <option value=&quot;spam&quot;>Spam Pattern Alert</option>
+        <option value=&quot;toxic&quot;>Persistent Toxicity</option>
+        <option value=&quot;review&quot;>Schedule Review</option>
+      </select>
+    </div>
+
+    <!-- Add New Note Section -->
+    <div class=&quot;gam-mc-section&quot; style=&quot;margin-bottom:12px&quot;>
+      <div class=&quot;gam-mc-h&quot; style=&quot;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#8b929e&quot;>
+        <span>Add new note for <b>SuspiciousUser42</b></span>
+        <span class=&quot;gam-mc-actions&quot; style=&quot;display:flex;gap:6px&quot;>
+          <button class=&quot;gam-btn gam-btn-cancel&quot; id=&quot;mc-note-cancel&quot; style=&quot;font-size:10px;padding:3px 8px;background:#252a31;color:#8b929e;border:1px solid #2a2f38;border-radius:4px;cursor:pointer;font-weight:600;transition:opacity .15s,transform .1s;white-space:nowrap&quot;>Cancel</button>
+          <button class=&quot;gam-btn gam-btn-accent&quot; id=&quot;mc-note-save&quot; style=&quot;font-size:10px;padding:3px 10px;background:#4A9EFF;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;transition:opacity .15s,transform .1s;white-space:nowrap&quot;>💾 Append</button>
+        </span>
+      </div>
+
+      <textarea class=&quot;gam-input gam-textarea&quot; id=&quot;mc-note-body&quot; rows=&quot;6&quot; style=&quot;width:100%;background:#181b20;border:1px solid #2a2f38;border-radius:4px;color:#e8eaed;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 10px;outline:none;box-sizing:border-box;transition:border-color .15s;resize:vertical;min-height:72px&quot; placeholder=&quot;Add your mod note here...&quot;></textarea>
+
+      <div class=&quot;gam-mc-hint&quot; id=&quot;mc-note-charcount&quot; style=&quot;text-align:right;margin-top:3px;font-size:10px;color:#9b9892&quot;>0 chars</div>
+    </div>
+
+    <!-- Status Messages -->
+    <div id=&quot;mc-note-status&quot;></div>
+
+  </div>
+
+</div></body></html>"></iframe>
+    </div>
+  </section>
+  <section class="snap-card">
+    <h2 class="snap-title">Badges: shadow/repeat/senior/new/park <span class="snap-key">badges</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="Badges: shadow/repeat/senior/new/park" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body><html>
+<head><style>
+.gam-park-btn{background:transparent;border:1px solid #4a5568;color:#a0aec0;padding:2px 6px;border-radius:4px;cursor:pointer;font-size:14px;margin-left:4px}
+.gam-park-btn:hover{background:#2d3748;color:#e2e8f0}
+.gam-shadow-badge{display:inline-flex;align-items:center;padding:2px 8px;margin-left:6px;font-size:11px;font-weight:600;border-radius:10px}
+.gam-shadow-badge[data-action=&quot;APPROVE&quot;]{background:#276749;color:#c6f6d5}
+.gam-shadow-badge[data-action=&quot;REMOVE&quot;]{background:#9b2c2c;color:#feb2b2}
+.gam-shadow-badge[data-action=&quot;WATCH&quot;]{background:#744210;color:#faf089}
+.gam-parked{opacity:.55}
+.gam-parked::before{content:&quot;\23F8 &quot;;color:#f6ad55;margin-right:4px}
+.gam-repeat-halo{display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 4px;border:2px solid #f5a623;border-radius:4px;box-shadow:0 0 0 3px rgba(245,166,35,.18);cursor:pointer;}
+.gam-repeat-badge{display:inline-block;font-size:9px;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;background:#f04040;color:#fff;}
+@keyframes gam-halo-pulse{0%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}50%{box-shadow:0 0 0 6px rgba(245,166,35,.35)}100%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}}
+.gam-repeat-halo--pulse{animation:gam-halo-pulse 600ms ease-out 1;}
+.gam-bar-icon{background:none;border:none;color:#a0aec0;width:22px;height:22px;border-radius:11px;cursor:pointer;font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;transition:background .1s,color .1s,transform .1s;padding:0;position:relative}
+.gam-bar-icon:hover{background:rgba(255,255,255,.08);color:#e2e8f0;transform:scale(1.12)}
+.gam-bar-icon:active{transform:scale(.94)}
+.gam-bar-icon::after{content:'';position:absolute;inset:-5px;pointer-events:auto}
+</style>
+</head>
+<body style=&quot;background:#0a0a0b;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:20px;line-height:1.6&quot;>
+
+<div style=&quot;max-width:900px&quot;>
+
+<h2 style=&quot;font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0&quot;>1. Shadow Badge (AI Queue Recommendation)</h2>
+<div style=&quot;display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px;background:#1a202c;border-radius:6px;border:1px solid #2d3748&quot;>
+  <div style=&quot;flex:1;min-width:200px&quot;>
+    <span style=&quot;display:inline-flex;align-items:center;padding:2px 8px;margin-left:6px;font-size:11px;font-weight:600;border-radius:10px;background:#276749;color:#c6f6d5;data-action:APPROVE;data-gam-shadow-action:APPROVE;data-gam-shadow-confidence:92;title:'Shadow Queue: APPROVE (92%)'&quot;>
+      ✓ APPROVE 92%
+    </span>
+  </div>
+  <div style=&quot;flex:1;min-width:200px&quot;>
+    <span style=&quot;display:inline-flex;align-items:center;padding:2px 8px;margin-left:6px;font-size:11px;font-weight:600;border-radius:10px;background:#9b2c2c;color:#feb2b2;data-action:REMOVE;data-gam-shadow-action:REMOVE;data-gam-shadow-confidence:87;title:'Shadow Queue: REMOVE (87%)'&quot;>
+      🗑 REMOVE 87%
+    </span>
+  </div>
+  <div style=&quot;flex:1;min-width:200px&quot;>
+    <span style=&quot;display:inline-flex;align-items:center;padding:2px 8px;margin-left:6px;font-size:11px;font-weight:600;border-radius:10px;background:#744210;color:#faf089;data-action:WATCH;data-gam-shadow-action:WATCH;data-gam-shadow-confidence:76;title:'Shadow Queue: WATCH (76%)'&quot;>
+      ⏸ WATCH 76%
+    </span>
+  </div>
+</div>
+<p style=&quot;font-size:11px;color:#a0aec0;margin-top:8px&quot;>Confidence score embedded. Click to reveal why-tooltip (model, provider, prompt version, rules version, timestamp).</p>
+
+<h2 style=&quot;font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0&quot;>2. Repeat Offender Halo + Badge</h2>
+<div style=&quot;display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px;background:#1a202c;border-radius:6px;border:1px solid #2d3748&quot;>
+  <span style=&quot;display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 4px;border:2px solid #f5a623;border-radius:4px;box-shadow:0 0 0 3px rgba(245,166,35,.18);cursor:pointer;role:button;tabindex:0;title:'Click to expand ban history'&quot;>
+    <a href=&quot;/u/SuspiciousUser&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot; style=&quot;color:inherit;font-weight:700;text-decoration:none&quot;>SuspiciousUser</a>
+    <span style=&quot;display:inline-block;font-size:9px;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;background:#f04040;color:#fff&quot;>
+      ×5
+    </span>
+  </span>
+</div>
+<p style=&quot;font-size:11px;color:#a0aec0;margin-top:8px&quot;>Animated pulse on first render (600ms ease-out). Wraps username link + ban-count badge. Role=button for accessibility.</p>
+
+<h2 style=&quot;font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0&quot;>3. New Account Badge (in Drawer Header)</h2>
+<div style=&quot;display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px;background:#1a202c;border-radius:6px;border:1px solid #2d3748&quot;>
+  <p>
+    <span style=&quot;display:inline-block;background:rgba(167,139,250,0.15);border:1px solid #a78bfa;color:#a78bfa;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;padding:0 5px;text-transform:uppercase;margin-left:6px&quot;>
+      NEW 3d
+    </span>
+  </p>
+</div>
+<p style=&quot;font-size:11px;color:#a0aec0;margin-top:8px&quot;>Appended to drawer header p tag when profile.is_new_account = true. Shows account age in days.</p>
+
+<h2 style=&quot;font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0&quot;>4. Park ⏸ Button (per-row injection)</h2>
+<div style=&quot;display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px;background:#1a202c;border-radius:6px;border:1px solid #2d3748&quot;>
+  <button style=&quot;background:transparent;border:1px solid #4a5568;color:#a0aec0;padding:2px 6px;border-radius:4px;cursor:pointer;font-size:14px;margin-left:4px;data-gam-action:park;data-gam-park-kind:user;data-gam-park-subject:BadActor&quot;>
+    ⏸
+  </button>
+</div>
+<p style=&quot;font-size:11px;color:#a0aec0;margin-top:8px&quot;>Injected into actions cell on Triage, /queue, /u/*, /p/*, modmail threads. Triggers openParkModal on click (document delegate).</p>
+
+<h2 style=&quot;font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0&quot;>5. Senior Status-Bar Park Chip</h2>
+<div style=&quot;display:flex;gap:12px;align-items:center;padding:8px 10px;background:rgba(12,14,18,.95);border:1px solid #2d3748;border-radius:14px;backdrop-filter:blur(16px);position:relative&quot;>
+  <button id=&quot;gam-v80-park-chip&quot; style=&quot;background:none;border:none;color:#a0aec0;width:22px;height:22px;border-radius:11px;cursor:pointer;font-size:13px;line-height:1;display:inline-flex;align-items:center;justify-content:center;font-family:inherit;padding:0;title:'Parked items awaiting senior review'&quot; class=&quot;gam-bar-icon&quot;>
+    ⏸ 7
+  </button>
+</div>
+<p style=&quot;font-size:11px;color:#a0aec0;margin-top:8px&quot;>Mounted on #gam-status-bar. Shows count. Click toggles parked-items popover. Visible only for lead mods when park feature on.</p>
+
+<h2 style=&quot;font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0&quot;>6. Park Modal (on button click)</h2>
+<div style=&quot;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1a202c;color:#e2e8f0;padding:18px 20px;border-radius:6px;border:1px solid #4a5568;min-width:380px;max-width:520px;role:dialog;aria-modal:true;aria-label:'Park for senior review'&quot;>
+  <div style=&quot;fontWeight:600;marginBottom:10px;fontSize:14px&quot;>
+    Park user BadUser for senior review
+  </div>
+  <label style=&quot;display:block;fontSize:11px;color:#a0aec0;marginBottom:4px&quot;>Senior review note</label>
+  <textarea style=&quot;width:100%;padding:6px 8px;background:#0f1419;color:#e2e8f0;border:1px solid #4a5568;border-radius:4px;fontFamily:inherit;fontSize:12px;rows:4;maxlength:200;placeholder:'needs senior review'&quot;>needs senior review</textarea>
+  <div style=&quot;display:flex;gap:8px;justifyContent:flex-end;marginTop:12px&quot;>
+    <button class=&quot;gam-btn&quot; style=&quot;background:#2d3748;color:#e2e8f0;border:1px solid #4a5568;padding:6px 12px;border-radius:4px;cursor:pointer&quot;>Cancel</button>
+    <button class=&quot;gam-btn gam-btn-accent&quot; style=&quot;background:#4a9eff;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer&quot;>⏸ Park</button>
+  </div>
+  <div role=&quot;status&quot; aria-live=&quot;polite&quot; style=&quot;fontSize:11px;color:#a0aec0;marginTop:6px&quot;></div>
+</div>
+<p style=&quot;font-size:11px;color:#a0aec0;margin-top:8px&quot;>Modal with textarea (autofocused). Tab order: textarea → Cancel → Park. Focus-trapped. Overlay at rgba(0,0,0,0.65).</p>
+
+<h2 style=&quot;font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0&quot;>7. Parked Row (visual dimming)</h2>
+<div style=&quot;display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px;background:#1a202c;border-radius:6px;border:1px solid #2d3748;opacity:.55&quot;>
+  <span style=&quot;color:#f6ad55&quot;>⏸</span> BadUser — marked as parked for review
+</div>
+<p style=&quot;font-size:11px;color:#a0aec0;margin-top:8px&quot;>Class .gam-parked: opacity 55%, ::before pseudo adds ⏸ icon in amber. Applied to row.closest('.gam-t-row, .post, .comment, .mail, [data-gam-queue-row]') after park succeeds.</p>
+
+<h2 style=&quot;font-size:14px;font-weight:600;margin-top:24px;margin-bottom:12px;color:#cbd5e0&quot;>8. Shadow Badge &quot;Why?&quot; Tooltip</h2>
+<div style=&quot;display:block;margin-left:6px;font-size:10px;color:#a0aec0;background:#0f1419;padding:4px 6px;border-radius:3px;max-width:300px&quot;>
+  model=claude-opus-4 · provider=anthropic · prompt=v3.2.1 · rules=v2.8.0 · at=2026-06-19T14:32:15.847Z
+</div>
+<p style=&quot;font-size:11px;color:#a0aec0;margin-top:8px&quot;>Span.gam-shadow-why. Hidden by default (display:none). Click badge to toggle visibility. Contains provenance from payload.</p>
+
+</div>
+</body>
+</html></body></html>"></iframe>
+    </div>
+  </section>
+  <section class="snap-card">
+    <h2 class="snap-title">Top Banners: auth-fail, ext-orphaned <span class="snap-key">banners</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="Top Banners: auth-fail, ext-orphaned" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body><!-- Auth-fail banner example (credential tier) -->
+<div id='gam-auth-fail-banner' data-severity='credential' style='position:fixed;top:8px;right:8px;z-index:2147483640;max-width:380px;padding:10px 12px;background:rgba(240, 160, 64, .95);color:#fff;font:12px/1.45 -apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.5);border:1px solid rgba(255, 220, 150, .35)'>
+  <div style='font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:6px;color:rgba(240, 160, 64, .95);font-size:11px;text-transform:uppercase;letter-spacing:0.06em'>🔒 GAW ModTools: token needs update</div>
+  <div style='margin-bottom:8px;opacity:.95'>
+    <ol style='margin:0;padding-left:18px'>
+      <li style='margin-bottom:3px'>Step 1 of 3: Your token was rotated. Click &quot;Open ModTools popup&quot; (button below).</li>
+      <li style='margin-bottom:3px'>Step 2 of 3: Open the popup, expand the Tokens card, and click &quot;Re-enter credentials&quot; (bottom of card) or paste the new token directly into the Team Mod Token field.</li>
+      <li style='margin-bottom:3px'>Step 3 of 3: Ask your lead for your current rotation token or a fresh invite link. Paste it in the popup. Click Save.</li>
+      <li style='margin-bottom:3px'>Still stuck? You may be using a lead token in the mod slot (or vice versa). Ask your lead which token type you need.</li>
+    </ol>
+  </div>
+  <div style='display:flex;gap:6px;justify-content:flex-end'>
+    <button style='padding:4px 10px;border:1px solid #fff;background:#fff;color:#a02020;border-radius:4px;cursor:pointer;font:inherit;font-weight:700'>Open ModTools popup</button>
+    <button style='padding:4px 10px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.15);color:#fff;border-radius:4px;cursor:pointer;font:inherit'>Force re-hydrate</button>
+    <button style='padding:4px 10px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;border-radius:4px;cursor:pointer;font:inherit;opacity:.85'>Dismiss</button>
+  </div>
+</div>
+
+<!-- Ext-orphaned banner -->
+<div id='gam-ext-orphaned-banner' style='position:fixed;top:0;left:0;right:0;z-index:99999999;background:#2a1d10;border-bottom:1px solid var(--bb-amber);color:#ffd84d;font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:8px 14px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 2px 8px rgba(0,0,0,0.6)'>
+  <span style='font-size:14px'>↻</span>
+  <span><b>ModTools updated.</b> The extension was reloaded — refresh this page to reconnect.</span>
+  <span style='flex:1'></span>
+  <button id='gam-ext-orphaned-copy' style='background:transparent;border:1px solid #7a7672;color:#ffd84d;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase' title='Copy debug details to clipboard'>📋 Copy</button>
+  <button id='gam-ext-orphaned-reload' style='background:var(--bb-amber);border:none;color:#0a0a0b;padding:4px 12px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase'>Reload page</button>
+  <button id='gam-ext-orphaned-dismiss' style='background:transparent;border:1px solid #7a7672;color:#9b9892;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase'>Dismiss</button>
+</div></body></html>"></iframe>
+    </div>
+  </section>
+  <section class="snap-card">
+    <h2 class="snap-title">Toast / Snack / Undo Notifications <span class="snap-key">toasts-snacks</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="Toast / Snack / Undo Notifications" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body><!DOCTYPE html>
+<html>
+<head>
+<style>
+/* Injected v8.1 toast CSS (injectToastCSS) */
+body.gam-ux-polish-on .gam-toast-stack{position:fixed;right:20px;bottom:20px;z-index:99999;display:flex;flex-direction:column-reverse;gap:8px;max-width:360px;pointer-events:none;}
+body.gam-ux-polish-on .gam-toast{pointer-events:auto;padding:12px 16px;border-radius:6px;font-size:13px;line-height:1.4;color:#e5e5e8;background:#2a2a30;box-shadow:0 4px 12px rgba(0,0,0,0.35);opacity:0;transform:translateY(8px);transition:opacity 180ms ease,transform 180ms ease;min-height:44px;display:flex;align-items:center;}
+body.gam-ux-polish-on .gam-toast.gam-toast-show{opacity:1;transform:translateY(0);}
+body.gam-ux-polish-on .gam-toast-success{background:#1f4d2e;color:#c6f6d5;}
+body.gam-ux-polish-on .gam-toast-error{background:#5a2020;color:#fed7d7;}
+body.gam-ux-polish-on .gam-toast-info{background:#2a2a30;color:#e5e5e8;}
+
+/* GAM_CSS .gam-snack base + variants */
+.gam-snack{position:fixed;bottom:14px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;opacity:0;transform:translateY(6px) scale(.97);transition:opacity .14s,transform .18s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px}
+.gam-snack-show{opacity:1;transform:translateY(0)}
+.gam-snack-success{background:#3dd68c;color:#0f1114}
+.gam-snack-error{background:#f04040;color:#fff}
+.gam-snack-info{background:#4A9EFF;color:#fff}
+.gam-snack-warn{background:#f0a040;color:#0f1114}
+
+/* Snack action button */
+.gam-snack-action { background:transparent; border:1px solid #4A9EFF; color:#4A9EFF; padding:4px 10px; cursor:pointer; font:700 10px ui-monospace,'JetBrains Mono',monospace; letter-spacing:0.06em; text-transform:uppercase; transition:background 80ms,color 80ms; flex-shrink:0; pointer-events:auto; white-space:nowrap; }
+.gam-snack-action:hover { background:#4A9EFF; color:#0a0a0b; }
+</style>
+</head>
+<body style=&quot;background:#0a0a0b; color:#e8eaed; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; padding: 40px;&quot;>
+
+<h2 style=&quot;color:#e8eaed; margin-bottom:30px; font-weight:700; font-size:14px;&quot;>Toast / Snack / Undo Notifications</h2>
+
+<!-- SECTION 1: v8.1 Toast Stack (when gam-ux-polish-on) -->
+<div style=&quot;margin-bottom: 60px;&quot;>
+<h3 style=&quot;color:#8b929e; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px;&quot;>v8.1 Toast Stack (UX Polish Enabled)</h3>
+
+<div id=&quot;gam-toast-stack&quot; style=&quot;position:fixed;right:20px;bottom:20px;z-index:99999;display:flex;flex-direction:column-reverse;gap:8px;max-width:360px;pointer-events:none;&quot;>
+  <div class=&quot;gam-toast gam-toast-show gam-toast-success&quot; role=&quot;status&quot; aria-live=&quot;polite&quot; style=&quot;pointer-events:auto;padding:12px 16px;border-radius:6px;font-size:13px;line-height:1.4;color:#c6f6d5;background:#1f4d2e;box-shadow:0 4px 12px rgba(0,0,0,0.35);opacity:1;transform:translateY(0);transition:opacity 180ms ease,transform 180ms ease;min-height:44px;display:flex;align-items:center;&quot;>
+    ✓ user123 banned for Rule 2 violation
+  </div>
+  <div class=&quot;gam-toast gam-toast-show gam-toast-error&quot; role=&quot;alert&quot; aria-live=&quot;assertive&quot; style=&quot;pointer-events:auto;padding:12px 16px;border-radius:6px;font-size:13px;line-height:1.4;color:#fed7d7;background:#5a2020;box-shadow:0 4px 12px rgba(0,0,0,0.35);opacity:1;transform:translateY(0);transition:opacity 180ms ease,transform 180ms ease;min-height:44px;display:flex;align-items:center;&quot;>
+    Error: Ban failed (403)
+  </div>
+  <div class=&quot;gam-toast gam-toast-info&quot; role=&quot;status&quot; aria-live=&quot;polite&quot; style=&quot;pointer-events:auto;padding:12px 16px;border-radius:6px;font-size:13px;line-height:1.4;color:#e5e5e8;background:#2a2a30;box-shadow:0 4px 12px rgba(0,0,0,0.35);opacity:0;transform:translateY(8px);transition:opacity 180ms ease,transform 180ms ease;min-height:44px;display:flex;align-items:center;&quot;>
+    Processing...
+  </div>
+</div>
+</div>
+
+<!-- SECTION 2: Legacy Snack Stack (bottom-right, z-index 9999999) -->
+<div style=&quot;position:fixed;bottom:20px;right:20px;z-index:9999998;max-width:400px;&quot;>
+<h3 style=&quot;color:#8b929e; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px; position:relative; top:-60px;&quot;>Legacy Snack Stack (max 4)</h3>
+
+<div class=&quot;gam-snack gam-snack-show gam-snack-info&quot; data-stack=&quot;1&quot; style=&quot;position:fixed;bottom:14px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;opacity:1;transform:translateY(0);transition:opacity .14s,transform .18s;pointer-events:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px;display:flex;align-items:center;gap:8px;&quot;>
+  <span style=&quot;flex:1;min-width:0;&quot;>User added to watchlist</span>
+</div>
+
+<div class=&quot;gam-snack gam-snack-show gam-snack-success&quot; data-stack=&quot;1&quot; style=&quot;position:fixed;bottom:62px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#0f1114;opacity:1;transform:translateY(0);transition:opacity .14s,transform .18s;pointer-events:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px;display:flex;align-items:center;gap:8px;&quot;>
+  <span style=&quot;flex:1;min-width:0;&quot;>✓ Note saved</span>
+</div>
+
+<div class=&quot;gam-snack gam-snack-show gam-snack-warn&quot; data-stack=&quot;1&quot; style=&quot;position:fixed;bottom:110px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#0f1114;opacity:1;transform:translateY(0);transition:opacity .14s,transform .18s;pointer-events:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px;display:flex;align-items:center;gap:8px;&quot;>
+  <span style=&quot;flex:1;min-width:0;&quot;>Mod log entries expire in 3 days</span>
+</div>
+
+<div class=&quot;gam-snack gam-snack-show gam-snack-error&quot; data-stack=&quot;1&quot; style=&quot;position:fixed;bottom:158px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;opacity:1;transform:translateY(0);transition:opacity .14s,transform .18s;pointer-events:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px;display:flex;align-items:center;gap:8px;&quot;>
+  <span style=&quot;flex:1;min-width:0;&quot;>Connection lost. Ctrl+Shift+L for mod log</span>
+</div>
+</div>
+
+<!-- SECTION 3: Snack with Action Button &amp; Countdown Bar -->
+<div style=&quot;position:fixed;bottom:250px;right:20px;z-index:9999998;max-width:400px;&quot;>
+<h3 style=&quot;color:#8b929e; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px;&quot;>Snack with Undo Action + Countdown</h3>
+
+<div class=&quot;gam-snack gam-snack-show gam-snack-info&quot; data-stack=&quot;1&quot; style=&quot;position:fixed;bottom:250px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;opacity:1;transform:translateY(0);transition:opacity .14s,transform .18s;pointer-events:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px;display:flex;align-items:center;gap:8px;padding-bottom:8px;&quot;>
+  <span style=&quot;flex:1;min-width:0;&quot;>Post removed</span>
+  <button class=&quot;gam-snack-action&quot; style=&quot;background:transparent;border:1px solid #4A9EFF;color:#4A9EFF;padding:4px 10px;cursor:pointer;font:700 10px ui-monospace,'JetBrains Mono',monospace;letter-spacing:0.06em;text-transform:uppercase;transition:background 80ms,color 80ms;flex-shrink:0;pointer-events:auto;white-space:nowrap;&quot;>Undo</button>
+  <div class=&quot;gam-snack-countdown-bar&quot; style=&quot;position:absolute;left:0;bottom:0;height:2px;background:#4A9EFF;width:100%;transition:width 100ms linear;border-radius:0 0 6px 6px;&quot;></div>
+</div>
+</div>
+
+<!-- SECTION 4: Ban Undo Toast (immediate 10s) -->
+<div style=&quot;position:fixed;bottom:320px;right:20px;z-index:2147483610;&quot;>
+<h3 style=&quot;color:#8b929e; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px;&quot;>Ban Undo Toast (10s)</h3>
+
+<div id=&quot;gam-undo&quot; style=&quot;position:fixed;bottom:90px;right:16px;z-index:2147483610;background:#1a1c20;color:#eee;border:1px solid #444;border-radius:6px;padding:10px 14px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.5);display:flex;align-items:center;gap:10px;&quot;>
+  <span>🔘 suspicioususer77 banned</span>
+  <button style=&quot;background:var(--bb-amber-cool);color:#3a2500;border:none;border-radius:3px;padding:4px 10px;cursor:pointer;font-weight:600;&quot;>Undo</button>
+</div>
+</div>
+
+<!-- SECTION 5: Universal Undo Toast with Progress Bar -->
+<div style=&quot;position:fixed;bottom:380px;right:20px;z-index:9999999;&quot;>
+<h3 style=&quot;color:#8b929e; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px;&quot;>Universal Undo Toast (20s tier-A)</h3>
+
+<div id=&quot;gam-undo-toast-demo&quot; style=&quot;position:fixed;bottom:380px;right:16px;z-index:9999999;background:#1a1f28;border:1px solid #3a3f48;border-radius:4px;padding:10px 14px;display:flex;align-items:center;gap:10px;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e8eaed;box-shadow:0 4px 16px rgba(0,0,0,.6);min-width:260px;max-width:380px;&quot; role=&quot;alert&quot;>
+  <span style=&quot;flex:1;&quot;>Content approval reversed</span>
+  <button style=&quot;background:transparent;border:1px solid #4A9EFF;border-radius:3px;color:#4A9EFF;font:600 11px inherit;padding:3px 10px;cursor:pointer;flex-shrink:0;&quot;>Undo</button>
+  <div style=&quot;position:absolute;bottom:0;left:0;height:2px;background:#4A9EFF;border-radius:0 0 4px 4px;width:85%;transition:width linear 20s;&quot;></div>
+</div>
+</div>
+
+<!-- SECTION 6: Service Worker Restart Snack -->
+<div style=&quot;position:fixed;bottom:440px;left:50%;transform:translateX(-50%);z-index:2147483640;&quot;>
+<h3 style=&quot;color:#8b929e; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px; position:relative; left:200px;&quot;>SW Restart Snack</h3>
+
+<div id=&quot;gam-sw-restart-snack&quot; style=&quot;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483640;background:#1a1c20;color:#eee;border:1px solid #444;border-radius:6px;padding:10px 14px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.5);display:flex;align-items:center;gap:10px;max-width:360px;&quot;>
+  <span>Connection re-established -- click Retry to resume.</span>
+  <button style=&quot;background:#4A9EFF;color:#fff;border:none;border-radius:3px;padding:4px 10px;cursor:pointer;font-weight:600;white-space:nowrap;&quot;>Retry</button>
+  <button style=&quot;background:transparent;color:#9b9892;border:1px solid #7a7672;border-radius:3px;padding:4px 8px;cursor:pointer;white-space:nowrap;&quot;>Dismiss</button>
+</div>
+</div>
+
+<!-- SECTION 7: Extension Orphaned Banner (top of page) -->
+<div style=&quot;position:fixed;top:0;left:0;right:0;z-index:99999999;background:#2a1d10;border-bottom:1px solid #ffd60a;color:#ffd84d;font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:8px 14px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 2px 8px rgba(0,0,0,0.6);&quot;>
+  <span style=&quot;font-size:14px;&quot;>↻</span>
+  <span><b>ModTools updated.</b> The extension was reloaded — refresh this page to reconnect.</span>
+  <span style=&quot;flex:1;&quot;></span>
+  <button id=&quot;gam-ext-orphaned-copy&quot; style=&quot;background:transparent;border:1px solid #7a7672;color:#ffd84d;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;&quot; title=&quot;Copy debug details to clipboard&quot;>📋 Copy</button>
+  <button id=&quot;gam-ext-orphaned-reload&quot; style=&quot;background:#ffd84d;border:none;color:#0a0a0b;padding:4px 12px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;&quot;>Reload page</button>
+  <button id=&quot;gam-ext-orphaned-dismiss&quot; style=&quot;background:transparent;border:1px solid #7a7672;color:#9b9892;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;&quot;>Dismiss</button>
+</div>
+
+<!-- Hidden SR announcer -->
+<div id=&quot;gam-sr-live&quot; role=&quot;alert&quot; aria-live=&quot;assertive&quot; style=&quot;position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;&quot;></div>
+
+</body>
+</html>
+</body></html>"></iframe>
+    </div>
+  </section>
+  <section class="snap-card">
+    <h2 class="snap-title">Modals: Text/Bug/Park/Precedent <span class="snap-key">modals</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="Modals: Text/Bug/Park/Precedent" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body><div style=&quot;background:#0a0a0b;padding:20px;font-family:ui-sans-serif,system-ui,sans-serif;color:#e4e4e4&quot;><!-- BUG REPORT MODAL --><div style=&quot;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999995;background:#1a1c20;border:1px solid #2a2a2a;border-radius:8px;padding:16px 18px;minWidth:320px;maxWidth:560px;boxShadow:0 6px 24px rgba(0,0,0,0.6);fontFamily:ui-sans-serif&quot;><div style=&quot;fontWeight:700;fontSize:14px;marginBottom:8px;color:#4A9EFF&quot;>🐛 Report a Bug</div><div style=&quot;fontSize:13px;marginBottom:10px;color:#e4e4e4&quot;>Describe what broke. Include what you were trying to do, what happened, and what you expected. Commander will see this, and it can also auto-dispatch to Claude for triage.</div><label style=&quot;display:block;fontSize:12px;color:#aaa;marginBottom:6px&quot; for=&quot;gam-bug-desc&quot;>Describe the bug (20-2000 chars):</label><textarea id=&quot;gam-bug-desc&quot; style=&quot;width:100%;background:#0f1114;color:#e4e4e4;border:1px solid #2a2a2a;borderRadius:4px;padding:8px;fontSize:13px;fontFamily:inherit;rows:7;maxLength:2000&quot; placeholder=&quot;I clicked X on the Y page, expected Z, but got W instead.&quot;></textarea><div id=&quot;gam-bug-counter&quot; style=&quot;color:#a0aec0;fontSize:12px;marginTop:6px;minHeight:16px&quot;>0 / 2000 (min 20)</div><label style=&quot;display:flex;alignItems:center;fontSize:12px;color:#e4e4e4;marginTop:8px&quot;><input type=&quot;checkbox&quot; id=&quot;gam-bug-snap&quot; checked style=&quot;marginRight:6px&quot;> Include debug snapshot (recent actions, current settings, extension version, page URL, browser). Tokens are redacted.</label><div style=&quot;display:flex;justifyContent:flex-end;gap:8px;marginTop:12px&quot;><button style=&quot;background:#2a2a2a;color:#e4e4e4;border:0;borderRadius:4px;padding:6px 12px;cursor:pointer;fontSize:13px&quot;>Cancel</button><button style=&quot;background:#4A9EFF;color:#fff;border:0;borderRadius:4px;padding:6px 12px;cursor:pointer;fontSize:13px&quot;>Submit</button></div></div><div style=&quot;position:fixed;inset:0;background:rgba(0,0,0,0.55);zIndex:9999994&quot;></div></div>
+
+<!-- ASK TEXT MODAL --><div style=&quot;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999995;background:#1a1c20;color:#e4e4e4;borderRadius:8px;padding:16px 18px;minWidth:320px;maxWidth:520px;boxShadow:0 6px 24px rgba(0,0,0,0.6);fontFamily:ui-sans-serif;role:dialog;aria-modal:true&quot;><div style=&quot;fontSize:14px;fontWeight:700;marginBottom:8px;color:#4A9EFF&quot;>Confirm action</div><label style=&quot;display:block;fontSize:12px;color:#aaa;marginBottom:6px&quot;>Reason for removal:</label><input type=&quot;text&quot; placeholder=&quot;Spam, abuse, off-topic, etc.&quot; style=&quot;width:100%;background:#0f1114;color:#e4e4e4;border:1px solid #2a2a2a;borderRadius:4px;padding:8px;fontSize:13px;fontFamily:inherit;boxSizing:border-box&quot;><div style=&quot;color:#E74C3C;fontSize:12px;marginTop:6px;minHeight:16px&quot;></div><div style=&quot;display:flex;justifyContent:flex-end;gap:8px;marginTop:12px&quot;><button style=&quot;background:#2a2a2a;color:#e4e4e4;border:0;borderRadius:4px;padding:6px 12px;cursor:pointer;fontSize:13px&quot;>Cancel</button><button style=&quot;background:#4A9EFF;color:#fff;border:0;borderRadius:4px;padding:6px 12px;cursor:pointer;fontSize:13px&quot;>OK</button></div></div><div style=&quot;position:fixed;inset:0;background:rgba(0,0,0,0.55);zIndex:9999994&quot;></div></div>
+
+<!-- PARK MODAL --><div style=&quot;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.65);zIndex:10000000;display:flex;alignItems:center;justifyContent:center&quot;><div style=&quot;background:#1a202c;color:#e2e8f0;padding:18px 20px;borderRadius:6px;minWidth:380px;maxWidth:520px;border:1px solid #4a5568;role:dialog;aria-modal:true;aria-label:Park for senior review&quot;><div style=&quot;fontWeight:600;marginBottom:10px;fontSize:14px&quot;>Park User post_id_12345 for senior review</div><label style=&quot;display:block;fontSize:11px;color:#a0aec0;marginBottom:4px&quot;>Senior review note</label><textarea style=&quot;width:100%;padding:6px 8px;background:#0f1419;color:#e2e8f0;border:1px solid #4a5568;borderRadius:4px;fontFamily:inherit;fontSize:12px;rows:4;maxLength:200&quot;>needs senior review</textarea><div style=&quot;fontSize:11px;color:#a0aec0;marginTop:6px;role:status;aria-live:polite&quot;></div><div style=&quot;display:flex;gap:8px;justifyContent:flex-end;marginTop:12px&quot;><button style=&quot;background:#2d3748;color:#e2e8f0;border:1px solid #4a5568;padding:6px 12px;borderRadius:4px;cursor:pointer&quot;>Cancel</button><button style=&quot;background:#4a9eff;color:#fff;border:none;padding:6px 12px;borderRadius:4px;cursor:pointer&quot;>⏸ Park</button></div></div></div>
+
+<!-- PRECEDENT MODAL --><div id=&quot;gam-precedent-modal&quot; style=&quot;position:fixed;inset:0;zIndex:2147483650;background:rgba(0,0,0,0.55);display:flex;alignItems:center;justifyContent:center&quot;><div style=&quot;background:#1a202c;color:#e2e8f0;padding:16px;borderRadius:6px;width:min(420px,90vw);border:1px solid #2d3748&quot;><h3 style=&quot;margin:0 0 10px;fontSize:14px&quot;>Mark as precedent</h3><input type=&quot;text&quot; placeholder=&quot;Title (required)&quot; style=&quot;width:100%;padding:6px;background:#0f1114;color:#e2e8f0;border:1px solid #2d3748;borderRadius:4px;marginBottom:6px&quot;><input type=&quot;text&quot; placeholder=&quot;Rule reference (optional)&quot; style=&quot;width:100%;padding:6px;background:#0f1114;color:#e2e8f0;border:1px solid #2d3748;borderRadius:4px;marginBottom:6px&quot;><textarea placeholder=&quot;Reason (optional)&quot; style=&quot;width:100%;padding:6px;background:#0f1114;color:#e2e8f0;border:1px solid #2d3748;borderRadius:4px;marginBottom:6px;minHeight:48px;resize:vertical;font:inherit&quot;></textarea><label style=&quot;fontSize:11px;color:#a0aec0&quot;>Action taken</label><select style=&quot;width:100%;padding:6px;background:#0f1114;color:#e2e8f0;border:1px solid #2d3748;borderRadius:4px;marginBottom:8px&quot;><option>APPROVE</option><option>REMOVE</option><option>BAN</option><option>WATCH</option><option>NOTE</option><option>LOCK</option></select><div style=&quot;display:flex;gap:6px;justifyContent:flex-end&quot;><button style=&quot;background:#2d3748;color:#e2e8f0;border:1px solid #4a5568;padding:6px 12px;borderRadius:4px;cursor:pointer&quot;>Cancel</button><button style=&quot;background:#4a9eff;color:#fff;border:none;padding:6px 12px;borderRadius:4px;cursor:pointer&quot;>Save</button></div></div></div></body></html>"></iframe>
+    </div>
+  </section>
+  <section class="snap-card">
+    <h2 class="snap-title">Command Palette (Ctrl+Shift+P) <span class="snap-key">command-palette</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="Command Palette (Ctrl+Shift+P)" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body>
+<div id=&quot;gam-cmdk-palette&quot; role=&quot;dialog&quot; aria-modal=&quot;true&quot; aria-label=&quot;ModTools command palette&quot; style=&quot;position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999990;background:rgba(0,0,0,0.55);backdrop-filter:blur(2px);display:flex;align-items:flex-start;justify-content:center;padding-top:80px;font:13px ui-monospace,JetBrains Mono,monospace&quot;>
+  <div id=&quot;gam-cmdk-card&quot; style=&quot;background:#0a0a0b;border:1px solid #ff9933;width:min(560px,92vw);max-height:65vh;display:flex;flex-direction:column;box-shadow:0 12px 48px rgba(0,0,0,0.7),0 0 0 1px rgba(255,153,51,0.15);border-radius:4px;overflow:hidden&quot;>
+
+    <!-- Header row with input -->
+    <div style=&quot;display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(255,153,51,0.25);background:linear-gradient(180deg,#13130f 0%,#0a0a0b 100%)&quot;>
+      <span style=&quot;color:#ff9933;font-weight:700;font-size:11px;letter-spacing:0.12em;text-transform:uppercase&quot;>CMD</span>
+      <input id=&quot;gam-cmdk-input&quot; type=&quot;text&quot; placeholder=&quot;Type a command or filter…&quot; aria-label=&quot;Filter commands&quot; autocomplete=&quot;off&quot; spellcheck=&quot;false&quot; style=&quot;flex:1;background:transparent;border:none;outline:none;color:#e8e6e1;font:13px ui-monospace,JetBrains Mono,monospace&quot;>
+      <span style=&quot;color:#7a7672;font-size:10px;letter-spacing:0.06em&quot;>ESC to close</span>
+    </div>
+
+    <!-- Command list (scrollable) -->
+    <div id=&quot;gam-cmdk-list&quot; role=&quot;listbox&quot; aria-label=&quot;Available commands&quot; style=&quot;overflow-y:auto;padding:6px 0;max-height:calc(65vh - 50px)&quot;>
+
+      <!-- Sample row: selected/highlighted state -->
+      <div role=&quot;option&quot; aria-selected=&quot;true&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid #ff9933;background:rgba(255,153,51,0.07)&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>🎛</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Open Mod Console</span>
+      </div>
+
+      <!-- Sample row: unselected state -->
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>✉</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Open Modmail Panel</span>
+      </div>
+
+      <!-- Sample row: unselected state -->
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>☠</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Open Death Row queue</span>
+      </div>
+
+      <!-- Sample row: unselected state -->
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>⚙</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Open Auto-Action queue</span>
+      </div>
+
+      <!-- Sample row: unselected state -->
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>🔍</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Search posts + comments (open search palette)</span>
+      </div>
+
+    </div>
+
+    <!-- Footer with keyboard hints -->
+    <div style=&quot;padding:6px 14px;border-top:1px solid rgba(255,153,51,0.12);color:#7a7672;font-size:10px;letter-spacing:0.04em;display:flex;justify-content:space-between&quot;>
+      <span>↑↓ navigate · ↵ execute</span>
+      <span>Ctrl+Shift+P</span>
+    </div>
+
+  </div>
+</div>
+</body></html>"></iframe>
+    </div>
+  </section>
+  <section class="snap-card">
+    <h2 class="snap-title">Action-picker HUD overlay (command palette) <span class="snap-key">action-picker-hud</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="Action-picker HUD overlay (command palette)" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body>
+<div id=&quot;gam-cmdk-palette&quot; role=&quot;dialog&quot; aria-modal=&quot;true&quot; aria-label=&quot;ModTools command palette&quot; style=&quot;position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999990;background:rgba(0,0,0,0.55);backdrop-filter:blur(2px);display:flex;align-items:flex-start;justify-content:center;padding-top:80px;font:13px ui-monospace,JetBrains Mono,monospace&quot;>
+  <div id=&quot;gam-cmdk-card&quot; style=&quot;background:#0a0a0b;border:1px solid #ff9933;width:min(560px,92vw);max-height:65vh;display:flex;flex-direction:column;box-shadow:0 12px 48px rgba(0,0,0,0.7),0 0 0 1px rgba(255,153,51,0.15);border-radius:4px;overflow:hidden&quot;>
+    <!-- Header -->
+    <div style=&quot;display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(255,153,51,0.25);background:linear-gradient(180deg,#13130f 0%,#0a0a0b 100%)&quot;>
+      <span style=&quot;color:#ff9933;font-weight:700;font-size:11px;letter-spacing:0.12em;text-transform:uppercase&quot;>CMD</span>
+      <input id=&quot;gam-cmdk-input&quot; type=&quot;text&quot; placeholder=&quot;Type a command or filter…&quot; aria-label=&quot;Filter commands&quot; autocomplete=&quot;off&quot; spellcheck=&quot;false&quot; style=&quot;flex:1;background:transparent;border:none;outline:none;color:#e8e6e1;font:13px ui-monospace,JetBrains Mono,monospace&quot;>
+      <span style=&quot;color:#7a7672;font-size:10px;letter-spacing:0.06em&quot;>ESC to close</span>
+    </div>
+    <!-- List Container -->
+    <div id=&quot;gam-cmdk-list&quot; role=&quot;listbox&quot; aria-label=&quot;Available commands&quot; style=&quot;overflow-y:auto;padding:6px 0;max-height:calc(65vh - 50px)&quot;>
+      <!-- Example list items (dynamically rendered) -->
+      <div role=&quot;option&quot; aria-selected=&quot;true&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid #ff9933;background:rgba(255,153,51,0.07)&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>🎛</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Open Mod Console</span>
+      </div>
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>✉</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Open Modmail Panel</span>
+      </div>
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>☠</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Open Death Row queue</span>
+      </div>
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>⚙</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Open Auto-Action queue</span>
+      </div>
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>▭</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Toggle Status Bar visibility</span>
+      </div>
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>?</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Open Help / shortcuts panel</span>
+      </div>
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>🔍</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Search posts + comments (open search palette)</span>
+      </div>
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>🔬</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Investigate user (open Profile Intel)</span>
+      </div>
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>▶</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Run all Death Row rules NOW</span>
+      </div>
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>↻</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Refresh team settings + roster</span>
+      </div>
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>📋</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Copy debug snapshot (current page)</span>
+      </div>
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>⚕</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Open extension popup (Diagnostics tab)</span>
+      </div>
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>↺</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Reload this page</span>
+      </div>
+      <div role=&quot;option&quot; aria-selected=&quot;false&quot; style=&quot;display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent&quot;>
+        <span style=&quot;color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px&quot;>⟲</span>
+        <span style=&quot;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap&quot;>Reload extension (orphan recovery)</span>
+      </div>
+    </div>
+    <!-- Footer -->
+    <div style=&quot;padding:6px 14px;border-top:1px solid rgba(255,153,51,0.12);color:#7a7672;font-size:10px;letter-spacing:0.04em;display:flex;justify-content:space-between&quot;>
+      <span>↑↓ navigate · ↵ execute</span>
+      <span>Ctrl+Shift+P</span>
+    </div>
+  </div>
+</div>
+</body></html>"></iframe>
+    </div>
+  </section>
+  <section class="snap-card">
+    <h2 class="snap-title">Skeleton loaders + Empty states <span class="snap-key">skeleton-empty</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="Skeleton loaders + Empty states" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body><!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { background: #0a0a0b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 16px; }
+    .demo-section { margin-bottom: 32px; }
+    .label { color: #9b9892; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; display: block; }
+
+    /* v8.1 ux contrast CSS (from line 4420-4443) */
+    :root {
+      --gam-bg-dark: #0f1114;
+      --gam-bg-card: #181b20;
+      --gam-muted-text: #b0b5bc;
+      --gam-muted-text-legacy: #8b929e;
+      --gam-link: #7cb8ff;
+      --gam-accent-legacy: #4A9EFF;
+      --gam-warn-bg: #744210;
+      --gam-warn-text: #ffe5b0;
+      --gam-warn-text-legacy: #faf089;
+      --gam-ok-bg: #276749;
+      --gam-ok-text: #c6f6d5;
+      --gam-danger-bg: #9b2c2c;
+      --gam-danger-text: #fed7d7;
+    }
+
+    /* v8.1 ux: skeleton CSS (line 4483-4499) */
+    body.gam-ux-polish-on .gam-skeleton-wrap { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
+    body.gam-ux-polish-on .gam-sk-line { height: 12px; border-radius: 4px; background: #2a2a30; }
+    body.gam-ux-polish-on .gam-sk-row { height: 36px; border-radius: 6px; background: #2a2a30; }
+    body.gam-ux-polish-on .gam-sk-card { height: 120px; border-radius: 8px; background: #2a2a30; }
+    body.gam-ux-polish-on .gam-sk-avatar { width: 32px; height: 32px; border-radius: 50%; background: #2a2a30; }
+
+    @media (prefers-reduced-motion: no-preference) {
+      body.gam-ux-polish-on .gam-skeleton-shimmer {
+        background: linear-gradient(90deg, #2a2a30 0%, #3a3a42 50%, #2a2a30 100%);
+        background-size: 200% 100%;
+        animation: gam-skeleton-shimmer 2s linear infinite;
+      }
+      @keyframes gam-skeleton-shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+      }
+    }
+
+    /* v8.1 ux: empty-state CSS (line 4573-4579) */
+    body.gam-ux-polish-on .gam-empty-card { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 32px 20px; background: #1f1f24; border-radius: 8px; text-align: center; color: var(--gam-muted-text, #b0b5bc); }
+    body.gam-ux-polish-on .gam-empty-icon { color: #5a5a62; }
+    body.gam-ux-polish-on .gam-empty-headline { font-size: 15px; font-weight: 600; color: #e5e5e8; }
+    body.gam-ux-polish-on .gam-empty-desc { font-size: 13px; color: var(--gam-muted-text, #b0b5bc); max-width: 320px; line-height: 1.5; }
+    body.gam-ux-polish-on .gam-empty-cta { margin-top: 4px; padding: 8px 16px; background: #3a3a42; color: #e5e5e8; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; min-height: 44px; min-width: 44px; }
+    body.gam-ux-polish-on .gam-empty-cta:hover { background: #4a4a52; }
+
+    /* Bloomberg state CSS (line 26587-26625) */
+    .gam-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 20px 12px; text-align: center; color: #9b9892; font: 10px/1.4 ui-monospace, monospace; }
+    .gam-empty-icon { font-size: 24px; line-height: 1; opacity: 0.6; }
+    .gam-empty-headline { color: #9b9892; font-weight: 600; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+    .gam-empty-desc { color: #9b9892; font-size: 9px; }
+    .gam-empty-cta { background: transparent; border: 1px solid #ff9933; color: #ff9933; padding: 2px 8px; cursor: pointer; font: 600 9px ui-monospace, monospace; letter-spacing: 0.04em; text-transform: uppercase; margin-top: 4px; }
+
+    .gam-error-state { padding: 10px 12px; background: rgba(255, 59, 59, 0.04); border-left: 2px solid #ff3b3b; }
+    .gam-error-chip { display: inline-block; padding: 1px 5px; font: 700 8px ui-monospace, monospace; letter-spacing: 0.1em; text-transform: uppercase; border-radius: 2px; margin-bottom: 4px; }
+    .gam-error-chip.hard { background: rgba(255, 59, 59, 0.18); color: #ff3b3b; }
+    .gam-error-chip.soft { background: rgba(240, 160, 64, 0.15); color: #f0a040; }
+    .gam-error-msg { color: #c8c5c0; font-size: 10px; margin: 2px 0; }
+    .gam-error-hint { color: #9b9892; font-size: 9px; }
+    .gam-error-retry { background: transparent; border: 1px solid #9b9892; color: #9b9892; padding: 1px 6px; cursor: pointer; font: 600 8px ui-monospace, monospace; letter-spacing: 0.04em; text-transform: uppercase; margin-top: 6px; }
+
+    .gam-skel-line { height: 10px; background: #2a2825; border-radius: 2px; margin: 3px 0; animation: gam-skel-pulse 1.4s ease-in-out infinite; }
+    @keyframes gam-skel-pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .gam-skel-line { animation: none; }
+    }
+  </style>
+</head>
+<body>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Skeleton: text-line variant (renderSkeleton)</span>
+  <div class=&quot;gam-skeleton-wrap&quot; aria-busy=&quot;true&quot; aria-live=&quot;off&quot;>
+    <div class=&quot;gam-sk-line gam-skeleton-shimmer&quot;></div>
+  </div>
+</div>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Skeleton: paragraph variant (renderSkeleton)</span>
+  <div class=&quot;gam-skeleton-wrap&quot; aria-busy=&quot;true&quot; aria-live=&quot;off&quot;>
+    <div class=&quot;gam-sk-line gam-skeleton-shimmer&quot;></div>
+    <div class=&quot;gam-sk-line gam-skeleton-shimmer&quot;></div>
+    <div class=&quot;gam-sk-line gam-skeleton-shimmer&quot;></div>
+  </div>
+</div>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Skeleton: row variant (renderSkeleton)</span>
+  <div class=&quot;gam-skeleton-wrap&quot; aria-busy=&quot;true&quot; aria-live=&quot;off&quot;>
+    <div class=&quot;gam-sk-row gam-skeleton-shimmer&quot;></div>
+  </div>
+</div>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Skeleton: card variant (renderSkeleton)</span>
+  <div class=&quot;gam-skeleton-wrap&quot; aria-busy=&quot;true&quot; aria-live=&quot;off&quot;>
+    <div class=&quot;gam-sk-card gam-skeleton-shimmer&quot;></div>
+  </div>
+</div>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Skeleton: avatar variant (renderSkeleton)</span>
+  <div class=&quot;gam-skeleton-wrap&quot; aria-busy=&quot;true&quot; aria-live=&quot;off&quot;>
+    <div class=&quot;gam-sk-avatar gam-skeleton-shimmer&quot;></div>
+  </div>
+</div>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Empty state: inbox-empty (renderEmptyState, v8.1)</span>
+  <div class=&quot;gam-empty-card&quot; role=&quot;status&quot;>
+    <div class=&quot;gam-empty-icon&quot;>
+      <svg viewBox=&quot;0 0 24 24&quot; width=&quot;40&quot; height=&quot;40&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.6&quot;><path d=&quot;M3 12l3-7h12l3 7v7H3z&quot;/><path d=&quot;M3 12h5l1 2h6l1-2h5&quot;/></svg>
+    </div>
+    <div class=&quot;gam-empty-headline&quot;>No items in inbox</div>
+    <div class=&quot;gam-empty-desc&quot;>Queue is empty. Check back later.</div>
+    <button class=&quot;gam-empty-cta&quot; type=&quot;button&quot;>Refresh</button>
+  </div>
+</div>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Empty state: users-empty (renderEmptyState, v8.1)</span>
+  <div class=&quot;gam-empty-card&quot; role=&quot;status&quot;>
+    <div class=&quot;gam-empty-icon&quot;>
+      <svg viewBox=&quot;0 0 24 24&quot; width=&quot;40&quot; height=&quot;40&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.6&quot;><circle cx=&quot;9&quot; cy=&quot;8&quot; r=&quot;3&quot;/><path d=&quot;M3 20a6 6 0 0 1 12 0&quot;/><circle cx=&quot;17&quot; cy=&quot;9&quot; r=&quot;2.2&quot;/><path d=&quot;M15 20a4 4 0 0 1 6 0&quot;/></svg>
+    </div>
+    <div class=&quot;gam-empty-headline&quot;>No users found</div>
+    <div class=&quot;gam-empty-desc&quot;>Search returned no results matching your criteria.</div>
+  </div>
+</div>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Empty state: rules-empty (renderEmptyState, v8.1)</span>
+  <div class=&quot;gam-empty-card&quot; role=&quot;status&quot;>
+    <div class=&quot;gam-empty-icon&quot;>
+      <svg viewBox=&quot;0 0 24 24&quot; width=&quot;40&quot; height=&quot;40&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.6&quot;><rect x=&quot;4&quot; y=&quot;4&quot; width=&quot;16&quot; height=&quot;16&quot; rx=&quot;2&quot;/><path d=&quot;M8 9h8M8 13h8M8 17h5&quot;/></svg>
+    </div>
+    <div class=&quot;gam-empty-headline&quot;>No rules configured</div>
+    <div class=&quot;gam-empty-desc&quot;>Add a custom rule to get started.</div>
+  </div>
+</div>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Empty state: modmail-empty (renderEmptyState, v8.1)</span>
+  <div class=&quot;gam-empty-card&quot; role=&quot;status&quot;>
+    <div class=&quot;gam-empty-icon&quot;>
+      <svg viewBox=&quot;0 0 24 24&quot; width=&quot;40&quot; height=&quot;40&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.6&quot;><rect x=&quot;3&quot; y=&quot;5&quot; width=&quot;18&quot; height=&quot;14&quot; rx=&quot;2&quot;/><path d=&quot;M3 7l9 6 9-6&quot;/></svg>
+    </div>
+    <div class=&quot;gam-empty-headline&quot;>No modmail</div>
+    <div class=&quot;gam-empty-desc&quot;>All caught up on moderation messages.</div>
+  </div>
+</div>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Empty state: popup context (gamMakeEmpty)</span>
+  <div class=&quot;gam-empty-state&quot;>
+    <div class=&quot;gam-empty-icon&quot;>📋</div>
+    <div class=&quot;gam-empty-headline&quot;>QUEUE IS CLEAR</div>
+    <div class=&quot;gam-empty-desc&quot;>No pending items to review.</div>
+  </div>
+</div>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Error state: hard severity (gamMakeError)</span>
+  <div class=&quot;gam-error-state&quot;>
+    <span class=&quot;gam-error-chip hard&quot;>ERROR</span>
+    <div class=&quot;gam-error-msg&quot;>Snapshot unavailable</div>
+    <div class=&quot;gam-error-hint&quot;>Worker may be unreachable.</div>
+    <button class=&quot;gam-error-retry&quot; type=&quot;button&quot;>Retry</button>
+  </div>
+</div>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Error state: soft severity (gamMakeError)</span>
+  <div class=&quot;gam-error-state&quot;>
+    <span class=&quot;gam-error-chip soft&quot;>WARN</span>
+    <div class=&quot;gam-error-msg&quot;>AI quota exhausted</div>
+    <div class=&quot;gam-error-hint&quot;>AI model offline or rate limit hit.</div>
+  </div>
+</div>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Skeleton: gamMakeSkel stat variant (popup context)</span>
+  <div style=&quot;padding: 8px 0;&quot;>
+    <div class=&quot;gam-skel-line&quot; style=&quot;height:10px;background:#2a2825;border-radius:2px;margin:3px 0;width:100%&quot;></div>
+  </div>
+</div>
+
+<div class=&quot;demo-section&quot;>
+  <span class=&quot;label&quot;>Skeleton: gamMakeSkel card variant (popup context)</span>
+  <div style=&quot;padding: 8px 0;&quot;>
+    <div class=&quot;gam-skel-line&quot; style=&quot;height:10px;background:#2a2825;border-radius:2px;margin:3px 0;width:100%&quot;></div>
+    <div class=&quot;gam-skel-line&quot; style=&quot;height:10px;background:#2a2825;border-radius:2px;margin:3px 0;width:70%&quot;></div>
+    <div class=&quot;gam-skel-line&quot; style=&quot;height:10px;background:#2a2825;border-radius:2px;margin:3px 0;width:85%&quot;></div>
+  </div>
+</div>
+
+</body>
+</html></body></html>"></iframe>
+    </div>
+  </section>
+  <section class="snap-card">
+    <h2 class="snap-title">User/Post/Thread/QueueItem Content Sections (GAW ModTools Intel Drawer) <span class="snap-key">sections</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="User/Post/Thread/QueueItem Content Sections (GAW ModTools Intel Drawer)" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body><div style=&quot;background:#0a0a0b; padding:16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; color:#e8eaed; font-size:12px; line-height:1.5; width:600px;&quot;>
+  <!-- User Section 1: Profile Header -->
+  <section class=&quot;gam-drawer-section&quot; data-section=&quot;1&quot;>
+    <h3 style=&quot;font-size:12px; font-weight:600; color:#8b929e; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 8px 0; border-bottom:1px solid #2a2f38; padding-bottom:4px;&quot;>Profile</h3>
+    <div>
+      <p style=&quot;margin:0 0 6px 0; display:flex; align-items:center; gap:6px;&quot;>
+        <span class=&quot;gam-chip gam-chip--primary gam-chip--primary-ONLINE&quot; style=&quot;display:inline-flex; align-items:center; gap:4px; background:rgba(61,214,140,0.15); border:1px solid #3dd68c; color:#3dd68c; font:600 9px ui-monospace,monospace; letter-spacing:0.06em; text-transform:uppercase; padding:2px 6px; border-radius:3px;&quot;>ONLINE</span>
+        <span class=&quot;gam-repeat-halo gam-repeat-halo--pulse&quot; role=&quot;button&quot; tabindex=&quot;0&quot; title=&quot;Click to expand ban history&quot; style=&quot;display:inline-flex; align-items:center; gap:6px; padding:2px 6px 2px 4px; border:2px solid #f5a623; border-radius:4px; box-shadow:0 0 0 3px rgba(245,166,35,.18); cursor:pointer;&quot;>
+          <a href=&quot;/u/ShadowModAdmin&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot; style=&quot;color:inherit; font-weight:700; text-decoration:none;&quot;>ShadowModAdmin</a>
+          <span class=&quot;gam-repeat-badge&quot; style=&quot;display:inline-block; font-size:9px; font-weight:700; line-height:1; padding:1px 4px; border-radius:8px; background:#f04040; color:#fff;&quot;>×3</span>
+        </span>
+      </p>
+      <p style=&quot;color:#a0aec0; font-size:12px; margin:4px 0 8px 0;&quot;>joined 2022-03-15 · karma 18934 · prior bans: 3 · 756d account</p>
+      <span style=&quot;display:inline-block; background:rgba(167,139,250,0.15); border:1px solid #a78bfa; color:#a78bfa; font:700 9px ui-monospace,monospace; letter-spacing:0.06em; padding:0 5px; text-transform:uppercase; margin-left:6px;&quot;>NEW 92d</span>
+      <div style=&quot;margin-top:4px; min-height:18px;&quot;>
+        <span style=&quot;display:inline-flex; align-items:center; gap:4px; background:rgba(0,0,0,0.3); border:1px solid #ff9933; color:#ff9933; font:600 9px ui-monospace,monospace; letter-spacing:0.06em; text-transform:uppercase; padding:1px 5px;&quot;>8.3 comments/day · HEAVY</span>
+      </div>
+      <div class=&quot;gam-repeat-label&quot; style=&quot;font-size:9px; color:#f5a623; text-transform:uppercase; letter-spacing:1px; border-left:2px solid #f5a623; padding-left:6px; margin:8px 0 4px 0;&quot;>REPEAT OFFENDER</div>
+      <div class=&quot;gam-repeat-history&quot; style=&quot;margin-top:2px;&quot;>
+        <div class=&quot;gam-drawer-note-row&quot; style=&quot;padding:6px 0; border-top:1px solid #2a2f38;&quot;>
+          <span class=&quot;gam-drawer-note-ts&quot; style=&quot;color:#5c6370; font-size:10px;&quot;>2025-11-10 14:22</span>
+          <span style=&quot;margin:0 2px;&quot;> </span>
+          <span class=&quot;gam-chip gam-chip--primary gam-chip--primary-BAN&quot; style=&quot;display:inline-flex; align-items:center; gap:4px; background:rgba(240,64,64,0.15); border:1px solid #f04040; color:#f04040; font:600 9px ui-monospace,monospace; letter-spacing:0.06em; text-transform:uppercase; padding:2px 6px; border-radius:3px;&quot;>BAN</span>
+          <span style=&quot;margin:0 2px;&quot;> </span>
+          <span class=&quot;gam-drawer-note-author&quot; style=&quot;color:#8b929e; font-size:11px; font-weight:600; margin-right:6px;&quot;>mod_enforcer</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- User Section 2: Contribution Quality -->
+  <section class=&quot;gam-drawer-section&quot; data-section=&quot;2&quot;>
+    <h3 style=&quot;font-size:12px; font-weight:600; color:#8b929e; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 8px 0; border-bottom:1px solid #2a2f38; padding-bottom:4px;&quot;>Quality</h3>
+    <div>
+      <p style=&quot;margin:0 0 6px 0;&quot;>Contribution Quality: <strong style=&quot;color:#e8eaed;&quot;>72</strong> <span class=&quot;gam-chip gam-chip--ai_conf gam-chip--ai_conf-LOW&quot; style=&quot;display:inline-flex; align-items:center; gap:4px; background:rgba(167,139,250,0.15); border:1px solid #a78bfa; color:#a78bfa; font:600 9px ui-monospace,monospace; letter-spacing:0.06em; text-transform:uppercase; padding:2px 6px; border-radius:3px;&quot;>LOW</span> <span style=&quot;color:#718096; font-size:10px;&quot;>(NAIVE v7.0)</span></p>
+      <p style=&quot;color:#a0aec0; font-size:11px; margin:0;&quot;>approved: 24 · removed: 8 · banned: 3</p>
+    </div>
+  </section>
+
+  <!-- User Section 4: Team Notes -->
+  <section class=&quot;gam-drawer-section&quot; data-section=&quot;4&quot;>
+    <h3 style=&quot;font-size:12px; font-weight:600; color:#8b929e; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 8px 0; border-bottom:1px solid #2a2f38; padding-bottom:4px;&quot;>Team Notes</h3>
+    <div>
+      <div class=&quot;gam-drawer-note-row&quot; style=&quot;padding:6px 0; border-top:1px solid #2a2f38;&quot;>
+        <span class=&quot;gam-drawer-note-author&quot; style=&quot;color:#8b929e; font-size:11px; font-weight:600; margin-right:6px;&quot;>qa_reviewer</span>
+        <span class=&quot;gam-drawer-note-ts&quot; style=&quot;color:#5c6370; font-size:10px;&quot;>2025-06-10 09:45</span>
+        <p class=&quot;gam-drawer-note-body&quot; style=&quot;color:#e8eaed; font-size:12px; white-space:pre-wrap; margin:2px 0 0 0; line-height:1.45;&quot;>Multiple rule violations in past week - escalated to team lead</p>
+      </div>
+      <div class=&quot;gam-drawer-note-form&quot; style=&quot;margin-top:8px; display:flex; flex-direction:column; gap:4px;&quot;>
+        <textarea placeholder=&quot;Add a team note…&quot; style=&quot;background:#181b20; color:#e8eaed; border:1px solid #2a2f38; border-radius:4px; padding:6px 8px; font:inherit; font-size:12px; resize:vertical; min-height:48px; outline:none; transition:border-color .15s;&quot;></textarea>
+        <button class=&quot;gam-nba-action-alt&quot; style=&quot;background:#252a31; color:#e8eaed; border:1px solid #2a2f38; border-radius:4px; padding:5px 12px; cursor:pointer; font-size:11px; font-weight:600; transition:border-color .12s;&quot;>Save note</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- User Section 7: Activity Timeline -->
+  <section class=&quot;gam-drawer-section&quot; data-section=&quot;7&quot;>
+    <h3 style=&quot;font-size:12px; font-weight:600; color:#8b929e; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 8px 0; border-bottom:1px solid #2a2f38; padding-bottom:4px;&quot;>Activity</h3>
+    <div class=&quot;gam-at-wrap&quot; style=&quot;padding:8px 14px; font:11px ui-monospace,SFMono-Regular,Consolas,monospace;&quot;>
+      <div class=&quot;gam-at-header&quot; style=&quot;display:flex; align-items:center; gap:8px; margin-bottom:8px; color:#8b929e; font-size:10px; font-variant-numeric:tabular-nums; letter-spacing:.3px;&quot;>
+        <div class=&quot;gam-at-spark&quot; style=&quot;display:flex; align-items:flex-end; gap:1px; height:16px;&quot;>
+          <div class=&quot;gam-at-spark-bar&quot; style=&quot;width:3px; background:#f5a623; opacity:.7; border-radius:1px 1px 0 0; min-height:1px; height:8px;&quot;></div>
+          <div class=&quot;gam-at-spark-bar&quot; style=&quot;width:3px; background:#f5a623; opacity:.7; border-radius:1px 1px 0 0; min-height:1px; height:12px;&quot;></div>
+          <div class=&quot;gam-at-spark-bar&quot; style=&quot;width:3px; background:#f5a623; opacity:.7; border-radius:1px 1px 0 0; min-height:1px; height:5px;&quot;></div>
+        </div>
+        43 items  30d  P:12  C:31
+      </div>
+      <div class=&quot;gam-at-row&quot; role=&quot;button&quot; tabindex=&quot;0&quot; style=&quot;display:grid; grid-template-columns:42px 20px 1fr; gap:0 6px; padding:3px 0; border-top:1px solid #252a31; cursor:pointer; line-height:1.35; transition:background .08s;&quot;>
+        <span class=&quot;gam-at-time&quot; style=&quot;color:#8b929e; font-variant-numeric:tabular-nums;&quot;>14:22</span>
+        <span class=&quot;gam-at-kind-p&quot; style=&quot;color:#f5a623; font-weight:700;&quot;>[P]</span>
+        <div>
+          <div class=&quot;gam-at-title&quot; style=&quot;color:#e8eaed; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;&quot;>Patriots United: The Path Forward</div>
+          <div class=&quot;gam-at-meta&quot; style=&quot;color:#5c6370; font-size:10px; margin-top:1px;&quot;><span class=&quot;gam-at-score-pos&quot; style=&quot;color:#3dd68c;&quot;>+142</span> · GreatAwakening · 8c</div>
+        </div>
+      </div>
+      <div class=&quot;gam-at-row&quot; role=&quot;button&quot; tabindex=&quot;0&quot; style=&quot;display:grid; grid-template-columns:42px 20px 1fr; gap:0 6px; padding:3px 0; border-top:1px solid #252a31; cursor:pointer; line-height:1.35; transition:background .08s;&quot;>
+        <span class=&quot;gam-at-time&quot; style=&quot;color:#8b929e; font-variant-numeric:tabular-nums;&quot;>13:15</span>
+        <span class=&quot;gam-at-kind-c&quot; style=&quot;color:#e8c84a;&quot;>[C]</span>
+        <div>
+          <div class=&quot;gam-at-title&quot; style=&quot;color:#e8eaed; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;&quot;>Excellent analysis of the timeline...</div>
+          <div class=&quot;gam-at-meta&quot; style=&quot;color:#5c6370; font-size:10px; margin-top:1px;&quot;><span class=&quot;gam-at-score-neg&quot; style=&quot;color:#f04040;&quot;>-4</span> · GreatAwakening</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- User Section 8: Lookalikes -->
+  <section class=&quot;gam-drawer-section&quot; data-section=&quot;8&quot;>
+    <h3 style=&quot;font-size:12px; font-weight:600; color:#8b929e; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 8px 0; border-bottom:1px solid #2a2f38; padding-bottom:4px;&quot;>Lookalikes</h3>
+    <div class=&quot;sim-panel&quot; style=&quot;border-top:1px solid #1e2a3a; padding:8px 12px; font-family:'IBM Plex Mono',monospace; font-size:11px;&quot;>
+      <div class=&quot;sim-panel-header&quot; style=&quot;color:#5b8db8; font-size:10px; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:6px;&quot;>SIMILAR ACCOUNTS</div>
+      <div class=&quot;sim-row&quot; style=&quot;display:flex; align-items:center; gap:8px; padding:3px 0; border-bottom:1px solid #111c27; cursor:pointer;&quot;>
+        <span class=&quot;sim-username&quot; style=&quot;flex:1; color:#c8d8e8; font-weight:500;&quot;>TruthSeeker99</span>
+        <span class=&quot;sim-pill sim-pill--MEDIUM&quot; style=&quot;font-size:9px; font-weight:700; letter-spacing:0.06em; padding:1px 5px; border-radius:2px; background:#2a2a12; color:#d4b44a; border:1px solid #5a4a10;&quot;>MEDIUM</span>
+        <span class=&quot;sim-meta&quot; style=&quot;color:#3a5a7a; font-size:10px;&quot;>karma 2145 - 5d ago</span>
+        <button class=&quot;gam-btn-small&quot; style=&quot;font-size:9px; padding:1px 5px; background:transparent; border:1px solid #2a2f38; color:#8b929e; cursor:pointer; border-radius:3px;&quot;>Open</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- QueueItem Section 1: Report Triage -->
+  <section class=&quot;gam-drawer-section&quot; data-section=&quot;1&quot; style=&quot;margin-top:24px; border-top:1px solid #2a2f38; padding-top:16px;&quot;>
+    <h3 style=&quot;font-size:12px; font-weight:600; color:#8b929e; text-transform:uppercase; letter-spacing:0.5px; margin:0 0 8px 0; border-bottom:1px solid #2a2f38; padding-bottom:4px;&quot;>Reports</h3>
+    <div>
+      <p style=&quot;margin:0 0 6px 0;&quot;><span class=&quot;gam-chip gam-chip--primary gam-chip--primary-OPEN&quot; style=&quot;display:inline-flex; align-items:center; gap:4px; background:rgba(102,204,255,0.15); border:1px solid #66ccff; color:#66ccff; font:600 9px ui-monospace,monospace; letter-spacing:0.06em; text-transform:uppercase; padding:2px 6px; border-radius:3px;&quot;>OPEN</span> <strong style=&quot;color:#e8eaed; margin-left:6px;&quot;>Potential QAnon Content Violation</strong></p>
+      <p style=&quot;font-size:12px; margin:0;&quot;>
+        Reports:
+        <span class=&quot;gam-chip gam-chip--risk gam-chip--risk-HIGH&quot; style=&quot;display:inline-flex; align-items:center; gap:4px; background:rgba(240,64,64,0.15); border:1px solid #f04040; color:#f04040; font:600 9px ui-monospace,monospace; letter-spacing:0.06em; text-transform:uppercase; padding:2px 6px; border-radius:3px;&quot;>HIGH</span>
+        <span style=&quot;margin-left:4px;&quot;>Misinformation · </span>
+        <span class=&quot;gam-chip gam-chip--risk gam-chip--risk-MEDIUM&quot; style=&quot;display:inline-flex; align-items:center; gap:4px; background:rgba(240,160,64,0.15); border:1px solid #f0a040; color:#f0a040; font:600 9px ui-monospace,monospace; letter-spacing:0.06em; text-transform:uppercase; padding:2px 6px; border-radius:3px;&quot;>MEDIUM</span>
+        <span style=&quot;margin-left:4px;&quot;>Spam </span>
+      </p>
+    </div>
+  </section>
+</div></body></html>"></iframe>
+    </div>
+  </section>
+  <section class="snap-card">
+    <h2 class="snap-title">Triage Console (alerts/stats/toolbar/batch bar) <span class="snap-key">triage-console</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="Triage Console (alerts/stats/toolbar/batch bar)" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body><!DOCTYPE html>
+<html>
+<head>
+<style>
+body { background: #0a0a0b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+.gam-t-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid #2a2f38; flex-wrap: wrap; }
+.gam-t-brand { font-weight: 800; font-size: 14px; color: #ff9933; letter-spacing: -.1px; }
+.gam-t-header-hint { font-size: 10px; color: #5c6370; letter-spacing: .1px; }
+.gam-t-layout { display: flex; gap: 18px; align-items: flex-start; }
+.gam-t-main { flex: 1; min-width: 0; }
+.gam-t-sidebar { width: 210px; flex-shrink: 0; position: sticky; top: 56px; display: flex; flex-direction: column; gap: 4px; align-self: flex-start; }
+.gam-t-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 0; }
+.gam-t-stat { background: #181b20; border: 1px solid #2a2f38; border-radius: 4px; padding: 8px 10px; transition: border-color .15s; }
+.gam-t-stat:hover { border-color: #3a3f48; }
+.gam-t-stat-val { font-size: 20px; font-weight: 700; line-height: 1; }
+.gam-t-stat-label { font-size: 9px; color: #5c6370; text-transform: uppercase; letter-spacing: .5px; margin-top: 3px; }
+.gam-t-stat-sub { font-size: 9px; margin-top: 3px; }
+.gam-t-alerts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.gam-t-alert { padding: 7px 11px 7px 14px; border-radius: 4px; font-size: 11px; line-height: 1.45; margin-bottom: 6px; border-left-width: 3px; border-left-style: solid; }
+.gam-t-alert:last-child { margin-bottom: 0; }
+.gam-t-alert b { font-weight: 700; }
+.gam-t-alert-warn { background: rgba(240,160,64,.09); color: #f0a040; border: 1px solid rgba(240,160,64,.2); border-left-color: #f0a040; }
+.gam-t-alert-red { background: rgba(240,64,64,.09); color: #f04040; border: 1px solid rgba(240,64,64,.2); border-left-color: #f04040; }
+.gam-t-alert-info { background: rgba(74,158,255,.06); color: #8b929e; border: 1px solid rgba(74,158,255,.12); border-left-color: #4A9EFF; }
+.gam-t-alert-link { color: inherit; text-decoration: underline; cursor: pointer; font-weight: 600; }
+.gam-t-toolbar { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+.gam-t-filter { background: #181b20; border: 1px solid #2a2f38; border-radius: 4px; padding: 5px 10px; font: 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-weight: 600; color: #8b929e; cursor: pointer; transition: border-color .12s, color .12s, background .12s; letter-spacing: .1px; }
+.gam-t-filter:hover { border-color: #3a3f48; color: #e8eaed; }
+.gam-t-filter-active { background: #4A9EFF; border-color: #4A9EFF; color: #fff; }
+.gam-t-filter-count { font-size: 10px; opacity: .7; margin-left: 4px; }
+.gam-t-cluster-badge { background: rgba(240,160,64,.15); color: #f0a040; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-left: 8px; }
+.gam-t-cluster-clear { cursor: pointer; margin-left: 4px; opacity: .7; }
+.gam-t-cluster-clear:hover { opacity: 1; }
+.gam-t-batch { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: rgba(74,158,255,.07); border: 1px solid rgba(74,158,255,.18); border-left: 3px solid #4A9EFF; border-radius: 4px; margin-bottom: 10px; font-size: 11px; color: #e8eaed; }
+.gam-t-batch-count { font-weight: 600; color: #4A9EFF; }
+.gam-t-batch-btn { background: #181b20; border: 1px solid #2a2f38; border-radius: 4px; padding: 4px 12px; font: 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; color: #8b929e; cursor: pointer; transition: all .15s; }
+.gam-t-batch-btn:hover { border-color: #3a3f48; color: #e8eaed; }
+.gam-t-batch-ban { color: #f04040; border-color: rgba(240,64,64,.3); }
+.gam-t-batch-ban:hover { background: rgba(240,64,64,.15); }
+.gam-t-batch-dr { color: #a78bfa; border-color: rgba(167,139,250,.3); }
+.gam-t-batch-dr:hover { background: rgba(167,139,250,.15); }
+.gam-t-batch-watch { color: #ffd60a; border-color: rgba(255,214,10,.3); }
+.gam-t-batch-watch:hover { background: rgba(255,214,10,.15); }
+.gam-t-batch-clear { color: #3dd68c; border-color: rgba(61,214,140,.3); }
+.gam-t-batch-clear:hover { background: rgba(61,214,140,.15); }
+.gam-t-batch-cancel { color: #5c6370; }
+.gam-t-flush-btn { margin-left: auto; background: #f04040; color: #fff; border: none; border-radius: 4px; padding: 6px 14px; font: 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-weight: 700; cursor: pointer; letter-spacing: .3px; text-transform: uppercase; transition: opacity .15s; }
+.gam-t-flush-btn:hover { opacity: .9; }
+.gam-t-flush-btn:disabled { opacity: .5; cursor: not-allowed; }
+.gam-t-dr-rules { display: flex; flex-direction: column; gap: 3px; }
+.gam-t-dr-rule { display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: #181b20; border: 1px solid #2a2f38; border-radius: 4px; font-size: 10px; }
+.gam-t-dr-rule-pat { flex: 1; font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace; color: #ffd60a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.gam-t-dr-rule-meta { color: #5c6370; font-size: 9px; flex-shrink: 0; }
+.gam-t-dr-rule-pat:hover, .gam-t-dr-rule-meta:hover { border-bottom: 1px dotted rgba(74,158,255,.6); }
+.gam-t-dr-rule-toggle { display: flex; align-items: center; flex-shrink: 0; cursor: pointer; }
+.gam-t-dr-rule-toggle input { cursor: pointer; accent-color: #a78bfa; width: 12px; height: 12px; }
+.gam-t-dr-rule-del { background: transparent; border: none; color: #5c6370; cursor: pointer; font-size: 12px; padding: 0 2px; line-height: 1; transition: color .1s; flex-shrink: 0; }
+.gam-t-dr-rule-del:hover { color: #f04040; }
+.gam-t-dr-rule-disabled { opacity: .45; }
+.gam-t-dr-rule-disabled .gam-t-dr-rule-pat { text-decoration: line-through; color: #5c6370; }
+.gam-t-dr-rule-hot .gam-t-dr-rule-pat { color: #f0a040; font-weight: 700; }
+.gam-t-dr-rule-hit { font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px; background: rgba(240,160,64,.15); color: #f0a040; margin-left: 3px; flex-shrink: 0; }
+.gam-t-dr-add { display: flex; gap: 4px; align-items: center; margin-top: 6px; padding-top: 6px; border-top: 1px solid #2a2f38; }
+.gam-t-dr-add-pat { flex: 1; background: #0f1114; border: 1px solid #2a2f38; border-radius: 4px; color: #e8eaed; font: 10px 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace; padding: 4px 6px; outline: none; min-width: 0; transition: border-color .15s; }
+.gam-t-dr-add-pat:focus { border-color: #a78bfa; }
+.gam-t-dr-add-hours { background: #0f1114; border: 1px solid #2a2f38; border-radius: 4px; color: #8b929e; font-size: 10px; padding: 3px 4px; flex-shrink: 0; }
+.gam-t-dr-add-btn { background: rgba(167,139,250,.15); border: 1px solid rgba(167,139,250,.3); border-radius: 4px; color: #a78bfa; font-size: 10px; font-weight: 700; padding: 4px 7px; cursor: pointer; flex-shrink: 0; transition: all .1s; }
+.gam-t-dr-add-btn:hover { background: rgba(167,139,250,.25); border-color: #a78bfa; }
+.gam-t-dr-sweep { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 4px 0 2px; }
+.gam-t-dr-sweep-btn { background: rgba(240,64,64,.12); border: 1px solid rgba(240,64,64,.3); border-radius: 4px; color: #f04040; font-size: 10px; font-weight: 700; padding: 4px 8px; cursor: pointer; flex-shrink: 0; transition: all .1s; letter-spacing: .2px; }
+.gam-t-dr-sweep-btn:hover:not(:disabled) { background: rgba(240,64,64,.22); border-color: #f04040; }
+.gam-t-dr-sweep-btn:disabled { opacity: .5; cursor: progress; }
+.gam-t-dr-sweep-btn-top { background: rgba(255,153,51,0.15); border: 1px solid #ff9933; color: #ff9933; font-size: 11px; padding: 6px 12px; letter-spacing: .4px; }
+.gam-t-dr-sweep-btn-top:hover { background: rgba(255,153,51,0.25); box-shadow: 0 0 8px rgba(255,153,51,0.3); }
+.gam-t-dr-sweep-hint { font-size: 9px; color: #5c6370; flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gam-t-dr-hint { font-size: 9px; min-height: 12px; padding: 2px 0; font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace; }
+.gam-t-dr-empty { font-size: 10px; color: #5c6370; font-style: italic; padding: 6px 4px; white-space: pre-line; line-height: 1.5; }
+.gam-t-section { display: flex; flex-direction: column; }
+.gam-t-section-head { font-size: 10px; font-weight: 700; color: #8b929e; padding: 8px 8px 4px; display: flex; align-items: center; gap: 5px; border-top: 1px solid #2a2f38; margin-top: 6px; text-transform: uppercase; letter-spacing: .6px; cursor: pointer; user-select: none; }
+.gam-t-section-head:hover { color: #e8eaed; }
+.gam-t-section:first-child .gam-t-section-head { border-top: none; margin-top: 0; }
+.gam-t-section-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.gam-t-carat { display: inline-block; font-size: 10px; width: 10px; color: #5c6370; transition: transform .15s; flex-shrink: 0; }
+.gam-t-section-collapsed .gam-t-carat { transform: rotate(-90deg); }
+.gam-t-section-collapsed .gam-t-section-body { display: none; }
+.gam-t-section-body { display: flex; flex-direction: column; gap: 0; }
+.gam-t-section-tards { color: #f04040 !important; background: rgba(240,64,64,.05); border-radius: 4px; padding-left: 8px; padding-right: 8px; margin-left: -4px; margin-right: -4px; border: 1px solid rgba(240,64,64,.12); }
+.gam-t-section-why { font-size: 9px; font-weight: 400; color: #5c6370; margin-left: 4px; text-transform: none; letter-spacing: 0; font-style: italic; opacity: .8; }
+.gam-t-list { display: flex; flex-direction: column; gap: 0; max-height: none; overflow: visible; }
+.gam-t-row { display: grid; grid-template-columns: 22px 1fr 80px 130px 120px; gap: 6px; align-items: center; padding: 2px 8px; min-height: 34px; border-radius: 3px; border: 1px solid transparent; transition: background .12s, border-color .12s; }
+.gam-t-row:hover { background: #181b20; border-color: #2a2f38; }
+.gam-t-row-selected { background: rgba(74,158,255,.08) !important; border-color: rgba(74,158,255,.25) !important; }
+.gam-t-row-banned { opacity: .5; }
+.gam-t-row-historical { opacity: .72; }
+.gam-t-row-historical:hover { opacity: 1; }
+.gam-t-row-tard { background: rgba(240,64,64,.08); border-left: 3px solid #f04040; padding-left: 5px; }
+.gam-t-row-tard:hover { background: rgba(240,64,64,.18); border-color: #f04040; }
+.gam-t-row-tard .gam-t-user-name-text { color: #f04040 !important; font-weight: 700; }
+.gam-t-check { width: 16px; height: 16px; border: 1.5px solid #3a3f48; border-radius: 3px; cursor: pointer; transition: border-color .12s, background .12s, box-shadow .12s; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.gam-t-check:hover { border-color: #4A9EFF; box-shadow: 0 0 0 2px rgba(74,158,255,.15); }
+.gam-t-check-on { background: #4A9EFF; border-color: #4A9EFF; }
+.gam-t-check-on::after { content: '✓'; color: #fff; font-size: 11px; font-weight: 700; }
+.gam-t-user-info { min-width: 0; overflow: hidden; }
+.gam-t-user-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 3px; line-height: 1.2; }
+.gam-t-user-name-text:hover { color: #ff9933; text-decoration: underline; }
+.gam-t-user-meta { font-size: 9px; color: #5c6370; display: flex; gap: 6px; align-items: center; margin-top: 1px; line-height: 1.3; }
+.gam-t-ip { font-size: 10px; color: #5c6370; font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.2px; }
+.gam-t-row[data-incluster=&quot;1&quot;] .gam-t-ip { background: rgba(240,160,64,.12); padding: 2px 4px; border-radius: 3px; color: #f0a040; }
+.gam-t-risk { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.gam-t-risk-high { background: #f04040; box-shadow: 0 0 5px 1px rgba(240,64,64,.65), 0 0 0 2px rgba(240,64,64,.15); }
+.gam-t-risk-med { background: #f0a040; box-shadow: 0 0 4px 1px rgba(240,160,64,.5); }
+.gam-t-prior { font-weight: 800; font-size: 9px; padding: 1px 5px; border-radius: 4px; background: rgba(240,64,64,.15); color: #f04040; }
+.gam-t-cluster-tag { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(240,160,64,.15); color: #f0a040; text-transform: uppercase; letter-spacing: .5px; }
+.gam-t-status { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.gam-t-badge { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 3px; display: inline-block; width: fit-content; text-transform: uppercase; letter-spacing: .6px; }
+.gam-t-badge-new { background: rgba(255,153,51,.12); color: #ff9933; }
+.gam-t-badge-suspect { background: rgba(240,160,64,.15); color: #f0a040; }
+.gam-t-badge-cleared { background: rgba(61,214,140,.12); color: #3dd68c; }
+.gam-t-badge-watching { background: rgba(255,214,10,.12); color: #ffd60a; }
+.gam-t-badge-deathrow { background: rgba(167,139,250,.12); color: #a78bfa; }
+.gam-t-badge-banned { background: rgba(240,64,64,.12); color: #f04040; }
+.gam-t-countdown { font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace; font-size: 9px; color: #a78bfa; background: rgba(167,139,250,.1); padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(167,139,250,.2); }
+.gam-t-verified { font-size: 9px; color: #3dd68c; font-weight: 700; letter-spacing: .3px; }
+.gam-t-unverified { font-size: 9px; color: #f0a040; font-weight: 700; letter-spacing: .3px; }
+.gam-t-actions { display: flex; gap: 3px; position: relative; justify-content: flex-end; align-items: center; }
+.gam-t-done { font-size: 10px; color: #5c6370; text-transform: uppercase; letter-spacing: .5px; align-self: center; }
+.gam-t-act { width: 22px; height: 22px; border: 1px solid #2a2f38; border-radius: 3px; background: transparent; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; transition: background .1s, border-color .1s, transform .1s; color: #8b929e; flex-shrink: 0; position: relative; padding: 0 4px; box-sizing: content-box; }
+.gam-t-act::after { content: ''; position: absolute; inset: -6px 0; pointer-events: auto; }
+.gam-t-act:hover { color: #e8eaed; border-color: #3a3f48; transform: scale(1.08); }
+.gam-t-act:active { transform: scale(.96); }
+.gam-t-act-watch:hover { background: rgba(255,214,10,.12); border-color: rgba(255,214,10,.3); color: #ffd60a; }
+.gam-t-act-dr:hover { background: rgba(167,139,250,.12); border-color: rgba(167,139,250,.3); color: #a78bfa; }
+.gam-t-act-ban:hover { background: rgba(240,64,64,.12); border-color: rgba(240,64,64,.3); color: #f04040; }
+.gam-t-act-clear:hover { background: rgba(61,214,140,.12); border-color: rgba(61,214,140,.3); color: #3dd68c; }
+.gam-t-empty { text-align: center; color: #5c6370; padding: 32px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id=&quot;gam-triage&quot;>
+  <div class=&quot;gam-t-header&quot;>
+    <span class=&quot;gam-t-brand&quot;>TRIAGE CONSOLE</span>
+    <span class=&quot;gam-t-header-hint&quot;>Click username to open Mod Console · Shift-click ⚒ for instant perma · ⚡ for Auto-DR pattern</span>
+  </div>
+
+  <div class=&quot;gam-t-layout&quot;>
+    <div class=&quot;gam-t-main&quot;>
+      <div class=&quot;gam-t-alerts&quot;>
+        <div class=&quot;gam-t-alert gam-t-alert-red&quot;>
+          💀 2 Death Row inmates READY. Will execute automatically.
+        </div>
+        <div class=&quot;gam-t-alert gam-t-alert-warn&quot;>
+          ⚠️ <b>Burst detected:</b> 4 users from IP range 203.45.x.x — <a href=&quot;#&quot; class=&quot;gam-t-alert-link&quot; data-cluster=&quot;203.45&quot;>Filter this cluster</a> · <a href=&quot;#&quot; class=&quot;gam-t-alert-link gam-t-alert-selectall&quot; data-cluster-select=&quot;203.45&quot;>☑ Select all 4</a>
+        </div>
+        <div class=&quot;gam-t-alert gam-t-alert-info gam-t-alert-flush&quot;>
+          ⏳ 3 on Death Row (auto-executes on page visit after timer)
+          <button class=&quot;gam-t-flush-btn&quot; data-flush=&quot;dr&quot;>🔥 Flush Death Row now</button>
+        </div>
+      </div>
+
+      <div class=&quot;gam-t-toolbar&quot;>
+        <button class=&quot;gam-t-filter gam-t-filter-active&quot;>All <span class=&quot;gam-t-filter-count&quot;>87</span></button>
+        <button class=&quot;gam-t-filter&quot;>Unreviewed <span class=&quot;gam-t-filter-count&quot;>12</span></button>
+        <button class=&quot;gam-t-filter&quot;>Suspicious <span class=&quot;gam-t-filter-count&quot;>3</span></button>
+        <button class=&quot;gam-t-filter&quot;>Watching <span class=&quot;gam-t-filter-count&quot;>8</span></button>
+        <button class=&quot;gam-t-filter&quot;>Death Row <span class=&quot;gam-t-filter-count&quot;>5</span></button>
+        <button class=&quot;gam-t-filter&quot;>Banned <span class=&quot;gam-t-filter-count&quot;>59</span></button>
+        <button class=&quot;gam-t-filter&quot; style=&quot;margin-left:auto&quot;>🤖 AI scan now</button>
+      </div>
+
+      <div class=&quot;gam-t-batch&quot; style=&quot;display:flex&quot;>
+        <span class=&quot;gam-t-batch-count&quot;>3 selected</span>
+        <span style=&quot;flex:1&quot;></span>
+        <button class=&quot;gam-t-batch-btn gam-t-batch-watch&quot; data-action=&quot;watch&quot;>◯ Watch all</button>
+        <button class=&quot;gam-t-batch-btn gam-t-batch-dr&quot; data-action=&quot;deathrow&quot;>💀 Death Row (72h)</button>
+        <button class=&quot;gam-t-batch-btn gam-t-batch-ban&quot; data-action=&quot;ban&quot;>☠ Ban all now</button>
+        <button class=&quot;gam-t-batch-btn gam-t-batch-cancel&quot; data-action=&quot;cancel&quot;>✖ Cancel</button>
+      </div>
+
+      <div class=&quot;gam-t-list&quot;>
+        <div class=&quot;gam-t-row&quot;>
+          <div class=&quot;gam-t-check&quot; data-user=&quot;SuspiciousUser42&quot;></div>
+          <div class=&quot;gam-t-user-info&quot;>
+            <div class=&quot;gam-t-user-name&quot;>
+              <span class=&quot;gam-t-user-name-text&quot;>SuspiciousUser42</span>
+              <span class=&quot;gam-t-risk gam-t-risk-high&quot;></span>
+            </div>
+            <div class=&quot;gam-t-user-meta&quot;>
+              <span>2 hours ago</span>
+              <span class=&quot;gam-t-prior&quot;>2 bans</span>
+            </div>
+          </div>
+          <div class=&quot;gam-t-ip&quot;>203.45.67.89</div>
+          <div class=&quot;gam-t-status&quot;>
+            <span class=&quot;gam-t-badge gam-t-badge-new&quot;>NEW</span>
+          </div>
+          <div class=&quot;gam-t-actions&quot; data-user=&quot;SuspiciousUser42&quot;>
+            <button class=&quot;gam-t-act gam-t-act-watch&quot; data-user=&quot;SuspiciousUser42&quot; data-action=&quot;watch&quot; title=&quot;Watch&quot;>◯</button>
+            <button class=&quot;gam-t-act gam-t-act-dr&quot; data-user=&quot;SuspiciousUser42&quot; data-action=&quot;deathrow&quot; title=&quot;Death Row&quot;>💀</button>
+            <button class=&quot;gam-t-act gam-t-act-ban&quot; data-user=&quot;SuspiciousUser42&quot; data-action=&quot;ban&quot; title=&quot;Ban&quot;>⚒</button>
+            <button class=&quot;gam-t-act gam-t-act-pattern&quot; data-user=&quot;SuspiciousUser42&quot; data-action=&quot;pattern&quot; title=&quot;Add pattern&quot;>⚡</button>
+          </div>
+        </div>
+
+        <div class=&quot;gam-t-row gam-t-row-tard&quot;>
+          <div class=&quot;gam-t-check&quot; data-user=&quot;TardFlag88&quot;></div>
+          <div class=&quot;gam-t-user-info&quot;>
+            <div class=&quot;gam-t-user-name&quot;>
+              <span class=&quot;gam-t-user-name-text&quot;>TardFlag88</span>
+              <span class=&quot;gam-t-risk gam-t-risk-med&quot;></span>
+            </div>
+            <div class=&quot;gam-t-user-meta&quot;>
+              <span>45 minutes ago</span>
+              <span class=&quot;gam-t-cluster-tag&quot;>BURST</span>
+            </div>
+          </div>
+          <div class=&quot;gam-t-ip&quot; data-incluster=&quot;1&quot;>203.45.67.90</div>
+          <div class=&quot;gam-t-status&quot;>
+            <span class=&quot;gam-t-badge gam-t-badge-suspect&quot;>SUSPECT</span>
+          </div>
+          <div class=&quot;gam-t-actions&quot; data-user=&quot;TardFlag88&quot;>
+            <button class=&quot;gam-t-act gam-t-act-watch&quot; data-user=&quot;TardFlag88&quot; data-action=&quot;watch&quot; title=&quot;Watch&quot;>◯</button>
+            <button class=&quot;gam-t-act gam-t-act-dr&quot; data-user=&quot;TardFlag88&quot; data-action=&quot;deathrow&quot; title=&quot;Death Row&quot;>💀</button>
+            <button class=&quot;gam-t-act gam-t-act-ban&quot; data-user=&quot;TardFlag88&quot; data-action=&quot;ban&quot; title=&quot;Ban&quot;>⚒</button>
+            <button class=&quot;gam-t-act gam-t-act-pattern&quot; data-user=&quot;TardFlag88&quot; data-action=&quot;pattern&quot; title=&quot;Add pattern&quot;>⚡</button>
+          </div>
+        </div>
+
+        <div class=&quot;gam-t-row&quot;>
+          <div class=&quot;gam-t-check gam-t-check-on&quot; data-user=&quot;WatchedMod&quot;></div>
+          <div class=&quot;gam-t-user-info&quot;>
+            <div class=&quot;gam-t-user-name&quot;>
+              <span class=&quot;gam-t-user-name-text&quot;>WatchedMod</span>
+            </div>
+            <div class=&quot;gam-t-user-meta&quot;>
+              <span>3 days ago</span>
+            </div>
+          </div>
+          <div class=&quot;gam-t-ip&quot;>198.20.45.12</div>
+          <div class=&quot;gam-t-status&quot;>
+            <span class=&quot;gam-t-badge gam-t-badge-watching&quot;>WATCHING</span>
+          </div>
+          <div class=&quot;gam-t-actions&quot; data-user=&quot;WatchedMod&quot;>
+            <button class=&quot;gam-t-act gam-t-act-watch&quot; data-user=&quot;WatchedMod&quot; data-action=&quot;watch&quot; title=&quot;Watch&quot;>◯</button>
+            <button class=&quot;gam-t-act gam-t-act-dr&quot; data-user=&quot;WatchedMod&quot; data-action=&quot;deathrow&quot; title=&quot;Death Row&quot;>💀</button>
+            <button class=&quot;gam-t-act gam-t-act-ban&quot; data-user=&quot;WatchedMod&quot; data-action=&quot;ban&quot; title=&quot;Ban&quot;>⚒</button>
+            <button class=&quot;gam-t-act gam-t-act-pattern&quot; data-user=&quot;WatchedMod&quot; data-action=&quot;pattern&quot; title=&quot;Add pattern&quot;>⚡</button>
+          </div>
+        </div>
+
+        <div class=&quot;gam-t-row gam-t-row-banned&quot;>
+          <div class=&quot;gam-t-check&quot; data-user=&quot;BannedUser91&quot;></div>
+          <div class=&quot;gam-t-user-info&quot;>
+            <div class=&quot;gam-t-user-name&quot;>
+              <span class=&quot;gam-t-user-name-text&quot;>BannedUser91</span>
+            </div>
+            <div class=&quot;gam-t-user-meta&quot;>
+              <span>5 minutes ago</span>
+              <span class=&quot;gam-t-verified&quot;>✓✓ VERIFIED</span>
+            </div>
+          </div>
+          <div class=&quot;gam-t-ip&quot;>192.168.1.1</div>
+          <div class=&quot;gam-t-status&quot;>
+            <span class=&quot;gam-t-badge gam-t-badge-banned&quot;>BANNED</span>
+          </div>
+          <div class=&quot;gam-t-actions&quot; data-user=&quot;BannedUser91&quot;>
+            <span class=&quot;gam-t-done&quot;>DONE</span>
+          </div>
+        </div>
+
+        <div class=&quot;gam-t-section&quot;>
+          <div class=&quot;gam-t-section-head gam-t-section-tards&quot;>
+            <span class=&quot;gam-t-carat&quot;>▾</span>
+            <span class=&quot;gam-t-section-dot&quot; style=&quot;background:#f04040&quot;></span>
+            🧨 Possible Tards (6)
+            <span class=&quot;gam-t-section-why&quot;>flagged by regex / cluster / prior bans / watchlist</span>
+          </div>
+          <div class=&quot;gam-t-section-body&quot;>
+            <div style=&quot;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;margin:0 0 6px 0;background:rgba(240,64,64,0.08);border:1px solid rgba(240,64,64,0.35);border-radius:4px&quot;>
+              <span style=&quot;font-size:11px;color:#8b929e&quot;>Bulk action: queue every Tard listed below to Death Row (72h delay).</span>
+              <button style=&quot;background:#f04040;color:#fff;border:none;border-radius:4px;padding:5px 14px;font:600 11px -apple-system,system-ui,sans-serif;letter-spacing:0.5px;cursor:pointer;flex-shrink:0&quot;>APPLY TO ALL (6)</button>
+            </div>
+            <div class=&quot;gam-t-row gam-t-row-tard&quot;>
+              <div class=&quot;gam-t-check&quot; data-user=&quot;Tard777&quot;></div>
+              <div class=&quot;gam-t-user-info&quot;>
+                <div class=&quot;gam-t-user-name&quot;><span class=&quot;gam-t-user-name-text&quot;>Tard777</span></div>
+                <div class=&quot;gam-t-user-meta&quot;><span>1 hour ago</span></div>
+              </div>
+              <div class=&quot;gam-t-ip&quot;>203.45.67.91</div>
+              <div class=&quot;gam-t-status&quot;><span class=&quot;gam-t-badge gam-t-badge-suspect&quot;>SUSPECT</span></div>
+              <div class=&quot;gam-t-actions&quot; data-user=&quot;Tard777&quot;>
+                <button class=&quot;gam-t-act gam-t-act-dr&quot; data-user=&quot;Tard777&quot; data-action=&quot;deathrow&quot; title=&quot;Death Row&quot;>💀</button>
+                <button class=&quot;gam-t-act gam-t-act-ban&quot; data-user=&quot;Tard777&quot; data-action=&quot;ban&quot; title=&quot;Ban&quot;>⚒</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class=&quot;gam-t-sidebar&quot;>
+      <div class=&quot;gam-t-sb-body&quot; data-sb-for=&quot;stats&quot;>
+        <div class=&quot;gam-t-stats&quot;>
+          <div class=&quot;gam-t-stat&quot;>
+            <div class=&quot;gam-t-stat-val&quot; style=&quot;color:#4A9EFF&quot;>12</div>
+            <div class=&quot;gam-t-stat-label&quot;>Unreviewed</div>
+            <div class=&quot;gam-t-stat-sub&quot;>3 sus</div>
+          </div>
+          <div class=&quot;gam-t-stat&quot;>
+            <div class=&quot;gam-t-stat-val&quot; style=&quot;color:#ffd60a&quot;>8</div>
+            <div class=&quot;gam-t-stat-label&quot;>Watching</div>
+          </div>
+          <div class=&quot;gam-t-stat&quot;>
+            <div class=&quot;gam-t-stat-val&quot; style=&quot;color:#a78bfa&quot;>5</div>
+            <div class=&quot;gam-t-stat-label&quot;>Death Row</div>
+            <div class=&quot;gam-t-stat-sub&quot; style=&quot;color:#f04040&quot;>2 READY</div>
+          </div>
+          <div class=&quot;gam-t-stat&quot;>
+            <div class=&quot;gam-t-stat-val&quot; style=&quot;color:#f04040&quot;>59</div>
+            <div class=&quot;gam-t-stat-label&quot;>Banned</div>
+          </div>
+        </div>
+      </div>
+
+      <div class=&quot;gam-t-sb-body&quot; data-sb-for=&quot;dr&quot;>
+        <div class=&quot;gam-t-dr-rules&quot; id=&quot;gam-dr-rules&quot;>
+          <div class=&quot;gam-t-dr-sweep gam-t-dr-sweep-top&quot;>
+            <button class=&quot;gam-t-dr-sweep-btn gam-t-dr-sweep-btn-top&quot; id=&quot;gam-dr-sweep-btn&quot; title=&quot;Apply every enabled Auto-DR rule to every username in your roster right now.&quot;>⚡ Run all rules now</button>
+            <span class=&quot;gam-t-dr-sweep-hint&quot; id=&quot;gam-dr-sweep-hint&quot;></span>
+          </div>
+          <div class=&quot;gam-t-dr-rule&quot;>
+            <span class=&quot;gam-t-dr-rule-pat&quot; title=&quot;catch spam patterns&quot;>(?:^|_)spambot</span>
+            <span class=&quot;gam-t-dr-rule-meta&quot;>72h</span>
+            <label class=&quot;gam-t-dr-rule-toggle&quot;>
+              <input type=&quot;checkbox&quot; data-rule-idx=&quot;0&quot; checked>
+            </label>
+            <button class=&quot;gam-t-dr-rule-del&quot; data-rule-idx=&quot;0&quot; title=&quot;Remove rule&quot;>×</button>
+          </div>
+          <div class=&quot;gam-t-dr-rule gam-t-dr-rule-hot&quot;>
+            <span class=&quot;gam-t-dr-rule-pat&quot; title=&quot;1488 - nazi reference&quot;>1488</span>
+            <span class=&quot;gam-t-dr-rule-hit&quot; title=&quot;2 users currently on Death Row match this pattern&quot;>2💀</span>
+            <span class=&quot;gam-t-dr-rule-meta&quot;>72h</span>
+            <label class=&quot;gam-t-dr-rule-toggle&quot;>
+              <input type=&quot;checkbox&quot; data-rule-idx=&quot;1&quot; checked>
+            </label>
+            <button class=&quot;gam-t-dr-rule-del&quot; data-rule-idx=&quot;1&quot; title=&quot;Remove rule&quot;>×</button>
+          </div>
+          <div class=&quot;gam-t-dr-rule gam-t-dr-rule-disabled&quot;>
+            <span class=&quot;gam-t-dr-rule-pat&quot; title=&quot;old pattern - disabled&quot;>(?:_|-)bot(?:_|-)?\d*$</span>
+            <span class=&quot;gam-t-dr-rule-meta&quot;>48h</span>
+            <label class=&quot;gam-t-dr-rule-toggle&quot;>
+              <input type=&quot;checkbox&quot; data-rule-idx=&quot;2&quot;>
+            </label>
+            <button class=&quot;gam-t-dr-rule-del&quot; data-rule-idx=&quot;2&quot; title=&quot;Remove rule&quot;>×</button>
+          </div>
+          <div class=&quot;gam-t-dr-add&quot;>
+            <input class=&quot;gam-t-dr-add-pat&quot; id=&quot;gam-dr-add-pat&quot; type=&quot;text&quot; placeholder=&quot;regex or *wildcard* pattern...&quot; spellcheck=&quot;false&quot;>
+            <select class=&quot;gam-t-dr-add-hours&quot; id=&quot;gam-dr-add-hours&quot;>
+              <option value=&quot;24&quot;>24h</option>
+              <option value=&quot;48&quot;>48h</option>
+              <option value=&quot;72&quot; selected>72h</option>
+              <option value=&quot;168&quot;>7d</option>
+            </select>
+            <button class=&quot;gam-t-dr-add-btn&quot; id=&quot;gam-dr-add-btn&quot;>⚡ Add</button>
+          </div>
+          <div class=&quot;gam-t-dr-hint&quot; id=&quot;gam-dr-pat-hint&quot;></div>
+        </div>
+      </div>
+
+      <div class=&quot;gam-t-sb-body&quot; data-sb-for=&quot;tards&quot;>
+        <div class=&quot;gam-t-tards-rules&quot; id=&quot;gam-tards-rules&quot;>
+          <div class=&quot;gam-t-dr-rule&quot;>
+            <span class=&quot;gam-t-dr-rule-pat&quot; title=&quot;sus phrase&quot;>gotcha_fren</span>
+            <label class=&quot;gam-t-dr-rule-toggle&quot;>
+              <input type=&quot;checkbox&quot; data-trule-idx=&quot;0&quot; checked>
+            </label>
+            <button class=&quot;gam-t-dr-rule-del&quot; data-trule-idx=&quot;0&quot; title=&quot;Remove rule&quot;>×</button>
+          </div>
+          <div class=&quot;gam-t-dr-add&quot;>
+            <input class=&quot;gam-t-dr-add-pat&quot; id=&quot;gam-tards-add-pat&quot; type=&quot;text&quot; placeholder=&quot;regex or *wildcard*...&quot; spellcheck=&quot;false&quot;>
+            <button class=&quot;gam-t-dr-add-btn&quot; id=&quot;gam-tards-add-btn&quot; style=&quot;background:rgba(240,64,64,.15);border-color:rgba(240,64,64,.3);color:#f04040&quot;>🧨 Add</button>
+          </div>
+          <div class=&quot;gam-t-dr-hint&quot; id=&quot;gam-tards-pat-hint&quot;></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
+</body></html>"></iframe>
+    </div>
+  </section>
+  <section class="snap-card">
+    <h2 class="snap-title">GAM CSS + Touch-Target Stylesheet (Global Injected) <span class="snap-key">master-css</span></h2>
+    <div class="snap-frame-wrap">
+      <iframe class="snap-frame" loading="lazy" title="GAM CSS + Touch-Target Stylesheet (Global Injected)" srcdoc="<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{margin:0;background:#0a0a0b;}body{padding:12px;}</style></head><body><div style=&quot;background: #0a0a0b; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; color: #e8eaed;&quot;>
+
+<!-- SNACK TOAST (bottom-right) -->
+<div class=&quot;gam-snack gam-snack-success&quot; style=&quot;position:fixed;bottom:14px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#0f1114;opacity:1;transform:translateY(0);transition:opacity .14s,transform .18s;pointer-events:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px;background:#3dd68c;&quot;>
+  User banned successfully
+  <button class=&quot;gam-snack-action&quot; style=&quot;background:transparent;border:1px solid #f0a040;color:#f0a040;padding:4px 10px;cursor:pointer;font:700 10px ui-monospace,'JetBrains Mono',monospace;letter-spacing:0.06em;text-transform:uppercase;transition:background 80ms,color 80ms;flex-shrink:0;pointer-events:auto;white-space:nowrap;border-radius:3px;&quot;>Undo</button>
+</div>
+
+<!-- MODAL BACKDROP -->
+<div id=&quot;gam-backdrop&quot; style=&quot;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999990;opacity:0;transition:opacity .2s;&quot;></div>
+
+<!-- CENTERED MODAL -->
+<div class=&quot;gam-modal&quot; style=&quot;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.97);z-index:9999995;background:#0f1114;border:1px solid #2a2f38;border-radius:8px;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e8eaed;opacity:1;transition:opacity .15s,transform .18s;box-shadow:0 24px 48px rgba(0,0,0,.6);max-height:85vh;max-width:95vw;display:flex;flex-direction:column;overflow:hidden;width:600px;&quot;>
+  <div class=&quot;gam-modal-header&quot; style=&quot;display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #2a2f38;background:linear-gradient(180deg,#181b20 0%,#0f1114 100%)&quot;>
+    <div class=&quot;gam-modal-title&quot; style=&quot;font-weight:700;font-size:13px;letter-spacing:.1px;flex:1;&quot;>Ban User: suspicious_account</div>
+    <button class=&quot;gam-modal-close&quot; style=&quot;background:none;border:none;color:#5c6370;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1;transition:color .1s,background .1s;border-radius:4px;min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center;&quot;>&amp;times;</button>
+  </div>
+  <div class=&quot;gam-modal-body&quot; style=&quot;padding:12px 14px;overflow-y:auto;flex:1;&quot;>
+    <div class=&quot;gam-field&quot; style=&quot;margin-bottom:10px;&quot;>
+      <label style=&quot;display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;&quot;>Violation Reason</label>
+      <select class=&quot;gam-select&quot; style=&quot;width:100%;background:#181b20;border:1px solid #2a2f38;border-radius:4px;color:#e8eaed;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 10px;outline:none;box-sizing:border-box;transition:border-color .15s;cursor:pointer;&quot;>
+        <option>Doxing / Personal Info</option>
+        <option>Incivility / Divisive Language</option>
+        <option>Doomer / Shill / Low-Effort</option>
+      </select>
+    </div>
+    <div class=&quot;gam-field&quot; style=&quot;margin-bottom:10px;&quot;>
+      <label style=&quot;display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;&quot;>Duration</label>
+      <div class=&quot;gam-mc-durs&quot; style=&quot;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;&quot;>
+        <button class=&quot;gam-mc-dur&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s;&quot;>7 days</button>
+        <button class=&quot;gam-mc-dur gam-mc-dur-active&quot; style=&quot;background:#f04040;border:1px solid #f04040;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;cursor:pointer;transition:all .15s;&quot;>30 days</button>
+        <button class=&quot;gam-mc-dur&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s;&quot;>90 days</button>
+        <button class=&quot;gam-mc-dur&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s;&quot;>Perm</button>
+      </div>
+    </div>
+    <div class=&quot;gam-mc-banner gam-mc-banner-warn&quot; style=&quot;padding:8px 12px;border-radius:4px;font-size:12px;margin-top:10px;line-height:1.4;background:rgba(240,160,64,.1);color:#f0a040;border:1px solid rgba(240,160,64,.25);&quot;>
+      This user has 2 prior removals and 1 prior ban.
+    </div>
+  </div>
+  <div style=&quot;display:flex;gap:8px;justify-content:flex-end;padding:12px 14px;border-top:1px solid #2a2f38;&quot;>
+    <button class=&quot;gam-btn gam-btn-cancel&quot; style=&quot;padding:6px 14px;border:1px solid #2a2f38;border-radius:4px;cursor:pointer;font:600 12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;letter-spacing:.2px;white-space:nowrap;min-height:32px;box-sizing:border-box;background:#252a31;color:#8b929e;transition:opacity .15s,transform .1s,background .15s;&quot;>Cancel</button>
+    <button class=&quot;gam-btn gam-btn-danger&quot; style=&quot;padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font:600 12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;letter-spacing:.2px;white-space:nowrap;min-height:32px;box-sizing:border-box;background:#f04040;color:#fff;transition:opacity .15s,transform .1s,background .15s;&quot;>Ban User</button>
+  </div>
+</div>
+
+<!-- TOOLTIP / USER INFO CARD -->
+<div id=&quot;gam-tooltip&quot; style=&quot;position:fixed;z-index:9999998;background:#0f1114;border:1px solid #3a3f48;border-left:3px solid #4A9EFF;border-radius:6px;padding:10px 12px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e8eaed;box-shadow:0 12px 32px rgba(0,0,0,.55);pointer-events:auto;opacity:1;display:block;max-width:320px;min-width:240px;top:100px;right:20px;&quot;>
+  <div class=&quot;gam-tip-name&quot; style=&quot;font-size:12px;margin-bottom:6px;font-weight:600;&quot;>DarkPatriot</div>
+  <div class=&quot;gam-tip-badges&quot; style=&quot;display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;font-size:10px;&quot;>
+    <span class=&quot;gam-chip gam-chip--primary gam-chip--watched&quot; style=&quot;display:inline-flex;align-items:center;padding:2px 8px;font-size:11px;font-weight:600;letter-spacing:.3px;border-radius:10px;background:#553c9a;color:#d6bcfa;&quot;>Watched</span>
+  </div>
+  <div class=&quot;gam-tip-meta&quot; style=&quot;color:#5c6370;font-size:10px;margin-bottom:6px;line-height:1.4;&quot;>
+    Joined: 1,247 days ago<br>
+    Posts: 847 | Comments: 1,203
+  </div>
+  <div class=&quot;gam-tip-intel&quot; style=&quot;padding-top:8px;margin-top:4px;border-top:1px solid #2a2f38;&quot;>
+    <div class=&quot;gam-tip-score&quot; style=&quot;font-size:11px;margin-bottom:4px;letter-spacing:.3px;font-weight:600;color:#4A9EFF;&quot;>Confidence: 87%</div>
+    <div class=&quot;gam-tip-stats&quot; style=&quot;color:#5c6370;font-size:10px;margin-bottom:2px;letter-spacing:.2px;&quot;>Pattern match: High</div>
+    <div class=&quot;gam-tip-hits&quot; style=&quot;color:#f0a040;font-size:10px;margin-top:4px;&quot;>2 rule violations in last 30 days</div>
+  </div>
+</div>
+
+<!-- MOD CONSOLE PANEL (Dock Right) -->
+<div id=&quot;gam-mc-panel&quot; class=&quot;gam-modal gam-modal-dock gam-modal-dock-right&quot; style=&quot;position:fixed;top:0;right:0;transform:none;width:420px;max-width:40vw;height:100vh;max-height:100vh;border-radius:0;border-top:none;border-bottom:none;border-right:none;border-left:1px solid #3a3f48;z-index:9999988;background:#0f1114;border:1px solid #3a3f48;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e8eaed;display:flex;flex-direction:column;overflow:hidden;&quot;>
+  <div class=&quot;gam-modal-header&quot; style=&quot;display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #2a2f38;background:linear-gradient(180deg,#181b20 0%,#0f1114 100%)&quot;>
+    <div class=&quot;gam-mc-titlebar&quot; style=&quot;display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:1;&quot;>
+      <div class=&quot;gam-mc-shield&quot; style=&quot;font-size:18px;&quot;>🛡️</div>
+      <div class=&quot;gam-mc-user&quot; style=&quot;font-size:15px;font-weight:700;color:#e8eaed;&quot;>suspect_user</div>
+      <div class=&quot;gam-mc-pills&quot; style=&quot;display:inline-flex;gap:6px;flex-wrap:wrap;margin-left:6px;&quot;>
+        <span class=&quot;gam-mc-pill gam-mc-pill-watch&quot; style=&quot;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(255,214,10,.12);color:#ffd60a;border:1px solid rgba(255,214,10,.25);&quot;>Watched</span>
+      </div>
+    </div>
+    <button class=&quot;gam-modal-close&quot; style=&quot;background:none;border:none;color:#5c6370;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1;transition:color .1s,background .1s;border-radius:4px;min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center;&quot;>&amp;times;</button>
+  </div>
+  <div class=&quot;gam-modal-body&quot; style=&quot;padding:12px 14px;overflow-y:auto;flex:1;&quot;>
+    <div class=&quot;gam-mc-tabs&quot; style=&quot;display:flex;gap:4px;padding:0 0 8px 0;border-bottom:1px solid #2a2f38;margin-bottom:10px;flex-wrap:wrap;&quot;>
+      <button class=&quot;gam-mc-tab gam-mc-tab-active&quot; style=&quot;background:#4A9EFF;border:1px solid #4A9EFF;border-radius:4px;padding:5px 12px;color:#fff;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box;&quot;>Intel</button>
+      <button class=&quot;gam-mc-tab&quot; style=&quot;background:transparent;border:1px solid #2a2f38;border-radius:4px;padding:5px 12px;color:#8b929e;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box;&quot;>History</button>
+      <button class=&quot;gam-mc-tab&quot; style=&quot;background:transparent;border:1px solid #2a2f38;border-radius:4px;padding:5px 12px;color:#8b929e;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s;letter-spacing:.15px;min-height:32px;box-sizing:border-box;&quot;>Notes</button>
+    </div>
+    <div class=&quot;gam-mc-stats&quot; style=&quot;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px;&quot;>
+      <div class=&quot;gam-mc-stat&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px;text-align:center;&quot;>
+        <div class=&quot;gam-mc-stat-v&quot; style=&quot;font-size:18px;font-weight:700;line-height:1;color:#e8eaed;letter-spacing:-.4px;&quot;>3</div>
+        <div class=&quot;gam-mc-stat-l&quot; style=&quot;font-size:9px;color:#5c6370;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;&quot;>Removals</div>
+      </div>
+      <div class=&quot;gam-mc-stat&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px;text-align:center;&quot;>
+        <div class=&quot;gam-mc-stat-v&quot; style=&quot;font-size:18px;font-weight:700;line-height:1;color:#e8eaed;letter-spacing:-.4px;&quot;>1</div>
+        <div class=&quot;gam-mc-stat-l&quot; style=&quot;font-size:9px;color:#5c6370;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;&quot;>Bans</div>
+      </div>
+      <div class=&quot;gam-mc-stat&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px;text-align:center;&quot;>
+        <div class=&quot;gam-mc-stat-v&quot; style=&quot;font-size:18px;font-weight:700;line-height:1;color:#e8eaed;letter-spacing:-.4px;&quot;>7</div>
+        <div class=&quot;gam-mc-stat-l&quot; style=&quot;font-size:9px;color:#5c6370;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;&quot;>Days active</div>
+      </div>
+      <div class=&quot;gam-mc-stat&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-radius:4px;padding:8px;text-align:center;&quot;>
+        <div class=&quot;gam-mc-stat-v&quot; style=&quot;font-size:18px;font-weight:700;line-height:1;color:#4A9EFF;letter-spacing:-.4px;&quot;>87%</div>
+        <div class=&quot;gam-mc-stat-l&quot; style=&quot;font-size:9px;color:#5c6370;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;&quot;>Risk</div>
+      </div>
+    </div>
+    <div class=&quot;gam-mc-section&quot; style=&quot;margin-bottom:12px;&quot;>
+      <div class=&quot;gam-mc-h&quot; style=&quot;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#8b929e;margin-bottom:6px;&quot;>Quick Actions</div>
+      <div class=&quot;gam-mc-grid&quot; style=&quot;display:grid;grid-template-columns:repeat(2,1fr);gap:10px;&quot;>
+        <button class=&quot;gam-mc-quick&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-radius:5px;padding:12px;text-align:left;cursor:pointer;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e8eaed;display:flex;flex-direction:column;gap:4px;transition:all .15s;min-height:32px;box-sizing:border-box;&quot;>
+          <div class=&quot;gam-mc-q-icon&quot; style=&quot;font-size:18px;line-height:1;&quot;>⚠️</div>
+          <div class=&quot;gam-mc-q-label&quot; style=&quot;font-weight:700;font-size:13px;&quot;>Warn</div>
+        </button>
+        <button class=&quot;gam-mc-quick&quot; style=&quot;background:#181b20;border:1px solid #2a2f38;border-radius:5px;padding:12px;text-align:left;cursor:pointer;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e8eaed;display:flex;flex-direction:column;gap:4px;transition:all .15s;min-height:32px;box-sizing:border-box;&quot;>
+          <div class=&quot;gam-mc-q-icon&quot; style=&quot;font-size:18px;line-height:1;&quot;>🚫</div>
+          <div class=&quot;gam-mc-q-label&quot; style=&quot;font-weight:700;font-size:13px;&quot;>Ban 7d</div>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- STATUS BAR (persistent, bottom-center) -->
+<div id=&quot;gam-status-bar&quot; style=&quot;position:fixed;bottom:14px;left:50%;transform:translateX(-50%);height:28px;background:rgba(12,14,18,.95);backdrop-filter:blur(16px) saturate(1.4);border:1px solid #3a3f48;border-radius:14px;z-index:9999980;display:inline-flex;align-items:center;padding:0 10px;gap:6px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#8b929e;box-shadow:0 2px 12px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.03);&quot;>
+  <span style=&quot;display:inline-block;width:1px;height:14px;background:#2a2f38;margin:0 2px;&quot;></span>
+  <span style=&quot;white-space:nowrap;&quot;>Queue: <strong style=&quot;color:#e8eaed;&quot;>12</strong></span>
+  <span style=&quot;display:inline-block;width:1px;height:14px;background:#2a2f38;margin:0 2px;&quot;></span>
+  <span style=&quot;white-space:nowrap;&quot;>Today: <strong style=&quot;color:#3dd68c;&quot;>4 ban</strong></span>
+</div>
+
+<!-- TRIAGE ROW -->
+<div class=&quot;gam-t-row&quot; data-user=&quot;suspect_user&quot; style=&quot;display:grid;grid-template-columns:1fr auto;gap:8px;padding:8px;border-bottom:1px solid #2a2f38;align-items:start;&quot;>
+  <div style=&quot;min-width:0;&quot;>
+    <div style=&quot;font-weight:600;color:#e8eaed;font-size:12px;margin-bottom:4px;&quot;>suspect_user</div>
+    <div style=&quot;color:#8b929e;font-size:11px;margin-bottom:4px;&quot;>Doxing / Personal Info — High confidence</div>
+    <div style=&quot;display:flex;gap:6px;flex-wrap:wrap;&quot;>
+      <span class=&quot;gam-chip gam-chip--primary gam-chip--new&quot; style=&quot;display:inline-flex;align-items:center;padding:2px 8px;font-size:11px;font-weight:600;letter-spacing:.3px;border-radius:10px;background:#2c5282;color:#bee3f8;&quot;>New</span>
+      <span class=&quot;gam-chip gam-chip--risk-high&quot; style=&quot;display:inline-flex;align-items:center;padding:2px 8px;font-size:11px;font-weight:600;letter-spacing:.3px;border-radius:10px;color:#feb2b2;&quot;>High Risk</span>
+    </div>
+  </div>
+  <div class=&quot;gam-t-actions&quot; style=&quot;display:flex;gap:4px;flex-shrink:0;&quot;>
+    <button class=&quot;gam-strip-btn&quot; style=&quot;display:inline-block;padding:2px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#4A9EFF!important;background:rgba(74,158,255,.08);border:1px solid rgba(74,158,255,.2);border-radius:4px;cursor:pointer;text-decoration:none!important;transition:all .15s;min-height:32px;box-sizing:border-box;white-space:nowrap;&quot;>Action</button>
+  </div>
+</div>
+
+<!-- STRIP MENU (dropdown on post/comment) -->
+<div class=&quot;gam-strip-menu gam-strip-menu-open&quot; style=&quot;display:block;position:absolute;top:100%;left:0;margin-top:4px;background:#0f1114;border:1px solid #3a3f48;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.6);min-width:220px;max-height:480px;overflow-y:auto;z-index:9999993;padding:4px;&quot;>
+  <div class=&quot;gam-strip-item&quot; style=&quot;display:block;padding:6px 10px;font-size:11px;color:#e8eaed;cursor:pointer;border-radius:4px;text-decoration:none!important;transition:background .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;&quot;>Remove post</div>
+  <div class=&quot;gam-strip-item&quot; style=&quot;display:block;padding:6px 10px;font-size:11px;color:#e8eaed;cursor:pointer;border-radius:4px;text-decoration:none!important;transition:background .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;&quot;>Ban user 7 days</div>
+  <div class=&quot;gam-strip-item&quot; style=&quot;display:block;padding:6px 10px;font-size:11px;color:#e8eaed;cursor:pointer;border-radius:4px;text-decoration:none!important;transition:background .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;&quot;>Add note</div>
+  <div class=&quot;gam-strip-item&quot; style=&quot;display:block;padding:6px 10px;font-size:11px;color:#e8eaed;cursor:pointer;border-radius:4px;text-decoration:none!important;transition:background .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;&quot;>Send message</div>
+</div>
+
+<!-- STATE CHIPS (v7.0) -->
+<div style=&quot;display:flex;gap:4px;margin-top:12px;flex-wrap:wrap;&quot;>
+  <div class=&quot;gam-chip gam-chip--primary gam-chip--new&quot; style=&quot;display:inline-flex;align-items:center;padding:2px 8px;font-size:11px;font-weight:600;letter-spacing:.3px;border-radius:10px;background:#2c5282;color:#bee3f8;margin-right:4px;&quot;>New</div>
+  <div class=&quot;gam-chip gam-chip--primary gam-chip--watched&quot; style=&quot;display:inline-flex;align-items:center;padding:2px 8px;font-size:11px;font-weight:600;letter-spacing:.3px;border-radius:10px;background:#553c9a;color:#d6bcfa;margin-right:4px;&quot;>Watched</div>
+  <div class=&quot;gam-chip gam-chip--primary gam-chip--escalated&quot; style=&quot;display:inline-flex;align-items:center;padding:2px 8px;font-size:11px;font-weight:600;letter-spacing:.3px;border-radius:10px;background:#9b2c2c;color:#feb2b2;margin-right:4px;&quot;>Escalated</div>
+  <div class=&quot;gam-chip gam-chip--risk-high&quot; style=&quot;display:inline-flex;align-items:center;padding:2px 8px;font-size:11px;font-weight:600;letter-spacing:.3px;border-radius:10px;color:#feb2b2;margin-right:4px;&quot;>Risk: High</div>
+  <div class=&quot;gam-chip gam-chip--verification-verified&quot; style=&quot;display:inline-flex;align-items:center;padding:2px 8px;font-size:11px;font-weight:600;letter-spacing:.3px;border-radius:10px;color:#c6f6d5;margin-right:4px;&quot;>✓ Verified</div>
+</div>
+
+</div></body></html>"></iframe>
+    </div>
+  </section>
+  </div>
+</body>
+</html>

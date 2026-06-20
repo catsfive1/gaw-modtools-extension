@@ -1,0 +1,80 @@
+{
+  "wp": "WP-12",
+  "component": "triage-console",
+  "edits": [
+    {
+      "oldString": ".gam-t-dr-rule-pat:hover,.gam-t-dr-rule-meta:hover{border-bottom-color:rgba(74,158,255,.6)}",
+      "newString": ".gam-t-dr-rule-pat:hover,.gam-t-dr-rule-meta:hover{border-bottom-color:var(--gam-tok-info,#7cb8ff)}",
+      "note": "WP-12 pt7: kill the dual-system raw info-blue literal (the 'barely-visible blue border'). Route the click-to-edit hover underline onto the WCAG-bumped --gam-tok-info so the affordance reads at AA. <style>-rule -> var() is safe."
+    },
+    {
+      "oldString": ".gam-t-dr-sweep-btn-top{background:rgba(255,153,51,0.15);border:1px solid var(--bb-amber);color:var(--bb-amber);font-size:11px;padding:6px 12px;letter-spacing:.4px}",
+      "newString": ".gam-t-dr-sweep-btn-top{background:rgba(255,153,51,0.15);border:1px solid var(--gam-tok-accent,#ff9933);color:var(--gam-tok-accent,#ff9933);font-size:11px;padding:6px 12px;letter-spacing:.4px}",
+      "note": "WP-12 pt8 + PART2: collapse the dual --bb-amber legacy var onto the single brand token --gam-tok-accent so the auto-DR-sweep primary CTA draws from one system. rgba(255,153,51,*) tints left as-is (varied-alpha derived fill, not a hex; matches accent at 15/25%)."
+    },
+    {
+      "oldString": ".gam-t-filter-active{background:${C.ACCENT};border-color:${C.ACCENT};color:#fff}",
+      "newString": ".gam-t-filter-active{background:${C.ACCENT};border-color:${C.ACCENT};color:var(--gam-tok-on-accent-dark,#0a0a0b)}",
+      "note": "WP-12 pt2 + PART1.7 on-accent split: active-filter fill is amber (C.ACCENT), so text must be on-accent-DARK (#0a0a0b, black-on-amber 9.86) not raw #fff (amber white-text fails 4.5:1). Mirrors the audited .gam-snack-info precedent. Kills a raw #fff literal."
+    },
+    {
+      "oldString": ".gam-t-check-on::after{content:'\\u2713';color:#fff;font-size:11px;font-weight:700}",
+      "newString": ".gam-t-check-on::after{content:'\\u2713';color:var(--gam-tok-on-accent-dark,#0a0a0b);font-size:11px;font-weight:700}",
+      "note": "PART1.7 on-accent split: the checkmark sits on the amber .gam-t-check-on fill (C.ACCENT), so on-accent-DARK is the WCAG-correct ink. Kills a raw #fff literal. Glyph content (accessible mark) unchanged."
+    },
+    {
+      "oldString": ".gam-t-flush-btn{margin-left:auto;background:${C.RED};color:#fff;border:none;border-radius:4px;padding:6px 14px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:700;cursor:pointer;letter-spacing:.3px;text-transform:uppercase;transition:opacity .15s}",
+      "newString": ".gam-t-flush-btn{margin-left:auto;background:${C.RED};color:var(--gam-tok-on-accent-light,#ffffff);border:none;border-radius:4px;padding:6px 14px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:700;cursor:pointer;letter-spacing:.3px;text-transform:uppercase;transition:opacity .15s}",
+      "note": "PART1.7 on-accent split: flush button fill is danger (C.RED), so white text is correct and must route to on-accent-LIGHT. Mirrors audited .gam-btn-danger / .gam-snack-error. Kills a raw #fff literal."
+    },
+    {
+      "oldString": "            dot.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-left:8px;font-size:10px;color:#3dd68c;font-weight:600';",
+      "newString": "            dot.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-left:8px;font-size:10px;color:'+GAM_TOK.success+';font-weight:600';",
+      "note": "#gam-users-live-dot live indicator. This is el.style.cssText (INJECTED inline) -> var() is forbidden, MUST use GAM_TOK.success string-concat (PART2.1). Routes the raw #3dd68c success literal to the token."
+    },
+    {
+      "oldString": "            dot.innerHTML = '<span style=\"color:var(--bb-amber-warm)\">●</span> fetching…';",
+      "newString": "            dot.innerHTML = '<span style=\"color:var(--gam-tok-warn,#f0a040)\">●</span> fetching…';",
+      "note": "live-dot 'fetching' state: collapse the legacy --bb-amber-warm var onto --gam-tok-warn (caution/in-flight). This is an innerHTML style ATTRIBUTE on a real parsed DOM element (not el.style.cssText), so var() resolves correctly. Accessible text '● fetching…' unchanged."
+    },
+    {
+      "oldString": "            dot.innerHTML = '<span style=\"color:#3dd68c\">●</span> live (60s)';",
+      "newString": "            dot.innerHTML = '<span style=\"color:var(--gam-tok-success,#3dd68c)\">●</span> live (60s)';",
+      "note": "live-dot 'live' state: raw #3dd68c -> success token. innerHTML style attribute on real DOM -> var() resolves. Kills a raw hex literal. Accessible text '● live (60s)' unchanged."
+    },
+    {
+      "oldString": "            dot.innerHTML = '<span style=\"color:#5c6370\">●</span> paused (tab hidden)';",
+      "newString": "            dot.innerHTML = '<span style=\"color:var(--gam-tok-ink-faint,#7a7672)\">●</span> paused (tab hidden)';",
+      "note": "live-dot 'paused' state: raw #5c6370 folds to ink-faint per DESIGN-TOKENS top-literal map (#5c6370 -> ink-faint). innerHTML style attribute on real DOM -> var() resolves. Kills a raw hex literal. Accessible text '● paused (tab hidden)' unchanged."
+    }
+  ],
+  "lockedSelectors": [
+    "#gam-triage",
+    "#gam-users-live-dot",
+    "#gam-dr-rules",
+    "#gam-tards-rules",
+    ".gam-t-dr-rule-pat",
+    ".gam-t-dr-rule-meta",
+    ".gam-t-dr-sweep-btn-top",
+    ".gam-t-filter-active",
+    ".gam-t-check-on",
+    ".gam-t-flush-btn",
+    ".gam-t-filter",
+    ".gam-t-cluster-badge",
+    ".gam-t-batch",
+    ".gam-t-batch-count",
+    ".gam-t-stats",
+    ".gam-t-stat",
+    ".gam-t-row",
+    ".gam-t-check",
+    ".gam-t-countdown",
+    ".gam-t-badge",
+    ".gam-t-dr-add-pat",
+    "[data-action]",
+    "[data-cluster]",
+    "[data-incluster]",
+    "[data-flush]",
+    "[data-user]"
+  ],
+  "summary": "WP-12 triage-console: 9 surgical color-only edits drive the component's RAW hex/legacy-var literals to zero. Three #fff -> the PART1.7 on-accent split (dark on amber filter/check fills, light on the red flush button), matching audited .gam-snack/.gam-btn precedents. Two legacy --bb-* vars (--bb-amber sweep CTA, --bb-amber-warm live-dot) collapse onto --gam-tok-accent / --gam-tok-warn, killing the dual style system. The 'barely-visible blue' click-to-edit underline routes to WCAG-bumped --gam-tok-info. Three raw inline hex on #gam-users-live-dot route to success/ink-faint: the el.style.cssText one uses GAM_TOK.success concat (var() forbidden in injected cssText, PART2.1); the two innerHTML style-attribute ones use var(--gam-tok-*) since they parse to real DOM. Every oldString verified to occur EXACTLY once. No locked selector renamed; no accessible-name textContent changed. rgba signal-tints with non-token alphas (.05-.4) deliberately left untouched (varied-alpha derived fills, not hex literals; collapsing them would change visuals beyond color-only and is WP-01 soft/line-token territory)."
+}

@@ -1,0 +1,176 @@
+{
+  "wp": "WP-10",
+  "summary": "Content Sections (User/Post/Thread/QueueItem intel drawer). Migrates every hardcoded hex in the cadence chip, new-account badge, repeat-offender halo/badge/label, activity sparkline, kind glyphs, similarity panel/pills, and muted drawer text onto GAM_TOK (inline cssText) and var(--gam-tok-*) (style rules). Cadence chip color now driven by a token map (BURSTING->danger, HEAVY->warn, NEW->special, normal->ink-muted) at consistent saturation. Similarity pills standardized onto danger/warn/ink-muted tiers (locked .sim-pill--* names restyled, not renamed). Repeat-halo restyled to a persistent accent-line ring (PRM pulse already gated). Sparkline heights capped to a normalized CSS scale (max-height:16px) so distributions stay comparable. New-account badge drops ui-monospace for 11px tabular caps with a special outline. Similarity empty/loading text routed to ink-muted instead of the ambiguous #3a5a7a. Component hex-literal count drops to zero.",
+  "lockedSelectors": [
+    ".gam-repeat-badge",
+    ".gam-repeat-halo",
+    ".gam-repeat-halo--pulse",
+    ".gam-repeat-label",
+    ".gam-repeat-history",
+    ".gam-drawer-note-row",
+    ".gam-drawer-note-author",
+    ".gam-drawer-note-ts",
+    ".gam-drawer-note-body",
+    ".gam-drawer-note-form",
+    ".gam-nba-action-primary",
+    ".gam-nba-action-alt",
+    ".gam-error-state",
+    ".gam-at-wrap",
+    ".gam-at-header",
+    ".gam-at-spark",
+    ".gam-at-spark-bar",
+    ".gam-at-row",
+    ".gam-at-removed-row",
+    ".gam-at-time",
+    ".gam-at-kind-p",
+    ".gam-at-kind-c",
+    ".gam-at-title",
+    ".gam-at-removed",
+    ".gam-at-meta",
+    ".gam-at-score-pos",
+    ".gam-at-score-neg",
+    ".sim-panel",
+    ".sim-panel-header",
+    ".sim-row",
+    ".sim-username",
+    ".sim-pill",
+    ".sim-pill--HIGH",
+    ".sim-pill--MEDIUM",
+    ".sim-pill--WATCH",
+    ".sim-meta",
+    ".gam-muted",
+    "[data-gam-nba-action]",
+    "[data-section]",
+    "[data-boundary]",
+    "hidden",
+    "role=button",
+    "tabindex"
+  ],
+  "edits": [
+    {
+      "oldString": "        const label = String(cad.cadence_label || '');\r\n        const color = label === 'BURSTING' ? '#ff3b3b'\r\n                    : label === 'HEAVY'    ? C.AMBER\r\n                    : label === 'NEW'      ? '#a78bfa'\r\n                    : '#9b9892';\r\n        const cpd = (typeof cad.comments_per_day_avg === 'number') ? cad.comments_per_day_avg.toFixed(1) : '?';\r\n        const chip = el('span', {\r\n          style: 'display:inline-flex;align-items:center;gap:4px;background:rgba(0,0,0,0.3);border:1px solid ' + color + ';color:' + color + ';font:600 9px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;padding:1px 5px'\r\n        }, cpd + ' comments/day \\u00B7 ' + (label || 'normal'));",
+      "newString": "        const label = String(cad.cadence_label || '');\r\n        // WP-10.1: cadence tone map -> tokens at consistent saturation (no ad-hoc runtime hex).\r\n        const color = label === 'BURSTING' ? GAM_TOK.danger\r\n                    : label === 'HEAVY'    ? GAM_TOK.warn\r\n                    : label === 'NEW'      ? GAM_TOK.special\r\n                    : GAM_TOK.inkMuted;\r\n        const cpd = (typeof cad.comments_per_day_avg === 'number') ? cad.comments_per_day_avg.toFixed(1) : '?';\r\n        const chip = el('span', {\r\n          style: 'display:inline-flex;align-items:center;gap:4px;background:'+GAM_TOK.surfaceSunken+';border:1px solid '+color+';color:'+color+';font:600 11px ui-monospace,monospace;font-variant-numeric:tabular-nums;letter-spacing:0.04em;text-transform:uppercase;padding:1px 6px;border-radius:6px'\r\n        }, cpd + ' comments/day \\u00B7 ' + (label || 'normal'));",
+      "note": "WP-10.1: cadence chip color from token map (BURSTING->danger, HEAVY->warn, NEW->special, else ink-muted) at consistent saturation; chip well -> surface-sunken token; 11px tabular caps + 6px radius per type scale. Kills #ff3b3b / C.AMBER / #a78bfa / #9b9892 / rgba(0,0,0,0.3)."
+    },
+    {
+      "oldString": "        const newBadge = el('span', {\r\n          style: 'display:inline-block;background:rgba(167,139,250,0.15);border:1px solid #a78bfa;color:#a78bfa;font:700 9px ui-monospace,monospace;letter-spacing:0.06em;padding:0 5px;text-transform:uppercase;margin-left:6px'\r\n        }, profile.account_age_days != null ? ('NEW ' + profile.account_age_days + 'd') : 'NEW');",
+      "newString": "        const newBadge = el('span', {\r\n          style: 'display:inline-block;background:'+GAM_TOK.specialSoft+';border:1px solid '+GAM_TOK.special+';color:'+GAM_TOK.special+';font:700 11px -apple-system,BlinkMacSystemFont,\"Segoe UI\",system-ui,sans-serif;font-variant-numeric:tabular-nums;letter-spacing:0.04em;padding:0 6px;text-transform:uppercase;margin-left:6px;border-radius:6px'\r\n        }, profile.account_age_days != null ? ('NEW ' + profile.account_age_days + 'd') : 'NEW');",
+      "note": "WP-10.6: new-account badge onto special-soft bg + special outline; kill ui-monospace -> 11px tabular caps (cross-font consistency, shared with WP-08). Kills rgba(167,139,250,0.15) + #a78bfa pair."
+    },
+    {
+      "oldString": "      if (p.reason) row.appendChild(el('div', {style: 'font-size:11px;color:#a0aec0;margin-top:2px;'}, String(p.reason)));",
+      "newString": "      if (p.reason) row.appendChild(el('div', {style: 'font-size:11px;color:'+GAM_TOK.inkMuted+';margin-top:2px;'}, String(p.reason)));",
+      "note": "Precedent reason text -> ink-muted (tertiary instruction text routes to ink-muted, not ink-faint). Kills #a0aec0."
+    },
+    {
+      "oldString": "      body.appendChild(el('p', {style: 'color:#a0aec0;font-size:12px;'}, bits.length ? bits.join(' \\u00B7 ') : 'No profile metadata.'));",
+      "newString": "      body.appendChild(el('p', {style: 'color:'+GAM_TOK.inkMuted+';font-size:12px;'}, bits.length ? bits.join(' \\u00B7 ') : 'No profile metadata.'));",
+      "note": "Profile-meta line -> ink-muted. Kills #a0aec0."
+    },
+    {
+      "oldString": "            histDiv.appendChild(el('em', {style: 'color:#718096;font-size:11px;'}, 'No ban records in recent audit window.'));",
+      "newString": "            histDiv.appendChild(el('em', {style: 'color:'+GAM_TOK.inkMuted+';font-size:11px;'}, 'No ban records in recent audit window.'));",
+      "note": "WP-10.5: explicit empty-state copy on ink-muted (not ambiguous muted hex). Kills #718096."
+    },
+    {
+      "oldString": "        ' ', stateChip({kind:'ai_conf', value:'LOW'}),\r\n        ' ', el('span', {style: 'color:#718096;font-size:10px;'}, '(NAIVE v7.0)')));",
+      "newString": "        ' ', stateChip({kind:'ai_conf', value:'LOW'}),\r\n        ' ', el('span', {style: 'color:'+GAM_TOK.inkFaint+';font-size:10px;'}, '(NAIVE v7.0)')));",
+      "note": "Disclaimer caption '(NAIVE v7.0)' -> ink-faint (genuine de-emphasized label). Kills #718096."
+    },
+    {
+      "oldString": "      body.appendChild(el('p', {style:'color:#a0aec0;font-size:11px;'},\r\n        `approved: ${approved} \\u00B7 removed: ${removed} \\u00B7 banned: ${banned}`));",
+      "newString": "      body.appendChild(el('p', {style:'color:'+GAM_TOK.inkMuted+';font-size:11px;'},\r\n        `approved: ${approved} \\u00B7 removed: ${removed} \\u00B7 banned: ${banned}`));",
+      "note": "Section-2 counts line -> ink-muted. Kills #a0aec0."
+    },
+    {
+      "oldString": "      const loadEl = el('div', { style: 'color:#3a5a7a;font-size:10px;padding:4px 0;' }, 'Scanning co-commenter graph...');",
+      "newString": "      const loadEl = el('div', { style: 'color:'+GAM_TOK.inkMuted+';font-size:10px;padding:4px 0;' }, 'Scanning co-commenter graph...');",
+      "note": "Similarity loading text -> ink-muted (not the bespoke #3a5a7a). Kills #3a5a7a."
+    },
+    {
+      "oldString": "          body.appendChild(el('div', { style: 'color:#3a5a7a;font-size:10px;padding:4px 0;font-style:italic;' },\r\n            'No lookalikes found -- this user appears unique'));",
+      "newString": "          body.appendChild(el('div', { style: 'color:'+GAM_TOK.inkMuted+';font-size:10px;padding:4px 0;font-style:italic;' },\r\n            'No lookalikes found -- this user appears unique'));",
+      "note": "WP-10.5: similarity empty-state copy -> ink-muted (explicit no-signal block, not ambiguous muted). Kills #3a5a7a."
+    },
+    {
+      "oldString": ".gam-repeat-halo{display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 4px;border:2px solid #f5a623;border-radius:4px;box-shadow:0 0 0 3px rgba(245,166,35,.18);cursor:pointer;}",
+      "newString": ".gam-repeat-halo{display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 4px;border:2px solid var(--gam-tok-accent,#ff9933);border-radius:6px;box-shadow:0 0 0 2px var(--gam-tok-accent-line,rgba(255,153,51,.28));cursor:pointer;}",
+      "note": "WP-10.4 / WP-08 shared: repeat-halo persistent ring -> accent border + 2px accent-line box-shadow (survives re-render + PRM; the pulse is the PRM-gated enhancement, already gated below). 6px radius per design language. Kills #f5a623 + rgba(245,166,35,.18)."
+    },
+    {
+      "oldString": ".gam-repeat-badge{display:inline-block;font-size:9px;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;background:#f04040;color:#fff;}",
+      "newString": ".gam-repeat-badge{display:inline-block;font-size:9px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;padding:1px 4px;border-radius:8px;background:var(--gam-tok-danger,#f04040);color:var(--gam-tok-on-accent-light,#ffffff);}",
+      "note": "Repeat-count badge -> danger fill + on-accent-light text (white on red per on-accent split); tabular count. Kills #f04040 + #fff literals."
+    },
+    {
+      "oldString": ".gam-repeat-label{font-size:9px;color:#f5a623;text-transform:uppercase;letter-spacing:1px;border-left:2px solid #f5a623;padding-left:6px;margin:8px 0 4px;}",
+      "newString": ".gam-repeat-label{font-size:9px;color:var(--gam-tok-accent,#ff9933);text-transform:uppercase;letter-spacing:1px;border-left:2px solid var(--gam-tok-accent,#ff9933);padding-left:6px;margin:8px 0 4px;}",
+      "note": "REPEAT OFFENDER label -> accent caps + accent left-rail (chrome accent, consistent with halo). Kills both #f5a623."
+    },
+    {
+      "oldString": "@keyframes gam-halo-pulse{0%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}50%{box-shadow:0 0 0 6px rgba(245,166,35,.35)}100%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}}",
+      "newString": "@keyframes gam-halo-pulse{0%{box-shadow:0 0 0 2px var(--gam-tok-accent-line,rgba(255,153,51,.28))}50%{box-shadow:0 0 0 6px var(--gam-tok-accent-soft,rgba(255,153,51,.10))}100%{box-shadow:0 0 0 2px var(--gam-tok-accent-line,rgba(255,153,51,.28))}}",
+      "note": "Pulse keyframe rebased onto accent-line/accent-soft tokens so the PRM-gated enhancement matches the persistent ring's amber. Kills rgba(245,166,35,*). Resting frame (2px) equals the persistent ring so no jump on animation start/end."
+    },
+    {
+      "oldString": ".gam-at-spark-bar{width:3px;background:#f5a623;opacity:.7;border-radius:1px 1px 0 0;min-height:1px}",
+      "newString": ".gam-at-spark-bar{width:3px;background:var(--gam-tok-accent-line,rgba(255,153,51,.28));border-radius:1px 1px 0 0;min-height:1px;max-height:16px}",
+      "note": "WP-10.3: sparkline bars -> accent-line token (replaces #f5a623+opacity:.7 dim). max-height:16px caps the normalized scale in CSS so distributions stay comparable across users regardless of the JS-set inline ratio height. Kills #f5a623."
+    },
+    {
+      "oldString": ".gam-at-kind-p{color:#f5a623;font-weight:700}",
+      "newString": ".gam-at-kind-p{color:var(--gam-tok-accent,#ff9933);font-weight:700}",
+      "note": "Post-kind [P] glyph -> accent. Kills #f5a623."
+    },
+    {
+      "oldString": ".gam-at-kind-c{color:#e8c84a}",
+      "newString": ".gam-at-kind-c{color:var(--gam-tok-warn,#f0a040)}",
+      "note": "Comment-kind [C] glyph -> warn (distinct amber-yellow tier from post accent). Kills #e8c84a."
+    },
+    {
+      "oldString": ".sim-panel { border-top:1px solid #1e2a3a; padding:8px 12px; font-family:'IBM Plex Mono',monospace; font-size:11px; }",
+      "newString": ".sim-panel { border-top:1px solid var(--gam-tok-border,#2a2f38); padding:8px 12px; font-family:'IBM Plex Mono',monospace; font-size:11px; }",
+      "note": "Similarity panel top divider -> border token. Kills #1e2a3a."
+    },
+    {
+      "oldString": ".sim-panel-header { color:#5b8db8; font-size:10px; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:6px; }",
+      "newString": ".sim-panel-header { color:var(--gam-tok-accent,#ff9933); font-size:11px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; margin-bottom:6px; }",
+      "note": "SIMILAR ACCOUNTS section header -> accent caps (matches WP-06 11px accent section-head treatment). Kills #5b8db8."
+    },
+    {
+      "oldString": ".sim-row { display:flex; align-items:center; gap:8px; padding:3px 0; border-bottom:1px solid #111c27; cursor:pointer; }",
+      "newString": ".sim-row { display:flex; align-items:center; gap:8px; padding:3px 0; border-bottom:1px solid var(--gam-tok-border,#2a2f38); cursor:pointer; }",
+      "note": "Similarity row divider -> border token. Kills #111c27."
+    },
+    {
+      "oldString": ".sim-row:hover { background:#0d1820; }",
+      "newString": ".sim-row:hover { background:var(--gam-tok-accent-soft,rgba(255,153,51,.10)); }",
+      "note": "Similarity row hover -> accent-soft (standard hover-row well). Kills #0d1820."
+    },
+    {
+      "oldString": ".sim-username { flex:1; color:#c8d8e8; font-weight:500; }",
+      "newString": ".sim-username { flex:1; color:var(--gam-tok-ink,#e8e6e1); font-weight:500; }",
+      "note": "Similarity username -> primary ink. Kills #c8d8e8."
+    },
+    {
+      "oldString": ".sim-pill--HIGH { background:#3d1a1a; color:#ff6b6b; border:1px solid #7a2020; }",
+      "newString": ".sim-pill--HIGH { background:var(--gam-tok-danger-soft,rgba(240,64,64,.12)); color:var(--gam-tok-danger,#f04040); border:1px solid var(--gam-tok-danger,#f04040); }",
+      "note": "WP-10.2: HIGH confidence -> danger tier (soft bg + danger ink + danger border). Locked .sim-pill--HIGH name preserved, restyle only. Kills #3d1a1a/#ff6b6b/#7a2020."
+    },
+    {
+      "oldString": ".sim-pill--MEDIUM { background:#2a2a12; color:#d4b44a; border:1px solid #5a4a10; }",
+      "newString": ".sim-pill--MEDIUM { background:var(--gam-tok-warn-soft,rgba(240,160,64,.12)); color:var(--gam-tok-warn,#f0a040); border:1px solid var(--gam-tok-warn,#f0a040); }",
+      "note": "WP-10.2: MEDIUM confidence -> warn tier (soft bg + warn ink + warn border). Locked name preserved. Kills #2a2a12/#d4b44a/#5a4a10."
+    },
+    {
+      "oldString": ".sim-pill--WATCH { background:#162030; color:#5b8db8; border:1px solid #1e3850; }",
+      "newString": ".sim-pill--WATCH { background:var(--gam-tok-surface-overlay,#252a31); color:var(--gam-tok-ink-muted,#b0b5bc); border:1px solid var(--gam-tok-border,#2a2f38); }",
+      "note": "WP-10.2: WATCH (lowest) confidence -> ink-muted tier (neutral overlay well + muted ink + border) so confidence reads positionally danger>warn>muted. Locked name preserved. Kills #162030/#5b8db8/#1e3850."
+    },
+    {
+      "oldString": ".sim-meta { color:#3a5a7a; font-size:10px; }",
+      "newString": ".sim-meta { color:var(--gam-tok-ink-muted,#b0b5bc); font-size:10px; }",
+      "note": "Similarity row meta (karma/last-seen) -> ink-muted. Kills #3a5a7a."
+    }
+  ]
+}

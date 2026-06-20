@@ -1,0 +1,69 @@
+{
+  "wp": "WP-09",
+  "summary": "Skeleton Loaders + Empty/Error States migrated to the token ramp. Collapses the two skeleton looks (v8.1 #2a2a30/#3a3a42 + v10.12 #2a2825) onto surface-overlay shimmer; routes both empty-state CSS blocks' literals (#9b9892/#e5e5e8/#5a5a62/#1f1f24/#3a3a42/#4a4a52) to ink/surface tokens; swaps error-state hex (#ff3b3b, rgba(255,59,59,*), #c8c5c0, #9b9892, --bb-amber-warm) for danger/danger-soft/warn/ink tokens; bumps every empty/error CTA to a 44px minimum touch target; adds a static PRM 'Loading…' fallback so reduced-motion users see an explicit affordance, not nothing. All <style>-rule channels use var(--gam-tok-*); the one inline cssText (gamMakeSkel) uses GAM_TOK.surfaceOverlay. Locked selectors restyled only — no renames, no accessible-name textContent changes.",
+  "lockedSelectors": [
+    ".gam-skeleton-wrap",
+    ".gam-sk-line",
+    ".gam-sk-row",
+    ".gam-sk-card",
+    ".gam-sk-avatar",
+    ".gam-skeleton-shimmer",
+    ".gam-skel-line",
+    ".gam-empty-card",
+    ".gam-empty-state",
+    ".gam-empty-icon",
+    ".gam-empty-headline",
+    ".gam-empty-desc",
+    ".gam-empty-cta",
+    ".gam-error-state",
+    ".gam-error-chip",
+    ".gam-error-msg",
+    ".gam-error-hint",
+    ".gam-error-retry",
+    "aria-busy",
+    "aria-live",
+    "role=status"
+  ],
+  "edits": [
+    {
+      "oldString": "        'body.gam-ux-polish-on .gam-skeleton-wrap{display:flex;flex-direction:column;gap:8px;padding:8px 0;}',\n        'body.gam-ux-polish-on .gam-sk-line{height:12px;border-radius:4px;background:#2a2a30;}',\n        'body.gam-ux-polish-on .gam-sk-row{height:36px;border-radius:6px;background:#2a2a30;}',\n        'body.gam-ux-polish-on .gam-sk-card{height:120px;border-radius:8px;background:#2a2a30;}',\n        'body.gam-ux-polish-on .gam-sk-avatar{width:32px;height:32px;border-radius:50%;background:#2a2a30;}',\n        /* Shimmer animation respects prefers-reduced-motion via no-preference guard */\n        '@media (prefers-reduced-motion: no-preference){',\n          'body.gam-ux-polish-on .gam-skeleton-shimmer{',\n            'background:linear-gradient(90deg,#2a2a30 0%,#3a3a42 50%,#2a2a30 100%);',\n            'background-size:200% 100%;',\n            'animation:gam-skeleton-shimmer 2s linear infinite;',\n          '}',\n          '@keyframes gam-skeleton-shimmer{',\n            '0%{background-position:200% 0;}',\n            '100%{background-position:-200% 0;}',\n          '}',\n        '}'",
+      "newString": "        'body.gam-ux-polish-on .gam-skeleton-wrap{display:flex;flex-direction:column;gap:8px;padding:8px 0;}',\n        /* WP-09: ONE skeleton look — shimmer over surface-overlay blocks (token ramp). */\n        'body.gam-ux-polish-on .gam-sk-line{height:12px;border-radius:4px;background:var(--gam-tok-surface-overlay,#252a31);}',\n        'body.gam-ux-polish-on .gam-sk-row{height:36px;border-radius:6px;background:var(--gam-tok-surface-overlay,#252a31);}',\n        'body.gam-ux-polish-on .gam-sk-card{height:120px;border-radius:8px;background:var(--gam-tok-surface-overlay,#252a31);}',\n        'body.gam-ux-polish-on .gam-sk-avatar{width:32px;height:32px;border-radius:50%;background:var(--gam-tok-surface-overlay,#252a31);}',\n        /* Shimmer animation respects prefers-reduced-motion via no-preference guard */\n        '@media (prefers-reduced-motion: no-preference){',\n          'body.gam-ux-polish-on .gam-skeleton-shimmer{',\n            'background:linear-gradient(90deg,var(--gam-tok-surface-overlay,#252a31) 0%,var(--gam-tok-border-strong,#3a3f48) 50%,var(--gam-tok-surface-overlay,#252a31) 100%);',\n            'background-size:200% 100%;',\n            'animation:gam-skeleton-shimmer 2s linear infinite;',\n          '}',\n          '@keyframes gam-skeleton-shimmer{',\n            '0%{background-position:200% 0;}',\n            '100%{background-position:-200% 0;}',\n          '}',\n        '}',\n        /* WP-09 PRM fallback: static surface-overlay block + border + explicit \"Loading…\" affordance (NOT nothing). */\n        '@media (prefers-reduced-motion: reduce){',\n          'body.gam-ux-polish-on .gam-skeleton-wrap{border:1px solid var(--gam-tok-border,#2a2f38);border-radius:6px;padding:8px;position:relative;}',\n          'body.gam-ux-polish-on .gam-skeleton-shimmer{background:var(--gam-tok-surface-overlay,#252a31);}',\n          'body.gam-ux-polish-on .gam-skeleton-wrap::after{content:\"Loading…\";display:block;margin-top:4px;font-size:11px;letter-spacing:.04em;color:var(--gam-tok-ink-muted,#b0b5bc);}',\n        '}'",
+      "note": "VT-1: collapse the v8.1 skeleton onto the token ramp (surface-overlay base, border-strong shimmer-mid) + VT-2: add a static PRM fallback (border + 'Loading…' ::after) so reduced-motion shows an explicit affordance. Locked .gam-skeleton-wrap/.gam-sk-*/.gam-skeleton-shimmer restyled only."
+    },
+    {
+      "oldString": "      l.style.cssText = 'height:10px;background:#2a2825;border-radius:2px;margin:3px 0;width:' + (widths[i % 3]) + '%';",
+      "newString": "      l.style.cssText = 'height:10px;background:'+GAM_TOK.surfaceOverlay+';border-radius:2px;margin:3px 0;width:' + (widths[i % 3]) + '%';",
+      "note": "VT-1: gamMakeSkel inline cssText skeleton line — unify onto the same surface-overlay base as the <style> skeleton. Inline channel => GAM_TOK.surfaceOverlay (no var() in cssText)."
+    },
+    {
+      "oldString": "        'body.gam-ux-polish-on .gam-empty-card{display:flex;flex-direction:column;align-items:center;gap:12px;padding:32px 20px;background:#1f1f24;border-radius:8px;text-align:center;color:var(--gam-muted-text,#b0b5bc);}',\n        'body.gam-ux-polish-on .gam-empty-icon{color:#5a5a62;}',\n        'body.gam-ux-polish-on .gam-empty-headline{font-size:15px;font-weight:600;color:#e5e5e8;}',\n        'body.gam-ux-polish-on .gam-empty-desc{font-size:13px;color:var(--gam-muted-text,#b0b5bc);max-width:320px;line-height:1.5;}',\n        'body.gam-ux-polish-on .gam-empty-cta{margin-top:4px;padding:8px 16px;background:#3a3a42;color:#e5e5e8;border:none;border-radius:6px;cursor:pointer;font-size:13px;min-height:44px;min-width:44px;}',\n        'body.gam-ux-polish-on .gam-empty-cta:hover{background:#4a4a52;}'",
+      "newString": "        /* WP-09: empty-card on surface-raised, token-driven ink; CTA already 44px. */\n        'body.gam-ux-polish-on .gam-empty-card{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;background:var(--gam-tok-surface-raised,#0f1114);border:1px solid var(--gam-tok-border,#2a2f38);border-radius:8px;text-align:center;color:var(--gam-tok-ink-muted,#b0b5bc);}',\n        'body.gam-ux-polish-on .gam-empty-icon{color:var(--gam-tok-ink-faint,#7a7672);}',\n        'body.gam-ux-polish-on .gam-empty-headline{font-size:15px;font-weight:600;color:var(--gam-tok-ink,#e8e6e1);}',\n        'body.gam-ux-polish-on .gam-empty-desc{font-size:13px;color:var(--gam-tok-ink-muted,#b0b5bc);max-width:320px;line-height:1.5;}',\n        'body.gam-ux-polish-on .gam-empty-cta{margin-top:4px;padding:8px 16px;background:var(--gam-tok-surface-overlay,#252a31);color:var(--gam-tok-ink,#e8e6e1);border:1px solid var(--gam-tok-border,#2a2f38);border-radius:6px;cursor:pointer;font-size:13px;min-height:44px;min-width:44px;}',\n        'body.gam-ux-polish-on .gam-empty-cta:hover{background:var(--gam-tok-accent-soft,rgba(255,153,51,0.10));border-color:var(--gam-tok-accent-line,rgba(255,153,51,0.28));}'",
+      "note": "VT-3: v8.1 empty-card → surface-raised + 24 padding + token ink (#1f1f24→surface-raised, #5a5a62→ink-faint, #e5e5e8→ink, #3a3a42/#4a4a52→overlay+accent-soft hover). 44px CTA retained. Locked .gam-empty-* restyled only."
+    },
+    {
+      "oldString": ".gam-empty-state {\n  display: flex; flex-direction: column; align-items: center;\n  justify-content: center; gap: 6px; padding: 20px 12px;\n  text-align: center; color: #9b9892; font: 10px/1.4 ui-monospace, monospace;\n}\n.gam-empty-icon { font-size: 24px; line-height: 1; opacity: 0.6; }\n.gam-empty-headline { color: #9b9892; font-weight: 600; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }\n.gam-empty-desc { color: #9b9892; font-size: 9px; }\n.gam-empty-cta {\n  background: transparent; border: 1px solid var(--bb-amber); color: var(--bb-amber);\n  padding: 2px 8px; cursor: pointer; font: 600 9px ui-monospace, monospace;\n  letter-spacing: 0.04em; text-transform: uppercase; margin-top: 4px;\n}",
+      "newString": "/* WP-09: content-script empty-state unified onto the token ramp; ink-muted message,\n   ink-faint subtext, CTA bumped to the 44px touch-target floor (was 9px no-target). */\n.gam-empty-state {\n  display: flex; flex-direction: column; align-items: center;\n  justify-content: center; gap: 6px; padding: 20px 12px;\n  text-align: center; color: var(--gam-tok-ink-muted, #b0b5bc); font: 10px/1.4 ui-monospace, monospace;\n}\n.gam-empty-icon { font-size: 24px; line-height: 1; opacity: 0.6; }\n.gam-empty-headline { color: var(--gam-tok-ink-muted, #b0b5bc); font-weight: 600; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }\n.gam-empty-desc { color: var(--gam-tok-ink-faint, #7a7672); font-size: 9px; }\n.gam-empty-cta {\n  background: transparent; border: 1px solid var(--gam-tok-accent, #ff9933); color: var(--gam-tok-accent, #ff9933);\n  padding: 8px 12px; cursor: pointer; font: 600 11px ui-monospace, monospace;\n  letter-spacing: 0.04em; text-transform: uppercase; margin-top: 4px;\n  min-height: 44px; min-width: 44px; box-sizing: border-box;\n}",
+      "note": "VT-3: the bespoke 9px-font/no-touch-target empty popup state → ink-muted message (#9b9892→ink-muted), ink-faint subtext (#9b9892→ink-faint on .gam-empty-desc), accent CTA via token, and the mandated 44px min CTA. --bb-amber→--gam-tok-accent (identical #ff9933)."
+    },
+    {
+      "oldString": ".gam-error-state {\n  padding: 10px 12px; background: rgba(255,59,59,0.04);\n  border-left: 2px solid #ff3b3b;\n}",
+      "newString": "/* WP-09: error states on danger/warn tokens (no hardcoded #ff3b3b/#f0a040). */\n.gam-error-state {\n  padding: 10px 12px; background: var(--gam-tok-danger-soft, rgba(240,64,64,0.12));\n  border-left: 2px solid var(--gam-tok-danger, #f04040);\n}",
+      "note": "VT-4: error-state tint + left rail → danger-soft / danger tokens. #ff3b3b→danger, rgba(255,59,59,0.04)→danger-soft."
+    },
+    {
+      "oldString": ".gam-error-chip.hard { background: rgba(255,59,59,0.18); color: #ff3b3b; }\n.gam-error-chip.soft { background: rgba(240,160,64,0.15); color: var(--bb-amber-warm); }",
+      "newString": ".gam-error-chip.hard { background: var(--gam-tok-danger-soft, rgba(240,64,64,0.12)); color: var(--gam-tok-danger, #f04040); }\n.gam-error-chip.soft { background: var(--gam-tok-warn-soft, rgba(240,160,64,0.12)); color: var(--gam-tok-warn, #f0a040); }",
+      "note": "VT-4: hard error chip → danger/danger-soft; soft chip → warn/warn-soft tokens. Drops #ff3b3b and the --bb-amber-warm alias for canonical warn."
+    },
+    {
+      "oldString": ".gam-error-msg { color: #c8c5c0; font-size: 10px; margin: 2px 0; }\n.gam-error-hint { color: #9b9892; font-size: 9px; }\n.gam-error-retry {\n  background: transparent; border: 1px solid #9b9892; color: #9b9892;\n  padding: 1px 6px; cursor: pointer; font: 600 8px ui-monospace, monospace;\n  letter-spacing: 0.04em; text-transform: uppercase; margin-top: 6px;\n}",
+      "newString": ".gam-error-msg { color: var(--gam-tok-ink, #e8e6e1); font-size: 10px; margin: 2px 0; }\n.gam-error-hint { color: var(--gam-tok-ink-muted, #b0b5bc); font-size: 9px; }\n.gam-error-retry {\n  background: transparent; border: 1px solid var(--gam-tok-border-strong, #3a3f48); color: var(--gam-tok-ink-muted, #b0b5bc);\n  padding: 8px 12px; cursor: pointer; font: 600 11px ui-monospace, monospace;\n  letter-spacing: 0.04em; text-transform: uppercase; margin-top: 6px;\n  min-height: 44px; min-width: 44px; box-sizing: border-box;\n}",
+      "note": "VT-4 + VT-3 CTA floor: error msg→ink, hint→ink-muted, retry button→border-strong outline + ink-muted text and the 44px touch target (was 8px no-target). #c8c5c0→ink, #9b9892→ink-muted/border-strong."
+    },
+    {
+      "oldString": ".gam-skel-line {\n  height: 10px; background: #2a2825; border-radius: 2px;\n  margin: 3px 0; animation: gam-skel-pulse 1.4s ease-in-out infinite;\n}",
+      "newString": "/* WP-09: content-script skel line on the same surface-overlay base as the v8.1 skeleton. */\n.gam-skel-line {\n  height: 10px; background: var(--gam-tok-surface-overlay, #252a31); border-radius: 2px;\n  margin: 3px 0; animation: gam-skel-pulse 1.4s ease-in-out infinite;\n}",
+      "note": "VT-1: unify the v10.12 .gam-skel-line base (#2a2825) onto surface-overlay so there is ONE skeleton look across both implementations. The existing PRM block already kills its animation (static fallback retained)."
+    }
+  ]
+}

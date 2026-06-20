@@ -1,0 +1,126 @@
+<![CDATA[<!DOCTYPE html>
+<html>
+<head>
+<style>
+/* Injected v8.1 toast CSS (injectToastCSS) */
+body.gam-ux-polish-on .gam-toast-stack{position:fixed;right:20px;bottom:20px;z-index:99999;display:flex;flex-direction:column-reverse;gap:8px;max-width:360px;pointer-events:none;}
+body.gam-ux-polish-on .gam-toast{pointer-events:auto;padding:12px 16px;border-radius:6px;font-size:13px;line-height:1.4;color:#e5e5e8;background:#2a2a30;box-shadow:0 4px 12px rgba(0,0,0,0.35);opacity:0;transform:translateY(8px);transition:opacity 180ms ease,transform 180ms ease;min-height:44px;display:flex;align-items:center;}
+body.gam-ux-polish-on .gam-toast.gam-toast-show{opacity:1;transform:translateY(0);}
+body.gam-ux-polish-on .gam-toast-success{background:#1f4d2e;color:#c6f6d5;}
+body.gam-ux-polish-on .gam-toast-error{background:#5a2020;color:#fed7d7;}
+body.gam-ux-polish-on .gam-toast-info{background:#2a2a30;color:#e5e5e8;}
+
+/* GAM_CSS .gam-snack base + variants */
+.gam-snack{position:fixed;bottom:14px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;opacity:0;transform:translateY(6px) scale(.97);transition:opacity .14s,transform .18s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px}
+.gam-snack-show{opacity:1;transform:translateY(0)}
+.gam-snack-success{background:#3dd68c;color:#0f1114}
+.gam-snack-error{background:#f04040;color:#fff}
+.gam-snack-info{background:#4A9EFF;color:#fff}
+.gam-snack-warn{background:#f0a040;color:#0f1114}
+
+/* Snack action button */
+.gam-snack-action { background:transparent; border:1px solid #4A9EFF; color:#4A9EFF; padding:4px 10px; cursor:pointer; font:700 10px ui-monospace,'JetBrains Mono',monospace; letter-spacing:0.06em; text-transform:uppercase; transition:background 80ms,color 80ms; flex-shrink:0; pointer-events:auto; white-space:nowrap; }
+.gam-snack-action:hover { background:#4A9EFF; color:#0a0a0b; }
+</style>
+</head>
+<body style="background:#0a0a0b; color:#e8eaed; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; padding: 40px;">
+
+<h2 style="color:#e8eaed; margin-bottom:30px; font-weight:700; font-size:14px;">Toast / Snack / Undo Notifications</h2>
+
+<!-- SECTION 1: v8.1 Toast Stack (when gam-ux-polish-on) -->
+<div style="margin-bottom: 60px;">
+<h3 style="color:#8b929e; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px;">v8.1 Toast Stack (UX Polish Enabled)</h3>
+
+<div id="gam-toast-stack" style="position:fixed;right:20px;bottom:20px;z-index:99999;display:flex;flex-direction:column-reverse;gap:8px;max-width:360px;pointer-events:none;">
+  <div class="gam-toast gam-toast-show gam-toast-success" role="status" aria-live="polite" style="pointer-events:auto;padding:12px 16px;border-radius:6px;font-size:13px;line-height:1.4;color:#c6f6d5;background:#1f4d2e;box-shadow:0 4px 12px rgba(0,0,0,0.35);opacity:1;transform:translateY(0);transition:opacity 180ms ease,transform 180ms ease;min-height:44px;display:flex;align-items:center;">
+    ✓ user123 banned for Rule 2 violation
+  </div>
+  <div class="gam-toast gam-toast-show gam-toast-error" role="alert" aria-live="assertive" style="pointer-events:auto;padding:12px 16px;border-radius:6px;font-size:13px;line-height:1.4;color:#fed7d7;background:#5a2020;box-shadow:0 4px 12px rgba(0,0,0,0.35);opacity:1;transform:translateY(0);transition:opacity 180ms ease,transform 180ms ease;min-height:44px;display:flex;align-items:center;">
+    Error: Ban failed (403)
+  </div>
+  <div class="gam-toast gam-toast-info" role="status" aria-live="polite" style="pointer-events:auto;padding:12px 16px;border-radius:6px;font-size:13px;line-height:1.4;color:#e5e5e8;background:#2a2a30;box-shadow:0 4px 12px rgba(0,0,0,0.35);opacity:0;transform:translateY(8px);transition:opacity 180ms ease,transform 180ms ease;min-height:44px;display:flex;align-items:center;">
+    Processing...
+  </div>
+</div>
+</div>
+
+<!-- SECTION 2: Legacy Snack Stack (bottom-right, z-index 9999999) -->
+<div style="position:fixed;bottom:20px;right:20px;z-index:9999998;max-width:400px;">
+<h3 style="color:#8b929e; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px; position:relative; top:-60px;">Legacy Snack Stack (max 4)</h3>
+
+<div class="gam-snack gam-snack-show gam-snack-info" data-stack="1" style="position:fixed;bottom:14px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;opacity:1;transform:translateY(0);transition:opacity .14s,transform .18s;pointer-events:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px;display:flex;align-items:center;gap:8px;">
+  <span style="flex:1;min-width:0;">User added to watchlist</span>
+</div>
+
+<div class="gam-snack gam-snack-show gam-snack-success" data-stack="1" style="position:fixed;bottom:62px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#0f1114;opacity:1;transform:translateY(0);transition:opacity .14s,transform .18s;pointer-events:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px;display:flex;align-items:center;gap:8px;">
+  <span style="flex:1;min-width:0;">✓ Note saved</span>
+</div>
+
+<div class="gam-snack gam-snack-show gam-snack-warn" data-stack="1" style="position:fixed;bottom:110px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#0f1114;opacity:1;transform:translateY(0);transition:opacity .14s,transform .18s;pointer-events:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px;display:flex;align-items:center;gap:8px;">
+  <span style="flex:1;min-width:0;">Mod log entries expire in 3 days</span>
+</div>
+
+<div class="gam-snack gam-snack-show gam-snack-error" data-stack="1" style="position:fixed;bottom:158px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;opacity:1;transform:translateY(0);transition:opacity .14s,transform .18s;pointer-events:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px;display:flex;align-items:center;gap:8px;">
+  <span style="flex:1;min-width:0;">Connection lost. Ctrl+Shift+L for mod log</span>
+</div>
+</div>
+
+<!-- SECTION 3: Snack with Action Button & Countdown Bar -->
+<div style="position:fixed;bottom:250px;right:20px;z-index:9999998;max-width:400px;">
+<h3 style="color:#8b929e; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px;">Snack with Undo Action + Countdown</h3>
+
+<div class="gam-snack gam-snack-show gam-snack-info" data-stack="1" style="position:fixed;bottom:250px;right:100px;z-index:9999999;padding:6px 12px;border-radius:6px;font:11px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;opacity:1;transform:translateY(0);transition:opacity .14s,transform .18s;pointer-events:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);letter-spacing:.15px;max-width:340px;display:flex;align-items:center;gap:8px;padding-bottom:8px;">
+  <span style="flex:1;min-width:0;">Post removed</span>
+  <button class="gam-snack-action" style="background:transparent;border:1px solid #4A9EFF;color:#4A9EFF;padding:4px 10px;cursor:pointer;font:700 10px ui-monospace,'JetBrains Mono',monospace;letter-spacing:0.06em;text-transform:uppercase;transition:background 80ms,color 80ms;flex-shrink:0;pointer-events:auto;white-space:nowrap;">Undo</button>
+  <div class="gam-snack-countdown-bar" style="position:absolute;left:0;bottom:0;height:2px;background:#4A9EFF;width:100%;transition:width 100ms linear;border-radius:0 0 6px 6px;"></div>
+</div>
+</div>
+
+<!-- SECTION 4: Ban Undo Toast (immediate 10s) -->
+<div style="position:fixed;bottom:320px;right:20px;z-index:2147483610;">
+<h3 style="color:#8b929e; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px;">Ban Undo Toast (10s)</h3>
+
+<div id="gam-undo" style="position:fixed;bottom:90px;right:16px;z-index:2147483610;background:#1a1c20;color:#eee;border:1px solid #444;border-radius:6px;padding:10px 14px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.5);display:flex;align-items:center;gap:10px;">
+  <span>🔘 suspicioususer77 banned</span>
+  <button style="background:var(--bb-amber-cool);color:#3a2500;border:none;border-radius:3px;padding:4px 10px;cursor:pointer;font-weight:600;">Undo</button>
+</div>
+</div>
+
+<!-- SECTION 5: Universal Undo Toast with Progress Bar -->
+<div style="position:fixed;bottom:380px;right:20px;z-index:9999999;">
+<h3 style="color:#8b929e; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px;">Universal Undo Toast (20s tier-A)</h3>
+
+<div id="gam-undo-toast-demo" style="position:fixed;bottom:380px;right:16px;z-index:9999999;background:#1a1f28;border:1px solid #3a3f48;border-radius:4px;padding:10px 14px;display:flex;align-items:center;gap:10px;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e8eaed;box-shadow:0 4px 16px rgba(0,0,0,.6);min-width:260px;max-width:380px;" role="alert">
+  <span style="flex:1;">Content approval reversed</span>
+  <button style="background:transparent;border:1px solid #4A9EFF;border-radius:3px;color:#4A9EFF;font:600 11px inherit;padding:3px 10px;cursor:pointer;flex-shrink:0;">Undo</button>
+  <div style="position:absolute;bottom:0;left:0;height:2px;background:#4A9EFF;border-radius:0 0 4px 4px;width:85%;transition:width linear 20s;"></div>
+</div>
+</div>
+
+<!-- SECTION 6: Service Worker Restart Snack -->
+<div style="position:fixed;bottom:440px;left:50%;transform:translateX(-50%);z-index:2147483640;">
+<h3 style="color:#8b929e; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px; position:relative; left:200px;">SW Restart Snack</h3>
+
+<div id="gam-sw-restart-snack" style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:2147483640;background:#1a1c20;color:#eee;border:1px solid #444;border-radius:6px;padding:10px 14px;font:12px ui-sans-serif,system-ui,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.5);display:flex;align-items:center;gap:10px;max-width:360px;">
+  <span>Connection re-established -- click Retry to resume.</span>
+  <button style="background:#4A9EFF;color:#fff;border:none;border-radius:3px;padding:4px 10px;cursor:pointer;font-weight:600;white-space:nowrap;">Retry</button>
+  <button style="background:transparent;color:#9b9892;border:1px solid #7a7672;border-radius:3px;padding:4px 8px;cursor:pointer;white-space:nowrap;">Dismiss</button>
+</div>
+</div>
+
+<!-- SECTION 7: Extension Orphaned Banner (top of page) -->
+<div style="position:fixed;top:0;left:0;right:0;z-index:99999999;background:#2a1d10;border-bottom:1px solid #ffd60a;color:#ffd84d;font:600 12px/1.4 ui-monospace,JetBrains Mono,monospace;padding:8px 14px;display:flex;align-items:center;gap:12px;letter-spacing:0.04em;box-shadow:0 2px 8px rgba(0,0,0,0.6);">
+  <span style="font-size:14px;">↻</span>
+  <span><b>ModTools updated.</b> The extension was reloaded — refresh this page to reconnect.</span>
+  <span style="flex:1;"></span>
+  <button id="gam-ext-orphaned-copy" style="background:transparent;border:1px solid #7a7672;color:#ffd84d;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;" title="Copy debug details to clipboard">📋 Copy</button>
+  <button id="gam-ext-orphaned-reload" style="background:#ffd84d;border:none;color:#0a0a0b;padding:4px 12px;cursor:pointer;font:700 11px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;">Reload page</button>
+  <button id="gam-ext-orphaned-dismiss" style="background:transparent;border:1px solid #7a7672;color:#9b9892;padding:4px 10px;cursor:pointer;font:600 10px ui-monospace,monospace;letter-spacing:0.06em;text-transform:uppercase;">Dismiss</button>
+</div>
+
+<!-- Hidden SR announcer -->
+<div id="gam-sr-live" role="alert" aria-live="assertive" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;"></div>
+
+</body>
+</html>
+]]>

@@ -1,0 +1,77 @@
+<![CDATA[
+<div id="gam-cmdk-palette" role="dialog" aria-modal="true" aria-label="ModTools command palette" style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999990;background:rgba(0,0,0,0.55);backdrop-filter:blur(2px);display:flex;align-items:flex-start;justify-content:center;padding-top:80px;font:13px ui-monospace,JetBrains Mono,monospace">
+  <div id="gam-cmdk-card" style="background:#0a0a0b;border:1px solid #ff9933;width:min(560px,92vw);max-height:65vh;display:flex;flex-direction:column;box-shadow:0 12px 48px rgba(0,0,0,0.7),0 0 0 1px rgba(255,153,51,0.15);border-radius:4px;overflow:hidden">
+    <!-- Header -->
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(255,153,51,0.25);background:linear-gradient(180deg,#13130f 0%,#0a0a0b 100%)">
+      <span style="color:#ff9933;font-weight:700;font-size:11px;letter-spacing:0.12em;text-transform:uppercase">CMD</span>
+      <input id="gam-cmdk-input" type="text" placeholder="Type a command or filter…" aria-label="Filter commands" autocomplete="off" spellcheck="false" style="flex:1;background:transparent;border:none;outline:none;color:#e8e6e1;font:13px ui-monospace,JetBrains Mono,monospace">
+      <span style="color:#7a7672;font-size:10px;letter-spacing:0.06em">ESC to close</span>
+    </div>
+    <!-- List Container -->
+    <div id="gam-cmdk-list" role="listbox" aria-label="Available commands" style="overflow-y:auto;padding:6px 0;max-height:calc(65vh - 50px)">
+      <!-- Example list items (dynamically rendered) -->
+      <div role="option" aria-selected="true" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid #ff9933;background:rgba(255,153,51,0.07)">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">🎛</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Open Mod Console</span>
+      </div>
+      <div role="option" aria-selected="false" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">✉</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Open Modmail Panel</span>
+      </div>
+      <div role="option" aria-selected="false" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">☠</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Open Death Row queue</span>
+      </div>
+      <div role="option" aria-selected="false" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">⚙</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Open Auto-Action queue</span>
+      </div>
+      <div role="option" aria-selected="false" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">▭</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Toggle Status Bar visibility</span>
+      </div>
+      <div role="option" aria-selected="false" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">?</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Open Help / shortcuts panel</span>
+      </div>
+      <div role="option" aria-selected="false" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">🔍</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Search posts + comments (open search palette)</span>
+      </div>
+      <div role="option" aria-selected="false" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">🔬</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Investigate user (open Profile Intel)</span>
+      </div>
+      <div role="option" aria-selected="false" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">▶</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Run all Death Row rules NOW</span>
+      </div>
+      <div role="option" aria-selected="false" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">↻</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Refresh team settings + roster</span>
+      </div>
+      <div role="option" aria-selected="false" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">📋</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Copy debug snapshot (current page)</span>
+      </div>
+      <div role="option" aria-selected="false" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">⚕</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Open extension popup (Diagnostics tab)</span>
+      </div>
+      <div role="option" aria-selected="false" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">↺</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Reload this page</span>
+      </div>
+      <div role="option" aria-selected="false" style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;color:#e8e6e1;border-left:2px solid transparent;background:transparent">
+        <span style="color:#ff9933;width:16px;text-align:center;font-size:14px;flex:0 0 16px">⟲</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Reload extension (orphan recovery)</span>
+      </div>
+    </div>
+    <!-- Footer -->
+    <div style="padding:6px 14px;border-top:1px solid rgba(255,153,51,0.12);color:#7a7672;font-size:10px;letter-spacing:0.04em;display:flex;justify-content:space-between">
+      <span>↑↓ navigate · ↵ execute</span>
+      <span>Ctrl+Shift+P</span>
+    </div>
+  </div>
+</div>
+]]>

@@ -1,0 +1,167 @@
+{
+  "wp": "WP-06",
+  "component": "intel-tab",
+  "edits": [
+    {
+      "oldString": "background:rgba(255,153,51,0.08);border:1px solid rgba(255,153,51,0.35);color:var(--bb-amber,#ff9933);width:100%",
+      "newString": "background:'+GAM_TOK.accentSoft+';border:1px solid '+GAM_TOK.accentLine+';color:'+GAM_TOK.accent+';width:100%",
+      "note": "WP-06.3 — AI-Explain button: route the bespoke rgba amber tint + var(--bb-amber) fallback onto canonical accent tokens (accentSoft fill, accentLine border, accent text). This is an inline cssText fragment inside a template literal style=\"...\" so it must close the string and concat GAM_TOK; the surrounding HTML string already uses single quotes inside the backtick template so the '+...+' concat is valid."
+    },
+    {
+      "oldString": "          const confColor = conf === null ? '#9b9892' : conf >= 80 ? '#44dd66' : conf >= 50 ? 'var(--bb-amber,#ff9933)' : '#ff4444';",
+      "newString": "          const confColor = conf === null ? GAM_TOK.inkMuted : conf >= 80 ? GAM_TOK.success : conf >= 50 ? GAM_TOK.warn : GAM_TOK.danger;",
+      "note": "WP-06.3 — confidence chip colors map to success/warn/danger tokens (unknown -> ink-muted). JS swaps a token value, not a hex. Drops #44dd66 / #ff4444 / var(--bb-amber) literals; #9b9892 -> inkMuted (WCAG-bumped secondary)."
+    },
+    {
+      "oldString": "          pop.style.cssText = 'position:absolute;top:calc(100% + 4px);left:0;width:380px;max-height:300px;overflow-y:auto;background:#0a0a0b;border:1px solid var(--bb-amber,#ff9933);border-radius:4px;box-shadow:0 8px 24px rgba(0,0,0,0.6);z-index:99999999;padding:10px 12px;font-size:12px;color:#e8e6e1;line-height:1.5;box-sizing:border-box';",
+      "newString": "          pop.style.cssText = 'position:absolute;top:calc(100% + 4px);left:0;width:380px;max-height:300px;overflow-y:auto;background:'+GAM_TOK.surfacePanel+';border:1px solid '+GAM_TOK.borderStrong+';border-radius:8px;box-shadow:0 8px 24px '+GAM_TOK.scrim+';z-index:var(--z-t-popover,10000010);padding:10px 12px;font-size:12px;color:'+GAM_TOK.ink+';line-height:1.5;box-sizing:border-box';",
+      "note": "WP-06.3 — AI-Explain popover adopts the floating-card shell: surface-panel bg + border-strong + 8px radius + 0 8px 24px scrim shadow (was deep-surface bg + amber border + 4px). z-index 99999999 collapsed onto the z-ladder popover tier (--z-t-popover) matching .gam-t-popover. Kills #0a0a0b / var(--bb-amber) / rgba(0,0,0,0.6) / #e8e6e1 / 99999999 literals. (Viewport-edge clamping is a JS-logic concern out of scope for the token migration; the existing left:0/absolute positioning is preserved.)"
+    },
+    {
+      "oldString": "          closeX.style.cssText = 'position:absolute;top:6px;right:8px;background:transparent;border:none;color:#9b9892;cursor:pointer;font-size:14px;line-height:1;padding:0';",
+      "newString": "          closeX.style.cssText = 'position:absolute;top:6px;right:8px;background:transparent;border:none;color:'+GAM_TOK.inkMuted+';cursor:pointer;font-size:14px;line-height:1;padding:0';",
+      "note": "Popover close X: #9b9892 -> inkMuted (WCAG-bumped secondary)."
+    },
+    {
+      "oldString": "          header.style.cssText = 'font-weight:700;color:var(--bb-amber,#ff9933);margin-bottom:6px;padding-right:20px;font-size:13px';",
+      "newString": "          header.style.cssText = 'font-weight:700;color:'+GAM_TOK.accent+';margin-bottom:6px;padding-right:20px;font-size:13px';",
+      "note": "Popover header title: var(--bb-amber) -> accent token (amber brand chrome)."
+    },
+    {
+      "oldString": "          chip.style.cssText = 'background:rgba(0,0,0,0.3);border:1px solid ' + confColor + ';color:' + confColor + ';border-radius:3px;padding:1px 6px;font-size:10px;font-weight:700;letter-spacing:0.06em';",
+      "newString": "          chip.style.cssText = 'background:'+GAM_TOK.surfaceSunken+';border:1px solid ' + confColor + ';color:' + confColor + ';border-radius:6px;padding:1px 6px;font-size:10px;font-weight:700;letter-spacing:0.06em';",
+      "note": "Confidence chip: bespoke rgba(0,0,0,0.3) well -> surface-sunken token; 3px->6px radius (token chip radius). confColor stays token-driven from the prior edit."
+    },
+    {
+      "oldString": "          thumbDown.style.cssText = 'background:transparent;border:1px solid #7a7672;color:#9b9892;border-radius:3px;padding:1px 6px;font-size:10px;font-weight:600;letter-spacing:0.03em;cursor:pointer;font-family:inherit';",
+      "newString": "          thumbDown.style.cssText = 'background:transparent;border:1px solid '+GAM_TOK.inkFaint+';color:'+GAM_TOK.inkMuted+';border-radius:6px;padding:1px 6px;font-size:10px;font-weight:600;letter-spacing:0.03em;cursor:pointer;font-family:inherit';",
+      "note": "Thumbs-down feedback button: #7a7672 border -> inkFaint, #9b9892 text -> inkMuted, 3px->6px radius."
+    },
+    {
+      "oldString": "            thumbDown.style.color = '#44dd66';",
+      "newString": "            thumbDown.style.color = GAM_TOK.success;",
+      "note": "Thumbs-down 'Noted' text color: #44dd66 -> success token (verified/OK state). Split to a single line to stay CRLF-agnostic."
+    },
+    {
+      "oldString": "            thumbDown.style.borderColor = '#44dd66';",
+      "newString": "            thumbDown.style.borderColor = GAM_TOK.success;",
+      "note": "Thumbs-down 'Noted' border color: #44dd66 -> success token. Split to a single line to stay CRLF-agnostic."
+    },
+    {
+      "oldString": "              try { thumbDown.textContent = '👎 wrong'; thumbDown.style.color = '#9b9892'; thumbDown.style.borderColor = '#7a7672'; thumbDown.disabled = false; } catch (_) {}",
+      "newString": "              try { thumbDown.textContent = '👎 wrong'; thumbDown.style.color = GAM_TOK.inkMuted; thumbDown.style.borderColor = GAM_TOK.inkFaint; thumbDown.disabled = false; } catch (_) {}",
+      "note": "Thumbs-down reset after 2s: #9b9892 -> inkMuted, #7a7672 -> inkFaint (matches the initial cssText)."
+    },
+    {
+      "oldString": "            cHead.style.cssText = 'font-weight:700;color:#9b9892;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:4px';",
+      "newString": "            cHead.style.cssText = 'font-weight:700;color:'+GAM_TOK.inkMuted+';font-size:10px;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:4px';",
+      "note": "Citations header (caps label): #9b9892 -> inkMuted."
+    },
+    {
+      "oldString": "            cList.style.cssText = 'margin:0;padding-left:16px;color:#9b9892;font-size:11px';",
+      "newString": "            cList.style.cssText = 'margin:0;padding-left:16px;color:'+GAM_TOK.inkMuted+';font-size:11px';",
+      "note": "Citations list: #9b9892 -> inkMuted. Anchor includes 'cList.style.cssText =' prefix to disambiguate from the cHead line that shares the rgba-free tail."
+    },
+    {
+      "oldString": ".gam-mc-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:${C.TEXT2};margin-bottom:6px}",
+      "newString": ".gam-mc-h{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--gam-tok-accent,${C.ACCENT});margin-bottom:6px}",
+      "note": "WP-06.4 — section headers = 11px accent caps with .04em tracking (was 700/.5px/TEXT2-grey). Restyle only; class name preserved. Uses var(--gam-tok-accent) in <style> rule (var() safe here) with ${C.ACCENT} fallback. weight 700->600 per type scale label-caps; .5px->.04em canonical tracking."
+    },
+    {
+      "oldString": ".gam-mc-chip-ok{background:rgba(61,214,140,.12);color:${C.GREEN};border-color:rgba(61,214,140,.25)}",
+      "newString": ".gam-mc-chip-ok{background:var(--gam-tok-success-soft,rgba(61,214,140,.12));color:var(--gam-tok-success,${C.GREEN});border-color:var(--gam-tok-success-soft,rgba(61,214,140,.12))}",
+      "note": "WP-06.6 / 1.7 — verified chip onto success tokens. Raw rgba(61,214,140,*) -> --gam-tok-success-soft; ${C.GREEN} kept as fallback alongside --gam-tok-success. Border routed to success-soft token (single derived value) per the 12% soft-tint contract."
+    },
+    {
+      "oldString": ".gam-mc-chip-bad{background:rgba(240,64,64,.12);color:${C.RED};border-color:rgba(240,64,64,.25)}",
+      "newString": ".gam-mc-chip-bad{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));color:var(--gam-tok-danger,${C.RED});border-color:var(--gam-tok-danger-soft,rgba(240,64,64,.12))}",
+      "note": "WP-06.6 — danger chip onto danger tokens. Raw rgba(240,64,64,*) -> --gam-tok-danger-soft + --gam-tok-danger."
+    },
+    {
+      "oldString": ".gam-mc-chip-warn{background:rgba(240,160,64,.12);color:${C.WARN};border-color:rgba(240,160,64,.25)}",
+      "newString": ".gam-mc-chip-warn{background:var(--gam-tok-warn-soft,rgba(240,160,64,.12));color:var(--gam-tok-warn,${C.WARN});border-color:var(--gam-tok-warn-soft,rgba(240,160,64,.12))}",
+      "note": "WP-06.6 — caution chip onto warn tokens. Raw rgba(240,160,64,*) -> --gam-tok-warn-soft + --gam-tok-warn."
+    },
+    {
+      "oldString": ".gam-mc-chip-mini{background:rgba(255,214,10,.12);color:${C.YELLOW};border-color:rgba(255,214,10,.25)}",
+      "newString": ".gam-mc-chip-mini{background:var(--gam-tok-warn-soft,rgba(240,160,64,.12));color:var(--gam-tok-warn,${C.WARN});border-color:var(--gam-tok-warn-soft,rgba(240,160,64,.12))}",
+      "note": "WP-06.6 / 1.7 — the 5-level ladder has NO yellow; the legacy mini/watch yellow (#ffd60a) collapses onto warn (caution/watch). Raw rgba(255,214,10,*) + ${C.YELLOW} replaced by warn tokens. Class name preserved (restyle only)."
+    },
+    {
+      "oldString": ".gam-mc-score-hits{color:${C.WARN};font-size:10px}",
+      "newString": ".gam-mc-score-hits{color:var(--gam-tok-warn,${C.WARN});font-size:10px}",
+      "note": "Score-hits accent routed to --gam-tok-warn token (was bare ${C.WARN}); keeps fallback."
+    },
+    {
+      "oldString": ".gam-mc-note-inline{padding:8px 10px;background:rgba(74,158,255,.08);border:1px solid rgba(74,158,255,.2);border-radius:4px;color:${C.TEXT};font-size:12px;line-height:1.45}",
+      "newString": ".gam-mc-note-inline{padding:8px 10px;background:var(--gam-tok-info-soft,rgba(74,158,255,.08));border:1px solid var(--gam-tok-info-soft,rgba(74,158,255,.2));border-radius:6px;color:var(--gam-tok-ink,${C.TEXT});font-size:12px;line-height:1.45}",
+      "note": "WP-06 — inline-note well: raw rgba(74,158,255,*) blue tint -> --gam-tok-info-soft; ${C.TEXT} -> --gam-tok-ink; 4px->6px radius (token chip/well radius). Info-blue is the informational tint per §1.1."
+    },
+    {
+      "oldString": ".gam-mc-note-inline b{color:${C.ACCENT};margin-right:4px}",
+      "newString": ".gam-mc-note-inline b{color:var(--gam-tok-info,${C.ACCENT});margin-right:4px}",
+      "note": "Inline-note label: ${C.ACCENT} (legacy #4A9EFF blue) -> --gam-tok-info (WCAG-bumped #7cb8ff) per §2.2; ACCENT-as-blue is an info context, not brand amber."
+    },
+    {
+      "oldString": ".gam-mc-empty-dense{padding:6px 10px;background:${C.BG};border:1px dashed ${C.BORDER};border-radius:4px;color:${C.TEXT3};font-size:11px;text-align:center}",
+      "newString": ".gam-mc-empty-dense{padding:6px 10px;background:var(--gam-tok-surface-raised,${C.BG});border:1px dashed var(--gam-tok-border,${C.BORDER});border-radius:6px;color:var(--gam-tok-ink-muted,${C.TEXT3});font-size:11px;text-align:center}",
+      "note": "WP-06.5 — empty state on surface-raised; empty/tip text routed to ink-muted (NEVER ink-faint) per §1.1. ${C.BG}->--gam-tok-surface-raised, ${C.BORDER}->--gam-tok-border, ${C.TEXT3} (tertiary grey)->--gam-tok-ink-muted; 4px->6px radius."
+    },
+    {
+      "oldString": ".gam-mc-intel-tip{font-size:10px;color:${C.TEXT3};margin-top:10px;padding:6px 10px;background:rgba(74,158,255,.05);border-left:2px solid ${C.ACCENT};border-radius:3px}",
+      "newString": ".gam-mc-intel-tip{font-size:12px;color:var(--gam-tok-ink-muted,${C.TEXT3});margin-top:10px;padding:6px 10px;background:var(--gam-tok-info-soft,rgba(74,158,255,.05));border-left:2px solid var(--gam-tok-info,${C.ACCENT});border-radius:6px}",
+      "note": "WP-06.5 — tip text -> ink-muted (never ink-faint); raw rgba(74,158,255,.05) -> --gam-tok-info-soft; left-keyline ${C.ACCENT} legacy blue -> --gam-tok-info (informational, not brand amber); 10px->12px secondary type; 3px->6px radius."
+    }
+  ],
+  "lockedSelectors": [
+    "#gam-mc-intel-summary",
+    "#gam-mc-intel-score",
+    "#gam-mc-intel-note",
+    "#gam-mc-intel-hist",
+    "#gam-mc-intel-ai-wrap",
+    "#gam-intel-ai-engine",
+    "#gam-intel-ai-go",
+    "#gam-intel-ai-out",
+    "#gam-intel-ai-text",
+    "#gam-intel-ai-copy",
+    "#gam-intel-ai-err",
+    "#gam-mc-ai-explain-wrap",
+    "#gam-mc-ai-explain-btn",
+    "#gam-mc-modnote-mount",
+    ".gam-mc-intel-2col",
+    ".gam-mc-intel-col",
+    ".gam-mc-intel-col-left",
+    ".gam-mc-intel-col-right",
+    ".gam-mc-intel-compact",
+    ".gam-mc-loading",
+    ".gam-mc-section",
+    ".gam-mc-h",
+    ".gam-mc-chip",
+    ".gam-mc-chips",
+    ".gam-mc-chip-ok",
+    ".gam-mc-chip-bad",
+    ".gam-mc-chip-warn",
+    ".gam-mc-chip-mini",
+    ".gam-mc-score-dense",
+    ".gam-mc-score-dim",
+    ".gam-mc-score-hits",
+    ".gam-mc-empty",
+    ".gam-mc-empty-dense",
+    ".gam-mc-note-inline",
+    ".gam-mc-note",
+    ".gam-mc-hist-*",
+    ".gam-mc-evidence",
+    ".gam-mc-evidence-text",
+    ".gam-mc-evidence-link",
+    ".gam-mc-ai-reply",
+    ".gam-mc-ai-header",
+    ".gam-mc-ai-engine",
+    ".gam-mc-ai-btn",
+    ".gam-mc-ai-text",
+    ".gam-mc-ai-use",
+    ".gam-mc-banner",
+    ".gam-mc-banner-red",
+    ".gam-mc-intel-tip"
+  ],
+  "summary": "WP-06 Intel Tab token migration: drives this component's raw hex/rgba literals to zero by routing them onto GAM_TOK (inline cssText) and var(--gam-tok-*) (style rules). Inline AI-Explain popover (renderIntelTab ~9357-9482) adopts the floating-card shell (surface-panel + border-strong + 8px radius + scrim shadow), maps its rogue z-index 99999999 onto the popover z-tier, and converts confidence-chip + close-X + thumbs-down + citations colors to tokens so JS only swaps token values (#44dd66/#ff4444/#9b9892/#7a7672/var(--bb-amber)/#0a0a0b/#e8e6e1 -> success/danger/inkMuted/inkFaint/accent/surfacePanel/ink). Intel CSS (~25199-25210, 24391) restyled per the brief: section heads -> 11px accent caps .04em; chip-ok/bad/warn -> success/danger/warn soft-token pairs; chip-mini's non-ladder yellow collapses onto warn; note-inline + intel-tip blue tints -> info-soft + info keyline; empty/tip text routed to ink-muted (never ink-faint); legacy #4A9EFF ACCENT-as-blue -> WCAG-bumped --gam-tok-info; #8b929e TEXT2 / #5c6370 TEXT3 -> ink-muted. All 49 locked selectors preserved (restyle only); no accessible-name textContent changed (tab/section labels untouched). 20 edits, each verified to occur exactly once."
+}

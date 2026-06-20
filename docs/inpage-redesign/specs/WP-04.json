@@ -1,0 +1,163 @@
+{
+  "wp": "WP-04",
+  "component": "modals",
+  "targetFile": "modtools.js",
+  "notes": "WP-04 = Modals (askTextModal / openBugReportModal / openParkModal / _openMarkPrecedentModal). The bug-report modal is ENTIRELY class-driven (.gam-bug-report-* + .gam-modal* + .gam-btn*) and those CSS rules were already migrated to var(--gam-tok-*) / aliased C.* by WP-01/WP-02 — so no bug-modal edits are needed here (its inline DOM carries no hex). WP-04's actual surface = the INLINE-styled DOM of the other three modals (askText, park, precedent), which still carry raw hex. All inline edits are string-concatenation onto GAM_TOK.* (never var() inside cssText). One new <style> rule (.gam-input-group) is appended via var(--gam-tok-*) since it lives inside GAM_CSS where var() is safe. Brief line numbers had drifted post WP-01/02; all oldStrings re-verified to occur exactly once against the live file.",
+  "edits": [
+    {
+      "oldString": "background:'rgba(0,0,0,0.55)', zIndex:'9999994',\n            display:'flex', alignItems:'center', justifyContent:'center' }",
+      "newString": "background:GAM_TOK.scrim, zIndex:'9999994',\n            display:'flex', alignItems:'center', justifyContent:'center' }",
+      "note": "askText backdrop -> shared scrim token (0.60). Drops the bespoke 0.55. z stays in WP-02's asktext tier (9999994, one below .gam-modal)."
+    },
+    {
+      "oldString": "cls: 'gam-modal gam-v72-asktext',\n          style: { background:'#1a1c20', color:'#e4e4e4', borderRadius:'8px',\n            padding:'16px 18px', minWidth:'320px', maxWidth:'520px',\n            boxShadow:'0 6px 24px rgba(0,0,0,0.6)',\n            fontFamily:'ui-sans-serif, system-ui, sans-serif' },",
+      "newString": "cls: 'gam-modal gam-v72-asktext',\n          style: { background:GAM_TOK.surfaceRaised, color:GAM_TOK.ink, borderRadius:'8px',\n            padding:'16px 18px', minWidth:'320px', maxWidth:'520px',\n            border:'1px solid '+GAM_TOK.borderStrong,\n            boxShadow:'0 8px 24px '+GAM_TOK.scrim,\n            fontFamily:'ui-sans-serif, system-ui, sans-serif' },",
+      "note": "askText panel: surface-raised body + border-strong + single scrim shadow (per WP-04.1). #1a1c20->surfaceRaised, #e4e4e4->ink. Adds the 1px border-strong the elevation contract requires."
+    },
+    {
+      "oldString": "        const title = el('div', {\n          id: _askTitleId,\n          style: { fontSize:'14px', fontWeight:'700', marginBottom:'8px', color:'#4A9EFF' }\n        }, String(o.title || 'Input required'));",
+      "newString": "        const title = el('div', {\n          id: _askTitleId,\n          style: { fontSize:'15px', fontWeight:'600', marginBottom:'8px', color:GAM_TOK.ink }\n        }, String(o.title || 'Input required'));",
+      "note": "askText title -> card-title scale (15px/600, ink). Drops the #4A9EFF blue heading (titles are ink, not info-blue; info is reserved for links/input accents per token roles)."
+    },
+    {
+      "oldString": "        const labelRow = el('label', {\n          style: { display:'block', fontSize:'12px', color:'#aaa', marginBottom:'6px' }\n        }, String(o.label || ''));",
+      "newString": "        const labelRow = el('label', {\n          style: { display:'block', fontSize:'11px', fontWeight:'600', letterSpacing:'.04em', textTransform:'uppercase', color:GAM_TOK.inkMuted, marginBottom:'6px' }\n        }, String(o.label || ''));",
+      "note": "askText field label -> 11px caps ink-muted rhythm (matches .gam-input-group label). #aaa->inkMuted."
+    },
+    {
+      "oldString": "          style: { width:'100%', background:'#0f1114', color:'#e4e4e4',\n            border:'1px solid #2a2a2a', borderRadius:'4px', padding:'8px',\n            fontSize:'13px', fontFamily:'inherit',\n            minHeight: o.multiline ? '80px' : 'auto', boxSizing:'border-box' }",
+      "newString": "          style: { width:'100%', background:GAM_TOK.surfaceSunken, color:GAM_TOK.ink,\n            border:'1px solid '+GAM_TOK.border, borderRadius:'6px', padding:'8px',\n            fontSize:'13px', fontFamily:'inherit',\n            minHeight: o.multiline ? '80px' : 'auto', boxSizing:'border-box' }",
+      "note": "askText input/textarea -> surface-sunken field well + 1px border + 6px radius (chip/input radius). #0f1114->surfaceSunken, #e4e4e4->ink, #2a2a2a->border."
+    },
+    {
+      "oldString": "        const err = el('div', {\n          style: { color:'#E74C3C', fontSize:'12px', marginTop:'6px',\n            minHeight:'16px' },\n          ...__axErr",
+      "newString": "        const err = el('div', {\n          style: { color:GAM_TOK.danger, fontSize:'12px', marginTop:'6px',\n            minHeight:'16px' },\n          ...__axErr",
+      "note": "askText validation error -> danger token. #E74C3C->danger."
+    },
+    {
+      "oldString": "        const cancelBtn = el('button', {\n          type: 'button',\n          style: { background:'#2a2a2a', color:'#e4e4e4', border:'0',\n            borderRadius:'4px', padding:'6px 12px', cursor:'pointer', fontSize:'13px' }\n        }, 'Cancel');",
+      "newString": "        const cancelBtn = el('button', {\n          type: 'button',\n          style: { background:'transparent', color:GAM_TOK.inkMuted, border:'1px solid '+GAM_TOK.border,\n            borderRadius:'6px', padding:'6px 12px', cursor:'pointer', fontSize:'13px', minHeight:'32px' }\n        }, 'Cancel');",
+      "note": "askText Cancel -> ghost button (transparent + 1px border + ink-muted), 6px radius, 32px min target. Matches the cancel/secondary treatment; #2a2a2a/#e4e4e4 retired."
+    },
+    {
+      "oldString": "        const okBtn = el('button', {\n          type: 'button',\n          style: { background:'#4A9EFF', color:'#fff', border:'0',\n            borderRadius:'4px', padding:'6px 12px', cursor:'pointer', fontSize:'13px' }\n        }, 'OK');",
+      "newString": "        const okBtn = el('button', {\n          type: 'button',\n          style: { background:GAM_TOK.accent, color:GAM_TOK.onAccentDark, border:'0',\n            borderRadius:'6px', padding:'6px 12px', cursor:'pointer', fontSize:'13px', fontWeight:'600', minHeight:'32px' }\n        }, 'OK');",
+      "note": "askText OK -> primary accent fill with on-accent-dark text (WCAG 1.4.3: black-on-amber 9.86). #4A9EFF/#fff retired; 6px radius, 32px min target, 600 weight."
+    },
+    {
+      "oldString": "          style: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.65)', zIndex: 10000000, display: 'flex', alignItems: 'center', justifyContent: 'center' }",
+      "newString": "          style: 'position:fixed;top:0;left:0;right:0;bottom:0;background:'+GAM_TOK.scrim+';z-index:var(--z-modal,9999995);display:flex;align-items:center;justify-content:center;'",
+      "note": "Park overlay -> shared scrim (drops bespoke 0.65) + z drops from rogue 10000000 to the --z-modal tier (WP-04.4/.5). Switched to a cssText string so var(--z-modal) resolves — the z-ladder prop is defined in GAM_CSS:root and var() is valid for z-index in a cssText string set via el()'s style:'...' path (no color var() involved)."
+    },
+    {
+      "oldString": "          style: { background: '#1a202c', color: '#e2e8f0', padding: '18px 20px', borderRadius: '6px', minWidth: '380px', maxWidth: '520px', border: '1px solid #4a5568' },",
+      "newString": "          style: { background: GAM_TOK.surfaceRaised, color: GAM_TOK.ink, padding: '18px 20px', borderRadius: '8px', minWidth: '380px', maxWidth: '520px', border: '1px solid '+GAM_TOK.borderStrong, boxShadow: '0 8px 24px '+GAM_TOK.scrim },",
+      "note": "Park modal shell -> surface-raised + border-strong + 8px radius + scrim shadow (floating-card elevation, WP-04.1). #1a202c->surfaceRaised, #e2e8f0->ink, #4a5568->borderStrong."
+    },
+    {
+      "oldString": "        const parkNoteLbl = el('label', { style: { display: 'block', fontSize: '11px', color: '#a0aec0', marginBottom: '4px' } });",
+      "newString": "        const parkNoteLbl = el('label', { style: { display: 'block', fontSize: '11px', fontWeight: '600', letterSpacing: '.04em', textTransform: 'uppercase', color: GAM_TOK.inkMuted, marginBottom: '4px' } });",
+      "note": "Park note label -> 11px caps ink-muted (shared field-label rhythm). #a0aec0->inkMuted."
+    },
+    {
+      "oldString": "          style: { width: '100%', padding: '6px 8px', background: '#0f1419', color: '#e2e8f0', border: '1px solid #4a5568', borderRadius: '4px', fontFamily: 'inherit', fontSize: '12px' }",
+      "newString": "          style: { width: '100%', padding: '6px 8px', background: GAM_TOK.surfaceSunken, color: GAM_TOK.ink, border: '1px solid '+GAM_TOK.border, borderRadius: '6px', fontFamily: 'inherit', fontSize: '12px' }",
+      "note": "Park textarea -> surface-sunken field well + 1px border + 6px radius. #0f1419->surfaceSunken, #e2e8f0->ink, #4a5568->border."
+    },
+    {
+      "oldString": "          style: { background: '#2d3748', color: '#e2e8f0', border: '1px solid #4a5568', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }",
+      "newString": "          style: { background: 'transparent', color: GAM_TOK.inkMuted, border: '1px solid '+GAM_TOK.border, padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', minHeight: '32px' }",
+      "note": "Park Cancel -> ghost button (transparent + ink-muted + 1px border), 6px radius, 32px min target. #2d3748/#e2e8f0/#4a5568 retired."
+    },
+    {
+      "oldString": "          style: { background: '#4a9eff', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }",
+      "newString": "          style: { background: GAM_TOK.accent, color: GAM_TOK.onAccentDark, border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', minHeight: '32px' }",
+      "note": "Park submit -> primary accent fill + on-accent-dark text (WCAG black-on-amber). #4a9eff/#fff retired; 6px radius, 32px target."
+    },
+    {
+      "oldString": "        const status = el('div', { style: { fontSize: '11px', color: '#a0aec0', marginTop: '6px' }, ...__axStatus });",
+      "newString": "        const status = el('div', { style: { fontSize: '11px', color: GAM_TOK.inkMuted, marginTop: '6px' }, ...__axStatus });",
+      "note": "Park status line -> ink-muted (instruction/secondary text routes to ink-muted, never ink-faint). #a0aec0->inkMuted."
+    },
+    {
+      "oldString": "      const titleInput = el('input', {type: 'text', placeholder: 'Title (required)', style: 'width:100%;padding:6px;background:#0f1114;color:#e2e8f0;border:1px solid #2d3748;border-radius:4px;margin-bottom:6px;'});",
+      "newString": "      const titleInput = el('input', {type: 'text', placeholder: 'Title (required)', style: 'width:100%;padding:6px;background:'+GAM_TOK.surfaceSunken+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.border+';border-radius:6px;margin-bottom:6px;'});",
+      "note": "Precedent title input -> surface-sunken well + border + 6px radius. #0f1114->surfaceSunken, #e2e8f0->ink, #2d3748->border."
+    },
+    {
+      "oldString": "      const ruleInput  = el('input', {type: 'text', placeholder: 'Rule reference (optional)', style: 'width:100%;padding:6px;background:#0f1114;color:#e2e8f0;border:1px solid #2d3748;border-radius:4px;margin-bottom:6px;'});",
+      "newString": "      const ruleInput  = el('input', {type: 'text', placeholder: 'Rule reference (optional)', style: 'width:100%;padding:6px;background:'+GAM_TOK.surfaceSunken+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.border+';border-radius:6px;margin-bottom:6px;'});",
+      "note": "Precedent rule input -> surface-sunken well + border + 6px radius."
+    },
+    {
+      "oldString": "      const reasonInput = el('textarea', {placeholder: 'Reason (optional)', style: 'width:100%;padding:6px;background:#0f1114;color:#e2e8f0;border:1px solid #2d3748;border-radius:4px;margin-bottom:6px;min-height:48px;resize:vertical;font:inherit;'});",
+      "newString": "      const reasonInput = el('textarea', {placeholder: 'Reason (optional)', style: 'width:100%;padding:6px;background:'+GAM_TOK.surfaceSunken+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.border+';border-radius:6px;margin-bottom:6px;min-height:48px;resize:vertical;font:inherit;'});",
+      "note": "Precedent reason textarea -> surface-sunken well + border + 6px radius."
+    },
+    {
+      "oldString": "      const actionSel  = el('select', {style: 'width:100%;padding:6px;background:#0f1114;color:#e2e8f0;border:1px solid #2d3748;border-radius:4px;margin-bottom:8px;'});",
+      "newString": "      const actionSel  = el('select', {style: 'width:100%;padding:6px;background:'+GAM_TOK.surfaceSunken+';color:'+GAM_TOK.ink+';border:1px solid '+GAM_TOK.border+';border-radius:6px;margin-bottom:8px;'});",
+      "note": "Precedent action select -> surface-sunken well + border + 6px radius."
+    },
+    {
+      "oldString": "      const modal = el('div', {id: 'gam-precedent-modal', style: 'position:fixed;inset:0;z-index:2147483650;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;'},",
+      "newString": "      const modal = el('div', {id: 'gam-precedent-modal', style: 'position:fixed;inset:0;z-index:var(--z-modal,9999995);background:'+GAM_TOK.scrim+';display:flex;align-items:center;justify-content:center;'},",
+      "note": "Precedent backdrop -> shared scrim (drops 0.55) + z drops from rogue 2147483650 to the --z-modal tier. #gam-precedent-modal id preserved (locked)."
+    },
+    {
+      "oldString": "        el('div', {style: 'background:#1a202c;color:#e2e8f0;padding:16px;border-radius:6px;width:min(420px,90vw);border:1px solid #2d3748;'},",
+      "newString": "        el('div', {style: 'background:'+GAM_TOK.surfaceRaised+';color:'+GAM_TOK.ink+';padding:16px;border-radius:8px;width:min(420px,90vw);border:1px solid '+GAM_TOK.borderStrong+';box-shadow:0 8px 24px '+GAM_TOK.scrim+';'},",
+      "note": "Precedent modal shell -> surface-raised + border-strong + 8px radius + scrim shadow (floating-card elevation). #1a202c->surfaceRaised, #e2e8f0->ink, #2d3748->borderStrong."
+    },
+    {
+      "oldString": "          el('label', {style: 'font-size:11px;color:#a0aec0;'}, 'Action taken'),",
+      "newString": "          el('label', {style: 'font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:'+GAM_TOK.inkMuted+';'}, 'Action taken'),",
+      "note": "Precedent 'Action taken' label -> 11px caps ink-muted (shared field-label rhythm). #a0aec0->inkMuted. textContent 'Action taken' unchanged (no accessible-name change)."
+    },
+    {
+      "oldString": ".gam-textarea{resize:vertical;min-height:72px;font-family:inherit}",
+      "newString": ".gam-textarea{resize:vertical;min-height:72px;font-family:inherit}\n/* WP-04: shared modal form-field rhythm. label = 11px caps ink-muted; field on\n   surface-sunken well + 1px border, focus -> accent ring. Apply via class so the\n   ~40 inline-styled modal fields converge on one look without per-element JS. */\n.gam-input-group{margin-bottom:10px}\n.gam-input-group>label{display:block;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--gam-tok-ink-muted,${C.TEXT2});margin-bottom:4px}\n.gam-input-group>input,.gam-input-group>textarea,.gam-input-group>select{width:100%;background:var(--gam-tok-surface-sunken,${C.BG});border:1px solid var(--gam-tok-border,${C.BORDER});border-radius:6px;color:var(--gam-tok-ink,${C.TEXT});font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:8px 10px;outline:none;box-sizing:border-box;transition:border-color .15s}\n.gam-input-group>input:focus,.gam-input-group>textarea:focus,.gam-input-group>select:focus{border-color:var(--gam-tok-accent,${C.ACCENT})}",
+      "note": "New .gam-input-group rule appended after .gam-textarea (WP-04.2): one form-field rhythm for modals. Lives inside GAM_CSS where var(--gam-tok-*) is safe. Additive — does not alter the existing .gam-field/.gam-input rules WP-01/02 already migrated. Anchored on the unique .gam-textarea line so it applies cleanly in order."
+    }
+  ],
+  "lockedSelectors": [
+    "#gam-bug-desc",
+    "#gam-bug-counter",
+    "#gam-bug-snap",
+    ".gam-bug-report-body",
+    ".gam-bug-report-intro",
+    ".gam-bug-report-lbl",
+    ".gam-bug-report-textarea",
+    ".gam-bug-report-counter",
+    ".gam-bug-report-snaprow",
+    ".gam-bug-report-actions",
+    ".gam-btn",
+    ".gam-btn-cancel",
+    ".gam-btn-accent",
+    ".gam-v72-asktext",
+    ".gam-v72-asktext-backdrop",
+    ".gam-modal",
+    ".gam-modal-backdrop",
+    ".gam-v80-park-overlay",
+    ".gam-v80-park-modal",
+    ".gam-input",
+    ".gam-textarea",
+    ".gam-select",
+    ".gam-field",
+    "#gam-precedent-modal",
+    ".gam-nba-action-primary",
+    ".gam-nba-action-alt",
+    "[data-gam-action='park']",
+    "[data-gam-park-kind]",
+    "[data-gam-park-subject]",
+    "role='dialog'",
+    "aria-modal='true'",
+    "aria-labelledby",
+    "aria-label='Park for senior review'",
+    "aria-label='Bug report form'",
+    "role='alert'",
+    "role='status'",
+    "aria-live"
+  ],
+  "summary": "WP-04 migrates the inline-styled DOM of the askText, Park, and Precedent modals (the Bug modal is already class-driven via WP-01/02-migrated .gam-bug-report-*/.gam-modal*/.gam-btn* rules, so it needs no edits). 23 edits: 22 inline-hex migrations to GAM_TOK string-concatenation (surface-raised bodies + border-strong + scrim shadows + surface-sunken field wells + accent primary buttons with on-accent-dark text + ghost cancel buttons + ink/ink-muted/danger text), plus 1 new .gam-input-group <style> rule (var(--gam-tok-*)) giving modals one shared form-field rhythm. Park z (rogue 10000000) and Precedent z (rogue 2147483650) both collapse onto the --z-modal ladder tier; all three backdrops adopt the single scrim 0.60 token. No locked selector renamed; no accessible-name textContent changed. Component literal hex -> zero in all four modal functions' inline styles."
+}

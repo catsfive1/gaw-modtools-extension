@@ -1,0 +1,185 @@
+{
+  "wp": "WP-08",
+  "summary": "Badges component (shadow / repeat / senior / park). Migrates every hardcoded hex in the Park modal/popover/button, the shadow-badge verdict fills, the shadow-armed outline, the shadow-why tooltip, and the repeat-halo/badge/label onto GAM_TOK (inline cssText) and var(--gam-tok-*) (<style> rules). Shadow-badge greens/reds re-mapped to full-saturation success/danger text on *-soft fills + 1px border (dim 276749/9b2c2c and c6f6d5/feb2b2 pairs dropped). Repeat-halo becomes a persistent accent-line ring + danger box-shadow that already survives PRM (pulse stays PRM-gated via the existing @media block). Park modal/overlay backdrop collapses onto scrim. The shadow-why tooltip switches display:none -> visibility:hidden+opacity+aria-hidden so it stays in the a11y tree. The status-bar chip (#gam-v80-park-chip) already inherits .gam-bar-icon's 44px hit area and carries no hex, so it needs no edit. New-account badge + cadence chip are explicitly WP-10 scope (not touched here). No locked selector is renamed/removed; no accessible-name textContent changed.",
+  "lockedSelectors": [
+    "[data-gam-shadow-action]",
+    "[data-gam-shadow-confidence]",
+    "[data-gam-shadow-model]",
+    "[data-gam-shadow-provider]",
+    "[data-gam-shadow-prompt-version]",
+    "[data-gam-shadow-rules-version]",
+    "[data-gam-shadow-generated-at]",
+    "[data-gam-shadow-subject]",
+    "[data-action]",
+    "[data-gam-action='park']",
+    "[data-gam-park-kind]",
+    "[data-gam-park-subject]",
+    ".gam-shadow-badge",
+    ".gam-shadow-why",
+    ".gam-shadow-armed",
+    ".gam-repeat-badge",
+    ".gam-repeat-halo",
+    ".gam-repeat-halo--pulse",
+    ".gam-repeat-label",
+    ".gam-repeat-history",
+    ".gam-parked",
+    ".gam-park-btn",
+    ".gam-bar-icon",
+    "#gam-v80-park-chip",
+    "#gam-v80-park-popover",
+    "#gam-v80-park-overlay",
+    "#gam-status-bar",
+    ".gam-input",
+    ".gam-btn",
+    ".gam-btn-accent",
+    ".gam-v80-park-overlay",
+    ".gam-v80-park-modal",
+    "[role='dialog']",
+    "[aria-modal]",
+    "[aria-live]",
+    "[role='status']",
+    "[data-user]"
+  ],
+  "edits": [
+    {
+      "oldString": "          style: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.65)', zIndex: 10000000, display: 'flex', alignItems: 'center', justifyContent: 'center' }",
+      "newString": "          style: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: GAM_TOK.scrim, zIndex: 10000000, display: 'flex', alignItems: 'center', justifyContent: 'center' }",
+      "note": "Park modal backdrop -> shared scrim 0.60 (brief item 7). rgba(0,0,0,0.65) collapses onto GAM_TOK.scrim."
+    },
+    {
+      "oldString": "          style: { background: '#1a202c', color: '#e2e8f0', padding: '18px 20px', borderRadius: '6px', minWidth: '380px', maxWidth: '520px', border: '1px solid #4a5568' },",
+      "newString": "          style: { background: GAM_TOK.surfacePanel, color: GAM_TOK.ink, padding: '18px 20px', borderRadius: '6px', minWidth: '380px', maxWidth: '520px', border: '1px solid '+GAM_TOK.borderStrong },",
+      "note": "Park modal shell -> surface-panel + ink + border-strong (floating layer per elevation contract). Dim 1a202c/e2e8f0/4a5568 gone."
+    },
+    {
+      "oldString": "        const parkNoteLbl = el('label', { style: { display: 'block', fontSize: '11px', color: '#a0aec0', marginBottom: '4px' } });",
+      "newString": "        const parkNoteLbl = el('label', { style: { display: 'block', fontSize: '11px', color: GAM_TOK.inkMuted, marginBottom: '4px' } });",
+      "note": "Park-note label -> ink-muted (secondary text). a0aec0 gone."
+    },
+    {
+      "oldString": "          style: { width: '100%', padding: '6px 8px', background: '#0f1419', color: '#e2e8f0', border: '1px solid #4a5568', borderRadius: '4px', fontFamily: 'inherit', fontSize: '12px' }",
+      "newString": "          style: { width: '100%', padding: '6px 8px', background: GAM_TOK.surfaceSunken, color: GAM_TOK.ink, border: '1px solid '+GAM_TOK.border, borderRadius: '4px', fontFamily: 'inherit', fontSize: '12px' }",
+      "note": "Park-note textarea (.gam-input) -> surface-sunken field well + ink + border. 0f1419/e2e8f0/4a5568 gone."
+    },
+    {
+      "oldString": "          style: { background: '#2d3748', color: '#e2e8f0', border: '1px solid #4a5568', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }\n        });\n        cancel.textContent = 'Cancel';",
+      "newString": "          style: { background: GAM_TOK.surfaceOverlay, color: GAM_TOK.ink, border: '1px solid '+GAM_TOK.border, padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }\n        });\n        cancel.textContent = 'Cancel';",
+      "note": "Park Cancel button (secondary) -> surface-overlay + ink + border. 2d3748/e2e8f0/4a5568 gone."
+    },
+    {
+      "oldString": "          style: { background: '#4a9eff', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }\n        });\n        submit.textContent = '\\u23F8 Park';",
+      "newString": "          style: { background: GAM_TOK.info, color: GAM_TOK.onAccentLight, border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }\n        });\n        submit.textContent = '\\u23F8 Park';",
+      "note": "Park submit (.gam-btn-accent) -> info fill + on-accent-light (white clears 4.5:1 on info per 1.7 split). 4a9eff/#fff gone."
+    },
+    {
+      "oldString": "        const status = el('div', { style: { fontSize: '11px', color: '#a0aec0', marginTop: '6px' }, ...__axStatus });",
+      "newString": "        const status = el('div', { style: { fontSize: '11px', color: GAM_TOK.inkMuted, marginTop: '6px' }, ...__axStatus });",
+      "note": "Park status aria-live region -> ink-muted. a0aec0 gone."
+    },
+    {
+      "oldString": "          style: { background: 'transparent', border: '1px solid #4a5568', color: '#a0aec0', padding: '2px 6px', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', marginLeft: '4px' }\n        });\n        b.textContent = '\\u23F8';",
+      "newString": "          style: { background: 'transparent', border: '1px solid '+GAM_TOK.border, color: GAM_TOK.inkMuted, padding: '2px 6px', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', marginLeft: '4px' }\n        });\n        b.textContent = '\\u23F8';",
+      "note": "parkBtn inline (.gam-park-btn) -> border + ink-muted. 4a5568/a0aec0 gone (matches the .gam-park-btn <style> rule below)."
+    },
+    {
+      "oldString": "          const empty = el('div', { style: { color: '#a0aec0', fontStyle: 'italic' } });\n          empty.textContent = 'Nothing parked for senior review.';",
+      "newString": "          const empty = el('div', { style: { color: GAM_TOK.inkMuted, fontStyle: 'italic' } });\n          empty.textContent = 'Nothing parked for senior review.';",
+      "note": "Parked-popover empty text -> ink-muted (tertiary/instruction routes to ink-muted, not ink-faint). a0aec0 gone."
+    },
+    {
+      "oldString": "            const row = el('div', { style: { borderTop: '1px solid #2d3748', padding: '6px 0' } });",
+      "newString": "            const row = el('div', { style: { borderTop: '1px solid '+GAM_TOK.border, padding: '6px 0' } });",
+      "note": "Parked-popover row divider -> border. 2d3748 gone."
+    },
+    {
+      "oldString": "            const meta = el('div', { style: { color: '#a0aec0', fontSize: '11px', marginTop: '2px' } });",
+      "newString": "            const meta = el('div', { style: { color: GAM_TOK.inkMuted, fontSize: '11px', marginTop: '2px' } });",
+      "note": "Parked-popover row meta -> ink-muted. a0aec0 gone."
+    },
+    {
+      "oldString": "            const note = el('div', { style: { color: '#cbd5e0', marginTop: '4px', whiteSpace: 'pre-wrap' } });",
+      "newString": "            const note = el('div', { style: { color: GAM_TOK.ink, marginTop: '4px', whiteSpace: 'pre-wrap' } });",
+      "note": "Parked-popover note body -> ink (primary body text). cbd5e0 gone."
+    },
+    {
+      "oldString": "            const sel = el('select', { style: { background: '#0f1419', color: '#e2e8f0', border: '1px solid #4a5568', borderRadius: '4px', padding: '2px 6px', fontSize: '11px' } });",
+      "newString": "            const sel = el('select', { style: { background: GAM_TOK.surfaceSunken, color: GAM_TOK.ink, border: '1px solid '+GAM_TOK.border, borderRadius: '4px', padding: '2px 6px', fontSize: '11px' } });",
+      "note": "Parked-popover resolve <select> -> surface-sunken field + ink + border. 0f1419/e2e8f0/4a5568 gone."
+    },
+    {
+      "oldString": "              style: { flex: '1 1 160px', background: '#0f1419', color: '#e2e8f0', border: '1px solid #4a5568', borderRadius: '4px', padding: '2px 6px', fontSize: '11px' }",
+      "newString": "              style: { flex: '1 1 160px', background: GAM_TOK.surfaceSunken, color: GAM_TOK.ink, border: '1px solid '+GAM_TOK.border, borderRadius: '4px', padding: '2px 6px', fontSize: '11px' }",
+      "note": "Parked-popover resolve reason <input> -> surface-sunken field + ink + border. 0f1419/e2e8f0/4a5568 gone."
+    },
+    {
+      "oldString": "              style: { background: '#4a9eff', color: '#fff', border: 'none', borderRadius: '4px', padding: '2px 10px', cursor: 'pointer', fontSize: '11px' }\n            });\n            go.textContent = 'Resolve';",
+      "newString": "              style: { background: GAM_TOK.info, color: GAM_TOK.onAccentLight, border: 'none', borderRadius: '4px', padding: '2px 10px', cursor: 'pointer', fontSize: '11px' }\n            });\n            go.textContent = 'Resolve';",
+      "note": "Parked-popover Resolve button -> info fill + on-accent-light. 4a9eff/#fff gone."
+    },
+    {
+      "oldString": "              const tooltip = el('span', {\n                cls: 'gam-shadow-why',\n                style: { display: 'none', marginLeft: '6px', fontSize: '10px', color: '#a0aec0' }\n              });",
+      "newString": "              const tooltip = el('span', {\n                cls: 'gam-shadow-why',\n                'aria-hidden': 'true',\n                style: { visibility: 'hidden', opacity: '0', transition: 'opacity .15s', marginLeft: '6px', fontSize: '10px', color: GAM_TOK.inkMuted }\n              });",
+      "note": "Brief item 5: shadow-why tooltip stays in a11y tree. display:none -> visibility:hidden+opacity:0 (+aria-hidden toggled by handler below). color a0aec0 -> ink-muted."
+    },
+    {
+      "oldString": "              badge.addEventListener('click', function(ev){\n                ev.stopPropagation();\n                tooltip.style.display = (tooltip.style.display === 'none') ? '' : 'none';\n              });",
+      "newString": "              badge.addEventListener('click', function(ev){\n                ev.stopPropagation();\n                var __shown = tooltip.style.visibility !== 'hidden';\n                tooltip.style.visibility = __shown ? 'hidden' : 'visible';\n                tooltip.style.opacity = __shown ? '0' : '1';\n                tooltip.setAttribute('aria-hidden', __shown ? 'true' : 'false');\n              });",
+      "note": "Brief item 5: toggle visibility+opacity+aria-hidden instead of display so the tooltip transitions safely and stays in the a11y tree. Paired with the visibility init above."
+    },
+    {
+      "oldString": "        '.gam-park-btn{background:transparent;border:1px solid #4a5568;color:#a0aec0;padding:2px 6px;border-radius:4px;cursor:pointer;font-size:14px;margin-left:4px}',",
+      "newString": "        '.gam-park-btn{background:transparent;border:1px solid var(--gam-tok-border,#2a2f38);color:var(--gam-tok-ink-muted,#b0b5bc);padding:2px 6px;border-radius:4px;cursor:pointer;font-size:14px;margin-left:4px}',",
+      "note": "park-btn <style> rule -> border + ink-muted tokens. 4a5568/a0aec0 gone."
+    },
+    {
+      "oldString": "        '.gam-park-btn:hover{background:#2d3748;color:#e2e8f0}',",
+      "newString": "        '.gam-park-btn:hover{background:var(--gam-tok-surface-overlay,#252a31);color:var(--gam-tok-ink,#e8e6e1)}',",
+      "note": "park-btn hover -> surface-overlay well + ink. 2d3748/e2e8f0 gone."
+    },
+    {
+      "oldString": "        '.gam-parked::before{content:\"\\u23F8 \";color:#f6ad55;margin-right:4px}',",
+      "newString": "        '.gam-parked::before{content:\"\\u23F8 \";color:var(--gam-tok-warn,#f0a040);margin-right:4px}',",
+      "note": "Parked ⏸ marker -> warn token (caution/parked state, severity-ladder color). f6ad55 gone. (16px leading gutter alignment is already handled by ::before content + margin.)"
+    },
+    {
+      "oldString": "        '.gam-shadow-badge[data-action=\"APPROVE\"]{background:#276749;color:#c6f6d5}',",
+      "newString": "        '.gam-shadow-badge[data-action=\"APPROVE\"]{background:var(--gam-tok-success-soft,rgba(61,214,140,0.12));color:var(--gam-tok-success,#3dd68c);border:1px solid var(--gam-tok-success,#3dd68c)}',",
+      "note": "Brief item 1: green = success text on success-soft + 1px border. Dim 276749/c6f6d5 pair dropped, AA on dark."
+    },
+    {
+      "oldString": "        '.gam-shadow-badge[data-action=\"REMOVE\"]{background:#9b2c2c;color:#feb2b2}',",
+      "newString": "        '.gam-shadow-badge[data-action=\"REMOVE\"]{background:var(--gam-tok-danger-soft,rgba(240,64,64,0.12));color:var(--gam-tok-danger,#f04040);border:1px solid var(--gam-tok-danger,#f04040)}',",
+      "note": "Brief item 1: red = danger text on danger-soft + 1px border. Dim 9b2c2c/feb2b2 pair dropped, AA on dark."
+    },
+    {
+      "oldString": "        '.gam-shadow-badge[data-action=\"WATCH\"]{background:#744210;color:#faf089}',",
+      "newString": "        '.gam-shadow-badge[data-action=\"WATCH\"]{background:var(--gam-tok-warn-soft,rgba(240,160,64,0.12));color:var(--gam-tok-warn,#f0a040);border:1px solid var(--gam-tok-warn,#f0a040)}',",
+      "note": "WATCH verdict -> warn text on warn-soft + 1px border (severity-ladder watch tier). Dim 744210/faf089 pair dropped."
+    },
+    {
+      "oldString": "        '.gam-shadow-armed{outline:2px dashed #4a9eff;outline-offset:1px}'",
+      "newString": "        '.gam-shadow-armed{outline:2px dashed var(--gam-tok-info,#7cb8ff);outline-offset:1px}'",
+      "note": "shadow-armed two-key-commit outline -> info token. 4a9eff gone."
+    },
+    {
+      "oldString": ".gam-repeat-halo{display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 4px;border:2px solid #f5a623;border-radius:4px;box-shadow:0 0 0 3px rgba(245,166,35,.18);cursor:pointer;}",
+      "newString": ".gam-repeat-halo{display:inline-flex;align-items:center;gap:6px;padding:2px 6px 2px 4px;border:2px solid var(--gam-tok-accent,#ff9933);border-radius:4px;box-shadow:0 0 0 3px var(--gam-tok-accent-line,rgba(255,153,51,0.28));cursor:pointer;}",
+      "note": "Brief item 2: persistent ring -> 2px accent border + accent-line box-shadow that survives re-render and PRM (this is the static ring; the pulse @media stays the PRM-gated enhancement). f5a623/rgba(245,166,35) gone."
+    },
+    {
+      "oldString": ".gam-repeat-badge{display:inline-block;font-size:9px;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;background:#f04040;color:#fff;}",
+      "newString": ".gam-repeat-badge{display:inline-block;font-size:9px;font-weight:700;line-height:1;padding:1px 4px;border-radius:8px;background:var(--gam-tok-danger,#f04040);color:var(--gam-tok-on-accent-light,#ffffff);}",
+      "note": "Repeat-offender count badge (xN) -> danger fill + on-accent-light (white on danger per 1.7 split). f04040/#fff gone."
+    },
+    {
+      "oldString": ".gam-repeat-label{font-size:9px;color:#f5a623;text-transform:uppercase;letter-spacing:1px;border-left:2px solid #f5a623;padding-left:6px;margin:8px 0 4px;}",
+      "newString": ".gam-repeat-label{font-size:9px;color:var(--gam-tok-accent,#ff9933);text-transform:uppercase;letter-spacing:1px;border-left:2px solid var(--gam-tok-accent,#ff9933);padding-left:6px;margin:8px 0 4px;}",
+      "note": "REPEAT OFFENDER label + left-rail -> accent token (matches the halo ring). f5a623 gone."
+    },
+    {
+      "oldString": "@keyframes gam-halo-pulse{0%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}50%{box-shadow:0 0 0 6px rgba(245,166,35,.35)}100%{box-shadow:0 0 0 3px rgba(245,166,35,.18)}}",
+      "newString": "@keyframes gam-halo-pulse{0%{box-shadow:0 0 0 3px var(--gam-tok-accent-line,rgba(255,153,51,0.28))}50%{box-shadow:0 0 0 6px var(--gam-tok-accent-line,rgba(255,153,51,0.28))}100%{box-shadow:0 0 0 3px var(--gam-tok-accent-line,rgba(255,153,51,0.28))}}",
+      "note": "PRM-gated pulse keyframes -> accent-line token at all stops (the 0.35 mid-intensity collapses onto accent-line, consistent with the static ring). rgba(245,166,35,*) gone."
+    }
+  ]
+}

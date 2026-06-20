@@ -1,0 +1,16 @@
+[
+  {"component":"Mod Console Shell + Tabs + Backdrop","key":"modconsole-shell"},
+  {"component":"Intel Tab (renderIntelTab)","key":"intel-tab"},
+  {"component":"Ban Tab + Custom History","key":"ban-tab"},
+  {"component":"Note Tab + Mod Note + History (renderNoteTab, mountModNote, renderHistory)","key":"note-tab"},
+  {"component":"Badges: shadow/repeat/senior/new/park","key":"badges"},
+  {"component":"Top Banners: auth-fail, ext-orphaned","key":"banners"},
+  {"component":"Toast / Snack / Undo Notifications","key":"toasts-snacks"},
+  {"component":"Modals: Text/Bug/Park/Precedent","key":"modals"},
+  {"component":"Command Palette (Ctrl+Shift+P)","key":"command-palette"},
+  {"component":"Action-picker HUD overlay (command palette)","key":"action-picker-hud"},
+  {"component":"Skeleton loaders + Empty states","key":"skeleton-empty"},
+  {"component":"User/Post/Thread/QueueItem Content Sections (GAW ModTools Intel Drawer)","key":"sections"},
+  {"component":"Triage Console (alerts/stats/toolbar/batch bar)","key":"triage-console"},
+  {"component":"GAM CSS + Touch-Target Stylesheet (Global Injected)","key":"master-css"}
+]

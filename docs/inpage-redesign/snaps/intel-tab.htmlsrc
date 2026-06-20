@@ -1,0 +1,86 @@
+<![CDATA[
+<div class="gam-mc-intel-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
+  <div class="gam-mc-intel-col gam-mc-intel-col-left" style="display:flex;flex-direction:column;gap:10px;min-width:0">
+    <div class="gam-mc-intel-compact" style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:#181b20;border:1px solid #2a2f38;border-radius:4px;margin-bottom:12px">
+      <div id="gam-mc-intel-summary" style="color:#e8eaed">
+        <div class="gam-mc-chips" style="display:flex;flex-wrap:wrap;gap:4px">
+          <span class="gam-mc-chip" style="display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:#252a31;color:#8b929e;border:1px solid #2a2f38">🕐 3 months</span>
+          <span class="gam-mc-chip" style="display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:#252a31;color:#8b929e;border:1px solid #2a2f38">📝 1,247 posts</span>
+          <span class="gam-mc-chip" style="display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:#252a31;color:#8b929e;border:1px solid #2a2f38">💬 3,891 comments</span>
+          <span class="gam-mc-chip gam-mc-chip-ok" style="display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(61,214,140,.12);color:#3dd68c;border:1px solid rgba(61,214,140,.25)">🔨 0 bans</span>
+          <span class="gam-mc-chip gam-mc-chip-ok" style="display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(61,214,140,.12);color:#3dd68c;border:1px solid rgba(61,214,140,.25)">🗑 0 removes</span>
+          <span class="gam-mc-chip" style="display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:#252a31;color:#8b929e;border:1px solid #2a2f38">📋 2 notes</span>
+          <span class="gam-mc-chip gam-mc-chip-ok" style="display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(61,214,140,.12);color:#3dd68c;border:1px solid rgba(61,214,140,.25)">not banned</span>
+        </div>
+      </div>
+      <div id="gam-mc-intel-score" style="color:#e8eaed">
+        <div class="gam-mc-score-dense" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:#e8eaed">
+          <span class="gam-mc-chip gam-mc-chip-ok" style="display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.3px;text-transform:uppercase;background:rgba(61,214,140,.12);color:#3dd68c;border:1px solid rgba(61,214,140,.25)">CLEAN</span>
+          <span class="gam-mc-score-dim" style="color:#5c6370;font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:10px">score 8 · 15 recent · avg 24w</span>
+        </div>
+      </div>
+      <div id="gam-mc-intel-note" style="color:#e8eaed">
+        <div class="gam-mc-note-inline" style="padding:8px 10px;background:rgba(74,158,255,.08);border:1px solid rgba(74,158,255,.2);border-radius:4px;color:#e8eaed;font-size:12px;line-height:1.45">
+          <b style="color:#4A9EFF;margin-right:4px">📋 Latest note (2 total):</b> User shows consistent high-effort engagement. Flagged as trusted contributor. — PatriotMod · 2 days ago
+        </div>
+      </div>
+    </div>
+    <div class="gam-mc-section" style="margin-bottom:12px">
+      <div class="gam-mc-h" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#8b929e;margin-bottom:6px">📌 Reported comment</div>
+      <div class="gam-mc-evidence-text" style="margin-bottom:4px;color:#e8eaed;font-style:italic;line-height:1.45">"This is a critical piece of information about the latest Q drop that everyone needs to read..."</div>
+      <a class="gam-mc-evidence-link" href="#" target="_blank" style="display:inline-block;margin-top:4px;font-size:10px;color:#4A9EFF;text-decoration:none">🔗 view post</a>
+    </div>
+    <div class="gam-mc-section" style="margin-bottom:12px">
+      <div class="gam-mc-h" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#8b929e;margin-bottom:6px">Local mod history</div>
+      <div id="gam-mc-intel-hist">
+        <div class="gam-mc-hist-row" style="display:grid;grid-template-columns:140px 1fr auto;gap:8px;padding:6px 0;border-bottom:1px solid #2a2f38;font-size:11px;align-items:center">
+          <span class="gam-mc-hist-type" style="font-weight:600;color:#e8eaed">📌 Note</span>
+          <span class="gam-mc-hist-v" style="color:#8b929e">Great contributor</span>
+          <span class="gam-mc-hist-t" style="color:#5c6370;font-size:10px">2d ago</span>
+        </div>
+        <div class="gam-mc-hist-row" style="display:grid;grid-template-columns:140px 1fr auto;gap:8px;padding:6px 0;border-bottom:none;font-size:11px;align-items:center">
+          <span class="gam-mc-hist-type" style="font-weight:600;color:#e8eaed">🔍 Note</span>
+          <span class="gam-mc-hist-v" style="color:#8b929e">High effort posts</span>
+          <span class="gam-mc-hist-t" style="color:#5c6370;font-size:10px">5d ago</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="gam-mc-intel-col gam-mc-intel-col-right" style="display:flex;flex-direction:column;gap:10px;min-width:0">
+    <div class="gam-mc-ai-reply" id="gam-mc-intel-ai-wrap" style="background:#181b20;border:1px solid #2a2f38;border-left:3px solid #a78bfa;border-radius:4px;padding:10px 12px;margin:10px 0">
+      <div class="gam-mc-ai-header" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;font-weight:700;color:#a78bfa">
+        <span>🤖 AI Sidebar Conformity Check</span>
+        <select class="gam-mc-ai-engine" id="gam-intel-ai-engine" style="background:#252a31;border:1px solid #2a2f38;border-radius:4px;color:#8b929e;font-size:11px;padding:3px 6px;margin-left:auto">
+          <option value="llama3" selected>Llama 3 (free, CF Worker)</option>
+          <option value="grok">Grok / xAI</option>
+        </select>
+        <button class="gam-btn gam-mc-ai-btn" id="gam-intel-ai-go" style="font-size:11px;padding:4px 10px;margin-left:4px;background:#4A9EFF;color:#fff;border:none;border-radius:4px;cursor:pointer">🧠 Analyze comments</button>
+      </div>
+      <div id="gam-intel-ai-out" style="display:none;margin-top:8px;display:flex;flex-direction:column;gap:6px">
+        <textarea class="gam-input gam-textarea gam-mc-ai-text" id="gam-intel-ai-text" rows="6" readonly placeholder="AI analysis will appear here..." style="font-size:11px;line-height:1.5;color:#e8eaed;background:#0f1114;resize:vertical;border:1px solid #2a2f38;border-radius:4px;padding:8px;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif">Comment [1]: Excellent breakdown of Q drop #4567...
+Comment [2]: This connects to the earlier research...
+
+ANALYSIS:
+All comments demonstrate high-effort, Q-aligned engagement. No rule violations detected. User maintains civil tone and provides evidence-based reasoning. Overall conformity: COMPLIANT.</textarea>
+        <div style="display:flex;gap:6px;margin-top:4px">
+          <button class="gam-btn gam-mc-ai-use" id="gam-intel-ai-copy" style="font-size:11px;padding:4px 10px;background:#4A9EFF;color:#fff;border:none;border-radius:4px;cursor:pointer">📋 Copy</button>
+        </div>
+      </div>
+      <div id="gam-intel-ai-err" class="gam-mc-banner gam-mc-banner-red" style="display:none;padding:8px 12px;border-radius:4px;font-size:12px;margin-top:10px;line-height:1.4;background:rgba(240,64,64,.1);color:#f04040;border:1px solid rgba(240,64,64,.25)"></div>
+    </div>
+    <div id="gam-mc-modnote-mount">
+      <div class="gam-mc-note" style="margin-top:10px;padding-top:10px;border-top:1px solid #2a2f38">
+        <label class="gam-mc-note-label" style="display:block;font-size:11px;font-weight:600;color:#8b929e;margin-bottom:4px">Mods-only note
+          <span class="gam-mc-note-hint" style="color:#5c6370;font-weight:400">(visible only to mods; auto-saves on blur)</span>
+        </label>
+        <textarea class="gam-mc-note-ta" style="width:100%;min-height:60px;background:#181b20;color:#e8eaed;border:1px solid #2a2f38;border-radius:4px;padding:6px 8px;font:12px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;resize:vertical;box-sizing:border-box;outline:none;transition:border-color .15s" placeholder="Leave a short note for other mods about this user...">Potential watchlist candidate. Consistent high-effort contributions. Check profile activity monthly.</textarea>
+        <div class="gam-mc-note-status" style="font-size:10px;color:#5c6370;margin-top:4px;min-height:14px">saved</div>
+      </div>
+    </div>
+    <div id="gam-mc-ai-explain-wrap" style="margin-top:8px;position:relative">
+      <button id="gam-mc-ai-explain-btn" class="gam-btn" title="Ask AI why this user is suspicious (Llama, 80% cheaper than Grok)" style="background:rgba(255,153,51,0.08);border:1px solid rgba(255,153,51,0.35);color:#ff9933;width:100%;padding:6px 12px;border-radius:4px;font-weight:600;cursor:pointer;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-size:12px">✨ AI Explain</button>
+    </div>
+    <div class="gam-mc-intel-tip" style="font-size:10px;color:#5c6370;margin-top:10px;padding:6px 10px;background:rgba(74,158,255,.05);border-left:2px solid #4A9EFF;border-radius:3px">💡 Hovering any username anywhere on GAW now shows this same intel instantly.</div>
+  </div>
+</div>
+]]>

@@ -1,0 +1,133 @@
+&lt;div class="gam-mc-panel" data-dock="right" style="position:fixed;top:0;bottom:0;max-width:95vw;background:#181b20;z-index:9999988;display:flex;flex-direction:column;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e8eaed;transition:transform .2s ease-out,width .2s ease-out;padding-bottom:56px;box-sizing:border-box"&gt;
+  &lt;div class="gam-mc-head" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #2a2f38;background:#181b20;min-height:44px;box-sizing:border-box"&gt;
+    &lt;span style="font-weight:700;font-size:13px"&gt;🔨 BAN jsmith (Repeat offender)&lt;/span&gt;
+    &lt;button class="gam-mc-close" style="background:none;border:none;color:#5c6370;font-size:20px;cursor:pointer;padding:2px 8px;line-height:1;border-radius:4px;transition:color .1s,background .1s"&gt;✕&lt;/button&gt;
+  &lt;/div&gt;
+
+  &lt;div style="flex:1;overflow-y:auto;padding:14px 12px"&gt;
+    &lt;!-- Evidence Section --&gt;
+    &lt;div class="gam-mc-evidence" style="background:#252a31;border:1px solid #2a2f38;border-left:3px solid #4A9EFF;border-radius:4px;padding:8px 12px;margin-bottom:10px;font-size:12px"&gt;
+      &lt;div class="gam-mc-evidence-label" style="font-size:10px;font-weight:700;color:#5c6370;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px"&gt;📎 Evidence (comment c123abc)&lt;/div&gt;
+      &lt;div class="gam-mc-evidence-text" style="color:#e8eaed;font-style:italic;line-height:1.45"&gt;"This is a sample comment that violates rule policy and should be moderated immediately..."&lt;/div&gt;
+      &lt;a class="gam-mc-evidence-link" href="#" target="_blank" style="display:inline-block;margin-top:4px;font-size:10px;color:#4A9EFF;text-decoration:none"&gt;🔗 open in new tab&lt;/a&gt;
+    &lt;/div&gt;
+
+    &lt;!-- Repeat Offender Banner --&gt;
+    &lt;div class="gam-mc-banner gam-mc-banner-red" style="padding:8px 12px;border-radius:4px;font-size:12px;margin-top:10px;line-height:1.4;background:rgba(240,64,64,.1);color:#f04040;border:1px solid rgba(240,64,64,.25)"&gt;
+      ⚠️ Repeat offender: 2 prior bans on file. Durations auto-escalate.
+    &lt;/div&gt;
+
+    &lt;!-- Violation Type Field --&gt;
+    &lt;div class="gam-mc-field" style="margin-bottom:12px;margin-top:12px"&gt;
+      &lt;label style="display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px"&gt;Violation type&lt;/label&gt;
+      &lt;select class="gam-input" id="mc-ban-viol" style="width:100%;background:#252a31;border:1px solid #2a2f38;border-radius:4px;color:#e8eaed;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 10px;outline:none;box-sizing:border-box;transition:border-color .15s"&gt;
+        &lt;option value=""&gt;-- Select violation --&lt;/option&gt;
+        &lt;option value="doxxing"&gt;🚨 Doxing / Personal Info&lt;/option&gt;
+        &lt;option value="incivility"&gt;🚫 Incivility / Divisive Language&lt;/option&gt;
+        &lt;option value="self_promo"&gt;💰 Self-Promotion / PAYtriot&lt;/option&gt;
+        &lt;option value="doomer_shill"&gt;🤡 Doomer / Shill / Low-Effort&lt;/option&gt;
+        &lt;option value="fringe"&gt;🔭 Off-Topic / Fringe Conspiracy&lt;/option&gt;
+        &lt;option value="grief_mods"&gt;📢 Griefing Mods / Modmail Bypass&lt;/option&gt;
+        &lt;option value="duplicate"&gt;♻️ Duplicate / Low-Quality Post&lt;/option&gt;
+        &lt;option value="clickbait"&gt;🎬 Clickbait / Fame-Fagging&lt;/option&gt;
+        &lt;option value="cross_win"&gt;🌐 Bad Conduct on Other .WINs&lt;/option&gt;
+        &lt;option value="other"&gt;✏️ Other (Custom)&lt;/option&gt;
+      &lt;/select&gt;
+    &lt;/div&gt;
+
+    &lt;!-- Custom History (hidden by default) --&gt;
+    &lt;div class="gam-mc-field" id="mc-ban-custom-hist-wrap" style="display:none;margin-bottom:12px"&gt;
+      &lt;label style="display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px"&gt;📋 Previous custom messages (click to use)&lt;/label&gt;
+      &lt;div id="mc-ban-custom-hist" class="gam-mc-custom-hist" style="display:flex;flex-direction:column;gap:4px;max-height:130px;overflow-y:auto;margin-top:6px"&gt;
+        &lt;div class="gam-mc-custom-hist-item" data-idx="0" title="Previous custom ban reason from 2 weeks ago about rule violations" style="background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:5px 8px;font-size:11px;color:#8b929e;cursor:pointer;line-height:1.4;transition:border-color .1s,color .1s"&gt;
+          Previous custom ban reason from 2 weeks ago about…
+        &lt;/div&gt;
+        &lt;div class="gam-mc-custom-hist-item" data-idx="1" title="Another previous message discussing inappropriate content patterns" style="background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:5px 8px;font-size:11px;color:#8b929e;cursor:pointer;line-height:1.4;transition:border-color .1s,color .1s"&gt;
+          Another previous message discussing inappropriate content…
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+
+    &lt;!-- Subject Field --&gt;
+    &lt;div class="gam-mc-field" style="margin-bottom:12px"&gt;
+      &lt;label style="display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px"&gt;Subject (sent to user)&lt;/label&gt;
+      &lt;input type="text" class="gam-input" id="mc-ban-subj" placeholder="Subject line..." style="width:100%;background:#252a31;border:1px solid #2a2f38;border-radius:4px;color:#e8eaed;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 10px;outline:none;box-sizing:border-box;transition:border-color .15s" value="Rule Violation: Incivility / Divisive Language"&gt;
+    &lt;/div&gt;
+
+    &lt;!-- Team Macros Field --&gt;
+    &lt;div class="gam-mc-field" style="margin-bottom:12px"&gt;
+      &lt;label style="display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px"&gt;📝 Team macros (shared) &lt;span style="color:#666;font-weight:400;font-size:10px"&gt;— manage in popup&lt;/span&gt;&lt;/label&gt;
+      &lt;select class="gam-input" id="mc-ban-macro-pick" style="width:100%;background:#252a31;border:1px solid #2a2f38;border-radius:4px;color:#e8eaed;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 10px;outline:none;box-sizing:border-box;transition:border-color .15s"&gt;
+        &lt;option value=""&gt;-- Pick a team macro --&lt;/option&gt;
+      &lt;/select&gt;
+    &lt;/div&gt;
+
+    &lt;!-- Message Textarea --&gt;
+    &lt;div class="gam-mc-field" style="margin-bottom:12px"&gt;
+      &lt;label style="display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px"&gt;📝 Message — post URL auto-prepended ✓&lt;/label&gt;
+      &lt;textarea class="gam-input gam-textarea" id="mc-ban-msg" rows="7" placeholder="Ban reason / message to user..." style="width:100%;background:#252a31;border:1px solid #2a2f38;border-radius:4px;color:#e8eaed;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 8px;outline:none;box-sizing:border-box;transition:border-color .15s;resize:vertical;min-height:52px;max-height:140px;font:inherit;font-size:13px"&gt;https://greatawakening.win/c/GreatAwakening/12345/comment/c123abc
+
+Your post/comment was removed for divisive or uncivil language. Remember: "They want you divided..."&lt;/textarea&gt;
+    &lt;/div&gt;
+
+    &lt;!-- Duration Selection --&gt;
+    &lt;div class="gam-mc-field" style="margin-bottom:12px"&gt;
+      &lt;label style="display:block;font-size:11px;font-weight:600;color:#8b929e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px"&gt;Duration&lt;/label&gt;
+      &lt;div class="gam-mc-durs" id="mc-ban-durs" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px"&gt;
+        &lt;button class="gam-mc-dur" data-v="0" style="background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s"&gt;Warning Only&lt;/button&gt;
+        &lt;button class="gam-mc-dur gam-mc-dur-active" data-v="1" style="background:#f04040;border:1px solid #f04040;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#fff;cursor:pointer;transition:all .15s"&gt;1 Day&lt;/button&gt;
+        &lt;button class="gam-mc-dur" data-v="3" style="background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s"&gt;3 Days&lt;/button&gt;
+        &lt;button class="gam-mc-dur" data-v="7" style="background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s"&gt;7 Days&lt;/button&gt;
+        &lt;button class="gam-mc-dur" data-v="14" style="background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s"&gt;14 Days&lt;/button&gt;
+        &lt;button class="gam-mc-dur" data-v="30" style="background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s"&gt;30 Days&lt;/button&gt;
+        &lt;button class="gam-mc-dur" data-v="90" style="background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s"&gt;90 Days&lt;/button&gt;
+        &lt;button class="gam-mc-dur" data-v="-1" style="background:#252a31;border:1px solid #2a2f38;border-radius:4px;padding:8px 10px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;color:#8b929e;cursor:pointer;transition:all .15s"&gt;Permanent&lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+
+    &lt;!-- Modmail Checkbox --&gt;
+    &lt;div class="gam-mc-field" style="margin-bottom:12px"&gt;
+      &lt;label class="gam-mc-checkbox" style="display:flex;align-items:center;gap:8px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e8eaed;cursor:pointer"&gt;
+        &lt;input type="checkbox" id="mc-ban-modmail" style="cursor:pointer"&gt;
+        Also send a separate modmail message (in addition to ban-delivered reason)
+      &lt;/label&gt;
+    &lt;/div&gt;
+
+    &lt;!-- AI Reply Section --&gt;
+    &lt;div class="gam-mc-ai-reply" id="mc-ban-ai-wrap" style="margin-top:10px"&gt;
+      &lt;div class="gam-mc-ai-header" style="display:flex;align-items:center;gap:8px;margin-bottom:8px"&gt;
+        &lt;span style="color:#a78bfa;font-weight:600"&gt;🤖 Custom AI Reply&lt;/span&gt;
+        &lt;select class="gam-mc-ai-engine" id="mc-ban-ai-engine" style="font:10px -apple-system,system-ui,sans-serif;padding:3px 6px;background:#252a31;border:1px solid #2a2f38;color:#e8eaed;border-radius:3px;cursor:pointer"&gt;
+          &lt;option value="llama3"&gt;Llama 3 (free, via CF Worker)&lt;/option&gt;
+          &lt;option value="grok"&gt;Grok / xAI (API key req.)&lt;/option&gt;
+        &lt;/select&gt;
+        &lt;button class="gam-btn gam-mc-ai-btn" id="mc-ban-ai-go" style="padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font:12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:opacity .15s,transform .1s,background .15s;letter-spacing:.2px;white-space:nowrap;background:#4A9EFF;color:#fff;margin-left:auto"&gt;⚡ Generate&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;div id="mc-ban-ai-out" class="gam-mc-ai-out" style="display:none"&gt;
+        &lt;textarea class="gam-input gam-textarea gam-mc-ai-text" id="mc-ban-ai-text" rows="4" readonly style="width:100%;background:#252a31;border:1px solid #2a2f38;border-radius:4px;color:#e8eaed;font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;padding:6px 8px;outline:none;box-sizing:border-box;transition:border-color .15s;margin-bottom:6px"&gt;&lt;/textarea&gt;
+        &lt;button class="gam-btn gam-btn-accent gam-mc-ai-use" id="mc-ban-ai-use" style="padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font:12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:opacity .15s,transform .1s,background .15s;letter-spacing:.2px;white-space:nowrap;background:#4A9EFF;color:#fff;width:100%"&gt;⬇️ Use this reply&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;div id="mc-ban-ai-err" class="gam-mc-banner gam-mc-banner-red" style="display:none;padding:8px 12px;border-radius:4px;font-size:12px;margin-top:10px;line-height:1.4;background:rgba(240,64,64,.1);color:#f04040;border:1px solid rgba(240,64,64,.25)"&gt;&lt;/div&gt;
+    &lt;/div&gt;
+
+    &lt;!-- AI Summary Preview (hidden by default) --&gt;
+    &lt;div class="gam-mc-field" id="mc-ban-summary-wrap" style="margin-top:8px;display:none"&gt;
+      &lt;label style="font-size:10px;color:#9b9892;text-transform:uppercase;letter-spacing:0.08em"&gt;🤖 AI summary (auto-appended to notes after BAN)&lt;/label&gt;
+      &lt;textarea id="mc-ban-summary-edit" rows="3" style="width:100%;box-sizing:border-box;background:#0a0a0b;border:1px solid #2a2825;padding:6px 8px;font-family:ui-monospace,JetBrains Mono,monospace;font-size:11px;color:#e8e6e1;line-height:1.4;resize:vertical"&gt;&lt;/textarea&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;!-- Status Messages --&gt;
+  &lt;div id="mc-ban-status" style="padding:0 12px"&gt;&lt;/div&gt;
+
+  &lt;!-- Unban Link (conditional) --&gt;
+  &lt;div style="margin-top:6px;font-size:10px;text-align:right;letter-spacing:0.04em;padding:0 12px"&gt;
+    &lt;a href="#" id="mc-ban-unban" style="color:#44dd66;text-decoration:underline;cursor:pointer;background:transparent;border:none;padding:0;font:inherit"&gt;already banned — unban instead&lt;/a&gt;
+  &lt;/div&gt;
+
+  &lt;!-- Action Buttons --&gt;
+  &lt;div class="gam-mc-actions" style="display:flex;gap:8px;padding:10px 12px;border-top:1px solid #2a2f38;background:#0f1114"&gt;
+    &lt;button class="gam-btn gam-btn-cancel" id="mc-ban-cancel" style="padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font:12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:opacity .15s,transform .1s,background .15s;letter-spacing:.2px;white-space:nowrap;background:#252a31;color:#8b929e;border:1px solid #2a2f38;min-width:160px;flex:1"&gt;Cancel&lt;/button&gt;
+    &lt;button class="gam-btn gam-btn-danger" id="mc-ban-go" style="padding:6px 14px;border:none;border-radius:4px;cursor:pointer;font:12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:600;transition:opacity .15s,transform .1s,background .15s;letter-spacing:.2px;white-space:nowrap;background:#f04040;color:#fff;min-width:160px;flex:1"&gt;🔨 BAN 1d (reason sent as message)&lt;/button&gt;
+  &lt;/div&gt;
+&lt;/div&gt;

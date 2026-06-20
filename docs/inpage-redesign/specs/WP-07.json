@@ -1,0 +1,105 @@
+{
+  "wp": "WP-07",
+  "summary": "Note Tab + Mods-only Note + History. Migrates all note-tab literal hex/rgba to GAM_TOK (inline cssText / JS-assigned .style.color) and var(--gam-tok-*) (style rules). Adds card-level editing-vs-saved state (warm-accent/amber left-border while dirty, success on save, success-soft flash + persistent saved micro-chip, pencil->check->alert icon swap) by converting mountModNote setStatus(txt,color) into a semantic setStatus(txt,state) helper that toggles .is-dirty/.is-saved on .gam-mc-note. Surfaces the 500-char threshold proactively (a fill track that climbs toward warn + a visible '/500' label). Swaps the clear-all emoji to a consistent trash glyph. Adds min-width:0 clamps on the meta row so long mod-name+timestamp can't break flex alignment. Adds a subtle bottom fade to long history-row bodies beyond the existing ellipsis. Note-history active left-rail and textarea focus retoned from the legacy blue C.ACCENT (#4A9EFF) to the brand amber accent token.",
+  "lockedSelectors": [
+    "#gam-mc-modnote-mount",
+    "#mc-note-count",
+    "#mc-note-clear-all",
+    "#mc-note-history",
+    "#mc-note-tpl",
+    "#mc-note-body",
+    "#mc-note-cancel",
+    "#mc-note-save",
+    "#mc-note-charcount",
+    "#mc-note-status",
+    ".gam-mc-note",
+    ".gam-mc-note-label",
+    ".gam-mc-note-hint",
+    ".gam-mc-note-ta",
+    ".gam-mc-note-status",
+    ".gam-mc-note-history",
+    ".gam-mc-note-row",
+    ".gam-mc-note-meta",
+    ".gam-mc-note-time",
+    ".gam-mc-note-body",
+    ".gam-mc-note-inline",
+    ".gam-mc-note-meta-inline",
+    ".gam-mc-empty-dense",
+    ".gam-mc-banner",
+    ".gam-mc-banner-warn",
+    ".gam-mc-banner-info",
+    ".gam-mc-banner-green",
+    ".gam-mc-banner-red",
+    ".gam-mc-section",
+    ".gam-mc-h",
+    ".gam-mc-field",
+    ".gam-mc-actions",
+    ".gam-mc-hint",
+    ".gam-btn-cancel",
+    ".gam-btn-accent",
+    ".gam-input",
+    ".gam-textarea"
+  ],
+  "edits": [
+    {
+      "oldString": "      const setStatus = (txt, color) => {\n        status.textContent = txt;\n        status.style.color = color || '';\n      };",
+      "newString": "      // WP-07 (in-page redesign): editing-vs-saved is now a CARD-LEVEL state,\n      // not a text-color whisper. setStatus takes a semantic state name; it maps\n      // to a GAM_TOK ink color (no literal hex), toggles .is-dirty / .is-saved on\n      // the .gam-mc-note wrap (warm-accent border while dirty, success on save +\n      // success-soft flash + a persistent saved micro-chip), and swaps the status\n      // glyph pencil -> check -> alert via [data-icon] (CSS ::before).\n      const __NOTE_STATE_INK = { editing: GAM_TOK.warn, saving: GAM_TOK.inkMuted, saved: GAM_TOK.success, error: GAM_TOK.danger };\n      const setStatus = (txt, state) => {\n        status.textContent = txt;\n        status.style.color = (state && __NOTE_STATE_INK[state]) ? __NOTE_STATE_INK[state] : '';\n        if (state === 'saved') {\n          wrap.classList.remove('is-dirty'); wrap.classList.add('is-saved');\n          status.setAttribute('data-icon', 'check');\n        } else if (state === 'editing' || state === 'saving') {\n          wrap.classList.add('is-dirty'); wrap.classList.remove('is-saved');\n          status.setAttribute('data-icon', 'pencil');\n        } else if (state === 'error') {\n          wrap.classList.add('is-dirty'); wrap.classList.remove('is-saved');\n          status.setAttribute('data-icon', 'alert');\n        } else {\n          wrap.classList.remove('is-dirty'); wrap.classList.remove('is-saved');\n          status.removeAttribute('data-icon');\n        }\n      };",
+      "note": "Convert the inline-hex setStatus into a semantic state helper. Removes the raw-color contract (no literal hex passed in) and drives the card-level editing/saved/error state + icon swap (visual transformation #1). All 6 call sites below switch from hex to a state name."
+    },
+    {
+      "oldString": "          ta.disabled = false;\n          setStatus('load failed; you can still type to save', '#a0a8b6');",
+      "newString": "          ta.disabled = false;\n          setStatus('load failed; you can still type to save', 'saving');",
+      "note": "load-failure soft note: keep the muted-ink tone (saving->inkMuted) instead of literal #a0a8b6."
+    },
+    {
+      "oldString": "        inFlight = true;\n        setStatus('saving\\u2026', '#a0a8b6');",
+      "newString": "        inFlight = true;\n        setStatus('saving\\u2026', 'saving');",
+      "note": "saving state -> inkMuted, drops #a0a8b6; keeps the .is-dirty card border while the write is in flight."
+    },
+    {
+      "oldString": "            currentProfile = nextProfile;\n            // Invalidate the cloud profile cache so next read reflects this write\n            try { _cloudProfilesCache = null; _cloudProfilesFetchedAt = 0; } catch(e){}\n            setStatus('saved', '#7fd67f');\n          } else {\n            setStatus('error saving', '#ff6b6b');\n          }",
+      "newString": "            currentProfile = nextProfile;\n            // Invalidate the cloud profile cache so next read reflects this write\n            try { _cloudProfilesCache = null; _cloudProfilesFetchedAt = 0; } catch(e){}\n            setStatus('saved', 'saved');\n          } else {\n            setStatus('error saving', 'error');\n          }",
+      "note": "Success path -> 'saved' (success token + .is-saved flash + check icon, drops #7fd67f); the else branch -> 'error' (danger token, drops #ff6b6b). Anchored with the cache-invalidate block so this #ff6b6b occurrence is unique vs the catch-branch one."
+    },
+    {
+      "oldString": "        } catch(e){\n          setStatus('error saving', '#ff6b6b');\n        } finally {",
+      "newString": "        } catch(e){\n          setStatus('error saving', 'error');\n        } finally {",
+      "note": "catch-branch save error -> 'error' (danger token), drops the second #ff6b6b. Anchored with catch(e){ ... } finally { to disambiguate from the else-branch occurrence above."
+    },
+    {
+      "oldString": "        setStatus('editing\\u2026', '#a0a8b6');\n        saveTimer = setTimeout(()=>{ doSave(); }, 1500);",
+      "newString": "        setStatus('editing\\u2026', 'editing');\n        saveTimer = setTimeout(()=>{ doSave(); }, 1500);",
+      "note": "editing/dirty state -> warn token (amber while dirty, pencil icon), drops the final #a0a8b6."
+    },
+    {
+      "oldString": "          <span>Note history <span class=\"gam-mc-hint\" id=\"mc-note-count\">(loading...)</span> <span class=\"gam-mc-hint\" style=\"color:#9b9892\">· newest first</span></span>",
+      "newString": "          <span>Note history <span class=\"gam-mc-hint\" id=\"mc-note-count\">(loading...)</span> <span class=\"gam-mc-hint\" style=\"color:'+GAM_TOK.inkMuted+'\">· newest first</span></span>",
+      "note": "renderNoteTab is a template literal; the 'newest first' label literal #9b9892 -> GAM_TOK.inkMuted via string concat inside the backtick. Accessible text '\\u00b7 newest first' preserved; id=mc-note-count untouched."
+    },
+    {
+      "oldString": "          <button class=\"gam-btn gam-btn-cancel\" id=\"mc-note-clear-all\" style=\"font-size:10px;padding:3px 8px\" title=\"Archive prior notes with a marker entry (history preserved, visually divided)\">\\u{1F9F9} Clear all</button>",
+      "newString": "          <button class=\"gam-btn gam-btn-cancel\" id=\"mc-note-clear-all\" style=\"font-size:10px;padding:3px 8px\" title=\"Archive prior notes with a marker entry (history preserved, visually divided)\">\\u{1F5D1}\\u{FE0E} Clear all</button>",
+      "note": "Visual transformation #3: swap the \\u{1F9F9} broom for a consistent trash glyph \\u{1F5D1} (wastebasket, matches the \\u{1F5D1} Remove glyph used elsewhere in the console). \\u{FE0E} text-variation selector keeps it monochrome/consistent. Accessible name ' Clear all' preserved; id=mc-note-clear-all untouched."
+    },
+    {
+      "oldString": "        <div class=\"gam-mc-hint\" id=\"mc-note-charcount\" style=\"text-align:right;margin-top:3px;font-size:10px;color:#9b9892\">0 chars</div>",
+      "newString": "        <div class=\"gam-mc-note-chartrack\" aria-hidden=\"true\"><i id=\"mc-note-charfill\" style=\"width:0%\"></i></div>\n        <div class=\"gam-mc-hint\" id=\"mc-note-charcount\" style=\"text-align:right;margin-top:3px;font-size:10px;color:'+GAM_TOK.inkMuted+'\">0 / 500</div>",
+      "note": "Visual transformation #2: add a proactive char-fill track (.gam-mc-note-chartrack > #mc-note-charfill) above the counter and surface the 500 threshold as a visible '/500' label. Counter literal #9b9892 -> GAM_TOK.inkMuted (template-literal concat). id=mc-note-charcount preserved; new id mc-note-charfill is additive."
+    },
+    {
+      "oldString": "      const __updateCharCount = () => {\n        const n = (body.value || '').length;\n        charCountEl.textContent = n + ' char' + (n === 1 ? '' : 's');\n        charCountEl.style.color = (n > 500) ? 'var(--bb-amber-warm, #f0a040)' : '#9b9892'; /* v.next a11y: #5a5752 -> #9b9892 (2.5:1 -> 6.5:1) */\n      };",
+      "newString": "      const __noteFillEl = root.querySelector('#mc-note-charfill');\n      const __updateCharCount = () => {\n        const n = (body.value || '').length;\n        charCountEl.textContent = n + ' / 500';\n        const over = n > 500;\n        // WP-07 #2: counter ink + fill track climb toward warn as the 500 cap nears.\n        charCountEl.style.color = over ? GAM_TOK.warn : GAM_TOK.inkMuted;\n        if (__noteFillEl) {\n          const pct = Math.max(0, Math.min(100, (n / 500) * 100));\n          __noteFillEl.style.width = pct + '%';\n          __noteFillEl.style.background = over ? GAM_TOK.warn : (pct >= 80 ? GAM_TOK.accentLine : GAM_TOK.accent);\n        }\n      };",
+      "note": "Visual transformation #2: drive the fill track + '/500' label, and migrate the JS-assigned counter color literals (var(--bb-amber-warm,#f0a040) and #9b9892) to GAM_TOK.warn / GAM_TOK.inkMuted. Track fills amber toward the 500 threshold (accent -> accent-line >=80% -> warn over-cap)."
+    },
+    {
+      "oldString": ".gam-mc-note-ta{width:100%;min-height:60px;background:${C.BG2};color:${C.TEXT};border:1px solid ${C.BORDER};border-radius:4px;padding:6px 8px;font:12px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;resize:vertical;box-sizing:border-box;outline:none;transition:border-color .15s}\n.gam-mc-note-ta:focus{border-color:${C.ACCENT}}\n.gam-mc-note-status{font-size:10px;color:${C.TEXT3};margin-top:4px;min-height:14px}",
+      "newString": ".gam-mc-note-ta{width:100%;min-height:60px;background:var(--gam-tok-surface-panel,${C.BG2});color:var(--gam-tok-ink,${C.TEXT});border:1px solid var(--gam-tok-border,${C.BORDER});border-radius:4px;padding:6px 8px;font:12px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;resize:vertical;box-sizing:border-box;outline:none;transition:border-color .15s}\n.gam-mc-note-ta:focus{border-color:var(--gam-tok-accent,${C.ACCENT})}\n.gam-mc-note-status{font-size:10px;color:var(--gam-tok-ink-muted,${C.TEXT3});margin-top:4px;min-height:14px;display:flex;align-items:center;gap:5px}\n/* WP-07: pencil->check->alert glyph swap, drawn as a leading ::before so the\n   accessible status text (textContent) stays clean. */\n.gam-mc-note-status[data-icon]::before{content:'';font-style:normal;font-weight:600}\n.gam-mc-note-status[data-icon='pencil']::before{content:'\\\\270E'}\n.gam-mc-note-status[data-icon='check']::before{content:'\\\\2713';color:var(--gam-tok-success,${C.GREEN})}\n.gam-mc-note-status[data-icon='alert']::before{content:'\\\\26A0';color:var(--gam-tok-danger,${C.RED})}\n/* WP-07: editing-vs-saved as a CARD state. Dirty = warm-accent/amber left rail;\n   saved = success rail + a success-soft flash + a persistent 'saved' micro-chip. */\n.gam-mc-note{border-left:3px solid transparent;padding-left:8px;margin-left:-11px;transition:border-color .15s,background .3s}\n.gam-mc-note.is-dirty{border-left-color:var(--gam-tok-warn,${C.WARN})}\n.gam-mc-note.is-saved{border-left-color:var(--gam-tok-success,${C.GREEN});background:var(--gam-tok-success-soft,rgba(61,214,140,.12))}\n.gam-mc-note.is-saved .gam-mc-note-status::after{content:'saved';margin-left:auto;font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--gam-tok-success,${C.GREEN});background:var(--gam-tok-success-soft,rgba(61,214,140,.12));border:1px solid var(--gam-tok-success,${C.GREEN});border-radius:999px;padding:1px 6px}\n/* WP-07 #2: char-fill track surfacing the 500-char threshold proactively. */\n.gam-mc-note-chartrack{height:3px;margin-top:6px;border-radius:999px;background:var(--gam-tok-surface-sunken,${C.BG});overflow:hidden}\n.gam-mc-note-chartrack > i{display:block;height:100%;width:0;background:var(--gam-tok-accent,${C.ACCENT});border-radius:999px;transition:width .15s,background .15s}",
+      "note": "Migrate .gam-mc-note-ta / :focus / -status hex (C.BG2/TEXT/BORDER/ACCENT/TEXT3) to var(--gam-tok-*). Retone textarea focus from legacy blue C.ACCENT(#4A9EFF) to brand amber accent. Append: status glyph swap (pencil/check/alert) keyed on [data-icon]; card-level .is-dirty/.is-saved state (amber/success left rail + success-soft flash + persistent 'saved' micro-chip via ::after); and the char-fill track (visual transformations #1 and #2). Anchored on the existing -ta/-status block (unique)."
+    },
+    {
+      "oldString": ".gam-mc-note-history{display:flex;flex-direction:column;gap:6px}\n.gam-mc-note-row{padding:8px 10px;background:${C.BG2};border:1px solid ${C.BORDER};border-left:3px solid ${C.ACCENT};border-radius:4px}\n.gam-mc-note-meta{font-size:10px;color:${C.TEXT2};margin-bottom:4px;display:flex;gap:8px;align-items:center}\n.gam-mc-note-meta b{color:${C.TEXT};font-weight:700}\n.gam-mc-note-time{color:${C.TEXT3};font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:10px;margin-left:auto}\n.gam-mc-note-body{font-size:12px;color:${C.TEXT};line-height:1.45;white-space:pre-wrap;word-break:break-word}",
+      "newString": ".gam-mc-note-history{display:flex;flex-direction:column;gap:6px}\n.gam-mc-note-row{padding:8px 10px;background:var(--gam-tok-surface-panel,${C.BG2});border:1px solid var(--gam-tok-border,${C.BORDER});border-left:3px solid var(--gam-tok-accent,${C.ACCENT});border-radius:4px}\n/* WP-07 #4: min-width:0 clamps so a long mod-name + timestamp can't break the\n   flex row's alignment (name truncates with an ellipsis; time stays pinned right). */\n.gam-mc-note-meta{font-size:10px;color:var(--gam-tok-ink-muted,${C.TEXT2});margin-bottom:4px;display:flex;gap:8px;align-items:center;min-width:0}\n.gam-mc-note-meta b{color:var(--gam-tok-ink,${C.TEXT});font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.gam-mc-note-time{color:var(--gam-tok-ink-muted,${C.TEXT3});font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:10px;margin-left:auto;flex:0 0 auto;white-space:nowrap}\n/* WP-07 #5: long history bodies clamp with a subtle bottom fade beyond the\n   existing 500-char ellipsis, signalling more content was truncated. */\n.gam-mc-note-body{font-size:12px;color:var(--gam-tok-ink,${C.TEXT});line-height:1.45;white-space:pre-wrap;word-break:break-word;max-height:8.7em;overflow:hidden;-webkit-mask-image:linear-gradient(180deg,black 78%,transparent);mask-image:linear-gradient(180deg,black 78%,transparent)}",
+      "note": "Migrate history-row hex (C.BG2/BORDER/ACCENT/TEXT2/TEXT/TEXT3) to var(--gam-tok-*). Retone the active left-rail from legacy blue C.ACCENT(#4A9EFF) to brand amber accent. Add #4 meta min-width:0 clamps (mod-name ellipsis, time pinned right, both nowrap) and #5 a subtle bottom fade-mask on long bodies. Note-time ink lifted from C.TEXT3 to ink-muted for WCAG. Anchored on the contiguous history block (unique)."
+    }
+  ]
+}

@@ -1,0 +1,207 @@
+<![CDATA[<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { background: #0a0a0b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 16px; }
+    .demo-section { margin-bottom: 32px; }
+    .label { color: #9b9892; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; display: block; }
+
+    /* v8.1 ux contrast CSS (from line 4420-4443) */
+    :root {
+      --gam-bg-dark: #0f1114;
+      --gam-bg-card: #181b20;
+      --gam-muted-text: #b0b5bc;
+      --gam-muted-text-legacy: #8b929e;
+      --gam-link: #7cb8ff;
+      --gam-accent-legacy: #4A9EFF;
+      --gam-warn-bg: #744210;
+      --gam-warn-text: #ffe5b0;
+      --gam-warn-text-legacy: #faf089;
+      --gam-ok-bg: #276749;
+      --gam-ok-text: #c6f6d5;
+      --gam-danger-bg: #9b2c2c;
+      --gam-danger-text: #fed7d7;
+    }
+
+    /* v8.1 ux: skeleton CSS (line 4483-4499) */
+    body.gam-ux-polish-on .gam-skeleton-wrap { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
+    body.gam-ux-polish-on .gam-sk-line { height: 12px; border-radius: 4px; background: #2a2a30; }
+    body.gam-ux-polish-on .gam-sk-row { height: 36px; border-radius: 6px; background: #2a2a30; }
+    body.gam-ux-polish-on .gam-sk-card { height: 120px; border-radius: 8px; background: #2a2a30; }
+    body.gam-ux-polish-on .gam-sk-avatar { width: 32px; height: 32px; border-radius: 50%; background: #2a2a30; }
+
+    @media (prefers-reduced-motion: no-preference) {
+      body.gam-ux-polish-on .gam-skeleton-shimmer {
+        background: linear-gradient(90deg, #2a2a30 0%, #3a3a42 50%, #2a2a30 100%);
+        background-size: 200% 100%;
+        animation: gam-skeleton-shimmer 2s linear infinite;
+      }
+      @keyframes gam-skeleton-shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+      }
+    }
+
+    /* v8.1 ux: empty-state CSS (line 4573-4579) */
+    body.gam-ux-polish-on .gam-empty-card { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 32px 20px; background: #1f1f24; border-radius: 8px; text-align: center; color: var(--gam-muted-text, #b0b5bc); }
+    body.gam-ux-polish-on .gam-empty-icon { color: #5a5a62; }
+    body.gam-ux-polish-on .gam-empty-headline { font-size: 15px; font-weight: 600; color: #e5e5e8; }
+    body.gam-ux-polish-on .gam-empty-desc { font-size: 13px; color: var(--gam-muted-text, #b0b5bc); max-width: 320px; line-height: 1.5; }
+    body.gam-ux-polish-on .gam-empty-cta { margin-top: 4px; padding: 8px 16px; background: #3a3a42; color: #e5e5e8; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; min-height: 44px; min-width: 44px; }
+    body.gam-ux-polish-on .gam-empty-cta:hover { background: #4a4a52; }
+
+    /* Bloomberg state CSS (line 26587-26625) */
+    .gam-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 20px 12px; text-align: center; color: #9b9892; font: 10px/1.4 ui-monospace, monospace; }
+    .gam-empty-icon { font-size: 24px; line-height: 1; opacity: 0.6; }
+    .gam-empty-headline { color: #9b9892; font-weight: 600; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+    .gam-empty-desc { color: #9b9892; font-size: 9px; }
+    .gam-empty-cta { background: transparent; border: 1px solid #ff9933; color: #ff9933; padding: 2px 8px; cursor: pointer; font: 600 9px ui-monospace, monospace; letter-spacing: 0.04em; text-transform: uppercase; margin-top: 4px; }
+
+    .gam-error-state { padding: 10px 12px; background: rgba(255, 59, 59, 0.04); border-left: 2px solid #ff3b3b; }
+    .gam-error-chip { display: inline-block; padding: 1px 5px; font: 700 8px ui-monospace, monospace; letter-spacing: 0.1em; text-transform: uppercase; border-radius: 2px; margin-bottom: 4px; }
+    .gam-error-chip.hard { background: rgba(255, 59, 59, 0.18); color: #ff3b3b; }
+    .gam-error-chip.soft { background: rgba(240, 160, 64, 0.15); color: #f0a040; }
+    .gam-error-msg { color: #c8c5c0; font-size: 10px; margin: 2px 0; }
+    .gam-error-hint { color: #9b9892; font-size: 9px; }
+    .gam-error-retry { background: transparent; border: 1px solid #9b9892; color: #9b9892; padding: 1px 6px; cursor: pointer; font: 600 8px ui-monospace, monospace; letter-spacing: 0.04em; text-transform: uppercase; margin-top: 6px; }
+
+    .gam-skel-line { height: 10px; background: #2a2825; border-radius: 2px; margin: 3px 0; animation: gam-skel-pulse 1.4s ease-in-out infinite; }
+    @keyframes gam-skel-pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .gam-skel-line { animation: none; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="demo-section">
+  <span class="label">Skeleton: text-line variant (renderSkeleton)</span>
+  <div class="gam-skeleton-wrap" aria-busy="true" aria-live="off">
+    <div class="gam-sk-line gam-skeleton-shimmer"></div>
+  </div>
+</div>
+
+<div class="demo-section">
+  <span class="label">Skeleton: paragraph variant (renderSkeleton)</span>
+  <div class="gam-skeleton-wrap" aria-busy="true" aria-live="off">
+    <div class="gam-sk-line gam-skeleton-shimmer"></div>
+    <div class="gam-sk-line gam-skeleton-shimmer"></div>
+    <div class="gam-sk-line gam-skeleton-shimmer"></div>
+  </div>
+</div>
+
+<div class="demo-section">
+  <span class="label">Skeleton: row variant (renderSkeleton)</span>
+  <div class="gam-skeleton-wrap" aria-busy="true" aria-live="off">
+    <div class="gam-sk-row gam-skeleton-shimmer"></div>
+  </div>
+</div>
+
+<div class="demo-section">
+  <span class="label">Skeleton: card variant (renderSkeleton)</span>
+  <div class="gam-skeleton-wrap" aria-busy="true" aria-live="off">
+    <div class="gam-sk-card gam-skeleton-shimmer"></div>
+  </div>
+</div>
+
+<div class="demo-section">
+  <span class="label">Skeleton: avatar variant (renderSkeleton)</span>
+  <div class="gam-skeleton-wrap" aria-busy="true" aria-live="off">
+    <div class="gam-sk-avatar gam-skeleton-shimmer"></div>
+  </div>
+</div>
+
+<div class="demo-section">
+  <span class="label">Empty state: inbox-empty (renderEmptyState, v8.1)</span>
+  <div class="gam-empty-card" role="status">
+    <div class="gam-empty-icon">
+      <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12l3-7h12l3 7v7H3z"/><path d="M3 12h5l1 2h6l1-2h5"/></svg>
+    </div>
+    <div class="gam-empty-headline">No items in inbox</div>
+    <div class="gam-empty-desc">Queue is empty. Check back later.</div>
+    <button class="gam-empty-cta" type="button">Refresh</button>
+  </div>
+</div>
+
+<div class="demo-section">
+  <span class="label">Empty state: users-empty (renderEmptyState, v8.1)</span>
+  <div class="gam-empty-card" role="status">
+    <div class="gam-empty-icon">
+      <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.2"/><path d="M15 20a4 4 0 0 1 6 0"/></svg>
+    </div>
+    <div class="gam-empty-headline">No users found</div>
+    <div class="gam-empty-desc">Search returned no results matching your criteria.</div>
+  </div>
+</div>
+
+<div class="demo-section">
+  <span class="label">Empty state: rules-empty (renderEmptyState, v8.1)</span>
+  <div class="gam-empty-card" role="status">
+    <div class="gam-empty-icon">
+      <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+    </div>
+    <div class="gam-empty-headline">No rules configured</div>
+    <div class="gam-empty-desc">Add a custom rule to get started.</div>
+  </div>
+</div>
+
+<div class="demo-section">
+  <span class="label">Empty state: modmail-empty (renderEmptyState, v8.1)</span>
+  <div class="gam-empty-card" role="status">
+    <div class="gam-empty-icon">
+      <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+    </div>
+    <div class="gam-empty-headline">No modmail</div>
+    <div class="gam-empty-desc">All caught up on moderation messages.</div>
+  </div>
+</div>
+
+<div class="demo-section">
+  <span class="label">Empty state: popup context (gamMakeEmpty)</span>
+  <div class="gam-empty-state">
+    <div class="gam-empty-icon">📋</div>
+    <div class="gam-empty-headline">QUEUE IS CLEAR</div>
+    <div class="gam-empty-desc">No pending items to review.</div>
+  </div>
+</div>
+
+<div class="demo-section">
+  <span class="label">Error state: hard severity (gamMakeError)</span>
+  <div class="gam-error-state">
+    <span class="gam-error-chip hard">ERROR</span>
+    <div class="gam-error-msg">Snapshot unavailable</div>
+    <div class="gam-error-hint">Worker may be unreachable.</div>
+    <button class="gam-error-retry" type="button">Retry</button>
+  </div>
+</div>
+
+<div class="demo-section">
+  <span class="label">Error state: soft severity (gamMakeError)</span>
+  <div class="gam-error-state">
+    <span class="gam-error-chip soft">WARN</span>
+    <div class="gam-error-msg">AI quota exhausted</div>
+    <div class="gam-error-hint">AI model offline or rate limit hit.</div>
+  </div>
+</div>
+
+<div class="demo-section">
+  <span class="label">Skeleton: gamMakeSkel stat variant (popup context)</span>
+  <div style="padding: 8px 0;">
+    <div class="gam-skel-line" style="height:10px;background:#2a2825;border-radius:2px;margin:3px 0;width:100%"></div>
+  </div>
+</div>
+
+<div class="demo-section">
+  <span class="label">Skeleton: gamMakeSkel card variant (popup context)</span>
+  <div style="padding: 8px 0;">
+    <div class="gam-skel-line" style="height:10px;background:#2a2825;border-radius:2px;margin:3px 0;width:100%"></div>
+    <div class="gam-skel-line" style="height:10px;background:#2a2825;border-radius:2px;margin:3px 0;width:70%"></div>
+    <div class="gam-skel-line" style="height:10px;background:#2a2825;border-radius:2px;margin:3px 0;width:85%"></div>
+  </div>
+</div>
+
+</body>
+</html>]]>
