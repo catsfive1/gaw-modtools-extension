@@ -14252,10 +14252,20 @@ Analyze this comment against the community rules. Then write a brief, profession
     // regardless of compact mode.
     // v5.1.4: match /modmail/thread/<id> (the real GAW URL) and legacy /messages/<id>
     if (!/\/(modmail\/thread|messages?)\/[^/?]+\/?$/.test(location.pathname)) return;
-    if (document.getElementById('gam-mm-bar')) return;
+    // v10.30 storm #11: rebind the bar on thread-switch. Every action button below closes over the
+    // `sender` captured when the bar was built; the old "if (#gam-mm-bar exists) return" kept a STALE
+    // bar after SPA-nav to a different thread -> clicking Ban on thread B banned thread A's author.
+    // Key the bar to the URL thread id (changes atomically on nav, unlike the DOM which lags): same
+    // thread -> keep it (no flicker); different thread -> remove the stale bar BEFORE it can be
+    // clicked, then rebuild for THIS thread's sender below.
+    const _mmMatch = location.pathname.match(/\/(modmail\/thread|messages?)\/([^/?]+)/);
+    const threadKey = _mmMatch ? _mmMatch[2] : location.pathname;
+    const _mmExisting = document.getElementById('gam-mm-bar');
+    if (_mmExisting && _mmExisting.getAttribute('data-mm-thread') === threadKey) return;
+    if (_mmExisting) _mmExisting.remove();
     const sender = findModmailSender();
     if (!sender){
-      // Retry shortly in case the page is still rendering
+      // Retry shortly in case the page is still rendering (re-reads URL + sender on each run).
       setTimeout(enhanceModmailRead, 800);
       return;
     }
@@ -14272,6 +14282,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       <span class="gam-mm-bar-hint">Ctrl+Shift+A archive \u00B7 Ctrl+Shift+M Mod Console \u00B7 R focus reply</span>
     `;
     container.insertBefore(bar, container.firstChild);
+    bar.setAttribute('data-mm-thread', threadKey); // v10.30 storm #11: stamp the thread id so the next call detects a switch and rebinds sender
     // v7.0: the bar acts as a Thread-kind entry point (flag-gated via drawer).
     bar.setAttribute('data-gam-intel-wired', 'v7');
     bar.addEventListener('click', async (e)=>{
