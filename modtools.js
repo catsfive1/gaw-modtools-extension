@@ -12305,13 +12305,28 @@ Analyze this comment against the community rules. Then write a brief, profession
     } catch(e){}
   })();
 
-  function injectAllStrips(){
+  function injectAllStrips(addedNodes){
     if (FallbackMode) return; // T4: native UI takes over
     // v9.6.6: ZERO modification on user profile pages. Commander's hard rule:
     // user page = pure infinite river of posts, no mod-action strips, no
     // byline compaction, no badges. The /users (triage) page and /ban page
     // are different surfaces with their own gates.
     if (typeof _isProfileViewNow === 'function' && _isProfileViewNow()) return;
+    // v10.30 storm #7: when the body observer passes its addedNodes, scope the strip sweep to those
+    // subtrees (mirrors _susApplyDecorationsOnNodes) instead of a full-document querySelectorAll on
+    // EVERY mutation — the O(total)-per-mutation jank source on long threads. Initial-load + SPA
+    // callers pass nothing -> full sweep, unchanged. buildActionStrip is idempotent (dataset guard).
+    if (addedNodes && addedNodes.length){
+      for (var _si = 0; _si < addedNodes.length; _si++){
+        var _sn = addedNodes[_si];
+        if (!_sn || _sn.nodeType !== 1) continue;
+        if (_sn.matches && _sn.matches('.post, .comment')) buildActionStrip(_sn);
+        if (_sn.querySelectorAll) _sn.querySelectorAll('.post, .comment').forEach(buildActionStrip);
+      }
+      // Byline compaction for the scoped path is run once-per-burst by the observer's debounced
+      // cosmetic pass (compactBylines is a full-document sweep; we don't want it per-mutation).
+      return;
+    }
     document.querySelectorAll('.post, .comment').forEach(buildActionStrip);
     // v9.3.16: piggyback byline compaction on the universal post-mutation hook
     // so newly-rendered (infinite-scroll, JSON-fetch) posts get the same treatment.
@@ -15112,6 +15127,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     var _gamBodyObsRoot = (!IS_USERS_PAGE && !IS_BAN_PAGE)
       ? (document.querySelector('.posts,.comments,.modmail-list,.comment-list') || document.body)
       : document.body;
+    var _gamBodyCosmeticDebounce = null;
     var _gamBodyObs = new MutationObserver(function(muts){
       var added = [];
       for (var mi = 0; mi < muts.length; mi++){
@@ -15123,11 +15139,20 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (!added.length) return;
       // Sus decorations: scoped to addedNodes (PB.4)
       _susApplyDecorationsOnNodes(added);
-      // Badge + strip injection: injectBadges/injectAllStrips are already
-      // internally idempotent (data-gam-tagged / dataset guards).
       if (!IS_USERS_PAGE && !IS_BAN_PAGE){
-        try { injectBadges(); } catch(e){}
-        try { injectAllStrips(); } catch(e){}
+        // v10.30 storm #7: action strips scoped to the new subtrees -> immediate, NO full-document
+        // querySelectorAll per mutation (the O(total)-per-mutation jank source during infinite-scroll).
+        try { injectAllStrips(added); } catch(e){}
+        // v10.30 storm #8: injectBadges + compactBylines are cosmetic and STILL scan full-document
+        // ($$(SELECTORS.anyItem) and '.post .details > span.since'). Debounce them to once-per-burst
+        // (crawler idiom @ ~28562, 1500ms) instead of per mutation. Idempotent, so a coalesced run
+        // catches everything added during the burst.
+        if (_gamBodyCosmeticDebounce) clearTimeout(_gamBodyCosmeticDebounce);
+        _gamBodyCosmeticDebounce = setTimeout(function(){
+          _gamBodyCosmeticDebounce = null;
+          try { injectBadges(); } catch(e){}
+          try { compactBylines(); } catch(e){}
+        }, 1500);
       }
     });
     _gamBodyObs.observe(_gamBodyObsRoot, { childList:true, subtree:true });
@@ -16891,13 +16916,20 @@ Analyze this comment against the community rules. Then write a brief, profession
       });
     });
 
+    let _triageObsDebounce = null;
     const observer=new MutationObserver(()=>{
-      const newLogs=document.querySelectorAll('.log:not([style*="display: none"])');
-      if(newLogs.length>0){
-        newLogs.forEach(l=>{ l.style.display='none'; });
-        scrapeCurrentPage();
-        refreshTriageConsole();
-      }
+      // v10.30 storm #8 (MEDIUM-1): 300ms debounce so a /users virtual-scroll burst coalesces into
+      // ONE scrapeCurrentPage()+refreshTriageConsole() rebuild instead of a full rebuild per mutation.
+      if (_triageObsDebounce) clearTimeout(_triageObsDebounce);
+      _triageObsDebounce = setTimeout(()=>{
+        _triageObsDebounce = null;
+        const newLogs=document.querySelectorAll('.log:not([style*="display: none"])');
+        if(newLogs.length>0){
+          newLogs.forEach(l=>{ l.style.display='none'; });
+          scrapeCurrentPage();
+          refreshTriageConsole();
+        }
+      }, 300);
     });
     observer.observe(mainContent||document.body, {childList:true, subtree:true});
 
@@ -27338,13 +27370,27 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     } catch(e){ /* self-healing: swallow errors so observer stays alive */ }
   }
   try { tagActionRows(); } catch(e){}
+  let _actionObs = null; // LOW-2: module-scope so a re-init can disconnect-before-reassign
   try {
-    const _actionObs = new MutationObserver(muts => {
+    if (_actionObs) { try { _actionObs.disconnect(); } catch(_){} }
+    let _actionPending = [];
+    let _actionDebounce = null;
+    _actionObs = new MutationObserver(muts => {
       for (const m of muts){
         for (const n of m.addedNodes){
-          if (n.nodeType === 1) tagActionRows(n);
+          if (n.nodeType === 1) _actionPending.push(n);
         }
       }
+      if (!_actionPending.length) return;
+      // v10.30 storm #8: coalesce infinite-scroll bursts (crawler idiom @ ~28562, 1500ms).
+      // tagActionRows is already node-scoped, so accumulate the added nodes and drain them ONCE
+      // per burst rather than running per mutation. Behavior identical (every added node tagged).
+      if (_actionDebounce) clearTimeout(_actionDebounce);
+      _actionDebounce = setTimeout(() => {
+        _actionDebounce = null;
+        const _batch = _actionPending.splice(0, _actionPending.length);
+        for (let _bi = 0; _bi < _batch.length; _bi++){ try { tagActionRows(_batch[_bi]); } catch(_){} }
+      }, 1500);
     });
     _actionObs.observe(document.body || document.documentElement, { childList:true, subtree:true });
   } catch(e){}
@@ -29907,10 +29953,16 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // v10.16.41: also inject 🛡 IMMUNE button (parallel injection — same observer fires both)
   setTimeout(() => { _schedInjectClocks(); _immuneInjectButtons(); }, 1500);
   // Re-scan on SPA navigation + scroll-induced new content
+  let _schedObs = null; // LOW-2: module-scope so a re-init can disconnect-before-reassign
   try {
-    const _schedObs = new MutationObserver(() => {
-      _schedInjectClocks();
-      _immuneInjectButtons();
+    if (_schedObs) { try { _schedObs.disconnect(); } catch(_){} }
+    let _schedDebounce = null;
+    _schedObs = new MutationObserver(() => {
+      // v10.30 storm #8: trailing-edge debounce (crawler idiom @ ~28562, 1500ms) so an infinite-scroll
+      // burst coalesces into ONE _schedInjectClocks()+_immuneInjectButtons() pass instead of running
+      // both (each a full-document querySelectorAll('.post.sticky')) per mutation.
+      if (_schedDebounce) clearTimeout(_schedDebounce);
+      _schedDebounce = setTimeout(() => { _schedDebounce = null; _schedInjectClocks(); _immuneInjectButtons(); }, 1500);
     });
     _schedObs.observe(document.body, { childList: true, subtree: true });
   } catch (_) {}
