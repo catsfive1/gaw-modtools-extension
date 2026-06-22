@@ -17836,16 +17836,18 @@ Analyze this comment against the community rules. Then write a brief, profession
   // /downvoted sub-routes the original regex missed.
   function _isProfileViewNow(){
     const p = window.location.pathname;
-    // /u/<name>, /u/<name>/, /u/<name>/posts, /u/<name>/saved,
-    // /u/<name>/upvoted, /u/<name>/downvoted, /u/<name>/comments
-    // ALL audit surfaces, never filter.
-    // v9.6.0: previously /comments was wrongly excluded with a comment claiming
-    // "comments don't render as .post elements anyway". That was WRONG -- GAW
-    // renders comment cards as .post[data-type="comment"] (see SELECTORS.post
-    // line 144). Result: every comment with score>0 and age>cutoff was
-    // display:none on /u/<name>/comments. This was the lurking bug behind
-    // ~12 sessions of "still hiding posts/comments" reports.
-    return /^\/u\/[^/]+(?:\/(?:posts|comments|saved|upvoted|downvoted))?\/?$/.test(p);
+    // v10.30 ROOT-CAUSE FIX — kills the recurring "tool is eating content on /u/me and
+    // /u/catsfive" (reported across ~12+ sessions). A profile is a profile on ANY sub-tab.
+    // The old regex WHITELISTED sub-routes (posts|comments|saved|upvoted|downvoted) and
+    // returned FALSE for any other profile path — so when GAW renders your OWN profile on a
+    // default/owner tab that is not in the list, the upvote-age filter + auto-remove +
+    // byline compaction all fired and ate content. Every prior "fix" just bolted one more
+    // tab onto the whitelist and got bitten again by the next one. Structural fix: treat
+    // ANY /u/<name>[/anything] as a profile (never filter it); the ONLY /u/ path that is
+    // NOT a user profile is /u/c:<community>. No whitelist left to fall out of date.
+    const m = p.match(/^\/u\/([^/]+)/);
+    if (!m) return false;                                  // not a /u/<name> path (e.g. /users, /p/<id>, /)
+    return !(m[1] || '').toLowerCase().startsWith('c:');   // /u/c:<community> is not a user profile
   }
   // v9.2.1: one-shot proof in DevTools console when the gate fires. Lets
   // the operator confirm the patch is actually loaded without typing
