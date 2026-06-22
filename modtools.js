@@ -32583,11 +32583,20 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
 
   async function _onBanAndRemove(username, postId) {
+    // v10.30 storm #1: GATE ON r.ok. An unknown/failed RPC RESOLVES {ok:false} (background.js:4482) —
+    // it does NOT throw — so the old unconditional success snack lied on every failure. modBanUser /
+    // modCommentRemoveBatch are STILL unregistered (browser-side ban pending HI-1 policy decision), so
+    // this will honestly error until wired — which is the point: an honest fail beats a fake "Banned".
     try {
-      await Promise.all([
+      const results = await Promise.all([
         rpcCall('modBanUser', { target: username, duration_days: 7, reason: 'Brigade activity', via: 'thread-watch' }),
         rpcCall('modCommentRemoveBatch', { post_id: postId, author: username, via: 'thread-watch' })
       ]);
+      const bad = results.find(function (r) { return !r || !r.ok; });
+      if (bad) {
+        try { snack('Ban+Remove FAILED — nothing applied: ' + (bad && bad.error || 'rpc error'), 'error'); } catch (_) {}
+        return;
+      }
       try { snack('Banned @' + username + ' + removed comments', 'success'); } catch (_) {}
       const rowEl = document.querySelector('[data-username="' + username + '"]');
       if (rowEl) rowEl.classList.add('gam-suspect-row--actioned');
@@ -32597,8 +32606,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
 
   async function _onWatchUser(username, reason) {
+    // v10.30 storm #1: gate on r.ok. modWatchUser is unregistered (no safe passive-watch route —
+    // the only near-match, modSniperArm, may be an auto-ban-on-next-post primitive = HI-1 risk), so
+    // this honestly errors until Commander defines what "Watch" should do. No fake success.
     try {
-      await rpcCall('modWatchUser', { username: username, reason: reason, via: 'thread-watch' });
+      const r = await rpcCall('modWatchUser', { username: username, reason: reason, via: 'thread-watch' });
+      if (!r || !r.ok) {
+        try { snack('Watch FAILED — not applied: ' + (r && r.error || 'rpc error'), 'error'); } catch (_) {}
+        return;
+      }
       try { snack('Watching @' + username, 'success'); } catch (_) {}
     } catch (e) {
       try { snack('Watch failed: ' + (e && e.message || e), 'error'); } catch (_) {}
@@ -32606,8 +32622,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
 
   async function _onMarkSus(username) {
+    // v10.30 storm #1: REWIRE modMarkSus (unregistered) -> modSusMark (background.js:3087, content-
+    // allowed, schema {username, reason}, POST /mod/user/sus) + gate on r.ok. SUS is the HI-1-safe
+    // target, so this is the one thread-watch action that becomes live now instead of just honest.
     try {
-      await rpcCall('modMarkSus', { username: username, via: 'thread-watch' });
+      const r = await rpcCall('modSusMark', { username: username, reason: 'Thread Watch' });
+      if (!r || !r.ok) {
+        try { snack('SUS FAILED — not applied: ' + (r && r.error || 'rpc error'), 'error'); } catch (_) {}
+        return;
+      }
       try { snack('Marked @' + username + ' SUS', 'success'); } catch (_) {}
     } catch (e) {
       try { snack('SUS failed: ' + (e && e.message || e), 'error'); } catch (_) {}
@@ -32621,12 +32644,23 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       btn.disabled = true;
       btn.textContent = 'Banning...';
       try {
-        await Promise.all(suspects.map(function(s) {
+        // v10.30 storm #1: gate on r.ok across every op. Unknown/failed RPC resolves {ok:false}
+        // (no throw), so the old code reported "Banned N" even when 100% of ops no-op'd.
+        const perUser = await Promise.all(suspects.map(function(s) {
           return Promise.all([
             rpcCall('modBanUser', { target: s.username, duration_days: 7, reason: 'Brigade activity', via: 'thread-watch' }),
             rpcCall('modCommentRemoveBatch', { post_id: postId, author: s.username, via: 'thread-watch' })
           ]);
         }));
+        const flat = perUser.reduce(function(a, pair){ return a.concat(pair); }, []);
+        const firstBad = flat.find(function(r){ return !r || !r.ok; });
+        if (firstBad) {
+          const failN = flat.filter(function(r){ return !r || !r.ok; }).length;
+          try { snack('Bulk ban FAILED — ' + failN + '/' + flat.length + ' ops not applied: ' + (firstBad && firstBad.error || 'rpc error'), 'error'); } catch (_) {}
+          btn.disabled = false;
+          btn.textContent = 'Ban All ' + suspects.length;
+          return;
+        }
         try { snack('Banned ' + suspects.length + ' users + removed comments', 'success'); } catch (_) {}
         btn.textContent = 'Done';
       } catch (e) {
@@ -32643,9 +32677,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     btn.addEventListener('click', async function() {
       btn.disabled = true;
       try {
-        await Promise.all(suspects.map(function(s) {
+        // v10.30 storm #1: gate on r.ok. modWatchUser unregistered -> honest fail until wired.
+        const results = await Promise.all(suspects.map(function(s) {
           return rpcCall('modWatchUser', { username: s.username, reason: 'Thread Watch bulk', via: 'thread-watch' });
         }));
+        const failN = results.filter(function(r){ return !r || !r.ok; }).length;
+        if (failN) {
+          try { snack('Bulk watch FAILED — ' + failN + '/' + results.length + ' not applied', 'error'); } catch (_) {}
+          btn.disabled = false;
+          btn.textContent = 'Watch All ' + suspects.length;
+          return;
+        }
         try { snack('Watching ' + suspects.length + ' users', 'success'); } catch (_) {}
         btn.textContent = 'Done';
       } catch (e) {
