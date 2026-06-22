@@ -7995,6 +7995,7 @@
       '#gam-token-onboard-backdrop',  // token onboarding modal (line ~14061)
       '.gam-preflight-wrap',          // v5.1.1 preflight confirmation (line ~14102)
       '#mc-esc-confirm',              // ESC-confirm row: orphaned if Mod Console is torn down while it is visible (any close route except its own Discard/Keep buttons). Listeners live on its child buttons + die with .remove(); the per-element cleanup loop below is a safe no-op for it.
+      '.gam-mc-link-preview',         // v10.30 ARTIFACT FIX: the ModChat link hover-preview (_gamLinkPreviewEl, modtools.js:~18078) is body-appended ONCE and only class-toggled (gam-show), NEVER removed. If ModChat closes / the anchor detaches mid-hover with no mouseout, it stays shown at its last position — landing over the bottom #gam-status-bar = the "web page inside the toolbar" artifact. Sweeping it here removes it on every close route; _gamEnsureLinkPreviewEl self-heals the now-detached module cache via .isConnected.
       '[data-gam-orphan-backdrop]'    // opt-in marker for any future backdrops
     ].join(', ');
     document.querySelectorAll(SEL).forEach(e => {
@@ -18076,7 +18077,10 @@ Analyze this comment against the community rules. Then write a brief, profession
   let _gamLinkPreviewEl = null;
   let _gamLinkHoverTimer = null;
   function _gamEnsureLinkPreviewEl() {
-    if (_gamLinkPreviewEl) return _gamLinkPreviewEl;
+    // v10.30 ARTIFACT FIX: require .isConnected, not just a truthy cache. closeAllPanels()
+    // now sweeps .gam-mc-link-preview, so the cached singleton can be detached from the DOM;
+    // returning a detached node would silently break the next hover-preview. Rebuild if gone.
+    if (_gamLinkPreviewEl && _gamLinkPreviewEl.isConnected) return _gamLinkPreviewEl;
     _gamLinkPreviewEl = document.createElement('div');
     _gamLinkPreviewEl.className = 'gam-mc-link-preview';
     document.body.appendChild(_gamLinkPreviewEl);
