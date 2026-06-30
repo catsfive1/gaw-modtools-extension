@@ -1352,7 +1352,7 @@
         Object.values(lsGet(K.ROSTER, {})).forEach(r=>{ const s=r && r.status || 'unknown'; out[s]=(out[s]||0)+1; });
         return out;
       })(),
-      recentActions: (lsGet(K.LOG, [])).slice(-25),
+      recentActions: (lsGet(K.LOG, [])).slice(-3),
       deathRowPending: getDeathRowPending().map(d=>({username:d.username, executeAt:new Date(d.executeAt).toISOString()})),
       activeWatchlist: Object.keys(lsGet(K.WATCH, {})),
       // v5.2.0 H2: sniff log excluded from snapshot by default (may contain auth tokens / moderation payloads).
@@ -7995,6 +7995,7 @@
       '#gam-token-onboard-backdrop',  // token onboarding modal (line ~14061)
       '.gam-preflight-wrap',          // v5.1.1 preflight confirmation (line ~14102)
       '#mc-esc-confirm',              // ESC-confirm row: orphaned if Mod Console is torn down while it is visible (any close route except its own Discard/Keep buttons). Listeners live on its child buttons + die with .remove(); the per-element cleanup loop below is a safe no-op for it.
+      '.gam-mc-link-preview',         // v10.30 ARTIFACT FIX: the ModChat link hover-preview (_gamLinkPreviewEl, modtools.js:~18078) is body-appended ONCE and only class-toggled (gam-show), NEVER removed. If ModChat closes / the anchor detaches mid-hover with no mouseout, it stays shown at its last position — landing over the bottom #gam-status-bar = the "web page inside the toolbar" artifact. Sweeping it here removes it on every close route; _gamEnsureLinkPreviewEl self-heals the now-detached module cache via .isConnected.
       '[data-gam-orphan-backdrop]'    // opt-in marker for any future backdrops
     ].join(', ');
     document.querySelectorAll(SEL).forEach(e => {
@@ -8466,7 +8467,7 @@
     requestAnimationFrame(()=>bd.style.opacity='1');
     return bd;
   }
-  function showModal(id, title, content, w='480px'){
+  function showModal(id, title, content, w='480px', titleIsHtml){
     closeAllPanels();
     // v5.2.2: side-dock mode for the Mod Console. Mod Console is pinnable to
     // left or right edge instead of modal-center. Toggle via pin button on header.
@@ -8485,7 +8486,7 @@
     // they do not rename or remove any locked selector. Title gets a unique id.
     const _titleId = 'gam-modal-title-' + id;
     const _titleNode = el('div',{cls:'gam-modal-title', id:_titleId});
-    _titleNode.innerHTML = title;  // title is caller-built trusted markup (pre-existing behavior)
+    if (titleIsHtml) { _titleNode.innerHTML = title; } else { _titleNode.textContent = String(title || ''); }
     const p=el('div',{id, cls, role:'dialog', 'aria-modal':'true', 'aria-labelledby':_titleId, style: isDock ? {} : {width:w}},
       el('div',{cls:'gam-modal-header'},
         _titleNode,
@@ -9117,7 +9118,7 @@
 
     body.appendChild(nav);
     body.appendChild(panels);
-    const mc = showModal('gam-mc-panel', titleHtml, body, '680px');
+    const mc = showModal('gam-mc-panel', titleHtml, body, '680px', true);
     // Stash state so the pin-toggle button can reopen at the same context.
     if (mc){ mc._gamUsername = username; mc._gamItem = item; mc._gamTab = tab; }
     renderTab(tab);
@@ -12304,13 +12305,28 @@ Analyze this comment against the community rules. Then write a brief, profession
     } catch(e){}
   })();
 
-  function injectAllStrips(){
+  function injectAllStrips(addedNodes){
     if (FallbackMode) return; // T4: native UI takes over
     // v9.6.6: ZERO modification on user profile pages. Commander's hard rule:
     // user page = pure infinite river of posts, no mod-action strips, no
     // byline compaction, no badges. The /users (triage) page and /ban page
     // are different surfaces with their own gates.
     if (typeof _isProfileViewNow === 'function' && _isProfileViewNow()) return;
+    // v10.30 storm #7: when the body observer passes its addedNodes, scope the strip sweep to those
+    // subtrees (mirrors _susApplyDecorationsOnNodes) instead of a full-document querySelectorAll on
+    // EVERY mutation — the O(total)-per-mutation jank source on long threads. Initial-load + SPA
+    // callers pass nothing -> full sweep, unchanged. buildActionStrip is idempotent (dataset guard).
+    if (addedNodes && addedNodes.length){
+      for (var _si = 0; _si < addedNodes.length; _si++){
+        var _sn = addedNodes[_si];
+        if (!_sn || _sn.nodeType !== 1) continue;
+        if (_sn.matches && _sn.matches('.post, .comment')) buildActionStrip(_sn);
+        if (_sn.querySelectorAll) _sn.querySelectorAll('.post, .comment').forEach(buildActionStrip);
+      }
+      // Byline compaction for the scoped path is run once-per-burst by the observer's debounced
+      // cosmetic pass (compactBylines is a full-document sweep; we don't want it per-mutation).
+      return;
+    }
     document.querySelectorAll('.post, .comment').forEach(buildActionStrip);
     // v9.3.16: piggyback byline compaction on the universal post-mutation hook
     // so newly-rendered (infinite-scroll, JSON-fetch) posts get the same treatment.
@@ -14251,10 +14267,20 @@ Analyze this comment against the community rules. Then write a brief, profession
     // regardless of compact mode.
     // v5.1.4: match /modmail/thread/<id> (the real GAW URL) and legacy /messages/<id>
     if (!/\/(modmail\/thread|messages?)\/[^/?]+\/?$/.test(location.pathname)) return;
-    if (document.getElementById('gam-mm-bar')) return;
+    // v10.30 storm #11: rebind the bar on thread-switch. Every action button below closes over the
+    // `sender` captured when the bar was built; the old "if (#gam-mm-bar exists) return" kept a STALE
+    // bar after SPA-nav to a different thread -> clicking Ban on thread B banned thread A's author.
+    // Key the bar to the URL thread id (changes atomically on nav, unlike the DOM which lags): same
+    // thread -> keep it (no flicker); different thread -> remove the stale bar BEFORE it can be
+    // clicked, then rebuild for THIS thread's sender below.
+    const _mmMatch = location.pathname.match(/\/(modmail\/thread|messages?)\/([^/?]+)/);
+    const threadKey = _mmMatch ? _mmMatch[2] : location.pathname;
+    const _mmExisting = document.getElementById('gam-mm-bar');
+    if (_mmExisting && _mmExisting.getAttribute('data-mm-thread') === threadKey) return;
+    if (_mmExisting) _mmExisting.remove();
     const sender = findModmailSender();
     if (!sender){
-      // Retry shortly in case the page is still rendering
+      // Retry shortly in case the page is still rendering (re-reads URL + sender on each run).
       setTimeout(enhanceModmailRead, 800);
       return;
     }
@@ -14271,6 +14297,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       <span class="gam-mm-bar-hint">Ctrl+Shift+A archive \u00B7 Ctrl+Shift+M Mod Console \u00B7 R focus reply</span>
     `;
     container.insertBefore(bar, container.firstChild);
+    bar.setAttribute('data-mm-thread', threadKey); // v10.30 storm #11: stamp the thread id so the next call detects a switch and rebinds sender
     // v7.0: the bar acts as a Thread-kind entry point (flag-gated via drawer).
     bar.setAttribute('data-gam-intel-wired', 'v7');
     bar.addEventListener('click', async (e)=>{
@@ -15100,6 +15127,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     var _gamBodyObsRoot = (!IS_USERS_PAGE && !IS_BAN_PAGE)
       ? (document.querySelector('.posts,.comments,.modmail-list,.comment-list') || document.body)
       : document.body;
+    var _gamBodyCosmeticDebounce = null;
     var _gamBodyObs = new MutationObserver(function(muts){
       var added = [];
       for (var mi = 0; mi < muts.length; mi++){
@@ -15111,11 +15139,20 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (!added.length) return;
       // Sus decorations: scoped to addedNodes (PB.4)
       _susApplyDecorationsOnNodes(added);
-      // Badge + strip injection: injectBadges/injectAllStrips are already
-      // internally idempotent (data-gam-tagged / dataset guards).
       if (!IS_USERS_PAGE && !IS_BAN_PAGE){
-        try { injectBadges(); } catch(e){}
-        try { injectAllStrips(); } catch(e){}
+        // v10.30 storm #7: action strips scoped to the new subtrees -> immediate, NO full-document
+        // querySelectorAll per mutation (the O(total)-per-mutation jank source during infinite-scroll).
+        try { injectAllStrips(added); } catch(e){}
+        // v10.30 storm #8: injectBadges + compactBylines are cosmetic and STILL scan full-document
+        // ($$(SELECTORS.anyItem) and '.post .details > span.since'). Debounce them to once-per-burst
+        // (crawler idiom @ ~28562, 1500ms) instead of per mutation. Idempotent, so a coalesced run
+        // catches everything added during the burst.
+        if (_gamBodyCosmeticDebounce) clearTimeout(_gamBodyCosmeticDebounce);
+        _gamBodyCosmeticDebounce = setTimeout(function(){
+          _gamBodyCosmeticDebounce = null;
+          try { injectBadges(); } catch(e){}
+          try { compactBylines(); } catch(e){}
+        }, 1500);
       }
     });
     _gamBodyObs.observe(_gamBodyObsRoot, { childList:true, subtree:true });
@@ -16879,13 +16916,20 @@ Analyze this comment against the community rules. Then write a brief, profession
       });
     });
 
+    let _triageObsDebounce = null;
     const observer=new MutationObserver(()=>{
-      const newLogs=document.querySelectorAll('.log:not([style*="display: none"])');
-      if(newLogs.length>0){
-        newLogs.forEach(l=>{ l.style.display='none'; });
-        scrapeCurrentPage();
-        refreshTriageConsole();
-      }
+      // v10.30 storm #8 (MEDIUM-1): 300ms debounce so a /users virtual-scroll burst coalesces into
+      // ONE scrapeCurrentPage()+refreshTriageConsole() rebuild instead of a full rebuild per mutation.
+      if (_triageObsDebounce) clearTimeout(_triageObsDebounce);
+      _triageObsDebounce = setTimeout(()=>{
+        _triageObsDebounce = null;
+        const newLogs=document.querySelectorAll('.log:not([style*="display: none"])');
+        if(newLogs.length>0){
+          newLogs.forEach(l=>{ l.style.display='none'; });
+          scrapeCurrentPage();
+          refreshTriageConsole();
+        }
+      }, 300);
     });
     observer.observe(mainContent||document.body, {childList:true, subtree:true});
 
@@ -17792,16 +17836,18 @@ Analyze this comment against the community rules. Then write a brief, profession
   // /downvoted sub-routes the original regex missed.
   function _isProfileViewNow(){
     const p = window.location.pathname;
-    // /u/<name>, /u/<name>/, /u/<name>/posts, /u/<name>/saved,
-    // /u/<name>/upvoted, /u/<name>/downvoted, /u/<name>/comments
-    // ALL audit surfaces, never filter.
-    // v9.6.0: previously /comments was wrongly excluded with a comment claiming
-    // "comments don't render as .post elements anyway". That was WRONG -- GAW
-    // renders comment cards as .post[data-type="comment"] (see SELECTORS.post
-    // line 144). Result: every comment with score>0 and age>cutoff was
-    // display:none on /u/<name>/comments. This was the lurking bug behind
-    // ~12 sessions of "still hiding posts/comments" reports.
-    return /^\/u\/[^/]+(?:\/(?:posts|comments|saved|upvoted|downvoted))?\/?$/.test(p);
+    // v10.30 ROOT-CAUSE FIX — kills the recurring "tool is eating content on /u/me and
+    // /u/catsfive" (reported across ~12+ sessions). A profile is a profile on ANY sub-tab.
+    // The old regex WHITELISTED sub-routes (posts|comments|saved|upvoted|downvoted) and
+    // returned FALSE for any other profile path — so when GAW renders your OWN profile on a
+    // default/owner tab that is not in the list, the upvote-age filter + auto-remove +
+    // byline compaction all fired and ate content. Every prior "fix" just bolted one more
+    // tab onto the whitelist and got bitten again by the next one. Structural fix: treat
+    // ANY /u/<name>[/anything] as a profile (never filter it); the ONLY /u/ path that is
+    // NOT a user profile is /u/c:<community>. No whitelist left to fall out of date.
+    const m = p.match(/^\/u\/([^/]+)/);
+    if (!m) return false;                                  // not a /u/<name> path (e.g. /users, /p/<id>, /)
+    return !(m[1] || '').toLowerCase().startsWith('c:');   // /u/c:<community> is not a user profile
   }
   // v9.2.1: one-shot proof in DevTools console when the gate fires. Lets
   // the operator confirm the patch is actually loaded without typing
@@ -18076,7 +18122,10 @@ Analyze this comment against the community rules. Then write a brief, profession
   let _gamLinkPreviewEl = null;
   let _gamLinkHoverTimer = null;
   function _gamEnsureLinkPreviewEl() {
-    if (_gamLinkPreviewEl) return _gamLinkPreviewEl;
+    // v10.30 ARTIFACT FIX: require .isConnected, not just a truthy cache. closeAllPanels()
+    // now sweeps .gam-mc-link-preview, so the cached singleton can be detached from the DOM;
+    // returning a detached node would silently break the next hover-preview. Rebuild if gone.
+    if (_gamLinkPreviewEl && _gamLinkPreviewEl.isConnected) return _gamLinkPreviewEl;
     _gamLinkPreviewEl = document.createElement('div');
     _gamLinkPreviewEl.className = 'gam-mc-link-preview';
     document.body.appendChild(_gamLinkPreviewEl);
@@ -27070,27 +27119,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       const ts = document.createElement('style');
       ts.id = 'gam-token-sheet';
       ts.textContent = `
+/* STORM-15: tokens duplicated from Block 1 (:root at L25736) removed to kill cascade race. */
 :root {
-  --bb-amber: #ff9933;
   --bb-amber-warm: #f0a040;
   --bb-amber-cool: #E8A317;
-  --bb-red: #ff3b3b;
-  --bb-green: #44dd66;
-  --bb-green-dim: #3dd68c;
-  --bb-cyan: #66ccff;
   --bb-purple: #a78bfa;
-  --bb-yellow: #ffd84d;
   --bb-blue: #4A9EFF;
-  --bb-bg: #0a0a0b;
-  --bb-panel: #131316;
-  --bb-sunken: #050507;
-  --bb-hover: #1c1c20;
-  --bb-ink: #e8e6e1;
-  --bb-ink-dim: #9b9892;
-  --bb-ink-faint: #7a7672;
-  --bb-line: #2a2825;
-  --bb-line-hot: #3d3a35;
-  --bb-r: 0;
   --bb-r-sm: 3px;
   --bb-r-md: 4px;
   --bb-motion-instant: 50ms;
@@ -27323,13 +27357,27 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     } catch(e){ /* self-healing: swallow errors so observer stays alive */ }
   }
   try { tagActionRows(); } catch(e){}
+  let _actionObs = null; // LOW-2: module-scope so a re-init can disconnect-before-reassign
   try {
-    const _actionObs = new MutationObserver(muts => {
+    if (_actionObs) { try { _actionObs.disconnect(); } catch(_){} }
+    let _actionPending = [];
+    let _actionDebounce = null;
+    _actionObs = new MutationObserver(muts => {
       for (const m of muts){
         for (const n of m.addedNodes){
-          if (n.nodeType === 1) tagActionRows(n);
+          if (n.nodeType === 1) _actionPending.push(n);
         }
       }
+      if (!_actionPending.length) return;
+      // v10.30 storm #8: coalesce infinite-scroll bursts (crawler idiom @ ~28562, 1500ms).
+      // tagActionRows is already node-scoped, so accumulate the added nodes and drain them ONCE
+      // per burst rather than running per mutation. Behavior identical (every added node tagged).
+      if (_actionDebounce) clearTimeout(_actionDebounce);
+      _actionDebounce = setTimeout(() => {
+        _actionDebounce = null;
+        const _batch = _actionPending.splice(0, _actionPending.length);
+        for (let _bi = 0; _bi < _batch.length; _bi++){ try { tagActionRows(_batch[_bi]); } catch(_){} }
+      }, 1500);
     });
     _actionObs.observe(document.body || document.documentElement, { childList:true, subtree:true });
   } catch(e){}
@@ -29892,10 +29940,16 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // v10.16.41: also inject 🛡 IMMUNE button (parallel injection — same observer fires both)
   setTimeout(() => { _schedInjectClocks(); _immuneInjectButtons(); }, 1500);
   // Re-scan on SPA navigation + scroll-induced new content
+  let _schedObs = null; // LOW-2: module-scope so a re-init can disconnect-before-reassign
   try {
-    const _schedObs = new MutationObserver(() => {
-      _schedInjectClocks();
-      _immuneInjectButtons();
+    if (_schedObs) { try { _schedObs.disconnect(); } catch(_){} }
+    let _schedDebounce = null;
+    _schedObs = new MutationObserver(() => {
+      // v10.30 storm #8: trailing-edge debounce (crawler idiom @ ~28562, 1500ms) so an infinite-scroll
+      // burst coalesces into ONE _schedInjectClocks()+_immuneInjectButtons() pass instead of running
+      // both (each a full-document querySelectorAll('.post.sticky')) per mutation.
+      if (_schedDebounce) clearTimeout(_schedDebounce);
+      _schedDebounce = setTimeout(() => { _schedDebounce = null; _schedInjectClocks(); _immuneInjectButtons(); }, 1500);
     });
     _schedObs.observe(document.body, { childList: true, subtree: true });
   } catch (_) {}
@@ -31819,9 +31873,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       panel.appendChild(el('div', { cls: 'gam-propose-actions' }, cancel, submit));
       panel.appendChild(status);
       overlay.appendChild(panel);
+      document.querySelectorAll('.gam-propose-overlay').forEach(function(o) { try { o.remove(); } catch(e) {} });
       document.body.appendChild(overlay);
+      overlay.addEventListener('click', function(ev) { if (ev.target === overlay) try { overlay.remove(); } catch(e) {} });
+      var _propOvEsc = function(ev) { if (ev.key === 'Escape') { try { overlay.remove(); } catch(e) {} document.removeEventListener('keydown', _propOvEsc); } };
+      document.addEventListener('keydown', _propOvEsc);
 
-      cancel.addEventListener('click', function() { try { overlay.remove(); } catch (e) {} });
+      cancel.addEventListener('click', function() { document.removeEventListener('keydown', _propOvEsc); try { overlay.remove(); } catch (e) {} });
 
       submit.addEventListener('click', async function() {
         submit.disabled = true;
@@ -31931,8 +31989,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       if (!isLead) try { vetoBtn.setAttribute('disabled', 'disabled'); } catch (e) {}
       panel.appendChild(el('div', { cls: 'gam-propose-actions' }, execBtn, puntBtn, vetoBtn, closeBtn));
       overlay.appendChild(panel);
+      document.querySelectorAll('.gam-propose-overlay').forEach(function(o) { try { o.remove(); } catch(e) {} });
       document.body.appendChild(overlay);
-      const dismiss = function() { try { overlay.remove(); } catch (e) {} };
+      overlay.addEventListener('click', function(ev) { if (ev.target === overlay) try { overlay.remove(); } catch(e) {} });
+      var _revOvEsc = function(ev) { if (ev.key === 'Escape') { try { overlay.remove(); } catch(e) {} document.removeEventListener('keydown', _revOvEsc); } };
+      document.addEventListener('keydown', _revOvEsc);
+      const dismiss = function() { document.removeEventListener('keydown', _revOvEsc); try { overlay.remove(); } catch (e) {} };
       closeBtn.addEventListener('click', dismiss);
       puntBtn.addEventListener('click', function() {
         // v8.1 ux optimistic: flag-on wraps with optimisticAction for pending
@@ -32044,8 +32106,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         panel.appendChild(el('div', { cls: 'gam-propose-actions' }, no, yes));
         overlay.appendChild(panel);
         document.body.appendChild(overlay);
-        yes.addEventListener('click', function() { try { overlay.remove(); } catch (e) {} resolve(true); });
-        no.addEventListener('click',  function() { try { overlay.remove(); } catch (e) {} resolve(false); });
+        overlay.addEventListener('click', function(ev) { if (ev.target === overlay) { try { overlay.remove(); } catch(e) {} resolve(false); } });
+        var _confOvEsc = function(ev) { if (ev.key === 'Escape') { try { overlay.remove(); } catch(e) {} document.removeEventListener('keydown', _confOvEsc); resolve(false); } };
+        document.addEventListener('keydown', _confOvEsc);
+        yes.addEventListener('click', function() { document.removeEventListener('keydown', _confOvEsc); try { overlay.remove(); } catch (e) {} resolve(true); });
+        no.addEventListener('click',  function() { document.removeEventListener('keydown', _confOvEsc); try { overlay.remove(); } catch (e) {} resolve(false); });
       });
     }
 
@@ -32403,7 +32468,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         '.gam-online-chip{cursor:pointer;user-select:none;padding:2px 8px;border-radius:10px;background:rgba(66,153,225,.2);color:#e2e8f0;font-size:12px;display:inline-block;position:relative}',
         '.gam-online-tooltip{position:absolute;top:100%;right:0;background:#1a202c;color:#e2e8f0;border:1px solid #2d3748;padding:8px 12px;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.5);z-index:2147483601;white-space:nowrap;margin-top:4px;font-size:12px}',
         '.gam-online-page{opacity:.7;font-size:11px}',
-        '.gam-propose-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483600;display:flex;align-items:center;justify-content:center}',
+        '.gam-propose-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:var(--z-modal);display:flex;align-items:center;justify-content:center}',
         '.gam-propose-panel{background:#1a202c;color:#e2e8f0;border:1px solid #2d3748;padding:16px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.7);min-width:420px;max-width:640px}',
         '.gam-propose-title{font-size:16px;font-weight:600;margin-bottom:12px}',
         '.gam-propose-field{margin:8px 0;display:flex;flex-direction:column;gap:4px}',
@@ -32579,11 +32644,20 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
 
   async function _onBanAndRemove(username, postId) {
+    // v10.30 storm #1: GATE ON r.ok. An unknown/failed RPC RESOLVES {ok:false} (background.js:4482) —
+    // it does NOT throw — so the old unconditional success snack lied on every failure. modBanUser /
+    // modCommentRemoveBatch are STILL unregistered (browser-side ban pending HI-1 policy decision), so
+    // this will honestly error until wired — which is the point: an honest fail beats a fake "Banned".
     try {
-      await Promise.all([
+      const results = await Promise.all([
         rpcCall('modBanUser', { target: username, duration_days: 7, reason: 'Brigade activity', via: 'thread-watch' }),
         rpcCall('modCommentRemoveBatch', { post_id: postId, author: username, via: 'thread-watch' })
       ]);
+      const bad = results.find(function (r) { return !r || !r.ok; });
+      if (bad) {
+        try { snack('Ban+Remove FAILED — nothing applied: ' + (bad && bad.error || 'rpc error'), 'error'); } catch (_) {}
+        return;
+      }
       try { snack('Banned @' + username + ' + removed comments', 'success'); } catch (_) {}
       const rowEl = document.querySelector('[data-username="' + username + '"]');
       if (rowEl) rowEl.classList.add('gam-suspect-row--actioned');
@@ -32593,8 +32667,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
 
   async function _onWatchUser(username, reason) {
+    // v10.30 storm #1: gate on r.ok. modWatchUser is unregistered (no safe passive-watch route —
+    // the only near-match, modSniperArm, may be an auto-ban-on-next-post primitive = HI-1 risk), so
+    // this honestly errors until Commander defines what "Watch" should do. No fake success.
     try {
-      await rpcCall('modWatchUser', { username: username, reason: reason, via: 'thread-watch' });
+      const r = await rpcCall('modWatchUser', { username: username, reason: reason, via: 'thread-watch' });
+      if (!r || !r.ok) {
+        try { snack('Watch FAILED — not applied: ' + (r && r.error || 'rpc error'), 'error'); } catch (_) {}
+        return;
+      }
       try { snack('Watching @' + username, 'success'); } catch (_) {}
     } catch (e) {
       try { snack('Watch failed: ' + (e && e.message || e), 'error'); } catch (_) {}
@@ -32602,8 +32683,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
 
   async function _onMarkSus(username) {
+    // v10.30 storm #1: REWIRE modMarkSus (unregistered) -> modSusMark (background.js:3087, content-
+    // allowed, schema {username, reason}, POST /mod/user/sus) + gate on r.ok. SUS is the HI-1-safe
+    // target, so this is the one thread-watch action that becomes live now instead of just honest.
     try {
-      await rpcCall('modMarkSus', { username: username, via: 'thread-watch' });
+      const r = await rpcCall('modSusMark', { username: username, reason: 'Thread Watch' });
+      if (!r || !r.ok) {
+        try { snack('SUS FAILED — not applied: ' + (r && r.error || 'rpc error'), 'error'); } catch (_) {}
+        return;
+      }
       try { snack('Marked @' + username + ' SUS', 'success'); } catch (_) {}
     } catch (e) {
       try { snack('SUS failed: ' + (e && e.message || e), 'error'); } catch (_) {}
@@ -32617,12 +32705,23 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       btn.disabled = true;
       btn.textContent = 'Banning...';
       try {
-        await Promise.all(suspects.map(function(s) {
+        // v10.30 storm #1: gate on r.ok across every op. Unknown/failed RPC resolves {ok:false}
+        // (no throw), so the old code reported "Banned N" even when 100% of ops no-op'd.
+        const perUser = await Promise.all(suspects.map(function(s) {
           return Promise.all([
             rpcCall('modBanUser', { target: s.username, duration_days: 7, reason: 'Brigade activity', via: 'thread-watch' }),
             rpcCall('modCommentRemoveBatch', { post_id: postId, author: s.username, via: 'thread-watch' })
           ]);
         }));
+        const flat = perUser.reduce(function(a, pair){ return a.concat(pair); }, []);
+        const firstBad = flat.find(function(r){ return !r || !r.ok; });
+        if (firstBad) {
+          const failN = flat.filter(function(r){ return !r || !r.ok; }).length;
+          try { snack('Bulk ban FAILED — ' + failN + '/' + flat.length + ' ops not applied: ' + (firstBad && firstBad.error || 'rpc error'), 'error'); } catch (_) {}
+          btn.disabled = false;
+          btn.textContent = 'Ban All ' + suspects.length;
+          return;
+        }
         try { snack('Banned ' + suspects.length + ' users + removed comments', 'success'); } catch (_) {}
         btn.textContent = 'Done';
       } catch (e) {
@@ -32639,9 +32738,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     btn.addEventListener('click', async function() {
       btn.disabled = true;
       try {
-        await Promise.all(suspects.map(function(s) {
+        // v10.30 storm #1: gate on r.ok. modWatchUser unregistered -> honest fail until wired.
+        const results = await Promise.all(suspects.map(function(s) {
           return rpcCall('modWatchUser', { username: s.username, reason: 'Thread Watch bulk', via: 'thread-watch' });
         }));
+        const failN = results.filter(function(r){ return !r || !r.ok; }).length;
+        if (failN) {
+          try { snack('Bulk watch FAILED — ' + failN + '/' + results.length + ' not applied', 'error'); } catch (_) {}
+          btn.disabled = false;
+          btn.textContent = 'Watch All ' + suspects.length;
+          return;
+        }
         try { snack('Watching ' + suspects.length + ' users', 'success'); } catch (_) {}
         btn.textContent = 'Done';
       } catch (e) {
