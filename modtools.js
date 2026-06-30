@@ -27119,27 +27119,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       const ts = document.createElement('style');
       ts.id = 'gam-token-sheet';
       ts.textContent = `
+/* STORM-15: tokens duplicated from Block 1 (:root at L25736) removed to kill cascade race. */
 :root {
-  --bb-amber: #ff9933;
   --bb-amber-warm: #f0a040;
   --bb-amber-cool: #E8A317;
-  --bb-red: #ff3b3b;
-  --bb-green: #44dd66;
-  --bb-green-dim: #3dd68c;
-  --bb-cyan: #66ccff;
   --bb-purple: #a78bfa;
-  --bb-yellow: #ffd84d;
   --bb-blue: #4A9EFF;
-  --bb-bg: #0a0a0b;
-  --bb-panel: #131316;
-  --bb-sunken: #050507;
-  --bb-hover: #1c1c20;
-  --bb-ink: #e8e6e1;
-  --bb-ink-dim: #9b9892;
-  --bb-ink-faint: #7a7672;
-  --bb-line: #2a2825;
-  --bb-line-hot: #3d3a35;
-  --bb-r: 0;
   --bb-r-sm: 3px;
   --bb-r-md: 4px;
   --bb-motion-instant: 50ms;
