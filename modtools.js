@@ -31888,9 +31888,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       panel.appendChild(el('div', { cls: 'gam-propose-actions' }, cancel, submit));
       panel.appendChild(status);
       overlay.appendChild(panel);
+      document.querySelectorAll('.gam-propose-overlay').forEach(function(o) { try { o.remove(); } catch(e) {} });
       document.body.appendChild(overlay);
+      overlay.addEventListener('click', function(ev) { if (ev.target === overlay) try { overlay.remove(); } catch(e) {} });
+      var _propOvEsc = function(ev) { if (ev.key === 'Escape') { try { overlay.remove(); } catch(e) {} document.removeEventListener('keydown', _propOvEsc); } };
+      document.addEventListener('keydown', _propOvEsc);
 
-      cancel.addEventListener('click', function() { try { overlay.remove(); } catch (e) {} });
+      cancel.addEventListener('click', function() { document.removeEventListener('keydown', _propOvEsc); try { overlay.remove(); } catch (e) {} });
 
       submit.addEventListener('click', async function() {
         submit.disabled = true;
@@ -32000,8 +32004,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       if (!isLead) try { vetoBtn.setAttribute('disabled', 'disabled'); } catch (e) {}
       panel.appendChild(el('div', { cls: 'gam-propose-actions' }, execBtn, puntBtn, vetoBtn, closeBtn));
       overlay.appendChild(panel);
+      document.querySelectorAll('.gam-propose-overlay').forEach(function(o) { try { o.remove(); } catch(e) {} });
       document.body.appendChild(overlay);
-      const dismiss = function() { try { overlay.remove(); } catch (e) {} };
+      overlay.addEventListener('click', function(ev) { if (ev.target === overlay) try { overlay.remove(); } catch(e) {} });
+      var _revOvEsc = function(ev) { if (ev.key === 'Escape') { try { overlay.remove(); } catch(e) {} document.removeEventListener('keydown', _revOvEsc); } };
+      document.addEventListener('keydown', _revOvEsc);
+      const dismiss = function() { document.removeEventListener('keydown', _revOvEsc); try { overlay.remove(); } catch (e) {} };
       closeBtn.addEventListener('click', dismiss);
       puntBtn.addEventListener('click', function() {
         // v8.1 ux optimistic: flag-on wraps with optimisticAction for pending
@@ -32113,8 +32121,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         panel.appendChild(el('div', { cls: 'gam-propose-actions' }, no, yes));
         overlay.appendChild(panel);
         document.body.appendChild(overlay);
-        yes.addEventListener('click', function() { try { overlay.remove(); } catch (e) {} resolve(true); });
-        no.addEventListener('click',  function() { try { overlay.remove(); } catch (e) {} resolve(false); });
+        overlay.addEventListener('click', function(ev) { if (ev.target === overlay) { try { overlay.remove(); } catch(e) {} resolve(false); } });
+        var _confOvEsc = function(ev) { if (ev.key === 'Escape') { try { overlay.remove(); } catch(e) {} document.removeEventListener('keydown', _confOvEsc); resolve(false); } };
+        document.addEventListener('keydown', _confOvEsc);
+        yes.addEventListener('click', function() { document.removeEventListener('keydown', _confOvEsc); try { overlay.remove(); } catch (e) {} resolve(true); });
+        no.addEventListener('click',  function() { document.removeEventListener('keydown', _confOvEsc); try { overlay.remove(); } catch (e) {} resolve(false); });
       });
     }
 
@@ -32472,7 +32483,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         '.gam-online-chip{cursor:pointer;user-select:none;padding:2px 8px;border-radius:10px;background:rgba(66,153,225,.2);color:#e2e8f0;font-size:12px;display:inline-block;position:relative}',
         '.gam-online-tooltip{position:absolute;top:100%;right:0;background:#1a202c;color:#e2e8f0;border:1px solid #2d3748;padding:8px 12px;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.5);z-index:2147483601;white-space:nowrap;margin-top:4px;font-size:12px}',
         '.gam-online-page{opacity:.7;font-size:11px}',
-        '.gam-propose-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2147483600;display:flex;align-items:center;justify-content:center}',
+        '.gam-propose-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:var(--z-modal);display:flex;align-items:center;justify-content:center}',
         '.gam-propose-panel{background:#1a202c;color:#e2e8f0;border:1px solid #2d3748;padding:16px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.7);min-width:420px;max-width:640px}',
         '.gam-propose-title{font-size:16px;font-weight:600;margin-bottom:12px}',
         '.gam-propose-field{margin:8px 0;display:flex;flex-direction:column;gap:4px}',
