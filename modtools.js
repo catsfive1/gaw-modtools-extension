@@ -15169,7 +15169,7 @@ Analyze this comment against the community rules. Then write a brief, profession
   function closeTriagePopover(){ if(triagePopover){ triagePopover.remove(); triagePopover=null; } }
 
   function scrapeCurrentPage(){
-    const logs=document.querySelectorAll('.log');
+    const logs=trySelectAll('userLogRow');
     let added=0;
     const newUsernames = [];
     logs.forEach(log=>{
@@ -15469,10 +15469,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     const candidates = [];
 
-    const logs = document.querySelectorAll('.log');
+    const logs = trySelectAll('userLogRow');
     logs.forEach((log, domIdx)=>{
       const spans=log.querySelectorAll('span'); if(spans.length<2) return;
-      const username=spans[0].textContent.trim(); if(!username) return;
+      const username=spans[0].textContent.trim()||log.dataset.username||''; if(!username) return;
       const joinText=spans[1]?spans[1].textContent.trim():'';
       const ipHash=spans[2]?spans[2].textContent.trim():'';
       seenUsernames.add(username.toLowerCase());
@@ -15621,7 +15621,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (!r.ok) return 0;
       const html = await r.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
-      const logs = doc.querySelectorAll('.log');
+      const logs = trySelectAll('userLogRow', doc);
       let added = 0;
       const newUsernames = [];
       logs.forEach(log => {
@@ -16063,7 +16063,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     const clusters=getIPClusters(users);
     const raidClusters=Object.entries(clusters).filter(([,names])=>names.length>=3);
     raidClusters.forEach(([prefix,names])=>{
-      aEl.innerHTML+=`<div class="gam-t-alert gam-t-alert-warn">\u{26A0}\u{FE0F} <b>Burst detected:</b> ${names.length} users from IP range ${prefix}.x.x &mdash; <a href="#" class="gam-t-alert-link" data-cluster="${prefix}">Filter this cluster</a> &middot; <a href="#" class="gam-t-alert-link gam-t-alert-selectall" data-cluster-select="${prefix}">☑ Select all ${names.length}</a></div>`;
+      aEl.innerHTML+=`<div class="gam-t-alert gam-t-alert-warn">\u{26A0}\u{FE0F} <b>Burst detected:</b> ${names.length} users from IP range ${prefix}.x.x &mdash; <a href="#" class="gam-t-alert-link" data-cluster="${prefix}">Filter this cluster</a> &middot; <a href="#" class="gam-t-alert-link gam-t-alert-selectall" data-cluster-select="${prefix}">☑ Select all ${names.length}</a> &middot; <a href="#" class="gam-t-alert-link gam-t-alert-bulkdr" data-cluster-dr="${prefix}">\u{1F480} Death Row all ${names.length}</a></div>`;
     });
     const drPending=getDeathRowPending();
     if(drPending.length>0){
@@ -16100,6 +16100,17 @@ Analyze this comment against the community rules. Then write a brief, profession
         triageFilter='cluster-'+prefix;
         try { snack('☑ Selected ' + names.length + ' from ' + prefix + '.x.x — choose a batch action below', 'success'); } catch(_){}
         refreshTriageConsole();
+      });
+    });
+    // v10.36.0: one-click "Death Row all N" on cluster burst alert — no select step needed.
+    // HI-1 intact: routes through batchDeathRow → addToDeathRow (72h delay, idempotent, 20s undo).
+    aEl.querySelectorAll('.gam-t-alert-bulkdr').forEach(a=>{
+      a.addEventListener('click', e=>{
+        e.preventDefault();
+        const prefix=a.dataset.clusterDr;
+        const names=(getIPClusters(users)||{})[prefix]||[];
+        if(!names.length){ snack('No cluster users found', 'warn'); return; }
+        batchDeathRow(names);
       });
     });
     const flushBtn = aEl.querySelector('[data-flush="dr"]');
@@ -16888,7 +16899,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     // v5.3.0: use self-healing selector (tries fallbacks if .main-content moves)
     const mainContent = trySelect('mainContent') || document.querySelector('.content-section') || document.body;
 
-    const nativeLogs=document.querySelectorAll('.log');
+    const nativeLogs=trySelectAll('userLogRow');
     nativeLogs.forEach(l=>{ l.style.display='none'; });
     const nativeHeaders=document.querySelectorAll('.page-header, .section-header');
     nativeHeaders.forEach(h=>{ h.style.display='none'; });
@@ -16923,7 +16934,14 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (_triageObsDebounce) clearTimeout(_triageObsDebounce);
       _triageObsDebounce = setTimeout(()=>{
         _triageObsDebounce = null;
-        const newLogs=document.querySelectorAll('.log:not([style*="display: none"])');
+        const newLogs=(function(){
+          const fbs=_SEL_FB.userLogRow||['.log'];
+          for(let i=0;i<fbs.length;i++){
+            const els=[...document.querySelectorAll(fbs[i]+':not([style*="display: none"])')];
+            if(els.length) return els;
+          }
+          return [];
+        })();
         if(newLogs.length>0){
           newLogs.forEach(l=>{ l.style.display='none'; });
           scrapeCurrentPage();
