@@ -1352,7 +1352,7 @@
         Object.values(lsGet(K.ROSTER, {})).forEach(r=>{ const s=r && r.status || 'unknown'; out[s]=(out[s]||0)+1; });
         return out;
       })(),
-      recentActions: (lsGet(K.LOG, [])).slice(-25),
+      recentActions: (lsGet(K.LOG, [])).slice(-3),
       deathRowPending: getDeathRowPending().map(d=>({username:d.username, executeAt:new Date(d.executeAt).toISOString()})),
       activeWatchlist: Object.keys(lsGet(K.WATCH, {})),
       // v5.2.0 H2: sniff log excluded from snapshot by default (may contain auth tokens / moderation payloads).
