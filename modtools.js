@@ -8467,7 +8467,7 @@
     requestAnimationFrame(()=>bd.style.opacity='1');
     return bd;
   }
-  function showModal(id, title, content, w='480px'){
+  function showModal(id, title, content, w='480px', titleIsHtml){
     closeAllPanels();
     // v5.2.2: side-dock mode for the Mod Console. Mod Console is pinnable to
     // left or right edge instead of modal-center. Toggle via pin button on header.
@@ -8486,7 +8486,7 @@
     // they do not rename or remove any locked selector. Title gets a unique id.
     const _titleId = 'gam-modal-title-' + id;
     const _titleNode = el('div',{cls:'gam-modal-title', id:_titleId});
-    _titleNode.innerHTML = title;  // title is caller-built trusted markup (pre-existing behavior)
+    if (titleIsHtml) { _titleNode.innerHTML = title; } else { _titleNode.textContent = String(title || ''); }
     const p=el('div',{id, cls, role:'dialog', 'aria-modal':'true', 'aria-labelledby':_titleId, style: isDock ? {} : {width:w}},
       el('div',{cls:'gam-modal-header'},
         _titleNode,
@@ -9118,7 +9118,7 @@
 
     body.appendChild(nav);
     body.appendChild(panels);
-    const mc = showModal('gam-mc-panel', titleHtml, body, '680px');
+    const mc = showModal('gam-mc-panel', titleHtml, body, '680px', true);
     // Stash state so the pin-toggle button can reopen at the same context.
     if (mc){ mc._gamUsername = username; mc._gamItem = item; mc._gamTab = tab; }
     renderTab(tab);
