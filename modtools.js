@@ -689,7 +689,17 @@
 
       // Init new page UI
       if(now.users && !document.getElementById('gam-triage')){
-        setTimeout(()=>{ try{ buildTriageConsole(); }catch(e){} }, 700);
+        setTimeout(()=>{
+          try{ buildTriageConsole(); }
+          catch(e){
+            // v10.36.2 P0 FIX: this catch used to swallow silently, leaving the
+            // native /users list rendered with zero indication ModTools failed to
+            // mount (Commander: "as if ModTools isn't running at all"). Log +
+            // show a persistent banner instead -- never silently revert again.
+            console.error('[modtools] buildTriageConsole boot failed:', e);
+            _showTriageMountFailBanner(e);
+          }
+        }, 700);
       }
       if(now.queue){
         setTimeout(()=>{ try{ enhanceQueuePage(); }catch(e){} }, 700);
@@ -15184,11 +15194,15 @@ Analyze this comment against the community rules. Then write a brief, profession
     let added=0;
     const newUsernames = [];
     logs.forEach(log=>{
-      const spans=log.querySelectorAll('span'); if(spans.length<2) return;
-      const u=spans[0].textContent.trim();
+      // v10.36.2 P0 FIX: was a hard `spans.length<2` gate that dropped the whole
+      // row whenever GAW's DOM didn't match the expected span layout. Derive
+      // username defensively instead; every other field stays optional.
+      const spans=log.querySelectorAll('span');
+      const u=(spans[0]?spans[0].textContent.trim():'') || log.dataset.username || (log.querySelector('a[href^="/u/"]')?.textContent.trim()) || '';
+      if(!u) return;
       const j=spans[1]?spans[1].textContent.trim():'';
       const ip=spans[2]?spans[2].textContent.trim():'';
-      if(u && rosterAdd(u,j,ip)){
+      if(rosterAdd(u,j,ip)){
         added++;
         newUsernames.push(u);
       }
@@ -15482,8 +15496,12 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     const logs = trySelectAll('userLogRow');
     logs.forEach((log, domIdx)=>{
-      const spans=log.querySelectorAll('span'); if(spans.length<2) return;
-      const username=spans[0].textContent.trim()||log.dataset.username||''; if(!username) return;
+      // v10.36.2 P0 FIX: dropped the hard `spans.length<2` gate -- it short-circuited
+      // BEFORE the dataset.username fallback ever ran, so any GAW DOM drift discarded
+      // the row entirely instead of falling back. Derive username defensively.
+      const spans=log.querySelectorAll('span');
+      const username=(spans[0]?spans[0].textContent.trim():'') || log.dataset.username || (log.querySelector('a[href^="/u/"]')?.textContent.trim()) || '';
+      if(!username) return;
       const joinText=spans[1]?spans[1].textContent.trim():'';
       const ipHash=spans[2]?spans[2].textContent.trim():'';
       seenUsernames.add(username.toLowerCase());
@@ -15636,12 +15654,14 @@ Analyze this comment against the community rules. Then write a brief, profession
       let added = 0;
       const newUsernames = [];
       logs.forEach(log => {
+        // v10.36.2 P0 FIX: same structure-agnostic extraction as scrapeCurrentPage()
+        // -- see that fn for the rationale.
         const spans = log.querySelectorAll('span');
-        if (spans.length < 2) return;
-        const u = spans[0].textContent.trim();
+        const u = (spans[0]?spans[0].textContent.trim():'') || log.dataset.username || (log.querySelector('a[href^="/u/"]')?.textContent.trim()) || '';
+        if (!u) return;
         const j = spans[1] ? spans[1].textContent.trim() : '';
         const ip = spans[2] ? spans[2].textContent.trim() : '';
-        if (u && rosterAdd(u, j, ip)) { added++; newUsernames.push(u); }
+        if (rosterAdd(u, j, ip)) { added++; newUsernames.push(u); }
       });
       if (newUsernames.length > 0) {
         try { applyAutoDeathRowRules(newUsernames); } catch(e){}
@@ -16866,6 +16886,23 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
     } catch(e){ console.warn('[modtools] raid score scan error', e); }
     try { if (typeof updateRaidIcon === 'function') updateRaidIcon(); } catch(_){}
+  }
+
+  // v10.36.2 P0 FIX: on Triage Console mount failure, render a persistent visible
+  // banner instead of silently reverting to the native /users list. Called from
+  // both mount paths (SPA-nav boot call above, and the safeFeature-wrapped
+  // fresh-load call below) so a DOM-drift or thrown error can never be invisible.
+  function _showTriageMountFailBanner(err){
+    try {
+      if (document.getElementById('gam-triage-fail-banner')) return;
+      const msg = (err && err.message) || String(err) || 'unknown error';
+      const b = el('div', {
+        id: 'gam-triage-fail-banner',
+        style: 'margin:8px;padding:10px 14px;border-radius:6px;background:'+GAM_TOK.dangerSoft+';border:1px solid '+GAM_TOK.danger+';color:'+GAM_TOK.danger+';font:600 13px/1.4 -apple-system,sans-serif;'
+      }, '⚠ ModTools Triage failed to load (' + msg + '). Showing native list. Tell Claude.');
+      const mount = document.querySelector('.main-content') || document.querySelector('.content-section') || document.body;
+      mount.insertBefore(b, mount.firstChild);
+    } catch(_) {}
   }
 
   function buildTriageConsole(){
@@ -30952,8 +30989,17 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 
     if (IS_USERS_PAGE){
       // AF-17 (Rule 50): safeFeature wraps bare call to isolate DOM errors
-      safeFeature('buildTriageConsole', () => buildTriageConsole());
-      snack(`\u{1F6E1} Triage Console loaded \u2014 ${rosterCount().total} users tracked`,'info');
+      // v10.36.2 P0 FIX: this used to fire the "loaded" snack unconditionally --
+      // even when safeFeature caught a throw (returns null) and already snacked
+      // "failed -- check console" one line earlier. Gate on the actual result and
+      // add a persistent banner so a caught mount failure is never just a toast
+      // that vanishes in 4 seconds.
+      const _triageResult = safeFeature('buildTriageConsole', () => buildTriageConsole());
+      if (_triageResult !== null) {
+        snack(`\u{1F6E1} Triage Console loaded \u2014 ${rosterCount().total} users tracked`,'info');
+      } else if (!document.getElementById('gam-triage')) {
+        _showTriageMountFailBanner(new Error('mount failed -- see console'));
+      }
     }
     if (IS_BAN_PAGE){
       safeFeature('enhanceBanPage', () => enhanceBanPage());
