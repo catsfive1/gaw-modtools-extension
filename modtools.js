@@ -13340,9 +13340,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     // secret on the worker; extension never sees it.
     addToggle('Deep Analysis on Load', 'deepAnalysisEnabled', 'Auto-run AI conformity check in background for each queue item when the queue page loads.');
 
-    // v9.12.0 - Auto-sticky management (Commander #15/#16). Disabled by default
-    // since the underlying /sticky toggle bug is mitigated by client-side
-    // cooldown but not eliminated. Lead must opt in.
+    // v9.12.0 - Auto-sticky management (Commander #15/#16). Re-enabled by
+    // default since ASK-048 (stale-DOM double-fire fix); see autoUnstickyTick.
     closeCard(); openCard('auto-sticky', '\u{1F4CC} Auto-Sticky Management', 1, 4, true, { sub:'Auto-unsticky thresholds + AI sticky detector' });
     addToggle('Auto-unsticky old / popular posts', 'autoUnstickyEnabled',
       'Every 4 min on the home/community pages: unsticky any sticky older than maxHours OR with more than upvoteThreshold upvotes. Per-post 6h cooldown stored in chrome.storage.local prevents re-toggling. On by default.');
