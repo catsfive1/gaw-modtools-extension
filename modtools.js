@@ -15232,8 +15232,12 @@ Analyze this comment against the community rules. Then write a brief, profession
       // v10.36.2 P0 FIX: was a hard `spans.length<2` gate that dropped the whole
       // row whenever GAW's DOM didn't match the expected span layout. Derive
       // username defensively instead; every other field stays optional.
+      // v10.36.5 P2 FIX: dataset/anchor checked BEFORE spans[0] -- an explicit
+      // data-username attribute or a real /u/ profile link is always a more
+      // reliable signal than "whatever text the first span happens to contain"
+      // (a badge/status span placed first would otherwise silently win).
       const spans=log.querySelectorAll('span');
-      const u=(spans[0]?spans[0].textContent.trim():'') || log.dataset.username || (log.querySelector('a[href^="/u/"]')?.textContent.trim()) || '';
+      const u=log.dataset.username || (log.querySelector('a[href^="/u/"]')?.textContent.trim()) || (spans[0]?spans[0].textContent.trim():'') || '';
       if(!u) return;
       const j=spans[1]?spans[1].textContent.trim():'';
       const ip=spans[2]?spans[2].textContent.trim():'';
@@ -15534,8 +15538,11 @@ Analyze this comment against the community rules. Then write a brief, profession
       // v10.36.2 P0 FIX: dropped the hard `spans.length<2` gate -- it short-circuited
       // BEFORE the dataset.username fallback ever ran, so any GAW DOM drift discarded
       // the row entirely instead of falling back. Derive username defensively.
+      // v10.36.5 P2 FIX: dataset/anchor checked BEFORE spans[0] -- see
+      // scrapeCurrentPage() for the rationale (a stray non-name span placed
+      // first would otherwise silently win over the real signal).
       const spans=log.querySelectorAll('span');
-      const username=(spans[0]?spans[0].textContent.trim():'') || log.dataset.username || (log.querySelector('a[href^="/u/"]')?.textContent.trim()) || '';
+      const username=log.dataset.username || (log.querySelector('a[href^="/u/"]')?.textContent.trim()) || (spans[0]?spans[0].textContent.trim():'') || '';
       if(!username) return;
       const joinText=spans[1]?spans[1].textContent.trim():'';
       const ipHash=spans[2]?spans[2].textContent.trim():'';
@@ -15691,8 +15698,10 @@ Analyze this comment against the community rules. Then write a brief, profession
       logs.forEach(log => {
         // v10.36.2 P0 FIX: same structure-agnostic extraction as scrapeCurrentPage()
         // -- see that fn for the rationale.
+        // v10.36.5 P2 FIX: dataset/anchor checked BEFORE spans[0] -- see
+        // scrapeCurrentPage() for the rationale.
         const spans = log.querySelectorAll('span');
-        const u = (spans[0]?spans[0].textContent.trim():'') || log.dataset.username || (log.querySelector('a[href^="/u/"]')?.textContent.trim()) || '';
+        const u = log.dataset.username || (log.querySelector('a[href^="/u/"]')?.textContent.trim()) || (spans[0]?spans[0].textContent.trim():'') || '';
         if (!u) return;
         const j = spans[1] ? spans[1].textContent.trim() : '';
         const ip = spans[2] ? spans[2].textContent.trim() : '';
@@ -15711,12 +15720,22 @@ Analyze this comment against the community rules. Then write a brief, profession
   function refreshTriageConsole(){
     const container=document.getElementById('gam-triage');
     if(!container) return;
-    const users=buildTriageData();
-    renderTriageStats(container, users);
-    renderTriageAlerts(container, users);
-    renderTriageToolbar(container, users);
-    renderTriageBatchBar(container);
-    renderTriageList(container, users);
+    // v10.36.5 P2 FIX: the v10.36.2 P0 fix only wrapped the INITIAL mount call.
+    // This render path is hit by ~44 other call sites (toolbar filters, batch
+    // actions, cluster alert links, per-row buttons) -- a throw here used to
+    // propagate uncaught, silently freezing/blanking the console (container
+    // still exists, so the P0 fail-banner's missing-container gate never fires).
+    try {
+      const users=buildTriageData();
+      renderTriageStats(container, users);
+      renderTriageAlerts(container, users);
+      renderTriageToolbar(container, users);
+      renderTriageBatchBar(container);
+      renderTriageList(container, users);
+    } catch(e){
+      console.error('[modtools] refreshTriageConsole render failed:', e);
+      _showTriageMountFailBanner(e);
+    }
 
     // v8.6.8 / v9.3.7 (P1-5): /users auto-refresh — 60s cadence.
     // Tab visibility-aware: skip the fetch when the tab is hidden, but keep
@@ -16990,6 +17009,14 @@ Analyze this comment against the community rules. Then write a brief, profession
 
     // v5.3.0: use self-healing selector (tries fallbacks if .main-content moves)
     const mainContent = trySelect('mainContent') || document.querySelector('.content-section') || document.body;
+    // v10.36.5 P1 FIX: falling all the way through to document.body means every
+    // known mount-target selector missed -- insertBefore on body never throws,
+    // so this used to report success silently (no banner, no warning). Flag it
+    // visibly; the console still mounts (degraded position) but the miss is honest.
+    if (mainContent === document.body) {
+      console.warn('[ModTools] ⚠ Triage mount target: all known selectors missed, falling back to document.body (layout may look off)');
+      _showTriageMountFailBanner(new Error('mount target selectors all missed -- inserted into document.body as a fallback'));
+    }
 
     const nativeLogs=trySelectAll('userLogRow');
     nativeLogs.forEach(l=>{ l.style.display='none'; });
@@ -17048,7 +17075,15 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (!document.getElementById('gam-triage') && IS_USERS_PAGE){
         clearInterval(_triageHeartbeat);
         console.warn('[ModTools] \u26A0 Triage console disappeared from DOM, re-injecting...');
-        buildTriageConsole();
+        // v10.36.5 P0 FIX: this was a bare call -- a 3rd mount site the v10.36.2
+        // P0 fix (silent mount-fail swallow) didn't cover. clearInterval already
+        // fired above so there is no retry; an uncaught throw here left the mod
+        // on the native list with zero signal, same failure class as before.
+        try { buildTriageConsole(); }
+        catch(e){
+          console.error('[modtools] heartbeat re-mount failed:', e);
+          _showTriageMountFailBanner(e);
+        }
       }
     }, 8000);
 
