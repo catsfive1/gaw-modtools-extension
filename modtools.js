@@ -8040,6 +8040,42 @@
     });
     panelOpen=null;
   }
+
+  // v10.36.4 P2 STORM #5 prereq: openCategoryMenu(anchor, items) -- shared
+  // popover positioning + lifecycle for the upcoming 5-section bar taxonomy
+  // category buttons (QUEUE/ACT/COORD/SYS). Extracted from the existing
+  // upward + horizontal-clamped popover pattern already used elsewhere (e.g.
+  // _showActiveModsPopover) -- a refactor of shipping positioning logic, not
+  // new invention. Menu width is measured post-layout (offsetWidth) instead
+  // of a hardcoded max-width guess, since category menus hold a variable
+  // number of moved controls. `items` are existing DOM nodes moved in
+  // verbatim (handlers travel with them) -- this helper never rebuilds a
+  // control, it only repositions the ones the caller hands it.
+  function openCategoryMenu(anchor, items){
+    closeAllPanels();
+    const existing = document.getElementById('gam-cat-menu');
+    if (existing) existing.remove();
+    const menu = el('div', {
+      id: 'gam-cat-menu',
+      role: 'menu',
+      'data-gam-orphan-backdrop': '', // swept by closeAllPanels' generic opt-in marker
+      style: 'position:fixed;z-index:99999996;background:'+GAM_TOK.surfacePanel+';border:1px solid '+GAM_TOK.border+';border-radius:6px;padding:4px;display:flex;flex-direction:column;gap:2px;min-width:160px;max-width:320px;max-height:60vh;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.7);'
+    });
+    (items || []).forEach(function(item){ if (item instanceof Node) menu.appendChild(item); });
+    document.body.appendChild(menu);
+    const r = anchor.getBoundingClientRect();
+    menu.style.left = Math.max(8, Math.min(window.innerWidth - menu.offsetWidth - 8, r.left)) + 'px';
+    menu.style.bottom = (window.innerHeight - r.top + 6) + 'px';
+    panelOpen = 'category-menu';
+    const dismiss = function(e){
+      if (menu.contains(e.target) || anchor.contains(e.target)) return;
+      menu.remove();
+      if (panelOpen === 'category-menu') panelOpen = null;
+      document.removeEventListener('click', dismiss, true);
+    };
+    setTimeout(function(){ document.addEventListener('click', dismiss, true); }, 0);
+    return menu;
+  }
   // v9.3.1 (P0-2): defensive orphan-backdrop sweep. Runs on init and every
   // 30s while the page is visible. If a backdrop element exists but no
   // .gam-modal is open AND no token-onboard input is focused, the backdrop
