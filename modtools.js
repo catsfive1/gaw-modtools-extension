@@ -16302,25 +16302,26 @@ Analyze this comment against the community rules. Then write a brief, profession
   }
 
   async function batchBanUsers(usernames){
-    snack(`Banning ${usernames.length} users...`,'info');
-    let ok=0, fail=0;
-    for(const username of usernames){
-      try {
-        const success=await executeBan(username, getUsersBanReason(), 0);
-        if(success){
-          rosterSetStatus(username,'banned');
-          verifyBan(username).then(v=>{
-            if(v !== null){ markVerified(username, v); refreshTriageConsole(); }
-          });
-          logAction({type:'ban', user:username, violation:'username', duration:-1, reason:getUsersBanReason(), source:'users-batch'});
-          ok++;
-        } else { fail++; }
-      } catch(e){ fail++; }
-      await new Promise(r=>setTimeout(r,1500));
-    }
+    // v10.36.2 P1 FIX (HI-1): was a direct executeBan(...,0) loop -- see
+    // instantPermaBan for the full rationale. Same fix, batch shape (mirrors
+    // the existing batchDeathRow() below): queue everyone through
+    // addToDeathRow(0ms) then ONE reaper fire, reusing processDeathRow's
+    // per-inmate execute+verify+audit+lock+stagger logic instead of
+    // duplicating it here.
+    const reason = getUsersBanReason();
+    usernames.forEach(username=>{
+      const added = addToDeathRow(username, 0, reason, { fromUserAction: true });
+      if (!added){
+        const dr = getDeathRow();
+        const entry = dr.find(d => d.username.toLowerCase() === username.toLowerCase());
+        if (entry) { entry.executeAt = Date.now(); saveDeathRow(dr); }
+      }
+      rosterSetStatus(username, 'deathrow');
+    });
+    snack(`Queuing ${usernames.length} user(s) for immediate execution...`,'info');
     triageSelected.clear();
     refreshTriageConsole();
-    snack(`Batch ban: ${ok} done${fail>0?', '+fail+' failed':''}`,'success');
+    await processDeathRow();
   }
 
   async function batchDeathRow(usernames){
@@ -16752,18 +16753,26 @@ Analyze this comment against the community rules. Then write a brief, profession
   }
 
   async function instantPermaBan(username){
+    // v10.36.2 P1 FIX (HI-1): was a direct executeBan(...,0) call -- bypassed
+    // the Death-Row choke-point entirely (no idempotency check, no queue
+    // record, no reaper audit trail). Per Commander's guarded-break-glass
+    // decision: still fires immediately (shift-click stays the existing
+    // no-confirm "power move"), but now routes through addToDeathRow(0ms) +
+    // an explicit reaper fire, so the choke-point, idempotency, and Death-Row
+    // audit log all hold. processDeathRow() already handles ban+verify+audit
+    // +snack per inmate -- reused as-is instead of duplicated here.
     snack(`Banning ${username}...`,'info');
     try {
-      const ok=await executeBan(username, getUsersBanReason(), 0);
-      if(ok){
-        const v=await verifyBan(username);
-        rosterSetStatus(username,'banned');
-        if (v !== null) markVerified(username, v);
-        logAction({type:'ban', user:username, violation:'username', duration:-1, reason:getUsersBanReason(), source:'users-triage-shift', verified:v});
-        snack(`${username} BANNED${v===true?' (VERIFIED)':''}`, 'success');
-      } else {
-        snack(`FAILED: ${username}`,'error');
+      const added = addToDeathRow(username, 0, getUsersBanReason(), { fromUserAction: true });
+      if (!added){
+        // Already queued (e.g. an earlier 72h DR add) -- force it ready now
+        // instead of silently no-op'ing on addToDeathRow's dupe-check.
+        const dr = getDeathRow();
+        const entry = dr.find(d => d.username.toLowerCase() === username.toLowerCase());
+        if (entry) { entry.executeAt = Date.now(); saveDeathRow(dr); }
       }
+      rosterSetStatus(username, 'deathrow');
+      await processDeathRow();
     } catch(e){ snack(`FAILED: ${username}`,'error'); }
     refreshTriageConsole();
   }
