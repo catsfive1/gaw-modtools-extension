@@ -51,6 +51,17 @@
     UNIVERSAL_UNDO:  true
   });
 
+  // v10.36.1 HOTFIX: MSG_QUEUE_KEY must be declared BEFORE any synchronous IIFE
+  // that can trigger rpcCall(). rpcCall (fn declarations are hoisted) fires
+  // _replayMsgQueue() fire-and-forget on every successful response, which reads
+  // MSG_QUEUE_KEY. The original AF-14 placement at L27939 caused the same class
+  // of 'Cannot access before initialization' TDZ crash as the FEATURE_FLAGS
+  // incident above -- caught internally by _replayMsgQueue's own try/catch, so
+  // it only ever surfaced as a repeating [gam:storage] console warning instead
+  // of a visible boot failure. Moved here per the same precedent.
+  const MSG_QUEUE_KEY = 'gam_msg_queue';
+  const MSG_QUEUE_MAX = 20;
+
   // v10.8.0 M6 (UIUX-04 B.2): centralized AI tone color palette.
   // Three render sites (modmail panel, mod-console inline, popover) used to
   // have inconsistent palettes. Single source of truth here.
@@ -27936,8 +27947,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   // AF-14 (Rule 40): gam_msg_queue -- SW-downtime outbox for fire-and-forget RPCs.
   // Callers pass { queued: true } to enqueue on EXT_CONTEXT_INVALIDATED instead of drop.
   // Replay fires at top of each successful rpcCall to drain the outbox.
-  const MSG_QUEUE_KEY = 'gam_msg_queue';
-  const MSG_QUEUE_MAX = 20;
+  // v10.36.1 HOTFIX: MSG_QUEUE_KEY/MSG_QUEUE_MAX hoisted to top of IIFE (see
+  // v10.36.1 HOTFIX comment at the file head). Original location replaced
+  // with this no-op marker to preserve audit trail.
 
   async function _enqueueRpc(name, args) {
     try {
