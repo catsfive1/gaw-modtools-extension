@@ -1699,6 +1699,7 @@
     // the Repair button couldn't restore it. Safe-OFF default; now Repair-aware.
     aiStickyDetectorEnabled: false,
     quickStickyKeysEnabled: true,        // v8.4.0: hover post + S/U to (un)sticky (FOXY-style)
+    gam_status_bar_grouped: true,        // v10.36.9: Wave-2 bar taxonomy (5-section) on by default; toggle off for the flat legacy bar
     lastTokenPromptAt: 0,                // v8.4.1: weekly debounce on token onboarding modal (unix-ms)
     sniffEnabled: false,                 // E7: endpoint sniffer off by default
     defaultDeathRowHours: 72,            // v5.1.3: 1-click DR duration
@@ -13306,6 +13307,9 @@ Analyze this comment against the community rules. Then write a brief, profession
     });
     addToggle('Theme Harmony', 'harmonizeTheme', 'Derive ModTools accent from GAW\'s own color wheel (180\u00B0 complement).', ()=>{ /* reload required */ });
     addToggle('Mail Hover Highlight', 'mailHoverHighlight', 'Highlight modmail senders throughout the page when hovering a modmail message.');
+    // v10.36.9: Wave-2 bar taxonomy rollback lever. On = SHIELD/HOT/QUEUE/
+    // ACT/COORD/SYS/CHAT grouping. Off = the original flat 32-icon bar.
+    addToggle('Grouped bottom bar', 'gam_status_bar_grouped', 'Group the bottom bar into labeled sections (QUEUE/ACT/COORD/SYS) instead of one flat row of icons. Turn off to go back to the original layout. Reload the page after changing this.');
 
     // v10.15.0 D-22: replay status-bar tour. Universally available (not
     // lead-gated). Resets the seen-flag and re-fires the 7-stop tour.
@@ -23884,79 +23888,130 @@ Analyze this comment against the community rules. Then write a brief, profession
     barSpacer.style.cssText = 'flex:1 1 auto;min-width:8px';
     const chatBtn_v980 = ModChat.createStatusBarButton();
 
-    const bar = el('div', { id:'gam-status-bar' },
-      brandBtn,
-      gearBtn,
-      el('span', { cls:'gam-bar-sep' }),
-      el('button',{ cls:'gam-bar-icon', onclick:openModLog, title:'Mod log + Death Row queue \u2014 your action history (Ctrl+Shift+L)', 'aria-label':'Mod log + Death Row queue' }, '\u{1F4CB}'), // v10.8.0 M11
-      inboxBtn,
-      peopleBtn,
-      el('span', { cls:'gam-bar-sep' }),
-      el('button',{ cls:'gam-bar-icon', onclick:openHelp, title:'ModTools rules + help (Ctrl+Shift+H) \u2014 press Shift+? for keyboard shortcuts cheatsheet', 'aria-label':'ModTools rules + help \u2014 press Shift+? for keyboard shortcuts' }, '\u2753'), // v10.8.0 M11; v10.18.9 (storm P2): tooltip promised 'cheatsheet' but opens tutorial; now honest about both paths
-      el('button',{ cls:'gam-bar-icon', onclick:downloadDebugSnapshot, title:'Debug snapshot \u2014 redacted JSON export of local state for support', 'aria-label':'Debug snapshot' }, '\u{1F41E}'), // v10.8.0 M11
-      // v7.1.2: team-sharable bug report (distinct from 🐞 local export above).
-      el('button',{ cls:'gam-bar-icon', onclick:openBugReportModal, title:'File a bug report — sends to the team\'s GitHub via worker (auto-strips PII)', 'aria-label':'File a bug report' }, '\u{1F41B}'), // v10.8.0 M11
-      // v9.8.0: ModChat launcher moved to FAR RIGHT (just before tickerEl).
-      // v5.4.0: Clean UI broom — hides share/hide/block/set context from action rows
-      el('button',{ id:'gam-clean-broom', cls:'gam-bar-icon' + (getSetting('cleanUi', false) ? ' gam-on' : ''), onclick:toggleCleanUi, title:'Clean UI (hide share/hide/block/set context)', 'aria-label':'Toggle clean UI mode' }, '\uD83E\uDDF9'), // v10.8.0 M11
-      // v5.4.0: Lock button — only on single post pages (/p/<id>). Inline regex so we never
-      // rely on a module-scoped const which (if load order changed) could TDZ.
-      (/^\/p\/[^/]+/.test(location.pathname)) ? el('button',{ id:'gam-lock-btn', cls:'gam-bar-icon', onclick:togglePostLock, title:'Lock / unlock this post', 'aria-label':'Lock or unlock this post' }, '\uD83D\uDD12') : null, // v10.8.0 M11
-      el('span', { cls:'gam-bar-sep' }),
-      sessDot,
-      fbBtn,
-      el('span', { cls:'gam-bar-sep' }),
-      filterSel,
-      el('span', { cls:'gam-bar-sep' }), // v10.14.5: break up the 10-icon run -- separates passive filter from active counters
-      drBtn,
-      raidBtn,
-      sirenBtn,
-      sirenClearBtn,
-      // v10.3 Patch 3: Sticky-queue chip
-      (function() {
-        const stickyChip = el('button', { id:'gam-sticky-chip', cls:'gam-bar-icon', title:'Sticky-pin requests pending -- click to review', 'aria-label':'Sticky-pin requests pending' }, 'PIN'); // v10.8.0 M11
-        stickyChip.style.display = 'none';
-        stickyChip.addEventListener('click', function(ev) {
-          ev.stopPropagation();
-          const acc = document.getElementById('gam-sticky-accordion');
-          if (!acc) return;
-          const nowVisible = acc.style.display !== 'none';
-          acc.style.display = nowVisible ? 'none' : 'block';
-          if (!nowVisible) {
-            const r = stickyChip.getBoundingClientRect();
-            acc.style.left = r.left + 'px';
-          }
-        });
-        return stickyChip;
-      })(),
-      // v10.3 Patch 4: Tard-suggester accordion button
-      (function() {
-        const tardBtn = el('button', { id:'gam-tard-suggest-btn', cls:'gam-bar-icon', title:'AI tard patterns -- click to expand (scans last 80 usernames via firehose)', 'aria-label':'AI TARD pattern suggestions' }, '✨'); // v10.8.0 M11
-        tardBtn.addEventListener('click', function(ev) {
-          ev.stopPropagation();
-          const acc = document.getElementById('gam-tard-accordion');
-          if (!acc) return;
-          const nowVisible = acc.style.display !== 'none';
-          acc.style.display = nowVisible ? 'none' : 'block';
-          if (!nowVisible) {
-            const r = tardBtn.getBoundingClientRect();
-            acc.style.left = r.left + 'px';
-            _openTardAccordion(acc);
-          }
-        });
-        return tardBtn;
-      })(),
-      el('span', { cls:'gam-bar-sep' }), // v10.14.5: separate queue counters from page/context icons
-      mmBtn,
-      c5Btn,
-      IS_USERS_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.ACCENT, cursor:'default'}, title:'Triage Console active' }, '\u{1F4CA}') : null,
-      IS_BAN_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.RED, cursor:'default'}, title:'/ban page enhancer active' }, '\u{1F528}') : null,
-      // v9.8.0 — flex-grow spacer pushes the right group to the far right
-      barSpacer,
-      // v9.8.0 — RIGHT GROUP: chat then ticker (status message far-right)
-      chatBtn_v980,
-      tickerEl
-    );
+    // v10.36.9: Wave-2 bar taxonomy (Opus/Sonnet plan, Commander-approved
+    // Structured 5-section: SHIELD | HOT | QUEUE | ACT | COORD | SYS | CHAT).
+    // Cold, low-frequency controls collapse behind 4 category-menu buttons
+    // (openCategoryMenu, v10.36.4 STORM #5 prereq). Permanent live-count
+    // state (inbox/DR/raid/siren) and the always-glanceable CHAT+TICKER
+    // never move behind a click -- STORM #4: a badge you have to open
+    // first is not a badge. Every handler below is reused verbatim from
+    // the original flat-bar construction -- this is pure regrouping, no
+    // rewiring. Flag-gated (gam_status_bar_grouped, default true) so the
+    // flat legacy bar is one Settings toggle away if the grouping ever
+    // needs a fast rollback.
+    const modLogBtn = el('button',{ cls:'gam-bar-icon', onclick:openModLog, title:'Mod log + Death Row queue \u2014 your action history (Ctrl+Shift+L)', 'aria-label':'Mod log + Death Row queue' }, '\u{1F4CB}');
+    const helpBtn = el('button',{ cls:'gam-bar-icon', onclick:openHelp, title:'ModTools rules + help (Ctrl+Shift+H) \u2014 press Shift+? for keyboard shortcuts cheatsheet', 'aria-label':'ModTools rules + help \u2014 press Shift+? for keyboard shortcuts' }, '\u2753');
+    const debugBtn = el('button',{ cls:'gam-bar-icon', onclick:downloadDebugSnapshot, title:'Debug snapshot \u2014 redacted JSON export of local state for support', 'aria-label':'Debug snapshot' }, '\u{1F41E}');
+    const bugReportBtn = el('button',{ cls:'gam-bar-icon', onclick:openBugReportModal, title:"File a bug report \u2014 sends to the team's GitHub via worker (auto-strips PII)", 'aria-label':'File a bug report' }, '\u{1F41B}');
+    const cleanBroomBtn = el('button',{ id:'gam-clean-broom', cls:'gam-bar-icon' + (getSetting('cleanUi', false) ? ' gam-on' : ''), onclick:toggleCleanUi, title:'Clean UI (hide share/hide/block/set context)', 'aria-label':'Toggle clean UI mode' }, '\uD83E\uDDF9');
+    const lockBtn = (/^\/p\/[^/]+/.test(location.pathname)) ? el('button',{ id:'gam-lock-btn', cls:'gam-bar-icon', onclick:togglePostLock, title:'Lock / unlock this post', 'aria-label':'Lock or unlock this post' }, '\uD83D\uDD12') : null;
+    const usersPageIndicator = IS_USERS_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.ACCENT, cursor:'default'}, title:'Triage Console active' }, '\u{1F4CA}') : null;
+    const banPageIndicator = IS_BAN_PAGE ? el('span',{ cls:'gam-bar-icon', style:{color:C.RED, cursor:'default'}, title:'/ban page enhancer active' }, '\u{1F528}') : null;
+
+    // v10.3 Patch 3/4: sticky-pin + tard-suggester chips -- hoisted from
+    // inline IIFEs (unchanged bodies) so both the grouped and legacy bar
+    // constructions below can reference them by name.
+    const stickyChipEl = (function() {
+      const stickyChip = el('button', { id:'gam-sticky-chip', cls:'gam-bar-icon', title:'Sticky-pin requests pending -- click to review', 'aria-label':'Sticky-pin requests pending' }, 'PIN');
+      stickyChip.style.display = 'none';
+      stickyChip.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        const acc = document.getElementById('gam-sticky-accordion');
+        if (!acc) return;
+        const nowVisible = acc.style.display !== 'none';
+        acc.style.display = nowVisible ? 'none' : 'block';
+        if (!nowVisible) {
+          const r = stickyChip.getBoundingClientRect();
+          acc.style.left = r.left + 'px';
+        }
+      });
+      return stickyChip;
+    })();
+    const tardBtnEl = (function() {
+      const tardBtn = el('button', { id:'gam-tard-suggest-btn', cls:'gam-bar-icon', title:'AI tard patterns -- click to expand (scans last 80 usernames via firehose)', 'aria-label':'AI TARD pattern suggestions' }, '\u2728');
+      tardBtn.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        const acc = document.getElementById('gam-tard-accordion');
+        if (!acc) return;
+        const nowVisible = acc.style.display !== 'none';
+        acc.style.display = nowVisible ? 'none' : 'block';
+        if (!nowVisible) {
+          const r = tardBtn.getBoundingClientRect();
+          acc.style.left = r.left + 'px';
+          _openTardAccordion(acc);
+        }
+      });
+      return tardBtn;
+    })();
+
+    function _catBtn(label, title){
+      return el('button', { cls:'gam-bar-icon gam-bar-cat', title, 'aria-label':title, 'aria-haspopup':'menu', 'aria-expanded':'false' }, label + ' \u25BE');
+    }
+    function _wireCatBtn(btn, itemsFn){
+      btn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        openCategoryMenu(btn, itemsFn().filter(Boolean));
+        requestAnimationFrame(()=>{ try { btn.setAttribute('aria-expanded', document.getElementById('gam-cat-menu') ? 'true' : 'false'); } catch(_){} });
+      });
+      return btn;
+    }
+
+    const barGrouped = getSetting('gam_status_bar_grouped', true);
+    let bar;
+    if (barGrouped) {
+      const queueBtn = _wireCatBtn(_catBtn('QUEUE', 'Queue tools \u2014 upvote filter, sticky pins, auto-tard suggestions'), ()=>[filterSel, stickyChipEl, tardBtnEl]);
+      const actBtn = _wireCatBtn(_catBtn('ACT', 'Post actions \u2014 clean UI, lock, native-mode toggle'), ()=>[cleanBroomBtn, lockBtn, fbBtn]);
+      const coordBtn = _wireCatBtn(_catBtn('COORD', 'Coordination \u2014 mod log, active mods, modmail actions, C5'), ()=>[modLogBtn, peopleBtn, mmBtn, c5Btn]);
+      const sysBtn = _wireCatBtn(_catBtn('SYS', 'Settings, help, diagnostics, session status'), ()=>[gearBtn, helpBtn, debugBtn, bugReportBtn, sessDot, usersPageIndicator, banPageIndicator]);
+      bar = el('div', { id:'gam-status-bar' },
+        brandBtn,
+        el('span', { cls:'gam-bar-sep' }),
+        inboxBtn, drBtn, raidBtn, sirenBtn, sirenClearBtn,
+        el('span', { cls:'gam-bar-sep' }),
+        queueBtn, actBtn, coordBtn, sysBtn,
+        barSpacer,
+        chatBtn_v980,
+        tickerEl
+      );
+    } else {
+      // Legacy flat bar -- verbatim original ordering, kept as the
+      // instant-rollback path behind the gam_status_bar_grouped flag.
+      bar = el('div', { id:'gam-status-bar' },
+        brandBtn,
+        gearBtn,
+        el('span', { cls:'gam-bar-sep' }),
+        modLogBtn,
+        inboxBtn,
+        peopleBtn,
+        el('span', { cls:'gam-bar-sep' }),
+        helpBtn,
+        debugBtn,
+        bugReportBtn,
+        cleanBroomBtn,
+        lockBtn,
+        el('span', { cls:'gam-bar-sep' }),
+        sessDot,
+        fbBtn,
+        el('span', { cls:'gam-bar-sep' }),
+        filterSel,
+        el('span', { cls:'gam-bar-sep' }),
+        drBtn,
+        raidBtn,
+        sirenBtn,
+        sirenClearBtn,
+        stickyChipEl,
+        tardBtnEl,
+        el('span', { cls:'gam-bar-sep' }),
+        mmBtn,
+        c5Btn,
+        usersPageIndicator,
+        banPageIndicator,
+        barSpacer,
+        chatBtn_v980,
+        tickerEl
+      );
+    }
+
     // v10.16.29: status-bar orientation. Default horizontal-bottom. Lead/mod
     // can flip to vertical-left or vertical-right via GEAR. Sets a
     // data-orientation attribute that CSS keys off. The vertical mode
@@ -25268,6 +25323,12 @@ Analyze this comment against the community rules. Then write a brief, profession
 select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text-align:center;font-size:12px;min-height:32px!important;min-width:32px!important} /* v10.6.2 HOTFIX UIUX-03 P0.2: select can't use ::after hit-extension, enforce 32px min tap target */
 #gam-sess-pill{font-size:11px}
 #gam-dr-count{width:auto;padding:0 6px;font-size:11px;font-weight:600}
+/* v10.36.9: Wave-2 bar taxonomy category buttons (QUEUE/ACT/COORD/SYS).
+   Auto-width text label, not the fixed 22px icon circle -- STORM #9: a
+   labeled control, not another icon a new mod has to hover to identify. */
+.gam-bar-cat{width:auto;padding:0 8px;border:1px solid var(--gam-tok-border,#2a2f38);border-radius:4px;font-size:10px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase}
+.gam-bar-cat:hover{border-color:${C.AMBER}}
+.gam-bar-cat[aria-expanded="true"]{background:rgba(255,153,51,.12);border-color:${C.AMBER};color:${C.AMBER}}
 /* v5.2.1 / v9.3.10: modmail actions popover anchored above status bar.
    Background flipped from rgba(15,17,20,.97) + backdrop-filter:blur(12px)
    to fully opaque ${C.BG} with NO backdrop-filter. PresidentialSeal + Commander

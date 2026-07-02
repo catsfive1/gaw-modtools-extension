@@ -2,6 +2,22 @@
 
 Versioned summary of recent work. Detailed commit history: `git log --oneline` in this repo.
 
+## v10.36.9 — FEATURE: Wave-2 bar taxonomy — Structured 5-section (2026-07-01)
+
+**v10.36.9 regroups the bottom status bar** (extension manifest 10.36.8 → 10.36.9; no worker change) — the piece of the Opus 4.8 planning session (bar-taxonomy topic) that was left unbuilt after P0/P1/P2-prereq shipped in v10.36.2-4. Commander approved the **Structured 5-section** layout (`SHIELD · HOT · QUEUE · ACT · COORD · SYS · CHAT`) in that session; confirmed live and unchanged via a Claude-in-Chrome session on his real `/users` page: ~18 unlabeled icon-only controls in one flat row, wide enough to trigger horizontal scroll arrows in the browser.
+
+**What changed:**
+- **SHIELD** (brand) stays first, always visible.
+- **HOT** — inbox/Death-Row/raid/siren+dismiss — stays a permanent, always-visible cluster right after SHIELD. Never buried behind a click (STORM #4: a badge you have to open first is not a badge).
+- **QUEUE / ACT / COORD / SYS** — the ~14 cold, low-frequency controls (upvote filter, sticky-pin + tard-suggester chips, clean-UI broom, post-lock, native-mode toggle, mod log, active-mods, modmail-actions, C5, settings, help, debug snapshot, bug report, session-health pill, page indicators) collapse behind 4 labeled category buttons using the shared `openCategoryMenu()` helper built in v10.36.4 (STORM #5 prereq). Category buttons show real text labels (QUEUE/ACT/COORD/SYS), not more emoji — STORM #9.
+- **CHAT + TICKER** stay at the far right, unmoved — the existing deliberate "icons left, chat+ticker right" layout (Commander, 2026-05-08) is untouched.
+- Every control's underlying handler is reused **verbatim** — this is pure regrouping, zero rewiring, zero behavior change to any individual button.
+- **Flag-gated, one-click rollback:** new Settings toggle "Grouped bottom bar" (`gam_status_bar_grouped`, on by default). Off reproduces the exact original flat 32-child bar, unchanged, as an instant fallback if the grouping ever needs to be reverted without a code change.
+
+**Verified from my side (§8):** `node --check` PARSE OK. New `scripts/_p5_bar_taxonomy_smoke_test.mjs` slices the real grouping logic and behaviorally exercises it against stubbed dependencies — **20/20**: HOT cluster confirmed always-visible (not inside any menu), exactly 4 correctly-labeled category buttons with `aria-haspopup="menu"`, each category click opens exactly one menu with the right items and nulls filtered (conditional LOCK/mmBtn/c5Btn/page-indicators correctly appear only when their page/role guard is true), and — the load-bearing safety check — the flag-off legacy path is confirmed to reproduce the original flat ordering with zero category buttons present, a true rollback and not a re-skin. Full existing suite (17 files, 242 total assertions) re-run clean, zero regressions. Boot-crash probe (the harness from v10.36.6) re-run clean after every edit in this pass.
+
+**Not yet done (deliberately, out of scope for this pass):** STORM #10 (full ARIA menu-widget semantics — arrow/Home/End keyboard nav inside the open menu) and STORM #13 (drop the bar to `bottom:8px`, which touches 3 separate coupled CSS sites) remain open Wave-2 items.
+
 ## v10.36.8 — FEATURE: "pick up where I left off" on /users (2026-07-01)
 
 **v10.36.8 adds Commander's requested ability to not re-see users he's already scanned on /users.** (extension manifest 10.36.7 → 10.36.8; no worker change.)
