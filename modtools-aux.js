@@ -1050,12 +1050,24 @@
   if (window._gamProfileProtectorInit) return;
   window._gamProfileProtectorInit = true;
 
-  // Same regex as modtools.js _isProfileViewNow() for parity.
-  // Covers /u/<name>, /u/<name>/, /u/<name>/posts, /u/<name>/comments,
-  // /u/<name>/saved, /u/<name>/upvoted, /u/<name>/downvoted.
+  // v10.36.10 ROOT-CAUSE PARITY FIX — the "eater" that survived 12+ sessions.
+  // This detector arms the PROFILE PROTECTOR + the !important CSS veto + the JS
+  // un-hide sweep. It was supposed to match modtools.js _isProfileViewNow() "for
+  // parity" — but v10.31 root-fixed ONLY modtools.js to the broad match and left
+  // THIS twin on the OLD whitelist regex (posts|comments|saved|upvoted|downvoted).
+  // Consequence: on GAW's owner-default profile tab (/u/<name>/submitted, /overview,
+  // any sub-path not in the list) this returned FALSE, so on the operator's OWN
+  // profile _arm() bailed, body.gam-on-profile-page was never set, and the entire
+  // catch-all anti-eater defense stayed OFF — the exact tab the bug was reported on.
+  // A profile is a profile on ANY /u/<name> sub-path; the ONLY /u/ path that is NOT a
+  // user profile is /u/c:<community>. Now identical logic to modtools.js — no
+  // whitelist left to drift out of sync ever again (locked by
+  // scripts/_profile_protector_detect_smoke_test.mjs).
   function _isProfileNow() {
     const p = window.location.pathname;
-    return /^\/u\/[^/]+(?:\/(?:posts|comments|saved|upvoted|downvoted))?\/?$/.test(p);
+    const m = p.match(/^\/u\/([^/]+)/);
+    if (!m) return false;
+    return !(m[1] || '').toLowerCase().startsWith('c:');
   }
 
   // v10.17.3 (the FINAL eater kill): CSS-with-!important veto. We could chase
@@ -3239,7 +3251,7 @@
 
   function _detectPageType() {
     var p = (location.pathname || '');
-    if (/^\/u\/[^/]+\/?$/.test(p))   return 'profile-user';
+    if (/^\/u\/(?!c:)[^/]+/i.test(p))   return 'profile-user';  // v10.36.10: any /u/<name> sub-tab, not just bare (parity with _isProfileNow)
     if (p === '/' || p === '/hot' || p === '/new' || p === '/top' || p === '/rising') return 'home-feed';
     if (p === '/queue' || p.indexOf('/queue/') === 0)   return 'mod-queue';
     if (p === '/users' || p.indexOf('/users/') === 0)   return 'mod-users';
