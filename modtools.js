@@ -26236,7 +26236,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 /* WP-02 (§WP-02.2 — three redundant active signals, grayscale-readable):
    accent-soft FILL + 2px accent BOTTOM-border + bright ink label at heavier
    weight. NOT color-only. The selector now matches the REAL JS-toggled class
-   `.gam-mc-tab-active` (renderTab toggles this, NOT `.active`) plus the
+   '.gam-mc-tab-active' (renderTab toggles this, NOT '.active') plus the
    mirrored aria-selected — pre-fix the active treatment never rendered because
    the selector targeted a class the JS never set. */
 .gam-mc-tab.gam-mc-tab-active,
