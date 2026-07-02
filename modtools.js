@@ -4988,7 +4988,11 @@
     // v5.1.2 additions
     SETTINGS:'gam_settings', SNIFF:'gam_sniff_log', FALLBACK:'gam_fallback_mode',
     // v9.12.0 - autoUnstickyTick durable cooldown (Commander #15)
-    STICKY_COOLDOWNS:'gam_sticky_cooldowns'
+    STICKY_COOLDOWNS:'gam_sticky_cooldowns',
+    // v10.36.8 - "pick up where I left off": personal reviewed/skip bookmark,
+    // separate from roster.status so it never touches moderation decisions
+    // or the HI-1/audit-relevant status machinery.
+    SEEN:'gam_reviewed_seen'
   };
   const STORAGE_MAX = 500;
 
@@ -5307,6 +5311,16 @@
   function getWatchlist(){ return lsGet(K.WATCH, {}); }
   function saveWatchlist(wl){ lsSet(K.WATCH, wl); }
   function isWatched(u){ return !!getWatchlist()[u.toLowerCase()]; }
+
+  // v10.36.8: "pick up where I left off" -- a personal, local-only
+  // reviewed/skip bookmark for the Unreviewed section. Deliberately NOT
+  // roster.status: this is "I looked, nothing to do right now," not a
+  // moderation decision, so it must never interact with ban/DR/audit logic.
+  function getSeenSet(){ return lsGet(K.SEEN, {}); }
+  function saveSeenSet(s){ lsSet(K.SEEN, s); }
+  function isSeenUser(u){ return !!getSeenSet()[u.toLowerCase()]; }
+  function markSeenUser(u){ const s=getSeenSet(); s[u.toLowerCase()]={at:new Date().toISOString()}; saveSeenSet(s); }
+  function unmarkSeenUser(u){ const s=getSeenSet(); delete s[u.toLowerCase()]; saveSeenSet(s); }
   function toggleWatch(u){
     const wl=getWatchlist(), k=u.toLowerCase();
     if(wl[k]){ delete wl[k]; saveWatchlist(wl); return false; }
@@ -15530,6 +15544,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     const roster = getRoster();
     const dr = getDeathRow();
     const watchlist = getWatchlist();
+    const reviewedSet = getSeenSet();
 
     const candidates = [];
 
@@ -15567,7 +15582,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     );
 
     candidates.forEach(c=>{
-      const u = buildUserRecord(c.username, c.joinText, c.ipHash, roster, dr, watchlist, c.onCurrentPage, c.domRow, hotPrefixes);
+      const u = buildUserRecord(c.username, c.joinText, c.ipHash, roster, dr, watchlist, c.onCurrentPage, c.domRow, hotPrefixes, reviewedSet);
       if (c._domIdx !== undefined) u._domIdx = c._domIdx;
       users.push(u);
     });
@@ -15600,7 +15615,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     return users.slice(0, ROSTER_MAX);
   }
 
-  function buildUserRecord(username, joinText, ipHash, roster, dr, watchlist, onCurrentPage, domRow, hotPrefixes){
+  function buildUserRecord(username, joinText, ipHash, roster, dr, watchlist, onCurrentPage, domRow, hotPrefixes, reviewedSet){
     const k=username.toLowerCase();
     const rs=roster[k];
     let status='new';
@@ -15650,6 +15665,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       watched:!!watchlist[k],
       verified: isVerified(username),
       lastSeen: rs ? (rs.lastSeen || rs.firstSeen) : new Date().toISOString(),
+      reviewed: !!(reviewedSet && reviewedSet[k]),
       onCurrentPage, domRow, inCluster
     };
   }
@@ -16518,6 +16534,37 @@ Analyze this comment against the community rules. Then write a brief, profession
         // joinedAt-desc (newest first); insert the divider after the last
         // user whose joinedAt is within the past 24h.
         if (s === 'new') {
+          // v10.36.8: "pick up where I left off" -- split Unreviewed into
+          // never-looked-at (unseenItems, rendered as the main list, 24h
+          // divider unchanged) and reviewed-but-not-actioned (reviewedItems,
+          // tucked behind a collapsed reveal so they stop resurfacing every
+          // visit). `reviewed` is a personal bookmark (K.SEEN), NOT
+          // roster.status -- the underlying status stays 'new' for every
+          // other counter/filter/export in the extension.
+          const unseenItems = items.filter(u => !u.reviewed);
+          const reviewedItems = items.filter(u => u.reviewed);
+
+          if (unseenItems.length > 0) {
+            const markAllBar = document.createElement('div');
+            markAllBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 12px;margin:0 0 6px 0;background:rgba(255,153,51,0.06);border:1px solid rgba(255,153,51,0.25);border-radius:4px';
+            const markAllLbl = document.createElement('span');
+            markAllLbl.style.cssText = 'font-size:11px;color:' + C.TEXT2;
+            markAllLbl.textContent = 'Already looked at these? Mark reviewed so they stop showing up here.';
+            const markAllBtn = document.createElement('button');
+            markAllBtn.style.cssText = 'background:transparent;color:' + C.ACCENT + ';border:1px solid ' + C.ACCENT + ';border-radius:4px;padding:4px 12px;font:600 11px -apple-system,system-ui,sans-serif;letter-spacing:0.3px;cursor:pointer;flex-shrink:0';
+            markAllBtn.textContent = '✓ Mark all ' + unseenItems.length + ' reviewed';
+            markAllBtn.addEventListener('click', function(){
+              const s2 = getSeenSet();
+              unseenItems.forEach(function(u){ s2[u.username.toLowerCase()] = { at: new Date().toISOString() }; });
+              saveSeenSet(s2);
+              snack('✓ Marked ' + unseenItems.length + ' reviewed', 'success');
+              refreshTriageConsole();
+            });
+            markAllBar.appendChild(markAllLbl);
+            markAllBar.appendChild(markAllBtn);
+            sec.body.appendChild(markAllBar);
+          }
+
           const cutoff = Date.now() - 24 * 3600 * 1000;
           const _ts = function(j){
             if (!j) return 0;
@@ -16527,13 +16574,13 @@ Analyze this comment against the community rules. Then write a brief, profession
             return isNaN(p) ? 0 : p;
           };
           let lastNewIdx = -1;
-          for (let i = 0; i < items.length; i++) {
-            if (_ts(items[i].joinedAt) >= cutoff) lastNewIdx = i;
+          for (let i = 0; i < unseenItems.length; i++) {
+            if (_ts(unseenItems[i].joinedAt) >= cutoff) lastNewIdx = i;
             else break; // sorted desc -- everything after is older
           }
-          items.forEach(function(u, i){
+          unseenItems.forEach(function(u, i){
             sec.body.appendChild(buildUserRow(u));
-            if (i === lastNewIdx && lastNewIdx < items.length - 1) {
+            if (i === lastNewIdx && lastNewIdx < unseenItems.length - 1) {
               const divider = document.createElement('div');
               divider.className = 'gam-t-24h-divider';
               divider.style.cssText = 'display:flex;align-items:center;gap:10px;margin:8px 4px;color:' + C.GREEN + ';font:600 10px/1 -apple-system,system-ui,sans-serif;letter-spacing:1.5px;opacity:0.85';
@@ -16549,6 +16596,28 @@ Analyze this comment against the community rules. Then write a brief, profession
               sec.body.appendChild(divider);
             }
           });
+
+          if (reviewedItems.length > 0) {
+            const revealWrap = document.createElement('div');
+            revealWrap.style.cssText = 'margin-top:8px';
+            const revealToggle = document.createElement('button');
+            revealToggle.style.cssText = 'background:transparent;color:' + C.TEXT2 + ';border:none;font:600 10px -apple-system,system-ui,sans-serif;letter-spacing:0.3px;cursor:pointer;padding:4px 2px';
+            revealToggle.textContent = '▸ ' + reviewedItems.length + ' reviewed (hidden) — show';
+            const revealBody = document.createElement('div');
+            revealBody.style.display = 'none';
+            let revealed = false;
+            revealToggle.addEventListener('click', function(){
+              revealed = !revealed;
+              revealBody.style.display = revealed ? '' : 'none';
+              revealToggle.textContent = (revealed ? '▾ ' : '▸ ') + reviewedItems.length + ' reviewed (hidden) — ' + (revealed ? 'hide' : 'show');
+              if (revealed && revealBody.children.length === 0) {
+                reviewedItems.forEach(u => revealBody.appendChild(buildUserRow(u)));
+              }
+            });
+            revealWrap.appendChild(revealToggle);
+            revealWrap.appendChild(revealBody);
+            sec.body.appendChild(revealWrap);
+          }
         } else {
           items.forEach(u=>sec.body.appendChild(buildUserRow(u)));
         }
@@ -16625,6 +16694,10 @@ Analyze this comment against the community rules. Then write a brief, profession
           <button class="gam-t-act gam-t-act-dr" title="Death Row" data-user="${escapeHtml(u.username)}" data-action="deathrow">\u{1F480}</button>
           <button class="gam-t-act gam-t-act-ban" title="Ban (Shift+click for instant perma)" data-user="${escapeHtml(u.username)}" data-action="ban">\u{1F528}</button>
           <button class="gam-t-act gam-t-act-pattern" title="Add username pattern to Auto-DR rules (⚡)" data-user="${escapeHtml(u.username)}" data-action="pattern">\u26A1</button>
+          ${u.status==='new'?(u.reviewed
+            ? `<button class="gam-t-act gam-t-act-unreviewed" title="Un-mark reviewed -- bring back to the main Unreviewed list" data-user="${escapeHtml(u.username)}" data-action="unreviewed">\u21A9</button>`
+            : `<button class="gam-t-act gam-t-act-reviewed" title="Mark reviewed -- hide from Unreviewed until you undo it" data-user="${escapeHtml(u.username)}" data-action="reviewed">\u2713</button>`
+          ):''}
         `}
       </div>
     `;
@@ -16678,6 +16751,14 @@ Analyze this comment against the community rules. Then write a brief, profession
           }
         } else if(action==='pattern'){
           showDrPatternPopover(btn, username);
+        } else if(action==='reviewed'){
+          markSeenUser(username);
+          snack(`✓ ${username} marked reviewed`, 'success');
+          refreshTriageConsole();
+        } else if(action==='unreviewed'){
+          unmarkSeenUser(username);
+          snack(`↩ ${username} back in Unreviewed`, 'warn');
+          refreshTriageConsole();
         }
       });
     });
@@ -25431,6 +25512,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-act-watch:hover{background:var(--gam-tok-warn-soft,rgba(255,214,10,.12));border-color:var(--gam-tok-warn-soft,rgba(255,214,10,.3));color:var(--gam-tok-warn,#f0a040)}
 .gam-t-act-dr:hover{background:var(--gam-tok-special-soft,rgba(167,139,250,.12));border-color:var(--gam-tok-special-soft,rgba(167,139,250,.3));color:var(--gam-tok-special,#a78bfa)}
 .gam-t-act-ban:hover{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));border-color:var(--gam-tok-danger-soft,rgba(240,64,64,.3));color:var(--gam-tok-danger,#f04040)}
+.gam-t-act-reviewed:hover{background:var(--gam-tok-success-soft,rgba(61,214,140,.12));border-color:var(--gam-tok-success-soft,rgba(61,214,140,.3));color:var(--gam-tok-success,#3dd68c)}
+.gam-t-act-unreviewed:hover{background:var(--gam-tok-ink-faint-soft,rgba(122,118,114,.12));border-color:var(--gam-tok-ink-faint,#7a7672);color:var(--gam-tok-ink-faint,#7a7672)}
 .gam-t-empty{text-align:center;color:var(--gam-tok-ink-faint,#7a7672);padding:32px;font-size:13px}
 
 /* /ban page */

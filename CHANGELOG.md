@@ -2,6 +2,20 @@
 
 Versioned summary of recent work. Detailed commit history: `git log --oneline` in this repo.
 
+## v10.36.8 — FEATURE: "pick up where I left off" on /users (2026-07-01)
+
+**v10.36.8 adds Commander's requested ability to not re-see users he's already scanned on /users.** (extension manifest 10.36.7 → 10.36.8; no worker change.)
+
+**Design:** a new `reviewed` bookmark, stored separately from `roster.status` (`K.SEEN = 'gam_reviewed_seen'`, own getter/setter pair `getSeenSet`/`saveSeenSet`/`isSeenUser`/`markSeenUser`/`unmarkSeenUser`). Deliberately NOT a moderation status — it's a personal "I looked, nothing to do" flag, so it can never interact with ban/DR/audit machinery or change what any other counter, filter, or export sees. `buildUserRecord()` now computes `reviewed` for every `'new'`-status user; `renderTriageList()`'s Unreviewed section splits into the never-looked-at list (rendered as before, 24h divider unchanged) and a reviewed-but-not-actioned list tucked behind a collapsed "▸ N reviewed (hidden) — show" reveal toggle.
+
+**UI additions:**
+- Per-row toggle on every Unreviewed row: ✓ "Mark reviewed" (hides it from the default list) / ↩ "Un-review" (brings it back), alongside the existing Watch/Death Row/Ban/Pattern icons.
+- "✓ Mark all N reviewed" bulk button at the top of the Unreviewed section — lets Commander clear an entire existing backlog in one click, so future visits only surface genuinely new arrivals (and anything the Tards/Suspicious detectors still flag, since risk-flagged users are pulled out before the reviewed-split runs and are never silently hidden).
+
+**Verified from my side (§8):** `node --check` PARSE OK. New `scripts/_p4_pickup_where_left_off_smoke_test.mjs` — **14/14**: the seen-set getter/setter round-trips correctly and is case-insensitive, marking one user doesn't affect another, `buildUserRecord`/`buildTriageData` wiring is present, the row toggle is correctly gated to `status==='new'` only, and — the load-bearing safety check — the entire feature is statically confirmed to never call `rosterSetStatus`, `addToDeathRow`, or `executeBan` anywhere in its code path, so it cannot become a backdoor moderation action. Full existing suite (16 files, 222 total assertions) re-run clean, zero regressions. Boot-crash probe (the harness from v10.36.6) re-run clean after every edit in this pass.
+
+**Live-verified this session:** connected to Commander's live Brave session via Claude-in-Chrome and confirmed the v10.36.7 chronological-sort bug end-to-end on the real `/users` page (the running build was still v10.36.6, pre-fix) — captured 80 real rows and found the exact scrambled pattern the fix addresses (e.g. idx 20-44 going 21h→21h→21h→20h→17h→...→1h→**1 day→1 day**→20h), which is now resolved by the already-shipped v10.36.7. Extension reload could not be automated (`brave://extensions/` navigation is blocked from browser-extension automation, confirmed by direct attempt) — this remains the one manual step only Commander can do.
+
 ## v10.36.7 — FIX: /users Unreviewed list was not chronological (2026-07-01)
 
 **v10.36.7 fixes Commander's live report right after the v10.36.6 boot-crash hotfix: the /users Triage Console now mounts and shows real data, but "the users list is not presented in chronological order."** (extension manifest 10.36.6 → 10.36.7; no worker change.)
