@@ -2,6 +2,18 @@
 
 Versioned summary of recent work. Detailed commit history: `git log --oneline` in this repo.
 
+## v10.36.7 — FIX: /users Unreviewed list was not chronological (2026-07-01)
+
+**v10.36.7 fixes Commander's live report right after the v10.36.6 boot-crash hotfix: the /users Triage Console now mounts and shows real data, but "the users list is not presented in chronological order."** (extension manifest 10.36.6 → 10.36.7; no worker change.)
+
+**Root cause:** `buildTriageData()`'s sort comparator had two tiers with two DIFFERENT and inconsistent ideas of "chronological." On-page (currently-visible) users were sorted by raw DOM scrape order (`_domIdx`) under a v5.2.9 comment claiming *"GAW renders `.log` elements newest-first on the /users page — that IS the chronological registration order."* Off-page (historical roster) users were sorted by `joinedAt` — a real timestamp already computed for **every** user, on-page included, in `buildUserRecord()` via `parseRelativeAge(joinText)` (the GAW-displayed "N units ago" text). On-page rows had this authoritative timestamp sitting on the object and never used it. Confirming this was a genuine regression rather than a stylistic call: `renderTriageList()`'s own 24h-divider logic (~L16510) already documents and depends on the assumption *"Items are sorted joinedAt-desc"* — the codebase's own downstream consumer contradicts the upstream DOM-order sort.
+
+**Fix:** `joinedAt` (via the existing, already-trusted `parseRelativeAge`) is now the primary chronological sort key for BOTH on-page and off-page users. DOM scrape index / `lastSeen` remain as tiebreakers only when `joinedAt` is missing or ties — so the fix degrades gracefully to the old behavior on any row `parseRelativeAge` can't parse, rather than ever doing worse than before.
+
+**Verified from my side (§8):** `node --check` PARSE OK. New `scripts/_p3_users_chronological_sort_smoke_test.mjs` slices the real comparator from source and behaviorally exercises it — **6/6**: newer-`joinedAt` sorts first regardless of DOM index (the actual regression case), missing-`joinedAt` ties fall back to DOM order (no scrambling), on-page always precedes off-page even when off-page is more recent, off-page `joinedAt`-desc and `lastSeen` fallback both preserved unchanged, plus an explicit regression-proof assertion showing the OLD domIdx-priority comparator gets the primary case wrong (not a test written to match whatever the code does). Full existing suite (15 files, 194 total assertions) re-run clean, zero regressions. Boot-crash probe (the harness from v10.36.6) re-run clean — no synchronous throw at top-level init.
+
+**Not root-caused with certainty (documented, not hidden):** whether GAW's actual `.log` DOM order changed, was never newest-first, or ties into the still-open, previously-flagged gap that `spans[1]`/`spans[2]` (join-date, IP-hash) extraction has no fallback/validation. `joinedAt` sidesteps the question entirely by trusting GAW's own displayed relative-age text instead of DOM position — but if that text extraction is itself wrong on the current GAW markup, this fix inherits that risk. Awaiting Commander's live confirmation.
+
 ## v10.36.6 — HOTFIX: `mc is not defined` — stray backticks in a CSS comment killed the entire content-script boot (2026-07-01)
 
 **v10.36.6 fixes the real "ModTools doesn't run AT ALL — no status bar, no anything" crash Commander hit live** (extension manifest 10.36.5 → 10.36.6; no worker change). This is the actual killer behind the "totally default /users page" symptom — deeper than, and upstream of, the v10.36.2 P0 mount-swallow fix, which is why that fix didn't resolve it.

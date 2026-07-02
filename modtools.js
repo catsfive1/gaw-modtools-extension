@@ -15572,21 +15572,28 @@ Analyze this comment against the community rules. Then write a brief, profession
       users.push(u);
     });
 
-    // v5.2.9 FIX: chronological sort for Unreviewed.
-    // On-page users: preserve DOM order (GAW renders .log elements newest-first
-    // on the /users page — that IS the chronological registration order).
-    // Off-page (historical roster) users: sort by joinedAt descending (newest first),
-    // then by lastSeen descending as fallback. On-page always trumps off-page.
+    // v10.36.7 FIX: chronological sort for Unreviewed.
+    // v5.2.9 had on-page users trust raw DOM scrape order ("GAW renders .log
+    // elements newest-first — that IS the chronological registration order"),
+    // ignoring the joinedAt timestamp already computed for every user (both
+    // on- and off-page) in buildUserRecord via parseRelativeAge(joinText).
+    // That DOM-order assumption produced a non-chronological Unreviewed list
+    // (Commander report, 2026-07-01) and directly contradicted the 24h-divider
+    // logic below it, which already assumes "Items are sorted joinedAt-desc".
+    // Now joinedAt is the primary chronological key for BOTH on-page and
+    // off-page users; DOM index / lastSeen remain as tiebreakers when
+    // joinedAt is unavailable or ties (parseRelativeAge is best-effort and
+    // can return '' on an unrecognized GAW date format).
     users.sort((a,b)=>{
       // Tier 1: on-page before off-page
       if(a.onCurrentPage && !b.onCurrentPage) return -1;
       if(!a.onCurrentPage && b.onCurrentPage) return 1;
-      // Tier 2 (both on-page): preserve original DOM scrape order — index stored below
-      if(a.onCurrentPage && b.onCurrentPage) return (a._domIdx||0) - (b._domIdx||0);
-      // Tier 3 (both off-page): joinedAt descending, lastSeen descending as fallback
+      // Tier 2: joinedAt descending (newest first) — authoritative for both groups
       const ja = a.joinedAt ? Date.parse(a.joinedAt) : 0;
       const jb = b.joinedAt ? Date.parse(b.joinedAt) : 0;
-      if (ja || jb) return jb - ja;
+      if (ja !== jb) return jb - ja;
+      // Tier 3 tiebreak: on-page falls back to DOM scrape order; off-page to lastSeen
+      if(a.onCurrentPage && b.onCurrentPage) return (a._domIdx||0) - (b._domIdx||0);
       return new Date(b.lastSeen||0).getTime() - new Date(a.lastSeen||0).getTime();
     });
 
