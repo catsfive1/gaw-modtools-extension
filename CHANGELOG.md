@@ -2,6 +2,18 @@
 
 Versioned summary of recent work. Detailed commit history: `git log --oneline` in this repo.
 
+## v10.36.11 — POLISH: category menus close on Escape and return focus (2026-07-02)
+
+**v10.36.11 finishes the safe part of STORM #10 (real ARIA menu-button semantics) for the QUEUE/ACT/COORD/SYS category menus shipped in v10.36.9** (extension manifest 10.36.10 → 10.36.11; no worker change). Before this, `openCategoryMenu()` (v10.36.4) only dismissed on an outside click — a keyboard user had no way to close the menu without clicking away, and focus was left stranded inside the (now-removed) menu instead of returning to the button that opened it.
+
+**Fix:** Escape now closes the menu and returns focus to its anchor button — the standard ARIA menu-button keyboard contract. Both `Escape` and the legacy `Esc` key value are handled. The keydown listener is torn down together with the click-outside listener so neither leaks after the menu closes.
+
+**Deliberately NOT done here:** full roving-tabindex arrow-key navigation between menu items. The item set inside these menus is heterogeneous — a native `<select>` (the upvote-age filter) mixed with plain buttons — and forcing uniform `role="menuitem"` + custom arrow-key handling onto a native select would fight its own built-in keyboard behavior rather than improve it. Shipping a half-working arrow-nav retrofit would be worse than not shipping it; this is flagged as an open item, not silently dropped.
+
+**Also held back this pass:** STORM #13 (dropping the bar to `bottom:8px`) touches three coupled pixel values in lockstep (the bar itself, snack-toast position, and two accordion popups) and needs visual confirmation in a live, rendered browser to avoid shipping a guessed spacing change that overlaps something — not something I can verify blind from a Node test harness. Holding it for a session where the live browser connection is available to check the result directly.
+
+**Verified from my side (§8):** `node --check` PARSE OK. New `scripts/_p6_category_menu_escape_smoke_test.mjs` slices the real `openCategoryMenu()` and behaviorally exercises it — **8/8**: Escape (both key-value forms) removes the menu and calls `.focus()` on the anchor, a non-Escape key leaves the menu open, the pre-existing outside-click dismiss still works unchanged, and the keydown listener is confirmed unregistered after teardown (no leaked double-handling on a second Escape). Full existing suite (18 files, 250 total assertions) re-run clean, zero regressions. Boot-crash probe (the harness from v10.36.6) re-run clean.
+
 ## v10.36.10 — ROOT-CAUSE (real this time): the /u/ "eater" defense was disarmed on the operator's own profile tab (2026-07-02)
 
 **v10.36.10 fixes the *actual* reason the profile eater kept coming back for 12+ sessions** (extension manifest 10.36.9 → 10.36.10; no worker change). Commander, exhausted: *"the bug that 'eats' the /u/me or /u/catsfive page and only shows the most recent post, then HIDES ALL POSTS AFTER THAT until it only shows posts that are 3 days or older. FIX THIS."*

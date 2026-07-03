@@ -8084,11 +8084,33 @@
     panelOpen = 'category-menu';
     const dismiss = function(e){
       if (menu.contains(e.target) || anchor.contains(e.target)) return;
+      teardown();
+    };
+    // v10.36.10 (STORM #10 partial): Escape closes the menu and returns focus
+    // to the anchor button -- the standard ARIA menu-button keyboard contract.
+    // Full roving-tabindex arrow-key navigation between items is deliberately
+    // NOT added here: the item set is heterogeneous (a native <select> mixed
+    // with plain buttons), and forcing role="menuitem" + custom arrow nav onto
+    // a native select would fight its own built-in keyboard behavior rather
+    // than improve it. Escape+focus-return is the safe, universally-correct
+    // subset that doesn't require guessing at that tradeoff.
+    const onKeydown = function(e){
+      if (e.key === 'Escape' || e.key === 'Esc'){
+        e.stopPropagation();
+        teardown();
+        try { anchor.focus(); } catch(_){}
+      }
+    };
+    function teardown(){
       menu.remove();
       if (panelOpen === 'category-menu') panelOpen = null;
       document.removeEventListener('click', dismiss, true);
-    };
-    setTimeout(function(){ document.addEventListener('click', dismiss, true); }, 0);
+      document.removeEventListener('keydown', onKeydown, true);
+    }
+    setTimeout(function(){
+      document.addEventListener('click', dismiss, true);
+      document.addEventListener('keydown', onKeydown, true);
+    }, 0);
     return menu;
   }
   // v9.3.1 (P0-2): defensive orphan-backdrop sweep. Runs on init and every
