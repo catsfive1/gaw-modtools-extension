@@ -72,12 +72,16 @@ let site1End = 0;
   ck('Site 4 (buildTriageConsole page-load boot) is guarded', /getSetting\('autoRunRulesOnLoad',\s*true\)/.test(ctx));
 }
 
-// --- Site 5: the "Run rules now" sweep button -- must NOT be guarded (user click) ---
+// --- Site 5: the "Run rules now" sweep (shared runRuleSweep core) -- must NOT be guarded (user click) ---
+// v10.36.14 WS-4: the sweep body was extracted into runRuleSweep() so both
+// the buried sidebar button AND the new toolbar button share it. This call
+// site now lives inside runRuleSweep() itself, not inline in sweepBtn's
+// click handler -- confirm via the function's own signature instead.
 {
-  const { ctx, idx } = windowAround('applyAutoDeathRowRules(combined);', 800, 50);
-  ck('sweep button context contains sweepBtn (confirms we are looking at the right handler)', /sweepBtn/.test(ctx));
+  const { ctx, idx } = windowAround('applyAutoDeathRowRules(combined);', 1000, 50);
+  ck('sweep-core context contains function runRuleSweep (confirms we are looking at the right function)', /function runRuleSweep\(\)/.test(ctx));
   const immediatePrefix = SRC.slice(Math.max(0, idx - 60), idx);
-  ck('Site 5 (user-initiated "Run rules now" sweep button) is NOT gated -- must always run on click',
+  ck('Site 5 (user-initiated "Run rules now" sweep core) is NOT gated -- must always run on click',
     !/getSetting\('autoRunRulesOnLoad'/.test(immediatePrefix));
 }
 

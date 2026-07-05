@@ -15571,6 +15571,38 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
   }
 
+  // v10.36.14 WS-4: on-demand sweep core, extracted verbatim from the buried
+  // rules-sidebar sweep button (v7.0.1) so a new toolbar "Run rules now"
+  // button can share the exact same logic instead of duplicating it. Runs
+  // every enabled Auto-DR rule against every username in the roster (and any
+  // visible triage rows) right now. applyAutoDeathRowRules is idempotent --
+  // already-queued users are skipped by addToDeathRow, so this is always
+  // safe to re-run. Returns a result object; callers own their own button
+  // disable/label/hint UI and snack-on-zero-match, since the buried sidebar
+  // button and the new toolbar button don't share DOM elements.
+  function runRuleSweep(){
+    const rosterEntries = Object.values(getRoster() || {});
+    const rosterNames = rosterEntries.filter(en => en && en.name).map(en => en.name);
+    // also sweep any usernames currently visible in triage rows
+    const visibleNames = Array.from(document.querySelectorAll('.gam-t-row [data-user]'))
+      .map(n => (n.getAttribute('data-user') || '').trim())
+      .filter(Boolean);
+    const combined = Array.from(new Set([...rosterNames, ...visibleNames]));
+    const rulesEnabled = (getSetting('autoDeathRowRules', []) || []).filter(r => r && r.enabled !== false).length;
+    if (!rulesEnabled){
+      return { ok:false, reason:'no-rules', combined, rulesEnabled, queued:0 };
+    }
+    if (!combined.length){
+      return { ok:false, reason:'no-users', combined, rulesEnabled, queued:0 };
+    }
+    const beforeDr = Object.keys(getDeathRow() || {}).length;
+    applyAutoDeathRowRules(combined);
+    const afterDr = Object.keys(getDeathRow() || {}).length;
+    const queued = Math.max(0, afterDr - beforeDr);
+    logAction({ type:'auto-dr-manual-sweep', scanned: combined.length, rules: rulesEnabled, queued });
+    return { ok:true, reason:null, combined, rulesEnabled, queued };
+  }
+
   // Public helper for lead mod: add a pattern at runtime (via DevTools or settings UI)
   window.gamAddAutoDeathRowRule = function(pattern, hours, reason){
     const rules = getSetting('autoDeathRowRules', []) || [];
@@ -16041,44 +16073,39 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (sweepBtn){
         sweepBtn.addEventListener('click', e => {
           e.stopPropagation();
-          const rosterEntries = Object.values(getRoster() || {});
-          const rosterNames = rosterEntries.filter(en => en && en.name).map(en => en.name);
-          // also sweep any usernames currently visible in triage rows
-          const visibleNames = Array.from(document.querySelectorAll('.gam-t-row [data-user]'))
-            .map(n => (n.getAttribute('data-user') || '').trim())
-            .filter(Boolean);
-          const combined = Array.from(new Set([...rosterNames, ...visibleNames]));
-          const rulesEnabled = (getSetting('autoDeathRowRules', []) || []).filter(r => r && r.enabled !== false).length;
-          if (!rulesEnabled){
+          // v10.36.14 WS-4: body extracted verbatim into runRuleSweep() (near
+          // applyAutoDeathRowRules) so the new toolbar button can share it.
+          // This button keeps its own disable/label/hint UI since the toolbar
+          // clone has no #gam-dr-sweep-hint element to update.
+          if ((getSetting('autoDeathRowRules', []) || []).filter(r => r && r.enabled !== false).length === 0){
             snack('\u26A1 No enabled Auto-DR rules to run', 'warn');
             return;
           }
-          if (!combined.length){
-            snack('\u26A1 No roster users to sweep yet -- load /users first', 'warn');
-            return;
-          }
-          const beforeDr = Object.keys(getDeathRow() || {}).length;
           sweepBtn.disabled = true;
           const originalLabel = sweepBtn.textContent;
           sweepBtn.textContent = '\u26A1 Sweeping...';
+          let result;
           try {
-            applyAutoDeathRowRules(combined);
+            result = runRuleSweep();
           } finally {
             sweepBtn.disabled = false;
             sweepBtn.textContent = originalLabel;
           }
-          const afterDr = Object.keys(getDeathRow() || {}).length;
-          const queued = Math.max(0, afterDr - beforeDr);
-          if (sweepHint){
-            sweepHint.textContent = `scanned ${combined.length} / ${rulesEnabled} rule${rulesEnabled===1?'':'s'} / ${queued} new DR`;
-            sweepHint.style.color = queued > 0 ? C.RED : C.TEXT3;
+          if (!result.ok){
+            if (result.reason === 'no-users'){
+              snack('\u26A1 No roster users to sweep yet -- load /users first', 'warn');
+            }
+            return;
           }
-          logAction({ type:'auto-dr-manual-sweep', scanned: combined.length, rules: rulesEnabled, queued });
+          if (sweepHint){
+            sweepHint.textContent = `scanned ${result.combined.length} / ${result.rulesEnabled} rule${result.rulesEnabled===1?'':'s'} / ${result.queued} new DR`;
+            sweepHint.style.color = result.queued > 0 ? C.RED : C.TEXT3;
+          }
           // applyAutoDeathRowRules already snacks when queued > 0. Only add a
           // "nothing matched" confirmation when it stayed silent, so the mod
           // knows the sweep ran.
-          if (queued === 0){
-            snack(`\u26A1 Sweep clean -- no new matches across ${combined.length} user${combined.length===1?'':'s'}`, 'info');
+          if (result.queued === 0){
+            snack(`\u26A1 Sweep clean -- no new matches across ${result.combined.length} user${result.combined.length===1?'':'s'}`, 'info');
           }
           refreshTriageConsole();
         });
@@ -16432,6 +16459,48 @@ Analyze this comment against the community rules. Then write a brief, profession
       ? `Auto-rules ON · last run ${lastRunLabel} · ${_lastRulesRunQueued} flagged`
       : 'Auto-rules OFF';
     tbEl.appendChild(rulesStatus);
+
+    // v10.36.14 WS-4: "Run rules now" toolbar button. The Auto-DR rules engine
+    // and a zero-safe sweep already existed but were buried in a collapsible
+    // rules-editor sidebar the operator never opens. Shares runRuleSweep()
+    // (near applyAutoDeathRowRules) with the buried sidebar button -- same
+    // engine, just surfaced. Visually distinct (lightning icon, not the robot
+    // AI-scan icon) so the two separate engines aren't conflated. Created +
+    // bound INSIDE this render function (handlers rebind every render).
+    const rulesBtn = document.createElement('button');
+    rulesBtn.className = 'gam-t-filter';
+    rulesBtn.title = 'Run every enabled Auto-DR username-pattern rule against the current roster right now.';
+    rulesBtn.innerHTML = '⚡ Run rules now';
+    rulesBtn.addEventListener('click', () => {
+      if ((getSetting('autoDeathRowRules', []) || []).filter(r => r && r.enabled !== false).length === 0){
+        snack('⚡ No enabled Auto-DR rules to run', 'warn');
+        return;
+      }
+      rulesBtn.disabled = true;
+      rulesBtn.textContent = '⚡ Running…';
+      let result;
+      try {
+        result = runRuleSweep();
+      } finally {
+        rulesBtn.disabled = false;
+        rulesBtn.innerHTML = '⚡ Run rules now';
+      }
+      if (!result.ok){
+        if (result.reason === 'no-users'){
+          snack('⚡ No roster users to sweep yet -- load /users first', 'warn');
+        }
+        return;
+      }
+      // runRuleSweep -> applyAutoDeathRowRules already snacks when queued > 0.
+      // Only add a "nothing matched" confirmation when it stayed silent, so
+      // the mod knows the sweep actually ran (distinguishes "no rules
+      // configured" -- caught above -- from "ran, found no matches").
+      if (result.queued === 0){
+        snack(`⚡ Sweep clean -- no new matches across ${result.combined.length} user${result.combined.length===1?'':'s'}`, 'info');
+      }
+      refreshTriageConsole();
+    });
+    tbEl.appendChild(rulesBtn);
 
     // v9.6.0: Force-AI-scan button. Lets a lead bypass the same-day cooldown
     // when "Possible Tards" looks empty (Commander's "I'm not seeing
