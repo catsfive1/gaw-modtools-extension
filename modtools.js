@@ -1708,6 +1708,12 @@
     // v5.1.9: Auto Death Row patterns. Array of regex-style patterns.
     // Each rule: { pattern: 'UsernamePlus.*', hours: 72, reason: 'auto: serial reg', enabled: true }
     autoDeathRowRules: [],
+    // v10.36.12: master on/off for the automatic (background) Auto-DR rule
+    // invocations -- scrape ingest, autorefresh, the 4h periodic sweep, and
+    // page-load. Default TRUE preserves pre-existing behavior; this only lets
+    // a mod turn it OFF. Does NOT affect the user-initiated "Run rules now"
+    // button or the Add-Pattern immediate-apply, which always run on click.
+    autoRunRulesOnLoad: true,
     // v5.4.1: Auto-Tard patterns. Same shape as DR rules (minus hours) — pattern-based
     // usernames that should always be flagged into Possible Tards regardless of signals.
     // Each rule: { pattern: '.*Fed.*', reason: 'auto: fed pattern', enabled: true, added: ISO }
@@ -5116,6 +5122,7 @@
     tardsThreshold:      'number',
     autoDeathRowRules:   'array',
     autoTardRules:       'array',
+    autoRunRulesOnLoad:  'boolean',
     'features.platformHardening': 'boolean',
     'features.teamBoost':         'boolean',
     // v10.19.0: were rendered in Settings but never shape-validated, so the
@@ -13588,6 +13595,10 @@ Analyze this comment against the community rules. Then write a brief, profession
     // v10.9.0 M2 (ASK-053): auto-remove opt-in toggle
     closeCard(); openCard('auto-actions', '\u{1F6E1} Auto-Actions', 1, 7, true, { sub:'Auto-remove SUS/DR queue items' });
     addToggle('Auto-Remove SUS/DR Queue Items', 'autoRemoveSusDr', 'When the queue page is open, automatically remove posts/comments from SUS-marked or Death Row users after a 1.5s undo window. OFF by default.');
+    // v10.36.12 WS-3: mirrors the /users toolbar checkbox. ON by default --
+    // this only lets a mod turn OFF the automatic (background) Auto-DR rule
+    // runs; the "Run rules now" button always works regardless of this setting.
+    addToggle('Auto-run Death Row rules on page load', 'autoRunRulesOnLoad', 'When ON, Auto-DR username-pattern rules run automatically as new users appear on /users (page load, autorefresh, 4h sweep). ON by default. Turn OFF to only run rules manually via "Run rules now".');
     closeCard(); openCard('fun', '\u{1F95A} Fun', 1, 9, true, { sub:'Easter eggs' });
     addToggle('Easter Eggs', 'easterEggsEnabled', 'Enable Q-themed easter eggs in the mod interface. \u{1F910}');
 
@@ -15261,6 +15272,11 @@ Analyze this comment against the community rules. Then write a brief, profession
   let triageSelected = new Set();
   let triageFilter = 'all';
   let triagePopover = null;
+  // v10.36.12: last-run tracker for the auto-DR rules engine, so a clean
+  // (0-match) automatic run is VISIBLE proof the engine is alive instead of
+  // looking identical to it never having run. Set inside applyAutoDeathRowRules.
+  let _lastRulesRunQueued = 0;
+  let _lastRulesRunAt = 0;
 
   function closeTriagePopover(){ if(triagePopover){ triagePopover.remove(); triagePopover=null; } }
 
@@ -15287,7 +15303,9 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
     });
     // v5.1.9: after scraping, run auto-DR pattern matcher on the newly-added names
-    if (newUsernames.length > 0) {
+    // v10.36.12: gated behind autoRunRulesOnLoad (default true) -- automatic
+    // ingest path, not a user click. See DEFAULT_SETTINGS comment.
+    if (newUsernames.length > 0 && getSetting('autoRunRulesOnLoad', true)) {
       applyAutoDeathRowRules(newUsernames);
     }
     return added;
@@ -15542,8 +15560,14 @@ Analyze this comment against the community rules. Then write a brief, profession
         }
       }
     }
+    // v10.36.12: record last-run stats for the toolbar status line, and
+    // retone the snack success (was 'warn' -- queuing users for a delayed,
+    // undoable 72h soft-stop is the engine working as designed, not an alarm;
+    // see WS-2's DR vocabulary standardization).
+    _lastRulesRunQueued = queued;
+    _lastRulesRunAt = Date.now();
     if (queued > 0){
-      snack(`\u{1F480} Auto-DR queued ${queued} user${queued>1?'s':''} by pattern`, 'warn');
+      snack(`\u{1F480} Auto-DR queued ${queued} user${queued>1?'s':''} by pattern`, 'success');
     }
   }
 
@@ -15777,7 +15801,9 @@ Analyze this comment against the community rules. Then write a brief, profession
         const ip = spans[2] ? spans[2].textContent.trim() : '';
         if (rosterAdd(u, j, ip)) { added++; newUsernames.push(u); }
       });
-      if (newUsernames.length > 0) {
+      // v10.36.12: gated behind autoRunRulesOnLoad (default true) -- silent
+      // background autorefresh, not a user click.
+      if (newUsernames.length > 0 && getSetting('autoRunRulesOnLoad', true)) {
         try { applyAutoDeathRowRules(newUsernames); } catch(e){}
       }
       return added;
@@ -15867,7 +15893,9 @@ Analyze this comment against the community rules. Then write a brief, profession
           const candidates = Object.values(roster)
             .filter(function(r){ return r && r.name && r.status !== 'deathrow' && r.status !== 'banned'; })
             .map(function(r){ return r.name; });
-          if (candidates.length > 0) {
+          // v10.36.12: gated behind autoRunRulesOnLoad (default true) -- this
+          // is the unattended 4h periodic timer, not a user click.
+          if (candidates.length > 0 && getSetting('autoRunRulesOnLoad', true)) {
             const drBefore = (lsGet(K.DR, []) || []).length;
             try { applyAutoDeathRowRules(candidates); } catch(e){}
             const drAfter = (lsGet(K.DR, []) || []).length;
@@ -16372,6 +16400,39 @@ Analyze this comment against the community rules. Then write a brief, profession
       badge.querySelector('.gam-t-cluster-clear').addEventListener('click', ()=>{ triageFilter='all'; triageSelected.clear(); refreshTriageConsole(); });
       tbEl.appendChild(badge);
     }
+    // v10.36.12 WS-3: master on/off for the automatic (background) Auto-DR
+    // rule invocations. Default TRUE preserves existing behavior; this only
+    // lets a mod turn it OFF. Created + bound INSIDE this render function
+    // (handlers rebind every refreshTriageConsole -- see aiBtn idiom below).
+    const autoRulesLabel = document.createElement('label');
+    autoRulesLabel.className = 'gam-t-filter';
+    autoRulesLabel.style.cssText = 'display:flex;align-items:center;gap:5px;cursor:pointer;font-weight:400';
+    const autoRulesChk = document.createElement('input');
+    autoRulesChk.type = 'checkbox';
+    autoRulesChk.checked = !!getSetting('autoRunRulesOnLoad', true);
+    autoRulesChk.title = 'When ON, Auto-DR rules run automatically as new users appear (page load, autorefresh, 4h sweep). Turn OFF to only run rules via the "Run rules now" button.';
+    autoRulesChk.addEventListener('change', () => {
+      setSetting('autoRunRulesOnLoad', autoRulesChk.checked);
+      snack(autoRulesChk.checked ? 'Auto-run Death Row rules: ON' : 'Auto-run Death Row rules: OFF', 'info');
+      refreshTriageConsole();
+    });
+    autoRulesLabel.appendChild(autoRulesChk);
+    autoRulesLabel.appendChild(document.createTextNode('Auto-run Death Row rules on page load'));
+    tbEl.appendChild(autoRulesLabel);
+
+    // v10.36.12 WS-3: persistent, non-alarming status line -- proof the
+    // engine is alive even on a clean (0-flagged) run. Reuses the existing
+    // info-toned design token.
+    const rulesStatus = document.createElement('span');
+    rulesStatus.className = 'gam-t-filter';
+    rulesStatus.style.cssText = 'color:var(--gam-tok-ink-muted,#b0b5bc);font-weight:400;background:transparent;border:none;cursor:default';
+    const rulesOn = !!getSetting('autoRunRulesOnLoad', true);
+    const lastRunLabel = _lastRulesRunAt ? new Date(_lastRulesRunAt).toLocaleTimeString() : 'not yet';
+    rulesStatus.textContent = rulesOn
+      ? `Auto-rules ON · last run ${lastRunLabel} · ${_lastRulesRunQueued} flagged`
+      : 'Auto-rules OFF';
+    tbEl.appendChild(rulesStatus);
+
     // v9.6.0: Force-AI-scan button. Lets a lead bypass the same-day cooldown
     // when "Possible Tards" looks empty (Commander's "I'm not seeing
     // suggestions lately" complaint). Tooltip explains why a previous run
@@ -17128,7 +17189,9 @@ Analyze this comment against the community rules. Then write a brief, profession
     const allNewNames = Object.values(getRoster())
       .filter(r => r.status === 'new' || !r.status)
       .map(r => r.name);
-    if (allNewNames.length > 0) applyAutoDeathRowRules(allNewNames);
+    // v10.36.12: gated behind autoRunRulesOnLoad (default true) -- page-load
+    // boot path, not a user click.
+    if (allNewNames.length > 0 && getSetting('autoRunRulesOnLoad', true)) applyAutoDeathRowRules(allNewNames);
     setTimeout(runDailyAiScanIfDue, 4000);
 
     const tc=document.createElement('div');

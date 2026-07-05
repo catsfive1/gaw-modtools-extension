@@ -40,10 +40,14 @@ function run(logs) {
   const stubTrySelectAll = () => logs;
   const stubRosterAdd = (u, j, ip) => { added.push({ u, j, ip }); return true; };
   const stubApplyAutoDR = () => {};
+  // v10.36.12 WS-3: scrapeCurrentPage's auto-DR call is now gated behind
+  // getSetting('autoRunRulesOnLoad', true) -- stub returns the passed
+  // fallback (true) to preserve this test's pre-existing behavior.
+  const stubGetSetting = (key, fallback) => fallback;
   const scrapeCurrentPage = new Function(
-    'trySelectAll', 'rosterAdd', 'applyAutoDeathRowRules',
+    'trySelectAll', 'rosterAdd', 'applyAutoDeathRowRules', 'getSetting',
     fnSrc + '\n return scrapeCurrentPage;'
-  )(stubTrySelectAll, stubRosterAdd, stubApplyAutoDR);
+  )(stubTrySelectAll, stubRosterAdd, stubApplyAutoDR, stubGetSetting);
   const count = scrapeCurrentPage();
   return { count, added };
 }

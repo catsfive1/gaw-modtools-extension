@@ -2,6 +2,20 @@
 
 Versioned summary of recent work. Detailed commit history: `git log --oneline` in this repo.
 
+## v10.36.13 — FEATURE: Auto-run Death Row rules on/off toggle + visible status (2026-07-05)
+
+**v10.36.13 delivers the "tick-box to control auto-run rules" ask from the USERS-page trust-break brief** (extension manifest 10.36.12 → 10.36.13; no worker change) — WS-3 of the same audit that produced v10.36.12. The Auto-DR rules engine already ran automatically on every new user (page load, silent autorefresh, and a 4-hour unattended sweep), with no way to turn it off and no visible confirmation that a clean (zero-match) pass had even happened — a quiet, working engine looked identical to a dead one.
+
+**What changed:** a new setting, **on by default**, so nothing changes for anyone unless they choose to turn it off. A checkbox now sits on the `/users` toolbar ("Auto-run Death Row rules on page load") and is mirrored in the Auto-Actions settings card. Right next to it, a permanent status line reads e.g. *"Auto-rules ON · last run 2:14:03 PM · 0 flagged"* — a clean run is now visible proof the engine is alive, not silence that could mean either "nothing to flag" or "broken."
+
+**Where the toggle applies (and where it deliberately does not):** turning it off silences the four genuinely automatic/background invocations — the initial scrape, the silent autorefresh poll, the 4-hour unattended sweep timer, and the page-load boot pass. It intentionally does **not** touch the existing "Run rules now" button or the immediate re-check that fires when a mod manually adds a new pattern — both are direct button presses, and gating a manual action behind an "auto-run" toggle would recreate the exact "the control does nothing" trust-break this whole fix exists to close.
+
+**Also retoned:** the Auto-DR engine's own snack ("Auto-DR queued N users by pattern") changed from alarm-yellow to success-green — queuing users for a delayed, undoable 72-hour soft-stop is the system working as designed, not a warning, matching the vocabulary fix shipped in v10.36.12.
+
+**Verified from my side (§8):** `node --check modtools.js` PARSE OK. New `scripts/_p9_autorun_rules_toggle_smoke_test.mjs` (16/16) statically confirms: the default is `true`, the setting is registered so the popup's Repair-settings button can restore it, all four automatic call sites are gated, both user-initiated call sites are deliberately left ungated, and the toolbar checkbox + settings-card mirror + status line all exist and are wired correctly. One pre-existing test (`_p0_triage_mount_smoke_test.mjs`) needed a `getSetting` stub added to its harness since `scrapeCurrentPage` gained a new dependency — a mechanical fix to keep the harness in sync, not a behavior change. Full suite: 22 files, 320+ assertions, all green.
+
+**A note on the brief's own line-number list:** the build brief for this session named six call sites to guard, but two of those six line numbers land inside the user-initiated "Run rules now" button and the "Add Pattern" immediate-apply handler — the very same brief separately (and correctly) says not to guard the user-initiated sweep button. Guarded the four sites that are genuinely automatic/background instead of guarding all six as literally listed; this preserves the brief's stated *intent* over its specific line-number list, which had drifted from the actual six-site inventory.
+
 ## v10.36.12 — P0 FIX: the /users burst banner now retires, and "Death Row all" never lies (2026-07-05)
 
 **v10.36.12 fixes the USERS-page trust-break Commander named as P0** (extension manifest 10.36.11 → 10.36.12; no worker change): *"⚠️ Burst detected: 29 users from IP range x.x.x — Death Row all 29"* stayed on screen unchanged for weeks. He pressed "Death Row all 29," got no confirmation and no lasting trace, and called it *"lazy, bad design, plain pure and simple."* A 10-specialist audit + adversarial critic traced both root causes in code before any fix was written.
