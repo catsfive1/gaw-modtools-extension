@@ -16839,11 +16839,19 @@ Analyze this comment against the community rules. Then write a brief, profession
 
   function buildUserRow(u, opts){
     const row=document.createElement('div');
+    // v10.36.15 WS-5: bold genuinely-new (recent AND unreviewed) usernames so
+    // brand-new registrations stand out at the top of the sort instead of
+    // blending in with the rest of the "New" badge crowd. Recomputed locally
+    // (not read from the render-section's `cutoff` var, which isn't visible
+    // here) -- missing/unparseable joinedAt is treated as NOT fresh so a
+    // parse miss can't accidentally bold the entire list.
+    const isFresh = u.status==='new' && !u.reviewed && u.joinedAt && (Date.now() - Date.parse(u.joinedAt)) < 24*3600*1000;
     row.className='gam-t-row'
       + (triageSelected.has(u.username)?' gam-t-row-selected':'')
       + (u.status==='banned'?' gam-t-row-banned':'')
       + (u.onCurrentPage ? '' : ' gam-t-row-historical')
-      + (opts && opts.tard ? ' gam-t-row-tard' : '');
+      + (opts && opts.tard ? ' gam-t-row-tard' : '')
+      + (isFresh ? ' gam-t-row-fresh' : '');
     row.setAttribute('tabindex', '0');
     if (u.inCluster) row.setAttribute('data-incluster', '1');
     const isDone=(u.status==='banned');
@@ -25745,6 +25753,15 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-flush-btn{margin-left:auto;background:var(--gam-tok-danger,#f04040);color:var(--gam-tok-on-accent-light,#ffffff);border:none;border-radius:4px;padding:6px 14px;font:11px -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;font-weight:700;cursor:pointer;letter-spacing:.3px;text-transform:uppercase;transition:opacity .15s}
 .gam-t-flush-btn:hover{opacity:.9}
 .gam-t-flush-btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* v10.36.15 WS-5: bold genuinely-new (recent AND unreviewed) usernames.
+   Ordered ABOVE .gam-t-row-tard so tard-red still wins on a row that is
+   both fresh and tard-flagged (tard's rule uses !important, which would win
+   regardless of source order, but the explicit ordering keeps the cascade
+   readable/predictable for a future editor). The banned line-through
+   composes fine since it targets a different property (text-decoration). */
+.gam-t-row-fresh .gam-t-user-name-text{font-weight:700}
+.gam-t-row-fresh{border-left:2px solid var(--gam-tok-accent,#ff9933);padding-left:6px}
 
 /* v5.1.3: Possible Tards top section + tard row highlight */
 .gam-t-section-tards{color:var(--gam-tok-danger,#f04040)!important;background:var(--gam-tok-danger-soft,rgba(240,64,64,.05));border-radius:4px;padding-left:8px;padding-right:8px;margin-left:-4px;margin-right:-4px;border:1px solid var(--gam-tok-danger-soft,rgba(240,64,64,.12))}

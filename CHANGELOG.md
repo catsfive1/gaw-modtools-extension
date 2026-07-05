@@ -2,6 +2,16 @@
 
 Versioned summary of recent work. Detailed commit history: `git log --oneline` in this repo.
 
+## v10.36.15 — FEATURE: brand-new usernames show up bold at the top (2026-07-05)
+
+**v10.36.15 finishes the last MUST item from the USERS-page trust-break brief** (extension manifest 10.36.14 → 10.36.15; no worker change) — WS-5, the final piece of Commander's "sort newest first AND bold new users" ask. The newest-first sort already shipped in v10.36.7; this ships the bold half.
+
+**What changed:** a user row now gets a bold username and a thin accent-colored left keyline when it is genuinely new — registered within the last 24 hours **and** not yet marked reviewed. The existing "New" text badge stays exactly as it was (bold weight alone is never the only signal, per WCAG 1.4.1 — a colorblind or low-vision mod still sees the text badge). A row that's missing a join-date, or whose join-date fails to parse, is treated as **not** fresh rather than defaulting to bold — so a data glitch can't accidentally highlight the entire list. The new style is ordered so the existing red "Possible Tard" row highlight still wins if a row happens to be both.
+
+**Verified from my side (§8):** `node --check modtools.js` PARSE OK. New `scripts/_p11_new_user_bold_flag_smoke_test.mjs` (9/9) slices the real `buildUserRow()` and confirms: a recent, unreviewed, "new" user gets the bold class; a user just past the 24-hour boundary does not; a reviewed user does not, even if recent; a user in any other status (watching, banned, etc.) does not; both a missing and an unparseable join-date correctly fall back to "not fresh"; and the class composes correctly alongside the pre-existing banned/tard row styling. Full suite: 24 files, 340+ assertions, all green.
+
+**This closes the MUST set (WS-1 through WS-5) from the same-day USERS-page trust-break audit.** Together, v10.36.12–15 mean: the burst banner retires once a cluster is actioned, "Death Row all" always tells the truth about what happened, the auto-rules engine has a visible on/off switch and status line, "Run rules now" is a real discoverable button, and brand-new registrations are visually distinct at the top of the list.
+
 ## v10.36.14 — FEATURE: "Run rules now" button on the /users toolbar (2026-07-05)
 
 **v10.36.14 delivers the "run rules on demand" ask from the USERS-page trust-break brief** (extension manifest 10.36.13 → 10.36.14; no worker change) — WS-4 of the same audit as v10.36.12/13. The Auto-DR rules engine and a zero-safe on-demand sweep already existed (since v7.0.1) and already handled the "nothing matched" case correctly — but the button that triggers it was buried inside a collapsible rules-editor sidebar Commander never opens. This is a placement fix, not a new engine.
