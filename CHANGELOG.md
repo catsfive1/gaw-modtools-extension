@@ -2,6 +2,14 @@
 
 Versioned summary of recent work. Detailed commit history: `git log --oneline` in this repo.
 
+## v10.36.16 — A11Y: screen-reader announcements now actually reach screen readers (2026-07-05)
+
+**v10.36.16 is WS-6 (SHOULD-tier) from the USERS-page trust-break audit** (extension manifest 10.36.15 → 10.36.16; no worker change), shipped because context budget remained healthy after the MUST set (v10.36.12-15). Every toast (`snack()`) already piped its message to a screen-reader announcer function, but that announcer's live regions were gated behind two visual-polish flags that default OFF — so on a stock install, the screen-reader-facing half of every action's feedback silently never existed. This is the accessibility face of the same "no feedback" trust-break the whole session has been fixing for sighted users.
+
+**What changed:** the announcer now always mounts and always speaks. The regions themselves are visually invisible either way (screen-reader-only CSS), so nothing changes for a sighted mod — this is a pure accessibility fix. Also added: the destructive-action confirmation dialog's "PERMANENT action, armed after countdown" warning is now marked so assistive tech announces it as an alert, and the moment the arm-timer finishes counting down and the Confirm button becomes clickable is now announced out loud. The `/users` burst-alert area is marked as a named region for screen readers, and burst-cluster changes (a new burst appearing, its count changing, or it clearing once resolved) are announced individually — not the whole alert panel shouting on every page refresh.
+
+**Verified from my side (§8):** `node --check modtools.js` PARSE OK. New `scripts/_p12_arialive_ungate_smoke_test.mjs` (17/17) slices the real announcer functions and confirms: both live regions mount unconditionally with correct ARIA attributes, mounting twice doesn't double up, messages route to the correct region by urgency, an announce before mounting is a safe no-op, message length is capped, and the burst-cluster delta tracking only speaks on an actual change. Full suite: 25 files, 355+ assertions, all green.
+
 ## v10.36.15 — FEATURE: brand-new usernames show up bold at the top (2026-07-05)
 
 **v10.36.15 finishes the last MUST item from the USERS-page trust-break brief** (extension manifest 10.36.14 → 10.36.15; no worker change) — WS-5, the final piece of Commander's "sort newest first AND bold new users" ask. The newest-first sort already shipped in v10.36.7; this ships the bold half.

@@ -2240,7 +2240,7 @@
               ${armSeconds>0 ? `Arm in ${armSeconds}s...` : 'Confirm'}
             </button>
           </div>
-          ${armSeconds>0 ? `<div class="gam-preflight-arm" style="--arm-seconds:${armSeconds}s">\u{26A0} PERMANENT action. Armed after countdown.</div>` : ''}
+          ${armSeconds>0 ? `<div class="gam-preflight-arm" role="alert" style="--arm-seconds:${armSeconds}s">\u{26A0} PERMANENT action. Armed after countdown.</div>` : ''}
         </div>
       `;
       document.body.appendChild(wrap);
@@ -2293,6 +2293,10 @@
             clearInterval(iv);
             yes.disabled = false;
             yes.textContent = 'Confirm';
+            // v10.36.16 WS-6: announce the arm-timer reaching 0 -- depends on
+            // WS-2 (batchDeathRow's truthful strings) so what gets announced
+            // is never a bare "0".
+            try { __announce('error', (title || 'Action') + ' is now armed — press Confirm to proceed.'); } catch(_){}
           } else {
             yes.textContent = `Arm in ${remaining}s...`;
           }
@@ -4374,7 +4378,12 @@
   //   <div id="gam-live-assertive" aria-live="assertive" aria-atomic="true" class="gam-sr-only"></div>
   const SR_ONLY_CSS = '.gam-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}';
   function __mountAriaLive(){
-    if (!__uxOn()) return;
+    // v10.36.16 WS-6: __uxOn() guard removed -- was gating screen-reader live
+    // regions behind two default-false visual-polish flags, so on a stock
+    // install the SR announcer never mounted at all (the accessibility face
+    // of "no feedback"). Regions are .gam-sr-only (visually hidden either
+    // way) so this is zero visual change; all VISUAL uxPolish gating stays
+    // intact elsewhere in this file.
     try {
       if (document.getElementById('gam-live-polite')) return;
       if (!document.body) return;
@@ -4394,7 +4403,7 @@
   }
   let __liveDebounce = 0;
   function __announce(kind, msg){
-    if (!__uxOn()) return;
+    // v10.36.16 WS-6: __uxOn() guard removed -- see __mountAriaLive comment.
     try {
       const id = (kind === 'error') ? 'gam-live-assertive' : 'gam-live-polite';
       const el = document.getElementById(id);
@@ -15277,6 +15286,11 @@ Analyze this comment against the community rules. Then write a brief, profession
   // looking identical to it never having run. Set inside applyAutoDeathRowRules.
   let _lastRulesRunQueued = 0;
   let _lastRulesRunAt = 0;
+  // v10.36.16 WS-6: tracks the last-announced count per cluster prefix so the
+  // aria-live announcer only speaks on a genuine DELTA (new cluster appears,
+  // or its unresolved count changes) -- never on every render, which would
+  // re-announce identical text every ~few seconds via the autorefresh poll.
+  let _lastAnnouncedClusters = {};
 
   function closeTriagePopover(){ if(triagePopover){ triagePopover.remove(); triagePopover=null; } }
 
@@ -16277,6 +16291,28 @@ Analyze this comment against the community rules. Then write a brief, profession
     raidClusters.forEach(([prefix,names])=>{
       aEl.innerHTML+=`<div class="gam-t-alert gam-t-alert-warn">\u{26A0}\u{FE0F} <b>Burst detected:</b> ${names.length} users from IP range ${prefix}.x.x &mdash; <a href="#" class="gam-t-alert-link" data-cluster="${prefix}">Filter this cluster</a> &middot; <a href="#" class="gam-t-alert-link gam-t-alert-selectall" data-cluster-select="${prefix}">☑ Select all ${names.length}</a> &middot; <a href="#" class="gam-t-alert-link gam-t-alert-bulkdr" data-cluster-dr="${prefix}">\u{1F480} Death Row all ${names.length}</a></div>`;
     });
+    // v10.36.16 WS-6: announce burst DELTAS keyed by cluster prefix, not the
+    // full alerts container (which rebuilds via innerHTML on every render --
+    // marking IT aria-live would re-announce identical text every autorefresh
+    // tick). Only speaks when a prefix is new or its unresolved count changed
+    // since the last render; a resolved-away cluster is announced once as
+    // cleared, then dropped from the tracker so it doesn't announce "0" later.
+    try {
+      const seenPrefixes = new Set();
+      raidClusters.forEach(([prefix, names])=>{
+        seenPrefixes.add(prefix);
+        if (_lastAnnouncedClusters[prefix] !== names.length){
+          _lastAnnouncedClusters[prefix] = names.length;
+          __announce('polite', `Burst detected: ${names.length} users from IP range ${prefix}.x.x`);
+        }
+      });
+      Object.keys(_lastAnnouncedClusters).forEach(prefix=>{
+        if (!seenPrefixes.has(prefix)){
+          delete _lastAnnouncedClusters[prefix];
+          __announce('polite', `Burst cluster ${prefix}.x.x resolved`);
+        }
+      });
+    } catch(_){}
     const drPending=getDeathRowPending();
     if(drPending.length>0){
       // v5.1.3: Death Row alert with FLUSH button
@@ -17280,7 +17316,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       </div>
       <div class="gam-t-layout">
         <div class="gam-t-main">
-          <div class="gam-t-alerts"></div>
+          <div class="gam-t-alerts" role="region" aria-label="Triage alerts"></div>
           <div class="gam-t-toolbar"></div>
           <div class="gam-t-batch"></div>
           <div class="gam-t-col-header">
