@@ -54,7 +54,10 @@ ck('filter handler is guarded so the new link does not break "Filter this cluste
 const hStart = SRC.indexOf(".gam-t-alert-selectall').forEach");
 const hEnd = SRC.indexOf('refreshTriageConsole();', hStart);
 const handler = (hStart >= 0 && hEnd >= 0) ? SRC.slice(hStart, hEnd + 30) : '';
-ck('select handler recomputes the cluster from the live roster', /getIPClusters\(users\)/.test(handler));
+// v10.36.12 P0 FIX: switched from getIPClusters to getUnresolvedIPClusters so
+// the burst banner + its Select-all/Death-Row-all links exclude already-
+// actioned users (see scripts/_p7_banner_excludes_actioned_smoke_test.mjs).
+ck('select handler recomputes the cluster from the live roster (unresolved-only)', /getUnresolvedIPClusters\(users\)/.test(handler));
 ck('select handler adds the cluster users to the batch selection', /triageSelected\.add\(n\)/.test(handler));
 ck('select handler filters to the cluster so they are visible', /triageFilter='cluster-'\+prefix/.test(handler));
 ck('HI-1: select handler only SELECTS -- no ban/deathrow/flush path', !/deathrow|\bban\b|executeBan|banUser|flush/i.test(handler));

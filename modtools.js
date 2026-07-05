@@ -15730,6 +15730,27 @@ Analyze this comment against the community rules. Then write a brief, profession
     return ipMap;
   }
 
+  // v10.36.12 P0 FIX: getIPClusters() clusters EVERY user with a public ipHash
+  // forever, even after every member has been Death-Rowed/banned/cleared --
+  // so the "Burst detected" banner never shrinks or disappears once formed
+  // (Commander: "lazy, bad design, plain pure and simple"). This variant
+  // excludes already-actioned/reviewed users so the ALERT retires once the
+  // cluster is resolved. getIPClusters itself is UNCHANGED -- its 3 other
+  // callers (cluster VIEW filter, hotPrefixes risk-flagging) legitimately
+  // need full membership history.
+  function getUnresolvedIPClusters(users){
+    const ipMap={};
+    users.forEach(u=>{
+      if(!u.ipHash || isPrivateIP(u.ipHash)) return;
+      if(u.status==='deathrow' || u.status==='banned' || u.status==='cleared') return;
+      if(u.reviewed) return;
+      const prefix=u.ipHash.split('.').slice(0,2).join('.');
+      if(!ipMap[prefix]) ipMap[prefix]=[];
+      ipMap[prefix].push(u.username);
+    });
+    return ipMap;
+  }
+
   // v8.6.8: silent auto-fetch of /users page so new registrations append
   // without requiring the lead to refresh. Uses the same scrapeCurrentPage
   // logic but against a fetched copy of the page HTML, then re-renders the
@@ -16194,7 +16215,9 @@ Analyze this comment against the community rules. Then write a brief, profession
     if(drReady.length>0){
       aEl.innerHTML+=`<div class="gam-t-alert gam-t-alert-red">\u{1F480} ${drReady.length} Death Row inmate${drReady.length>1?'s':''} READY. Will execute automatically.</div>`;
     }
-    const clusters=getIPClusters(users);
+    // v10.36.12 P0 FIX: use the UNRESOLVED cluster map so a burst banner
+    // retires once every member has been actioned -- see getUnresolvedIPClusters.
+    const clusters=getUnresolvedIPClusters(users);
     const raidClusters=Object.entries(clusters).filter(([,names])=>names.length>=3);
     raidClusters.forEach(([prefix,names])=>{
       aEl.innerHTML+=`<div class="gam-t-alert gam-t-alert-warn">\u{26A0}\u{FE0F} <b>Burst detected:</b> ${names.length} users from IP range ${prefix}.x.x &mdash; <a href="#" class="gam-t-alert-link" data-cluster="${prefix}">Filter this cluster</a> &middot; <a href="#" class="gam-t-alert-link gam-t-alert-selectall" data-cluster-select="${prefix}">☑ Select all ${names.length}</a> &middot; <a href="#" class="gam-t-alert-link gam-t-alert-bulkdr" data-cluster-dr="${prefix}">\u{1F480} Death Row all ${names.length}</a></div>`;
@@ -16228,7 +16251,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       a.addEventListener('click', e=>{
         e.preventDefault();
         const prefix=a.dataset.clusterSelect;
-        const names=(getIPClusters(users)||{})[prefix]||[];
+        const names=(getUnresolvedIPClusters(users)||{})[prefix]||[];
         let added=0;
         names.forEach(n=>{ if(n && !triageSelected.has(n)){ triageSelected.add(n); added++; } });
         triageFilter='cluster-'+prefix;
@@ -16242,7 +16265,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       a.addEventListener('click', e=>{
         e.preventDefault();
         const prefix=a.dataset.clusterDr;
-        const names=(getIPClusters(users)||{})[prefix]||[];
+        const names=(getUnresolvedIPClusters(users)||{})[prefix]||[];
         if(!names.length){ snack('No cluster users found', 'warn'); return; }
         batchDeathRow(names);
       });
@@ -16428,14 +16451,29 @@ Analyze this comment against the community rules. Then write a brief, profession
   }
 
   async function batchDeathRow(usernames){
-    let ok=0;
+    // v10.36.12 P0 FIX: addToDeathRow is idempotent, so re-actioning an
+    // already-queued cluster silently returned added=0 for everyone -- a
+    // zero-valued, yellow 'warn' toast that auto-dismisses in ~4s. That IS
+    // the "no feedback / nothing happened" trust-break (Commander pressed
+    // "Death Row all 29" and got a vanishing "0"). Now: distinguish newly
+    // queued from already-queued and never emit a bare "0 user(s)" toast.
+    const total = usernames.length;
+    let added = 0;
     usernames.forEach(username=>{
-      const added=addToDeathRow(username, 72*60*60*1000, getUsersBanReason());
-      if(added){ rosterSetStatus(username,'deathrow'); logAction({type:'deathrow', user:username, delay:'72 hours', source:'users-batch'}); ok++; }
+      const wasAdded=addToDeathRow(username, 72*60*60*1000, getUsersBanReason());
+      if(wasAdded){ rosterSetStatus(username,'deathrow'); logAction({type:'deathrow', user:username, delay:'72 hours', source:'users-batch'}); added++; }
     });
+    const already = total - added;
     triageSelected.clear();
     refreshTriageConsole();
-    snack(`${ok} user(s) added to Death Row (72h)`,'warn');
+    if (added > 0 && already === 0){
+      snack(`\u{1F480} ${added} queued for Death Row — auto-bans in 72h unless undone`, 'success');
+    } else if (added > 0 && already > 0){
+      snack(`\u{1F480} ${added} newly queued, ${already} already on Death Row — all queued (72h)`, 'success');
+    } else if (added === 0 && total > 0){
+      snack(`✓ All ${total} already on Death Row — nothing to do. Use "Flush Death Row now" to execute immediately.`, 'info');
+    }
+    return { added, already, total };
   }
 
   function getFilteredUsers(users){
