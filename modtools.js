@@ -497,6 +497,21 @@
     { id:'cross_win', label:'Bad Conduct on Other .WINs', emoji:'\u{1F310}', subject:'Ban: Conduct on Other .WIN Communities', message:'You have been banned from GAW due to reported incivil behavior on other .WIN communities. All GAW users must adhere to the highest standards of conduct. WWG1WGA.', defaultDays:7 },
     { id:'other', label:'Other (Custom)', emoji:'\u{270F}\u{FE0F}', subject:'', message:'', defaultDays:1 },
   ];
+
+  // v10.37.0 SUS-RATING WS-B: reason presets for the Flag SUS dropdown.
+  // Value IS the full "[tag] label" string, passed verbatim as `reason` to
+  // modSusMark (client-string only -- no server-side enum, no deploy).
+  const SUS_REASONS = [
+    '[evasion] Ban evasion / known alt',
+    '[shill] Concern troll / manufactured doubt',
+    '[doomer] Doomer / blackpill / demoralization',
+    '[spam] Spam / self-promo / PAYtriot',
+    '[slop] Low-effort / copypasta / AI slop',
+    '[divisive] Divisive / race-baiting / brigading',
+    '[fringe] Off-topic / fringe (flat earth, chemtrails)',
+    '[cross-win] Bad conduct on other .WINs',
+    '[watch] Watch - pattern forming, no single hit',
+  ];
   const DURATIONS = [{label:'Warning Only',value:0},{label:'1 Day',value:1},{label:'3 Days',value:3},{label:'7 Days',value:7},{label:'14 Days',value:14},{label:'30 Days',value:30},{label:'90 Days',value:90},{label:'Permanent',value:-1}];
   const REPLY_TEMPLATES = [
     { id:'welcome', label:'\u{1F44B} Welcome', subject:'Welcome to The Great Awakening!', body:'Welcome to GAW, {username}!\n\nRead the sidebar rules, post high-effort content, search before posting, use modmail for questions. WWG1WGA!' },
@@ -1750,6 +1765,10 @@
     easterEggsEnabled: true,
     // v5.2.2: paint a small yellow X next to flagged-suspicious usernames sitewide
     susMarkerEnabled: true,
+    // v10.37.0 SUS-RATING WS-A: subtle amber/red background wash on a SUS
+    // user's comment/post body + username (separate from susMarkerEnabled's
+    // ✗ glyph system -- this rides _susState / _susDecorateOne).
+    susTint: true,
     // v5.2.2: sniff GAW's primary accent color at init, use its complement for our UI
     harmonizeTheme: true,
     // v5.2.0 H7: per-feature opt-ins. Cloud features gated behind explicit consent.
@@ -12303,6 +12322,66 @@ Analyze this comment against the community rules. Then write a brief, profession
     });
     strip.appendChild(banBtn);
 
+    // v10.37.0 SUS-RATING WS-C: one-click Flag/Clear SUS control. State-aware:
+    // not-sus -> dropdown of SUS_REASONS + Custom...; already-sus -> single
+    // Clear button. HI-1: writes go through _gamMarkSusFromStrip/
+    // _gamClearSusFromStrip ONLY (modSusMark/modSusClear) -- never
+    // executeBan/addToDeathRow. No confirm() on clear (SUS is HI-1-safe,
+    // trivially reversible, Commander hates friction).
+    {
+      const lk = String(author || '').toLowerCase();
+      const isSus = _susState.rows.has(lk);
+      if (isSus) {
+        const row = _susState.rows.get(lk);
+        const susBtn = el('button', {
+          cls: 'gam-strip-btn',
+          type: 'button',
+          'aria-label': 'Clear SUS on ' + author,
+          'aria-pressed': 'true',
+          title: 'SUS by ' + (row.marked_by || '?') + ': ' + (row.reason || '(no reason)')
+        }, '✓ SUS ✕');
+        susBtn.addEventListener('click', async e=>{
+          e.preventDefault(); e.stopPropagation();
+          await _gamClearSusFromStrip(author);
+        });
+        strip.appendChild(susBtn);
+      } else {
+        const susWrap = el('span', { cls:'gam-strip-drop' });
+        const susBtn = el('button', {
+          cls: 'gam-strip-btn',
+          type: 'button',
+          'aria-label': 'Flag ' + author + ' as SUS',
+          'aria-pressed': 'false'
+        }, '\u{1F6A9} Flag SUS ▾');
+        const susMenu = el('div', { cls:'gam-strip-menu' });
+        SUS_REASONS.forEach(reasonStr=>{
+          const it = el('a', { cls:'gam-strip-item', href:'javascript:void(0)' }, reasonStr);
+          it.addEventListener('click', async e=>{
+            e.preventDefault(); e.stopPropagation();
+            susMenu.classList.remove('gam-strip-menu-open');
+            await _gamMarkSusFromStrip(author, reasonStr);
+          });
+          susMenu.appendChild(it);
+        });
+        const customIt = el('a', { cls:'gam-strip-item', href:'javascript:void(0)' }, 'Custom...');
+        customIt.addEventListener('click', async e=>{
+          e.preventDefault(); e.stopPropagation();
+          susMenu.classList.remove('gam-strip-menu-open');
+          const reason = prompt('Reason for marking ' + author + ' SUS? (optional)', '') || '';
+          await _gamMarkSusFromStrip(author, reason);
+        });
+        susMenu.appendChild(customIt);
+        susBtn.addEventListener('click', e=>{
+          e.preventDefault(); e.stopPropagation();
+          document.querySelectorAll('.gam-strip-menu-open').forEach(m=>{ if (m!==susMenu) m.classList.remove('gam-strip-menu-open'); });
+          susMenu.classList.toggle('gam-strip-menu-open');
+        });
+        susWrap.appendChild(susBtn);
+        susWrap.appendChild(susMenu);
+        strip.appendChild(susWrap);
+      }
+    }
+
     // v10.25.0 (next-wave): in-feed SLOP BADGE -- an at-a-glance low-effort flag for
     // the curator. Posts only, INFORMATIONAL (no auto-action), conservative heuristic
     // (needs multiple slop signals to trip). Toggle via the 'slopBadge' setting (default on).
@@ -13343,6 +13422,10 @@ Analyze this comment against the community rules. Then write a brief, profession
     addToggle('Sus Marker', 'susMarkerEnabled', 'Paint \u2717 next to watchlisted / cloud-flagged usernames sitewide.', v=>{
       if (v) startSusMarker(); else document.querySelectorAll('.gam-sus-x').forEach(n=>n.remove());
     });
+    addToggle('SUS Tint', 'susTint', 'Softly tint SUS users\u2019 comments & usernames (amber; red when hot).', v=>{
+      _gamInjectSusTintStyles();
+      _susApplyDecorations(true);
+    });
     addToggle('Theme Harmony', 'harmonizeTheme', 'Derive ModTools accent from GAW\'s own color wheel (180\u00B0 complement).', ()=>{ /* reload required */ });
     addToggle('Mail Hover Highlight', 'mailHoverHighlight', 'Highlight modmail senders throughout the page when hovering a modmail message.');
     // v10.36.9: Wave-2 bar taxonomy rollback lever. On = SHIELD/HOT/QUEUE/
@@ -13860,6 +13943,38 @@ Analyze this comment against the community rules. Then write a brief, profession
     hideTooltip();
   }
 
+  // v10.37.0 SUS-RATING WS-C: shared mark/clear helpers extracted from the
+  // proven tooltip 'sus' path so the tooltip, the action-strip control, and
+  // the modmail-bar button all converge on one code path. HI-1: these are
+  // the ONLY two writers of SUS state -- modSusMark/modSusClear only, never
+  // executeBan/addToDeathRow. Presets (SUS_REASONS) are display strings only.
+  async function _gamMarkSusFromStrip(username, reason){
+    const lk = String(username || '').toLowerCase();
+    const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modSusMark', args:{ username, reason: reason || '', client_op_id: __makeReqId() } });
+    if (r && r.ok){
+      _susState.rows.set(lk, (r.data && r.data.row) || { username, reason: reason || '', marked_by: '(you)', comment_count_24h: 0 });
+      snack(`\u{1F6A9} ${username} marked SUS`, 'success');
+      _susApplyDecorations(true);
+      try { window.dispatchEvent(new CustomEvent('gam-roster-change')); } catch(_){}
+    } else {
+      snack('Mark failed (HTTP ' + (r && r.status || '?') + ')', 'error');
+    }
+    return r;
+  }
+  async function _gamClearSusFromStrip(username){
+    const lk = String(username || '').toLowerCase();
+    const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modSusClear', args:{ username, client_op_id: __makeReqId() } });
+    if (r && r.ok){
+      _susState.rows.delete(lk);
+      snack(`✓ SUS cleared on ${username}`, 'success');
+      _susApplyDecorations(true);
+      try { window.dispatchEvent(new CustomEvent('gam-roster-change')); } catch(_){}
+    } else {
+      snack('Clear failed (HTTP ' + (r && r.status || '?') + ')', 'error');
+    }
+    return r;
+  }
+
   // v5.1.2 / v9.3.3 (P1-1): boundary-aware positioning.
   // Prefers below+left-anchored. Flips to top-anchored when the anchor is
   // near the bottom edge, and right-anchored (grows left) when near the
@@ -13974,25 +14089,49 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
       else if (act === 'sus'){
         // v9.3.4 (P1-3): Mark/Clear SUS via worker RPC.
+        // v10.37.0 SUS-RATING: converged onto the shared _gamMarkSusFromStrip/
+        // _gamClearSusFromStrip helpers (same code path as the action-strip
+        // control and the modmail-bar button). Clear keeps its existing
+        // confirm() guard (pre-existing UX, unchanged). Mark now offers the
+        // SUS_REASONS dropdown with the raw prompt() as the "Custom..." path.
         const lk = String(username || '').toLowerCase();
         if (_susState.rows.has(lk)) {
           // Clear path
           if (!confirm(`Clear SUS flag on ${username}?`)) return;
-          const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modSusClear', args:{ username, client_op_id: __makeReqId() } }); // v10.11 C5 (REDTEAM-2): idempotency key
-          if (r && r.ok){ _susState.rows.delete(lk); snack(`✓ SUS cleared on ${username}`, 'success'); _susApplyDecorations(true); unpinTooltip(); }
-          else { snack(`Clear failed (HTTP ${r && r.status || '?'})`, 'error'); }
+          await _gamClearSusFromStrip(username);
+          unpinTooltip();
         } else {
-          // Mark path — prompt for reason
-          const reason = prompt(`Reason for marking ${username} SUS? (optional)`, '') || '';
-          const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modSusMark', args:{ username, reason, client_op_id: __makeReqId() } }); // v10.11 C5 (REDTEAM-2): idempotency key
-          if (r && r.ok){
-            _susState.rows.set(lk, (r.data && r.data.row) || { username, reason, marked_by: '(you)', comment_count_24h: 0 });
-            snack(`\u{1F6A9} ${username} marked SUS`, 'success');
-            _susApplyDecorations(true);
+          // Mark path — small reason menu anchored to the control button
+          document.querySelectorAll('.gam-strip-menu-open').forEach(m=>m.classList.remove('gam-strip-menu-open'));
+          const susTipMenu = document.createElement('div');
+          susTipMenu.className = 'gam-strip-menu gam-strip-menu-open';
+          susTipMenu.style.cssText = 'position:absolute;';
+          const rect = btn.getBoundingClientRect();
+          susTipMenu.style.left = (rect.left + window.scrollX) + 'px';
+          susTipMenu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+          const closeSusTipMenu = ()=>{ susTipMenu.remove(); document.removeEventListener('click', onOutsideClick, true); };
+          const onOutsideClick = (ev2)=>{ if (!ev2.target.closest('.gam-strip-menu')) closeSusTipMenu(); };
+          SUS_REASONS.forEach(reasonStr=>{
+            const mi = el('a', { cls:'gam-strip-item', href:'javascript:void(0)' }, reasonStr);
+            mi.addEventListener('click', async e2=>{
+              e2.preventDefault(); e2.stopPropagation();
+              closeSusTipMenu();
+              await _gamMarkSusFromStrip(username, reasonStr);
+              unpinTooltip();
+            });
+            susTipMenu.appendChild(mi);
+          });
+          const customMi = el('a', { cls:'gam-strip-item', href:'javascript:void(0)' }, 'Custom...');
+          customMi.addEventListener('click', async e2=>{
+            e2.preventDefault(); e2.stopPropagation();
+            closeSusTipMenu();
+            const reason = prompt(`Reason for marking ${username} SUS? (optional)`, '') || '';
+            await _gamMarkSusFromStrip(username, reason);
             unpinTooltip();
-          } else {
-            snack(`Mark failed (HTTP ${r && r.status || '?'})`, 'error');
-          }
+          });
+          susTipMenu.appendChild(customMi);
+          document.body.appendChild(susTipMenu);
+          setTimeout(()=>document.addEventListener('click', onOutsideClick, true), 0);
         }
       }
     });
@@ -14082,6 +14221,25 @@ Analyze this comment against the community rules. Then write a brief, profession
       _susApplyDecorations(true);
     } catch(_){}
   }
+  // v10.37.0 SUS-RATING WS-A: injects the comment/post background wash for
+  // SUS-flagged users. Cloned from _gamInjectFlagDotStyles -- id-guarded,
+  // dark-theme tuned. Do NOT lower the body wash below .045 alpha (vanishes);
+  // the inset left rail is the real at-a-glance signal (WCAG 1.4.1 backstop).
+  function _gamInjectSusTintStyles(){
+    if (document.getElementById('gam-sus-tint-styles')) return;
+    const st = document.createElement('style');
+    st.id = 'gam-sus-tint-styles';
+    st.textContent = `
+      .gam-sus-comment{background:rgba(240,160,64,.055);box-shadow:inset 3px 0 0 rgba(240,160,64,.55);border-radius:2px;transition:background .12s,filter .12s}
+      .gam-sus-comment.gam-sus-comment-hot{background:rgba(240,64,64,.075);box-shadow:inset 3px 0 0 rgba(240,64,64,.60)}
+      .gam-sus-comment a[href^="/u/"][data-gam-sus-decorated]{background:rgba(240,160,64,.14);padding:0 3px;border-radius:3px}
+      .gam-sus-comment.gam-sus-comment-hot a[href^="/u/"][data-gam-sus-decorated]{background:rgba(240,64,64,.16)}
+      .gam-sus-comment:hover{filter:brightness(1.15)}
+      .gam-sus-comment:hover a[href^="/u/"][data-gam-sus-decorated]{background:rgba(240,160,64,.22)}
+      .gam-sus-comment.gam-sus-comment-hot:hover a[href^="/u/"][data-gam-sus-decorated]{background:rgba(240,64,64,.24)}
+    `;
+    (document.head || document.documentElement).appendChild(st);
+  }
   function _susApplyDecorations(force){
     const sel = force
       ? 'a[href^="/u/"]'
@@ -14105,6 +14263,15 @@ Analyze this comment against the community rules. Then write a brief, profession
           a.style.fontWeight = isNew ? '600' : '';
           a.title = a.getAttribute('data-gam-sus-orig-title') || '';
           a.removeAttribute('data-gam-sus-orig-title');
+          // v10.37.0 SUS-RATING WS-A: strip the container tint only when no
+          // OTHER sus-decorated anchor remains in it (a comment may quote a
+          // second sus user). Does not assume this branch returns below --
+          // the isNew continuation still needs to run.
+          const _teardownBox = a.closest('.comment, .post');
+          if (_teardownBox && !_teardownBox.querySelector('a[href^="/u/"][data-gam-sus-decorated]')) {
+            _teardownBox.classList.remove('gam-sus-comment', 'gam-sus-comment-hot');
+            _teardownBox.removeAttribute('aria-label');
+          }
         } catch(_){}
         if (!isNew) return;
       }
@@ -14140,8 +14307,20 @@ Analyze this comment against the community rules. Then write a brief, profession
       // Prefix '🚩 ' once (may follow ⓝ prefix if both conditions)
       const txt = a.textContent || '';
       if (!/^\u{1F6A9}\s/u.test(txt)) a.textContent = '\u{1F6A9} ' + txt;
+      // v10.37.0 SUS-RATING WS-A: stamp the container background wash.
+      if (getSetting('susTint', true)) {
+        const _box = a.closest('.comment, .post');
+        if (_box) {
+          _box.classList.add('gam-sus-comment');
+          _box.classList.toggle('gam-sus-comment-hot', isHot);
+          _box.setAttribute('aria-label', 'Flagged SUS by ' + (row.marked_by || '?') + ': ' + reason);
+        }
+      }
     });
   }
+  // v10.37.0 SUS-RATING WS-A: mount the tint stylesheet once at boot, gated
+  // on susTint (default true). Decorators check the setting per-element.
+  if (getSetting('susTint', true)) _gamInjectSusTintStyles();
   // Initial fetch + 60s poll (visibility-gated) + visibilitychange refresh.
   // AF-26 (Rule 77): scheduleIdle for non-critical boot task
   scheduleIdle(_susRefresh, 1500);
@@ -14464,6 +14643,9 @@ Analyze this comment against the community rules. Then write a brief, profession
       // RPC -- if already-SUS, show the no-op "Already SUS" snack instead of
       // a misleading "marked SUS" success on a duplicate.
       else if (act === 'sus'){
+        // v10.37.0 SUS-RATING: converged onto the shared _gamMarkSusFromStrip
+        // helper (same code path as tooltip + action-strip). Button-state
+        // (disabled/text) UX preserved as-is; only the RPC call changed.
         const _alreadySus = !!(typeof _susState === 'object' && _susState && _susState.rows
           && _susState.rows.has(String(sender || '').toLowerCase()));
         if (_alreadySus) {
@@ -14476,28 +14658,14 @@ Analyze this comment against the community rules. Then write a brief, profession
         const orig = btn.textContent;
         btn.textContent = '\u{1F6A9} marking SUS...';
         try {
-          const r = await chrome.runtime.sendMessage({
-            type: 'rpc',
-            name: 'modSusMark',
-            args: { username: sender, reason: 'modmail-bar', client_op_id: __makeReqId() }
-          });
+          const r = await _gamMarkSusFromStrip(sender, 'modmail-bar');
           if (r && r.ok) {
             btn.textContent = '\u2713 SUS marked';
-            snack(`${sender} marked SUS`, 'success');
             logAction({ type:'sus', user:sender, source:'modmail-bar' });
-            // v10.14.2 MM6: keep _susState in sync so a second click reads
-            // the fresh state without round-tripping the SW.
-            try {
-              const _lk = String(sender || '').toLowerCase();
-              if (_susState && _susState.rows && _lk) {
-                _susState.rows.set(_lk, (r.data && r.data.row) || { username: sender, reason: 'modmail-bar', marked_by: '(you)', comment_count_24h: 0 });
-              }
-            } catch(_){}
           } else {
             const errMsg = (r && r.error) || 'unknown';
             btn.disabled = false;
             btn.textContent = orig;
-            snack('SUS mark failed: ' + errMsg, 'error');
           }
         } catch (e) {
           btn.disabled = false;
@@ -15204,6 +15372,14 @@ Analyze this comment against the community rules. Then write a brief, profession
           a.style.fontWeight = isNew ? '600' : '';
           a.title = a.getAttribute('data-gam-sus-orig-title') || '';
           a.removeAttribute('data-gam-sus-orig-title');
+          // v10.37.0 SUS-RATING WS-A: strip container tint only if no OTHER
+          // sus-decorated anchor remains in it; does not assume this branch
+          // returns (isNew continuation still runs below).
+          var _teardownBox = a.closest('.comment, .post');
+          if (_teardownBox && !_teardownBox.querySelector('a[href^="/u/"][data-gam-sus-decorated]')) {
+            _teardownBox.classList.remove('gam-sus-comment', 'gam-sus-comment-hot');
+            _teardownBox.removeAttribute('aria-label');
+          }
         } catch(_){}
         if (!isNew) return;
       }
@@ -15236,6 +15412,15 @@ Analyze this comment against the community rules. Then write a brief, profession
       a.title = '\u{1F6A9} SUS by ' + (row.marked_by || '?') + ': ' + reason + extra;
       var txt = a.textContent || '';
       if (!/^\u{1F6A9}\s/u.test(txt)) a.textContent = '\u{1F6A9} ' + txt;
+      // v10.37.0 SUS-RATING WS-A: stamp the container background wash.
+      if (getSetting('susTint', true)) {
+        var _box = a.closest('.comment, .post');
+        if (_box) {
+          _box.classList.add('gam-sus-comment');
+          _box.classList.toggle('gam-sus-comment-hot', isHot);
+          _box.setAttribute('aria-label', 'Flagged SUS by ' + (row.marked_by || '?') + ': ' + reason);
+        }
+      }
     } catch(_){}
   }
   try {
