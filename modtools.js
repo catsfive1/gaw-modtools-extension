@@ -5322,6 +5322,22 @@
             return;
           }
         }
+        if (k === 'gam_settings' && stored[k] == null){
+          // v10.40.1: factory-reset corner. Popup Factory reset REMOVES
+          // gam_settings then bumps the stamp; a tab that was closed during
+          // the reset would otherwise resurrect its stale localStorage copy
+          // (chrome.storage empty = no overwrite signal on the v10.40.0
+          // path above). Newer chrome stamp + no chrome settings = an
+          // authoritative wipe -> clear the page copy too.
+          let chromeStamp = 0, lsStamp = 0;
+          try { chromeStamp = Number(stored[K_WRITE_STAMP]) || 0; } catch(e){}
+          try { lsStamp = Number(JSON.parse(localStorage.getItem(K_WRITE_STAMP) || '0')) || 0; } catch(e){}
+          if (chromeStamp > lsStamp){
+            try { localStorage.removeItem(k); } catch(e){}
+            try { localStorage.setItem(K_WRITE_STAMP, JSON.stringify(chromeStamp)); } catch(e){}
+            return;
+          }
+        }
         const lsRaw = localStorage.getItem(k);
         if (lsRaw == null && stored[k] != null){
           // v5.2.0 H1: never hydrate secrets into page localStorage.

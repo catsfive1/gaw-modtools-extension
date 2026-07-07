@@ -1,4 +1,8 @@
 # GAW ModTools — CHANGELOG
+## v10.40.1 -- FIX: factory-reset corner of the split-brain settings fix
+
+Factory reset removes gam_settings from chrome.storage, so the v10.40.0 stamp-overwrite path had no signal and a GAW tab closed during the reset could resurrect stale page-localStorage settings later. Fix: reset now bumps gam_settings_writeStamp after the wipe, and hydrate treats "no chrome settings + newer stamp" as an authoritative wipe, clearing the page copy. Regression scripts/_p18_factory_reset_stamp_smoke_test.mjs 11/11; suite 32/32.
+
 ## v10.40.0 — UX P1: settings integrity — modmail feature resurrected, re-consent path, popup-write hydrate fix, autoRefresh toggle, one-modal title/flag grants, undo stack of 3 (2026-07-07)
 
 **v10.40.0 ships P1 items 4-9 from the 2026-07-07 four-specialist UX audit** (extension manifest 10.39.0 → 10.40.0; no worker change). The theme is settings integrity: features that existed but were unreachable, consent that could never be revisited, popup maintenance buttons that silently did nothing, and confirmation flows that made the operator type words a button should have offered.

@@ -1435,6 +1435,11 @@ $('clearBtn').addEventListener('click', async () => {
     // v5.1.1: scope clear to ModTools-owned keys only (don't nuke unrelated settings)
     // v10.7.0 UIUX-06 B.1: also remove gam_welcomed so welcome toast fires again after factory reset
     await chrome.storage.local.remove([...OWNED_KEYS, 'gam_welcomed', 'gam_pending_invite_backup']);
+    // v10.40.1: bump the write stamp AFTER the wipe so content-script hydrate
+    // treats "no gam_settings + newer stamp" as an authoritative reset and
+    // clears any stale page-localStorage copy in tabs that were CLOSED during
+    // the reset (the clearLocalStorage message below only reaches open tabs).
+    try { await chrome.storage.local.set({ gam_settings_writeStamp: Date.now() }); } catch (e) {}
     // Also tell every open GAW tab to clear its localStorage - otherwise
     // the content script's hydration will just read data back from localStorage.
     // v5.1.1: query BOTH root and subdomain tab patterns
