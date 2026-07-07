@@ -18208,6 +18208,56 @@ Analyze this comment against the community rules. Then write a brief, profession
     return wrap;
   }
 
+  // v10.36.11: keep the /u/<name> POSTS view in strict newest-first order.
+  // ROOT CAUSE of the recurring "profile eats my posts" report (confirmed LIVE
+  // 2026-07-05 via Claude-in-Chrome on catsfive's real page): nothing hides or
+  // removes the posts. The profile river (and GAW's own paginated scroll) append
+  // fetched pages OUT OF chronological order, so the operator's most-recent posts
+  // (#2 .. ~3 days old) get stranded BELOW older 4-6-day posts and LOOK eaten,
+  // while the single newest + the old posts stay on top. The server returns them
+  // correctly ordered (verified: raw fetch = 19h,19h,20h,21h,1d... ; live DOM =
+  // 19h,4d,4d,4d...). Only the client DOM is scrambled. Proven fix (verified live
+  // in his browser BEFORE shipping): re-sort every .post[data-id] by its <time>
+  // descending and consolidate into the first .post-list. Idempotent + debounced.
+  let _profileReorderObs = null;
+  let _profileReorderScheduled = false;
+  function _reorderProfilePostsChronological(){
+    // Posts view only; _isProfileViewNow is the v10.31 broad detector (any
+    // /u/<name>, excludes /u/c:) so this never touches community feeds.
+    if (typeof _isProfileViewNow === 'function' && !_isProfileViewNow()) return;
+    const posts = [...document.querySelectorAll('.post[data-id]:not([data-type="comment"])')];
+    if (posts.length < 2) return;
+    const primary = posts[0].parentElement;
+    if (!primary) return;
+    const getT = (p) => {
+      const t = p.querySelector('time');
+      if (!t) return 0;
+      const raw = t.getAttribute('datetime') || t.getAttribute('title') || t.textContent || '';
+      const ms = Date.parse(raw);
+      return isNaN(ms) ? 0 : ms;
+    };
+    const sorted = posts.slice().sort((a, b) => getT(b) - getT(a));
+    // Already correctly ordered? Skip the reflow -- also stops the observer from
+    // ping-ponging on our own DOM moves.
+    let ordered = true;
+    for (let i = 0; i < posts.length; i++){ if (posts[i] !== sorted[i]){ ordered = false; break; } }
+    if (ordered) return;
+    // Pause our own observer so the reflow can't retrigger us mid-move.
+    try { if (_profileReorderObs) _profileReorderObs.disconnect(); } catch(_){}
+    sorted.forEach(p => primary.appendChild(p));
+    try {
+      if (_profileReorderObs){
+        const root = document.querySelector('.main-content') || document.body;
+        _profileReorderObs.observe(root, { childList:true, subtree:true });
+      }
+    } catch(_){}
+  }
+  function _scheduleReorderProfilePosts(){
+    if (_profileReorderScheduled) return;
+    _profileReorderScheduled = true;
+    setTimeout(() => { _profileReorderScheduled = false; try { _reorderProfilePostsChronological(); } catch(_){} }, 350);
+  }
+
   function enhanceUserProfilePage(){
     if (!IS_USER_PROFILE_PAGE) return;
     profileRiver.username = PROFILE_USERNAME;
@@ -18249,6 +18299,13 @@ Analyze this comment against the community rules. Then write a brief, profession
         if (rem < 600) loadNextProfilePage();
       }, 200);
     }, { passive:true });
+    // v10.36.11: guarantee newest-first order no matter how pages get appended
+    // (river fetch OR GAW native infinite-scroll). Debounced observer + one pass now.
+    try {
+      _profileReorderObs = new MutationObserver(() => _scheduleReorderProfilePosts());
+      _profileReorderObs.observe(mainContent, { childList:true, subtree:true });
+    } catch(_){}
+    _scheduleReorderProfilePosts();
     // Prefetch once so even a short page starts filling immediately.
     setTimeout(()=>loadNextProfilePage(), 800);
   }
