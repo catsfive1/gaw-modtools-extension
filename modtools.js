@@ -6817,7 +6817,11 @@
       const thingId = opts && opts.seedData && opts.seedData.thingId ? opts.seedData.thingId : id;
       const thingType = opts && opts.seedData && opts.seedData.thingType ? opts.seedData.thingType : 'post';
       return {
-        APPROVE:    async () => { try { await apiApprove(thingId, thingType); snack('Approved', 'success'); logAction({type:'approve', id:thingId, source:'v7-nba'}); } catch(e){} close(); },
+        // v10.37.2 WS-1 (UXP0): capture api result + branch on r.ok -- api helpers
+        // resolve {ok:false} on HTTP failure (never throw), so the old fire-and-
+        // forget path showed a success snack on failed approves. On failure the
+        // panel stays open so the operator can retry.
+        APPROVE:    async () => { try { const r = await apiApprove(thingId, thingType); if (r && r.ok) { snack('Approved', 'success'); logAction({type:'approve', id:thingId, source:'v7-nba'}); close(); } else { snack('Approve FAILED: ' + (r && r.error || 'network'), 'error'); } } catch(e){ snack('Approve FAILED: ' + (e && e.message || 'network'), 'error'); } },
         // AF-34 (Rule 101): withUndo wraps apiRemove -- inverse is apiApprove (Tier B, 5s window)
         // v10.13.2 W5 (UIUX2-30): include e.message + remediation hint so operator
         // can act on the failure (network vs auth vs gone) rather than just "Remove failed".
@@ -8024,6 +8028,10 @@
     }
 
     if (!result || !result.ok) {
+      // v10.37.2 WS-1 (UXP0): the silent return here meant HTTP failures
+      // ({ok:false} resolutions) gave ZERO feedback -- the operator saw
+      // nothing and assumed success. Name the action + reason.
+      snack(label + ' FAILED: ' + (result && result.error || 'network'), 'error');
       return result;
     }
 
@@ -13729,17 +13737,29 @@ Analyze this comment against the community rules. Then write a brief, profession
   // if Settings.mailHoverHighlight is true.
   document.addEventListener('mouseover', e=>{
     const i=e.target.closest(SELECTORS.anyItem);
-    if(i) hoveredItem=i;
+    // v10.37.2 WS-3a (UXP0): hoveredItem is the invisible target of the
+    // Ctrl+Shift+B/R/X/P/W/C shortcuts -- mark it with .gam-kb-target so
+    // the operator can SEE what the keys will act on.
+    if(i){
+      if(hoveredItem && hoveredItem!==i) hoveredItem.classList.remove('gam-kb-target');
+      i.classList.add('gam-kb-target');
+      hoveredItem=i;
+    }
     const m=e.target.closest('.mail.standard_page');
     if(m){
-      if(hoveredMail && hoveredMail!==m) hoveredMail.classList.remove('gam-mail-hover');
+      if(hoveredMail && hoveredMail!==m) hoveredMail.classList.remove('gam-mail-hover', 'gam-mail-hover-strong');
       hoveredMail=m;
-      if (getSetting('mailHoverHighlight', false)) m.classList.add('gam-mail-hover');
+      // v10.37.2 WS-3b (UXP0): bare-key A/R always act on hoveredMail, so the
+      // base .gam-mail-hover target marker is now ALWAYS applied. The
+      // mailHoverHighlight setting keeps controlling only the stronger
+      // cosmetic highlight (.gam-mail-hover-strong).
+      m.classList.add('gam-mail-hover');
+      if (getSetting('mailHoverHighlight', false)) m.classList.add('gam-mail-hover-strong');
     }
   });
   document.addEventListener('mouseout', e=>{
     if(hoveredMail && !hoveredMail.contains(e.relatedTarget)){
-      hoveredMail.classList.remove('gam-mail-hover');
+      hoveredMail.classList.remove('gam-mail-hover', 'gam-mail-hover-strong');
       hoveredMail=null;
     }
   });
@@ -17192,7 +17212,11 @@ Analyze this comment against the community rules. Then write a brief, profession
       nameTarget.title = 'Open Mod Console (shift-click: profile in new tab)';
       // v7.0: route through IntelDrawer (flag-gated); falls back to v6.3.0 path when flag off.
       row.setAttribute('data-gam-intel-wired', 'v7');
-      nameTarget.addEventListener('click', (e)=>{
+      // v10.37.2 WS-5 (UXP0): keyboard-reachable -- role=button + tabindex=0 +
+      // Enter/Space route through the same handler as click.
+      nameTarget.setAttribute('role', 'button');
+      nameTarget.setAttribute('tabindex', '0');
+      const openIntel = (e)=>{
         if (e.shiftKey){ window.open(`/u/${encodeURIComponent(u.username)}/`,'_blank'); return; }
         if (e.ctrlKey || e.metaKey) return;
         IntelDrawer.open({
@@ -17201,6 +17225,10 @@ Analyze this comment against the community rules. Then write a brief, profession
           seedData: { username: u.username, primaryState: (u.status||'new').toUpperCase() === 'BANNED' ? 'ACTIONED' : 'OPEN' },
           fallback: () => openModConsole(u.username, null, 'intel')
         });
+      };
+      nameTarget.addEventListener('click', openIntel);
+      nameTarget.addEventListener('keydown', (e)=>{
+        if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openIntel(e); }
       });
     }
 
@@ -17497,7 +17525,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     tc.innerHTML=`
       <div class="gam-t-header">
         <span class="gam-t-brand">\u{1F6E1} ModTools ${VERSION} \u2014 Triage Console</span>
-        <span class="gam-t-header-hint">Click username to open Mod Console \u00B7 Shift-click \u{1F528} for instant perma \u00B7 \u26A1 for Auto-DR pattern \u00B7 ${ROSTER_MAX} user history</span>
+        <span class="gam-t-header-hint">Click or Enter on username to open Mod Console \u00B7 Shift-click \u{1F528} for instant perma \u00B7 \u26A1 for Auto-DR pattern \u00B7 ${ROSTER_MAX} user history</span>
       </div>
       <div class="gam-t-layout">
         <div class="gam-t-main">
@@ -25250,6 +25278,10 @@ Analyze this comment against the community rules. Then write a brief, profession
 
 .mail.standard_page{transition:background .15s}
 .gam-mail-hover{background:rgba(74,158,255,.06)!important;box-shadow:inset 3px 0 0 ${C.ACCENT}}
+/* v10.37.2 WS-3b (UXP0): stronger cosmetic highlight, gated by mailHoverHighlight setting */
+.gam-mail-hover-strong{background:rgba(74,158,255,.14)!important}
+/* v10.37.2 WS-3a (UXP0): visible target marker for hoveredItem keyboard shortcuts */
+.gam-kb-target{outline:1px solid rgba(240,160,64,.55);outline-offset:2px}
 
 /* Modal system
    v9.3.11: backdrop-filter:blur(4px) removed AND the chat-panel ID rule
@@ -29298,7 +29330,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       const row = document.createElement('label');
       row.style.cssText = 'display:flex;gap:10px;align-items:flex-start;background:#1a1c20;padding:10px 12px;border-radius:6px;cursor:pointer';
       row.innerHTML = `
-        <input type="checkbox" data-feature="${f.key}" checked style="margin-top:3px;accent-color:#2ECC71">
+        <input type="checkbox" data-feature="${f.key}" style="margin-top:3px;accent-color:#2ECC71">
         <div>
           <div style="font-weight:600;color:#eee">${f.label}</div>
           <div style="color:#888;font-size:12px">${f.desc}</div>

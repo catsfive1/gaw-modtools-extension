@@ -307,7 +307,9 @@
           &#x26A0; Safe Mode
         </span>
         <label class="gam-toggle" id="safeModeToggleLabel" style="display:flex;align-items:center;gap:4px;cursor:pointer;min-height:32px;position:relative">
-          <input type="checkbox" id="safeModeToggle" style="display:none">
+          <!-- v10.37.2 WS-4 (UXP0): visually-hidden-but-focusable (was display:none, which
+     removed the panic control from the tab order entirely). -->
+        <input type="checkbox" id="safeModeToggle" style="opacity:0;position:absolute;width:1px;height:1px">
           <!-- v10.14.1 CT4: track stays 32x16 visually; ::after on track extends -->
           <!-- the click target vertically to 32px so toggle meets a11y charter. -->
           <span id="safeModeToggleTrack" class="gam-toggle-track"

@@ -1234,6 +1234,12 @@ input:focus, textarea:focus, select:focus {
   outline: 2px solid var(--bb-amber) !important;
   outline-offset: 1px !important;
 }
+/* v10.37.2 WS-4 (UXP0): Safe Mode checkbox is visually-hidden-but-focusable
+   (popup.html); surface keyboard focus on the visible toggle track. */
+#safeModeToggle:focus-visible + .gam-toggle-track {
+  outline: 2px solid var(--bb-amber);
+  outline-offset: 2px;
+}
 .pop-btn-primary {
   background: var(--bb-amber) !important;
   border-color: var(--bb-amber) !important;
