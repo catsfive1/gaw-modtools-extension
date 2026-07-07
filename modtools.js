@@ -3107,6 +3107,26 @@
     });
   }
 
+  // v10.39.0 WS-A (dialog sweep): Brave can silently suppress native
+  // confirm()/prompt() in content scripts (see the settings note near the
+  // browser-dialog comment) -- a suppressed confirm() returns false
+  // instantly, so the button appears DEAD. gamConfirm routes the question
+  // through the styled in-DOM _gamAuxConfirm builder (modtools-aux.js).
+  // Native confirm survives ONLY as the last-ditch fallback if the aux file
+  // failed to load. Returns Promise<boolean>; resolves false on cancel/ESC/
+  // backdrop click -- callers keep identical no-action-on-cancel semantics.
+  function gamConfirm(message, opts){
+    try {
+      if (typeof window._gamAuxConfirm === 'function') {
+        return window._gamAuxConfirm(message, opts || {});
+      }
+    } catch(_){}
+    // Allowlisted fallback: aux script missing (should never happen -- both
+    // files ship in the same content_scripts block).
+    try { return Promise.resolve(!!window.confirm(message)); }
+    catch(_){ return Promise.resolve(false); }
+  }
+
   // --- CHUNK 15: scrubUrlForTelemetry + normalizeWorkerError --------------
   function scrubUrlForTelemetry(raw){
     try {
@@ -8591,12 +8611,46 @@
       };
       document.addEventListener('keydown', s._gamSnackEsc, true);
     }
-    s._gamDismissTimer = setTimeout(()=>{
-      s.classList.remove('gam-snack-show');
-      setTimeout(()=>{ try { s.remove(); } catch(_){} },300);
-      if (s._gamCountdownInterval) { clearInterval(s._gamCountdownInterval); s._gamCountdownInterval = null; }
-      if (s._gamSnackEsc) { try { document.removeEventListener('keydown', s._gamSnackEsc, true); } catch(_){} s._gamSnackEsc = null; }
-    }, durationMs);
+    // v10.39.0 WS-C: opts.sticky === true keeps the snack until explicitly
+    // dismissed (its ✕ button or ESC) -- no auto-dismiss timer. Used by the
+    // batch-ban completion summary so a failure roster can't scroll away.
+    if (!o.sticky) {
+      s._gamDismissTimer = setTimeout(()=>{
+        s.classList.remove('gam-snack-show');
+        setTimeout(()=>{ try { s.remove(); } catch(_){} },300);
+        if (s._gamCountdownInterval) { clearInterval(s._gamCountdownInterval); s._gamCountdownInterval = null; }
+        if (s._gamSnackEsc) { try { document.removeEventListener('keydown', s._gamSnackEsc, true); } catch(_){} s._gamSnackEsc = null; }
+      }, durationMs);
+    }
+  }
+  // v10.39.0 WS-C: expose snack for modtools-aux.js. Its _gmSnack (GOD MODE)
+  // and sibling aux toasts have ALWAYS probed `window.snack` and silently
+  // fallen back to console.log because nothing ever exported it -- the GOD
+  // MODE bulk-DR summary was invisible on-page. Same isolated world, safe.
+  try { window.snack = snack; } catch(_){}
+  // v10.39.0 WS-C: single UPDATING progress element for batch Death Row runs
+  // (>3 inmates). Reuses the .gam-snack visual shell but is NOT part of the
+  // stack (no data-stack attr) and never auto-dismisses -- its text updates
+  // in place instead of emitting one toast per user. Sits above the 4-snack
+  // stack band so per-user EXECUTED/FAILED toasts don't cover it.
+  function _gamBatchProgress(text){
+    let p = document.getElementById('gam-batch-progress');
+    if (!p) {
+      p = el('div', { id:'gam-batch-progress', cls:'gam-snack gam-snack-info' });
+      p.setAttribute('role', 'status');
+      p.setAttribute('aria-live', 'polite');
+      p.style.bottom = '210px';
+      document.body.appendChild(p);
+      requestAnimationFrame(()=>{ try { p.classList.add('gam-snack-show'); } catch(_){} });
+    }
+    p.textContent = String(text);
+    return p;
+  }
+  function _gamBatchProgressDone(){
+    const p = document.getElementById('gam-batch-progress');
+    if (!p) return;
+    try { p.classList.remove('gam-snack-show'); } catch(_){}
+    setTimeout(()=>{ try { p.remove(); } catch(_){} }, 300);
   }
   function showBackdrop(fn){
     const bd=el('div',{id:'gam-backdrop', onclick:fn||closeAllPanels});
@@ -9049,7 +9103,20 @@
     const ready=getDeathRowReady();
     if(ready.length===0) return;
     console.log(`[DeathRow] ${ready.length} inmate(s) ready`);
+    // v10.39.0 WS-C: batch progress + named failure roster. A 29-user batch
+    // used to emit 29 stacked snacks (stack cap 4) -- failures scrolled away
+    // with no end summary. Now: one UPDATING progress element while a batch
+    // of >3 processes, plus a persistent (until-dismissed) completion summary
+    // naming up to 10 failed usernames. Stagger timing, locks, dedup and
+    // verify-after-ban logic are UNTOUCHED.
+    const _batchTotal = ready.length;
+    const _showBatchProgress = _batchTotal > 3;
+    let _batchAttempted = 0;
+    const _batchFailed = [];
     for(const inmate of ready){
+      if (_showBatchProgress) {
+        try { _gamBatchProgress('Banning ' + (_batchAttempted + 1) + '/' + _batchTotal + '… (' + inmate.username + ')'); } catch(_){}
+      }
       // v8.3.3: unconditional same-tab + cross-tab dedup (was flag-gated
       // behind platformHardening, which left default-config users with N
       // duplicate bans when N tabs were open).
@@ -9092,14 +9159,33 @@
           } catch(e){}
           snack(`\u{1F480} EXECUTED: ${inmate.username}${v===true?' (VERIFIED)':''}`, 'success');
         } else {
+          _batchFailed.push(inmate.username);
           snack(`\u{26A0}\u{FE0F} Death Row FAILED: ${inmate.username} -- will retry next visit`, 'error');
         }
-      } catch(err){ console.error('[DeathRow]', inmate.username, err); }
+      } catch(err){
+        _batchFailed.push(inmate.username);
+        console.error('[DeathRow]', inmate.username, err);
+      }
       finally {
         clearDrInFlight(inmate.username);
         await releaseDrLock(inmate.username);
       }
+      _batchAttempted++;
       await new Promise(r=>setTimeout(r, 2000));
+    }
+    // v10.39.0 WS-C: completion summary for batches (>3). Persistent until
+    // dismissed; success-type ONLY when zero failures; failures named (up to
+    // 10) so a scrolled-away FAILED snack can no longer hide who failed.
+    if (_showBatchProgress) {
+      try { _gamBatchProgressDone(); } catch(_){}
+      const _batchOk = _batchAttempted - _batchFailed.length;
+      if (_batchFailed.length === 0) {
+        snack('Batch complete: ' + _batchOk + '/' + _batchTotal + ' banned', 'success', { sticky: true });
+      } else {
+        const _names = _batchFailed.slice(0, 10).join(', ') +
+          (_batchFailed.length > 10 ? ', +' + (_batchFailed.length - 10) + ' more' : '');
+        snack('Batch done: ' + _batchOk + '/' + _batchTotal + ' banned — Failed: ' + _names, 'error', { sticky: true });
+      }
     }
     if (IS_USERS_PAGE && typeof refreshTriageConsole === 'function') refreshTriageConsole();
   }
@@ -11078,7 +11164,14 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
 
       // Preflight panel
-      const confirmed = await preflight({
+      // v10.39.0 WS-B: TIMED bans (duration > 0) skip the client confirm
+      // modal -- they already carry a Tier-A 20s undo toast, so the modal was
+      // double friction on the most common ban shape. Warnings (duration===0)
+      // and PERMANENT bans (duration===-1, with its 3s arm gate) keep the
+      // modal unchanged. The server-side modBanPreflight RPC below still runs
+      // and still gates the send for EVERY ban.
+      let confirmed = true;
+      if (!(duration > 0)) confirmed = await preflight({
         title: duration === 0 ? 'Warning Message \u2014 Preflight' : duration === -1 ? 'PERMANENT BAN \u2014 Preflight' : `${duration}-day Ban \u2014 Preflight`,
         danger: duration === -1,
         armSeconds: duration === -1 ? 3 : 0,
@@ -11120,9 +11213,6 @@ Analyze this comment against the community rules. Then write a brief, profession
       }
 
       // BAN path (timed or permanent)
-      statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Capturing evidence...</div>`;
-      const evidenceKey = await captureEvidence('ban', username, item);
-      statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Sending ban...</div>`;
       const fullReason = subject ? (subject + '\r\n\r\n' + message) : message;
       // duration === -1 (perma) \u2192 days=0 per GAW contract
       // duration > 0 \u2192 days=duration
@@ -11133,15 +11223,30 @@ Analyze this comment against the community rules. Then write a brief, profession
       // so ban-preflight never rejects duration_hours<=0 on the perma path.
       const _isPerma = duration === -1;
       const _hoursForApi = _isPerma ? 43800 : (daysForApi * 24);
+      // v10.39.0 WS-B: start the modBanPreflight RPC CONCURRENTLY with
+      // evidence capture (was serial: evidence \u2192 preflight \u2192 ban, each fully
+      // blocking). Only the WAITING overlaps -- the preflight verdict is
+      // still awaited BEFORE the ban send below and still hard-blocks it on
+      // {ok:false}. The .then() wrapper folds rejection into a settled value
+      // so a preflight failure during evidence capture can never surface as
+      // an unhandled rejection; the original non-fatal-on-throw handling is
+      // preserved verbatim after the await.
+      statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Capturing evidence + preflight check...</div>`;
+      const _pfPromise = rpcCall('modBanPreflight', {
+        target: username,
+        duration_hours: _hoursForApi,
+        permanent: _isPerma,
+        reason: fullReason.slice(0, 800)
+      }).then(function(pf){ return { pf: pf }; }, function(err){ return { pfErr: err }; });
+      const evidenceKey = await captureEvidence('ban', username, item);
       let _banAuditId = null;
-      try {
-        statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Preflight check...</div>`;
-        const pf = await rpcCall('modBanPreflight', {
-          target: username,
-          duration_hours: _hoursForApi,
-          permanent: _isPerma,
-          reason: fullReason.slice(0, 800)
-        });
+      const _pfRes = await _pfPromise;
+      if (_pfRes.pfErr) {
+        // Preflight failure is non-fatal -- log and proceed so a worker outage
+        // doesn't block the mod from banning. The audit chain will have a gap.
+        _logError('ui-ban', ERR_SEV.MED, _pfRes.pfErr, { op: 'ban-preflight' }); // v10.11 C2: Cat B
+      } else {
+        const pf = _pfRes.pf;
         if (!pf || !pf.ok) {
           const retryMsg = (pf && pf.retry_after_seconds)
             ? ' \u2014 rate limited, retry in ' + pf.retry_after_seconds + 's'
@@ -11152,11 +11257,8 @@ Analyze this comment against the community rules. Then write a brief, profession
           return;
         }
         _banAuditId = (pf && pf.audit_id) || null;
-      } catch(pfErr) {
-        // Preflight failure is non-fatal -- log and proceed so a worker outage
-        // doesn't block the mod from banning. The audit chain will have a gap.
-        _logError('ui-ban', ERR_SEV.MED, pfErr, { op: 'ban-preflight' }); // v10.11 C2: Cat B
       }
+      statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Sending ban...</div>`;
 
       // V11 #5: wrap apiBan with undo middleware (Tier A, 20s window)
       const _banTarget = username;
@@ -12048,7 +12150,7 @@ Analyze this comment against the community rules. Then write a brief, profession
           return;
         }
         if (q==='sniper'){
-          if (!confirm(`Arm DR Sniper on ${username}?\nThey will be banned 125h after their NEXT comment.`)) return;
+          if (!(await gamConfirm(`Arm DR Sniper on ${username}?\nThey will be banned 125h after their NEXT comment.`, { okLabel: 'Arm sniper', danger: true }))) return;
           btn.disabled = true;
           const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
           const r = await rpcCall('modSniperArm', { username, mod: me, banDelayHours: 125, client_op_id: __makeReqId() }); // v10.11 C5 (REDTEAM-2): idempotency key
@@ -12693,12 +12795,13 @@ Analyze this comment against the community rules. Then write a brief, profession
         // matches the panel chrome so it doesn't visually float on top of rows.
         const drBatchBar = el('div',{ id:'gam-dr-batch-bar', style:{display:'none',alignItems:'center',gap:'10px',padding:'8px 10px',marginTop:'8px',background:'#1a1c20',border:'1px solid rgba(255,153,51,0.30)',borderRadius:'4px',position:'sticky',bottom:'0',zIndex:'2',boxShadow:'0 -2px 8px rgba(0,0,0,0.4)'} },
           el('span',{ 'data-batch-count':'1', style:{color:C.AMBER,fontWeight:'600',fontSize:'12px'} }, '0 selected'),
-          el('button',{ cls:'gam-btn gam-btn-small gam-btn-danger', style:{marginLeft:'auto',padding:'4px 10px'}, onclick: () => {
+          el('button',{ cls:'gam-btn gam-btn-small gam-btn-danger', style:{marginLeft:'auto',padding:'4px 10px'}, onclick: async () => {
             const checks = drl.querySelectorAll('input[data-dr-select="1"]:checked');
             const selectedUsers = [];
             checks.forEach(c => { if (c.dataset.drUser) selectedUsers.push(c.dataset.drUser); });
             if (selectedUsers.length === 0) return;
-            if (!confirm('Cancel death row for ' + selectedUsers.length + ' user' + (selectedUsers.length === 1 ? '' : 's') + '?\n\n' + selectedUsers.join('\n'))) return;
+            // v10.39.0 WS-A: styled confirm (Brave can suppress native confirm in content scripts). Cancel => no action, unchanged.
+            if (!(await gamConfirm('Cancel death row for ' + selectedUsers.length + ' user' + (selectedUsers.length === 1 ? '' : 's') + '?\n\n' + selectedUsers.join('\n'), { okLabel: 'Cancel death row', danger: true }))) return;
             // Capture full DR records BEFORE removal so undo can restore.
             const drNow = getDeathRow();
             const recs = selectedUsers.map(u => drNow.find(x => x.username.toLowerCase() === u.toLowerCase())).filter(Boolean);
@@ -12750,8 +12853,9 @@ Analyze this comment against the community rules. Then write a brief, profession
             'Copied'
           );
         }},'\u{1F4CB} Copy'),
-        el('button',{cls:'gam-btn gam-btn-small gam-btn-danger', onclick:()=>{
-          if(confirm('Clear all?')){
+        el('button',{cls:'gam-btn gam-btn-small gam-btn-danger', onclick:async ()=>{
+          // v10.39.0 WS-A: styled confirm (Brave suppression => dead button).
+          if(await gamConfirm('Clear all mod-log entries?', { okLabel: 'Clear all', danger: true })){
             // AF-06 (Rule 16): safeRemove replaces raw localStorage.removeItem for K.LOG
             try { safeRemove(K.LOG); } catch(e){}
             try { chrome?.storage?.local?.remove(K.LOG); } catch(e){}
@@ -12989,7 +13093,7 @@ Analyze this comment against the community rules. Then write a brief, profession
     menu.style.top  = Math.min(e.clientY + 2, vh - (menu.offsetHeight || 180) - 8) + 'px';
     _gamCtxMenu = menu;
 
-    menu.addEventListener('click', function(ev) {
+    menu.addEventListener('click', async function(ev) {
       const ctxItem = ev.target.closest('[data-act]');
       if (!ctxItem) return;
       _gamCloseCtx();
@@ -13000,7 +13104,8 @@ Analyze this comment against the community rules. Then write a brief, profession
         // v10.10.2 SUS-DR FIX: Death Row from right-click menu -- confirm guard, 72h default
         const alreadyDr = getDeathRow().some(d => d.username.toLowerCase() === String(ctxU || '').toLowerCase());
         if (alreadyDr){ snack(`${ctxU} already on death row`, 'warn'); return; }
-        if (!confirm(`Add ${ctxU} to Death Row (72h)?\n\nThis will queue a ban. You can undo within 20s via the status bar.`)) return;
+        // v10.39.0 WS-A: styled confirm (Brave suppression => dead menu item).
+        if (!(await gamConfirm(`Add ${ctxU} to Death Row (72h)?\n\nThis will queue a ban. You can undo within 20s via the status bar.`, { okLabel: 'Queue ban', danger: true }))) return;
         const hours = getSetting('defaultDeathRowHours', 72);
         const added = addToDeathRow(ctxU, hours * 3600 * 1000, 'sus-flag', { fromUserAction: true });
         if (added){
@@ -14096,7 +14201,8 @@ Analyze this comment against the community rules. Then write a brief, profession
         // v10.10.2 SUS-DR FIX: one-click DR from tooltip (72h default, confirm guard)
         const alreadyDr = getDeathRow().some(d => d.username.toLowerCase() === String(username || '').toLowerCase());
         if (alreadyDr){ snack(`${username} already on death row`, 'warn'); return; }
-        if (!confirm(`Add ${username} to Death Row (72h)?\n\nThis will queue a ban. You can undo within 20s via the status bar.`)) return;
+        // v10.39.0 WS-A: styled confirm (Brave suppression => dead button).
+        if (!(await gamConfirm(`Add ${username} to Death Row (72h)?\n\nThis will queue a ban. You can undo within 20s via the status bar.`, { okLabel: 'Queue ban', danger: true }))) return;
         const hours = getSetting('defaultDeathRowHours', 72);
         const added = addToDeathRow(username, hours * 3600 * 1000, 'sus-flag', { fromUserAction: true });
         if (added){
@@ -16783,11 +16889,12 @@ Analyze this comment against the community rules. Then write a brief, profession
       <button class="gam-t-batch-btn gam-t-batch-cancel" data-action="cancel">\u2716 Cancel</button>
     `;
     bEl.querySelectorAll('.gam-t-batch-btn').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
+      btn.addEventListener('click', async ()=>{
         const action=btn.dataset.action;
         if(action==='cancel'){ triageSelected.clear(); refreshTriageConsole(); return; }
         if(action==='ban'){
-          if(!confirm(`Ban ${triageSelected.size} user(s) NOW? This is irreversible.`)) return;
+          // v10.39.0 WS-A: styled confirm (Brave suppression => dead button).
+          if(!(await gamConfirm(`Ban ${triageSelected.size} user(s) NOW? This is irreversible.`, { okLabel: 'Ban all now', danger: true }))) return;
           batchBanUsers([...triageSelected]); return;
         }
         if(action==='deathrow'){ batchDeathRow([...triageSelected]); return; }
@@ -16941,7 +17048,8 @@ Analyze this comment against the community rules. Then write a brief, profession
         bulkBtn.style.cssText = 'background:' + C.RED + ';color:#fff;border:none;border-radius:4px;padding:5px 14px;font:600 11px -apple-system,system-ui,sans-serif;letter-spacing:0.5px;cursor:pointer;flex-shrink:0';
         bulkBtn.textContent = 'APPLY TO ALL (' + tards.length + ')';
         bulkBtn.addEventListener('click', async function(){
-          const ok = window.confirm('Queue ALL ' + tards.length + ' users above to Death Row (72h soft-stop)?\n\nYou can still remove false positives from the DR queue before they execute.');
+          // v10.39.0 WS-A: styled confirm (Brave suppression => dead button).
+          const ok = await gamConfirm('Queue ALL ' + tards.length + ' users above to Death Row (72h soft-stop)?\n\nYou can still remove false positives from the DR queue before they execute.', { okLabel: 'Queue all', danger: true });
           if (!ok) return;
           bulkBtn.disabled = true;
           bulkBtn.textContent = 'queueing…';
@@ -18401,7 +18509,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       btn.title = `Unban ${uname} (no message sent)`;
       btn.addEventListener('click', async (e)=>{
         e.preventDefault();
-        if (!confirm(`Unban ${uname}? No message will be sent.`)) return;
+        // v10.39.0 WS-A: styled confirm (Brave suppression => dead button).
+        if (!(await gamConfirm(`Unban ${uname}? No message will be sent.`, { okLabel: 'Unban' }))) return;
         btn.disabled = true; btn.textContent='...';
         const ok = await executeUnban(uname);
         if (ok){
@@ -18783,7 +18892,17 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (editable){
         editBtn.addEventListener('click', async ()=>{
           menu.remove();
-          const next = prompt('Edit your message (5min window):', String(msg.content || ''));
+          // v10.39.0 WS-A: styled text modal replaces native prompt (Brave
+          // suppression => dead Edit item). Cancel/ESC resolves null => no
+          // action, same as prompt cancel.
+          const next = await askTextModal({
+            title: 'Edit message',
+            label: 'Edit your message (5min window)',
+            initial: String(msg.content || ''),
+            multiline: true,
+            max: 4000,
+            trim: false
+          });
           if (next == null) return;
           const trimmed = next.trim();
           if (!trimmed || trimmed === msg.content) return;
@@ -21038,17 +21157,16 @@ Analyze this comment against the community rules. Then write a brief, profession
           const previewSnippet = String(body).slice(0, 200) + (String(body).length > 200 ? '…' : '');
           let ok = false;
           try {
-            if (typeof window._gamAuxConfirm === 'function') {
-              ok = await window._gamAuxConfirm(
-                'Send this ' + (tone || 'reply') + ' directly to u/' + (t.first_user || '?') + '?\n\n' +
-                'Subject: ' + (t.subject || '(no subject)') + '\n\n' +
-                'Body:\n' + previewSnippet + '\n\n' +
-                'This bypasses the GAW review step. Make sure the text is correct.',
-                { okLabel: 'Send now', cancelLabel: 'Cancel', danger: true }
-              );
-            } else {
-              ok = window.confirm('Send AI reply directly? Bypasses GAW review step.');
-            }
+            // v10.39.0 WS-A: gamConfirm keeps the _gamAuxConfirm primary path
+            // byte-identical and retires the bare native-confirm else-branch
+            // (Brave suppression => dead Send button when aux was missing).
+            ok = await gamConfirm(
+              'Send this ' + (tone || 'reply') + ' directly to u/' + (t.first_user || '?') + '?\n\n' +
+              'Subject: ' + (t.subject || '(no subject)') + '\n\n' +
+              'Body:\n' + previewSnippet + '\n\n' +
+              'This bypasses the GAW review step. Make sure the text is correct.',
+              { okLabel: 'Send now', cancelLabel: 'Cancel', danger: true }
+            );
           } catch (_) {}
           if (!ok) return;
           btn.disabled = true;
@@ -25075,7 +25193,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (act === 'intel') openModConsole(sender, null, 'intel');
       else if (act === 'ban') openModConsole(sender, null, 'ban');
       else if (act === 'unban'){
-        if (!confirm(`Unban ${sender}?`)) return;
+        // v10.39.0 WS-A: styled confirm (Brave suppression => dead button).
+        if (!(await gamConfirm(`Unban ${sender}?`, { okLabel: 'Unban' }))) return;
         const r = await apiUnban(sender);
         snack(r.ok ? `\u2713 ${sender} unbanned` : `Unban failed (${r.status})`, r.ok ? 'success' : 'error');
         if (r.ok) rosterSetStatus(sender, 'cleared');
@@ -28276,12 +28395,13 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     }
 
     if (needsConfirm){
-      try {
-        if (!window.confirm(confirmMsg)) {
-          snack('Lock/unlock cancelled', 'info');
-          return;
-        }
-      } catch(_){ /* if confirm itself blows up, skip and proceed */ }
+      // v10.39.0 WS-A: styled confirm (Brave suppression => dead lock button
+      // exactly when state drift made confirmation matter most).
+      const _lockOk = await gamConfirm(confirmMsg, { okLabel: 'Proceed', danger: true });
+      if (!_lockOk) {
+        snack('Lock/unlock cancelled', 'info');
+        return;
+      }
     }
 
     const community = 'GreatAwakening';
@@ -30523,44 +30643,51 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
             snack('No posts are currently marked immune. Click 🛡 next to any sticky to mark it.', 'info');
             return;
           }
-          // Build a small text list — operator picks an action.
-          const lines = entries
-            .sort((a, b) => (b.added_at || 0) - (a.added_at || 0))
-            .map((e, i) => (i + 1) + '. id=' + e.thingId + ' · ' + (e.title || '(no title)').slice(0, 60));
-          const choice = window.prompt(
-            '🛡 IMMUNE POSTS (' + entries.length + ' total):\n\n' + lines.join('\n') +
-            '\n\nEnter:\n  - a number to REMOVE that entry\n  - "clear" to remove ALL\n  - blank to cancel',
-            ''
-          );
-          if (!choice || !choice.trim()) return;
-          const c = choice.trim().toLowerCase();
-          if (c === 'clear') {
-            if (window.confirm('Remove immunity from ALL ' + entries.length + ' post(s)?')) {
+          // v10.39.0 WS-A: was a window.prompt type-a-number menu (Brave can
+          // silently suppress native dialogs in content scripts => dead
+          // palette command). Now a styled gam-modal: one row per immune
+          // post with a per-row Remove button, plus a Clear-all. The actions
+          // themselves are unchanged (_immuneRemove / _immuneClearAll + the
+          // same on-page shield-button refresh).
+          const sorted = entries.slice().sort((a, b) => (b.added_at || 0) - (a.added_at || 0));
+          const _refreshPagePost = (thingId) => {
+            const postEl = document.querySelector('.post.sticky[data-id="' + thingId + '"]');
+            if (postEl) {
+              delete postEl.dataset.gamImmune;
+              const oldBtn = postEl.querySelector('[data-gam-immune-btn="1"]');
+              if (oldBtn) oldBtn.remove();
+              _immuneInjectButtons();
+            }
+          };
+          const listWrap = el('div', {});
+          sorted.forEach((entry) => {
+            const row = el('div', { style: { display:'flex', alignItems:'center', gap:'8px', padding:'6px 0', borderBottom:'1px solid rgba(255,255,255,0.08)' } },
+              el('span', { style: { flex:'1', minWidth:'0', fontSize:'12px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }, title: String(entry.title || '') },
+                (entry.title || '(no title)').slice(0, 60) + ' · id=' + entry.thingId),
+              el('button', { cls:'gam-btn gam-btn-small gam-btn-danger', onclick: async (ev) => {
+                const b = ev.currentTarget;
+                b.disabled = true;
+                await _immuneRemove(entry.thingId);
+                _refreshPagePost(entry.thingId);
+                try { row.remove(); } catch(_){}
+                snack('Removed immunity from post ' + entry.thingId, 'success');
+              } }, 'Remove')
+            );
+            listWrap.appendChild(row);
+          });
+          listWrap.appendChild(el('div', { style: { display:'flex', justifyContent:'flex-end', marginTop:'10px' } },
+            el('button', { cls:'gam-btn gam-btn-small gam-btn-danger', onclick: async () => {
+              if (!(await gamConfirm('Remove immunity from ALL ' + entries.length + ' post(s)?', { okLabel: 'Clear all', danger: true }))) return;
               await _immuneClearAll();
               // Refresh buttons on visible stickies
               document.querySelectorAll('.post.sticky[data-id]').forEach(p => delete p.dataset.gamImmune);
               document.querySelectorAll('[data-gam-immune-btn="1"]').forEach(b => b.remove());
               _immuneInjectButtons();
               snack('Cleared immunity from ' + entries.length + ' post(s)', 'success');
-            }
-            return;
-          }
-          const idx = parseInt(c, 10) - 1;
-          if (idx < 0 || idx >= entries.length) {
-            snack('Invalid choice', 'error');
-            return;
-          }
-          const target = entries[idx];
-          await _immuneRemove(target.thingId);
-          // Refresh button if the post is on this page
-          const postEl = document.querySelector('.post.sticky[data-id="' + target.thingId + '"]');
-          if (postEl) {
-            delete postEl.dataset.gamImmune;
-            const oldBtn = postEl.querySelector('[data-gam-immune-btn="1"]');
-            if (oldBtn) oldBtn.remove();
-            _immuneInjectButtons();
-          }
-          snack('Removed immunity from post ' + target.thingId, 'success');
+              closeAllPanels();
+            } }, '✖ Clear all')
+          ));
+          showModal('gam-immune-mgr', '\u{1F6E1} Immune posts (' + entries.length + ')', listWrap, '520px');
         }
       });
     }

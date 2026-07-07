@@ -2437,8 +2437,12 @@ async function _handleInviteClick(target) {
     }
     // Username prompt -- deep-dive treats target as optional (audit-only),
     // qa makes it required (matches the v10.12.1 fix that prompted explicitly).
+    // v10.39.0 WS-A: __popupAskText UNCONDITIONALLY. The non-hardening branch
+    // used native prompt(), which Chrome does not render at all inside an MV3
+    // action popup -- it returned null instantly, making Invite a dead button
+    // on hardening-OFF installs. Same styled inline modal both ways now.
     let who;
-    if (await __hardeningOnPopup()) {
+    {
       const raw = await __popupAskText({
         title: 'Invite target',
         label: isQa ? 'GAW username this invite is for' : 'GAW username this invite is for (optional, for audit)',
@@ -2454,9 +2458,6 @@ async function _handleInviteClick(target) {
         return;
       }
       who = raw;
-      if (isQa && !who) return;
-    } else {
-      who = prompt(isQa ? 'GAW username this invite is for:' : 'GAW username this invite is for (optional, for audit):', '') || '';
       if (isQa && !who) return;
     }
     const rInv = await popupRpc('adminInviteCreate', { mod: who });

@@ -2299,7 +2299,9 @@
     if (!ok) return;
     _gmSnack('Queueing ' + safe.length + ' to Death Row...', 'info');
     let queued = 0;
-    let failed = 0;
+    // v10.39.0 WS-C: collect the NAMES of failures (was a bare count) so the
+    // summary can say who failed, mirroring processDeathRow's failure roster.
+    const failedNames = [];
     for (var i = 0; i < safe.length; i++) {
       const name = safe[i];
       try {
@@ -2309,11 +2311,16 @@
           args: { username: name, delayMs: 600000, reason: 'bulk via GOD MODE search' }
         });
         if (r && r.ok) queued++;
-        else failed++;
-      } catch (_) { failed++; }
+        else failedNames.push(name);
+      } catch (_) { failedNames.push(name); }
     }
-    const tail = failed > 0 ? (' (' + failed + ' failed)') : '';
-    _gmSnack('Queued ' + queued + '/' + safe.length + ' to Death Row -- cancel via DR popover' + tail, queued > 0 ? 'ok' : 'err');
+    // v10.39.0 WS-C: name up to 10 failures; any failure => err type (never
+    // success-type on a partial failure).
+    const failed = failedNames.length;
+    const tail = failed > 0
+      ? (' -- FAILED: ' + failedNames.slice(0, 10).join(', ') + (failed > 10 ? ', +' + (failed - 10) + ' more' : ''))
+      : '';
+    _gmSnack('Queued ' + queued + '/' + safe.length + ' to Death Row -- cancel via DR popover' + tail, failed > 0 ? 'err' : 'ok');
   }
 
   // v10.17.1 stub -- filled in by saved-queries layer (task 13). Safe no-op
