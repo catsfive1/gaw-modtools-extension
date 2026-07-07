@@ -3240,3 +3240,376 @@ textarea {
   box-shadow: 0 0 4px rgba(240, 160, 64, 0.6);
   pointer-events: none;
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   REDESIGN v10.38 CARD SYSTEM
+   One clean appended layer. Uses existing --bb-* tokens only.
+   Wins the cascade by source order against the legacy L1-990 and
+   Bloomberg L993+ layers (matching !important, later in file).
+   ════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --rd-card-bg:  #0e0e12;   /* card module surface, one step above --bb-bg   */
+  --rd-head-bg:  #15151a;   /* card header strip                              */
+  --rd-row-line: rgba(255,255,255,0.05);
+  --rd-radius:   3px;
+}
+
+/* ── 1. HEADER MASTHEAD ─────────────────────────────────────────────── */
+.pop-header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  background: linear-gradient(180deg, #17171c 0%, #0e0e11 100%) !important;
+  border-bottom: 1px solid var(--bb-amber-dim) !important;
+  padding: 9px 12px !important;
+}
+.pop-brand {
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  font: 700 12px/1.2 var(--bb-font) !important;
+  color: var(--bb-amber) !important;
+  letter-spacing: 0.10em;
+}
+.pop-ver {
+  color: var(--bb-ink-dim) !important;
+  font: 400 10px/1 var(--bb-font) !important;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--bb-line) !important;
+  background: var(--bb-sunken) !important;
+  padding: 2px 6px !important;
+  border-radius: 2px !important;
+}
+
+/* ── 2. STAT TILES — 4-col ledger, one-line labels, no broken empties ── */
+.pop-stats {
+  background: var(--rd-card-bg) !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  border-radius: var(--rd-radius) !important;
+  overflow: hidden;
+  margin: 8px 8px 8px !important;
+}
+.pop-stat {
+  padding: 7px 9px 8px !important;
+  border-right: 1px solid var(--rd-row-line) !important;
+  border-bottom: 1px solid var(--rd-row-line) !important;
+  min-height: 48px;
+  box-sizing: border-box;
+}
+.pop-stat:nth-child(4n) { border-right: none !important; }
+.pop-stat:nth-last-child(-n+4) { border-bottom: none !important; }
+.pop-stat .label, .pop-stat-label {
+  font: 600 8.5px/1.2 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
+  letter-spacing: 0.06em !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 0 !important;
+}
+.pop-stat-val {
+  font: 700 17px/1.15 var(--bb-font) !important;
+  margin-top: 3px;
+  letter-spacing: -0.3px;
+}
+/* empty-value state: proper em-dash placeholder instead of a blank hole
+   (JS blanks the value nodes before first data lands) */
+.pop-stat-val:empty::before {
+  content: "\2014";
+  color: var(--bb-ink-faint);
+  font-weight: 400;
+}
+/* loading skeleton inside a stat tile: visible bar, not a ghost */
+.pop-stat-val .gam-skel-wrap,
+.pop-stat-val .gam-skel-line {
+  background: rgba(255,255,255,0.07) !important;
+  min-height: 12px;
+  border-radius: 2px;
+}
+.pop-stat:hover { background: rgba(255,153,51,0.06) !important; }
+
+/* ── 3. QUICK-NAV ACTION TILES (Users/Queue/Ban/GAW) ────────────────── */
+.pop-actions { padding: 0 8px 4px !important; gap: 5px !important; }
+.pop-actions .pop-btn {
+  background: var(--rd-card-bg) !important;
+  border: 1px solid var(--bb-line) !important;
+  border-radius: var(--rd-radius) !important;
+}
+.pop-actions .pop-btn:hover {
+  background: var(--bb-amber-bg) !important;
+  border-color: var(--bb-amber-dim) !important;
+}
+.pop-actions .pop-btn-primary {
+  background: var(--bb-amber) !important;
+  border-color: var(--bb-amber) !important;
+  color: var(--bb-bg) !important;
+}
+.pop-actions .pop-btn-primary:hover {
+  background: var(--bb-amber-dim) !important;
+  border-color: var(--bb-amber-dim) !important;
+  color: var(--bb-bg) !important;
+}
+
+/* ── 4. CARD SHELL — instrument-panel module, not a log line ────────── */
+.gam-card {
+  margin: 0 8px 8px !important;
+  border: 1px solid var(--bb-line-hot) !important;
+  background: var(--rd-card-bg) !important;
+  border-radius: var(--rd-radius) !important;
+  overflow: hidden;
+}
+/* category rail: 2px, colored per card via --rd-cat */
+.gam-card::before {
+  width: 2px;
+  background: var(--rd-cat, var(--bb-amber)) !important;
+  opacity: 0.95;
+}
+.gam-card:hover::before { width: 3px; }
+
+/* per-card category color (rail + title dot) */
+#card-tools           { --rd-cat: var(--bb-amber); }
+#card-maint-status    { --rd-cat: var(--bb-green); }
+#card-maint-probes    { --rd-cat: var(--bb-cyan); }
+#card-maint-detect    { --rd-cat: var(--bb-purple); }
+#card-maint-integrity { --rd-cat: var(--bb-warn); }
+#card-macros          { --rd-cat: var(--bb-amber); }
+#card-tokens          { --rd-cat: var(--bb-amber); }
+#card-diag            { --rd-cat: var(--bb-cyan); }
+#card-lead            { --rd-cat: var(--bb-purple); }
+
+/* header strip: small-caps title, category dot, weight tiers */
+.gam-card-header,
+.gam-card > summary.gam-card-head,
+.gam-card-head {
+  padding: 7px 10px 7px 12px !important;
+  background: linear-gradient(180deg, var(--rd-head-bg), #101015) !important;
+  border-bottom: 1px solid var(--bb-line) !important;
+}
+.gam-card-title {
+  font: 700 10px/1.3 var(--bb-font) !important;
+  color: #d8d5cf !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.14em !important;
+  display: flex !important;
+  align-items: center;
+  gap: 7px;
+}
+.gam-card-title::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 1px;
+  background: var(--rd-cat, var(--bb-amber));
+  box-shadow: 0 0 5px var(--rd-cat, var(--bb-amber));
+}
+#card-lead .gam-card-title { color: #d8d5cf !important; }
+
+/* collapsed <details> card: designed collapsed state, not a lonely header */
+details.gam-card:not([open]) > summary.gam-card-head {
+  border-bottom: none !important;
+  cursor: pointer !important;
+}
+details.gam-card:not([open]) > summary.gam-card-head::after {
+  content: "expand \25B8";
+  margin-left: auto;
+  font: 500 9px/1 var(--bb-font);
+  color: var(--bb-ink-faint);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+details.gam-card:not([open]) > summary.gam-card-head:hover::after {
+  color: var(--bb-amber);
+}
+details.gam-card[open] > summary.gam-card-head { cursor: pointer !important; }
+
+/* designed empty state (JS can drop <div class="gam-card-empty"> in a body) */
+.gam-card-empty,
+.gam-card-body:empty::before {
+  content: "Nothing to show \2014  all clear";
+  display: block;
+  padding: 10px 12px;
+  font: 400 10.5px/1.4 var(--bb-font);
+  color: var(--bb-ink-faint);
+  letter-spacing: 0.03em;
+}
+/* body whose direct children are ALL display:none (pre-hydration state
+   machine, e.g. Tokens card) gets the same dim one-liner instead of a
+   lonely header. Covers both attr spellings (HTML + element.style). */
+.gam-card-body:not(:has(> :not([style*="display:none"], [style*="display: none"])))::after {
+  content: "Waiting for status \2014  open greatawakening.win to hydrate";
+  display: block;
+  padding: 9px 12px;
+  font: 400 10px/1.4 var(--bb-font);
+  color: var(--bb-ink-faint);
+  letter-spacing: 0.03em;
+}
+
+/* ── 5. ACTION ROWS — quiet secondary tier, sentence case, chevron ──── */
+.pop-maint-action-row {
+  padding: 0 8px 0 4px !important;
+  min-height: 34px !important;
+  border-bottom: 1px solid var(--rd-row-line) !important;
+}
+.pop-maint-action-row .pop-btn {
+  text-transform: none !important;
+  letter-spacing: 0.015em !important;
+  font: 500 11.5px/1.3 var(--bb-font) !important;
+  color: var(--bb-ink) !important;
+}
+.pop-maint-action-row::after {
+  content: "\203A";
+  color: var(--bb-ink-faint);
+  font: 600 12px/1 var(--bb-font);
+  flex: none;
+  transition: color 80ms ease-out, transform 80ms ease-out;
+}
+.pop-maint-action-row:hover::after {
+  color: var(--rd-cat, var(--bb-amber));
+  transform: translateX(2px);
+}
+/* destructive row: red accent tier */
+#maintReset { color: var(--bb-red) !important; }
+.pop-maint-action-row:has(> #maintReset):hover {
+  border-left-color: var(--bb-red) !important;
+  background: var(--bb-red-bg) !important;
+}
+.pop-maint-action-row:has(> #maintReset) .pop-btn:hover,
+.pop-maint-action-row:has(> #maintReset):hover::after { color: var(--bb-red) !important; }
+
+/* Safe Mode row: give the toggle row real structure */
+#safeModeRow { padding: 6px 10px !important; }
+#safeModeRow::after { content: none; }
+#safeModeRow > .pop-btn {
+  text-transform: none !important;
+  font: 600 11.5px/1.3 var(--bb-font) !important;
+  letter-spacing: 0.02em !important;
+}
+
+/* Feature-health strip inside System Status */
+#featureHealthRow {
+  padding: 6px 10px !important;
+  align-items: flex-start !important;
+}
+#featureHealthRow::after { content: none; }
+
+/* ── 6. CARD SUB-SECTIONS (Tools card) ──────────────────────────────── */
+.gam-card-subsection {
+  border-top: 1px solid var(--rd-row-line) !important;
+  padding: 8px 10px 8px !important;
+  margin-top: 0 !important;
+}
+.gam-card-subsection:first-child { border-top: none !important; }
+.gam-card-sub-label {
+  font: 700 8.5px/1.2 var(--bb-font) !important;
+  color: var(--bb-ink-dim) !important;
+  letter-spacing: 0.12em !important;
+  margin-bottom: 6px !important;
+}
+#card-tools .gam-card-body { padding: 0 !important; }
+.gam-card-grid2 .pop-btn,
+#godmodeBtn {
+  background: transparent !important;
+  border: 1px solid var(--bb-line) !important;
+  border-radius: 2px !important;
+  color: var(--bb-ink) !important;
+  text-transform: none !important;
+  letter-spacing: 0.02em !important;
+  font: 500 10.5px/1.3 var(--bb-font) !important;
+}
+.gam-card-grid2 .pop-btn:hover,
+#godmodeBtn:hover {
+  border-color: var(--bb-amber-dim) !important;
+  color: var(--bb-amber) !important;
+  background: var(--bb-amber-bg) !important;
+}
+#godmodeBtn { width: 100%; text-align: left !important; min-height: 34px; }
+/* crawl pills keep intrinsic width; group does not stretch the last pill */
+.gam-crawl-pill { flex: 0 0 auto !important; border-radius: 2px !important; }
+.gam-crawl-group { flex: 0 1 auto !important; }
+
+/* ── 7. TEAM MACROS — fix the grid collision, real tab bar ──────────── */
+/* Root cause: #macrosSection carries .pop-token (display:grid, 3 cols with
+   auto-placement) so .gam-macro-tabs / #macrosList / .pop-tools were being
+   auto-placed into columns of the same row. Block layout restores flow. */
+#macrosSection.pop-token {
+  display: block !important;
+  padding: 8px 10px 10px !important;
+  border-top: none !important;
+}
+#macrosSection .pop-token-hint {
+  margin: 0 0 8px !important;
+  color: var(--bb-ink-dim) !important;
+}
+.gam-macro-tabs {
+  display: flex !important;
+  gap: 2px !important;
+  border-bottom: 1px solid var(--bb-line) !important;
+  margin-bottom: 8px;
+}
+.gam-macro-tab {
+  flex: 0 0 auto !important;
+  padding: 6px 10px !important;
+  font: 600 10px/1 var(--bb-font) !important;
+  letter-spacing: 0.06em !important;
+}
+#macrosSection .pop-tools {
+  display: flex !important;
+  gap: 6px !important;
+  margin: 8px 0 0 !important;
+  padding: 0 !important;
+}
+#macrosSection .pop-tools .pop-btn {
+  flex: 1;
+  text-transform: none !important;
+  letter-spacing: 0.02em !important;
+  font: 500 10.5px/1.3 var(--bb-font) !important;
+  border-radius: 2px !important;
+}
+.gam-macro-list {
+  border-radius: 2px !important;
+  background: var(--bb-sunken) !important;
+}
+
+/* ── 8. CARD BODIES inherit the module surface ──────────────────────── */
+.gam-card-body { background: transparent !important; }
+
+/* tokens first-run: 3-up path buttons must never truncate at 380px */
+.tok-path-btn {
+  padding: 8px 4px !important;
+  font-size: 10px !important;
+  letter-spacing: 0.03em !important;
+  white-space: nowrap;
+}
+
+/* ── 9. FOOTER ──────────────────────────────────────────────────────── */
+.pop-footer {
+  background: linear-gradient(180deg, #101014, #0c0c0f) !important;
+  border-top: 1px solid var(--bb-line-hot) !important;
+  padding: 7px 12px !important;
+}
+.pop-link {
+  background: none !important;
+  border: none !important;
+  min-height: 0 !important;
+  padding: 4px 6px !important;
+  color: var(--bb-ink-dim) !important;
+  font: 500 10px/1.2 var(--bb-font) !important;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pop-link:hover { background: none !important; border: none !important; }
+.pop-link:hover { color: var(--bb-ink) !important; }
+.pop-link-danger { color: color-mix(in srgb, var(--bb-red) 65%, var(--bb-ink-dim)) !important; }
+.pop-link-danger:hover { color: var(--bb-red) !important; }
+
+/* ── 10. MICRO-CONTRAST — retire #5c6370 under 12px ─────────────────── */
+.pop-section-label { color: var(--bb-ink-dim); }
+.pop-token-status  { color: var(--bb-ink-dim); }
+.pop-token-hint    { color: var(--bb-ink-dim); }
+.pop-sep           { color: var(--bb-ink-dim); }
+
+/* ── 11. FULL-BLEED GUARDS — side gutters for non-card blocks ───────── */
+#tab-panel-stats > .pop-alert { margin: 0 8px 8px; }
+#diagTabSection > .gam-card { margin: 0 8px 8px !important; }

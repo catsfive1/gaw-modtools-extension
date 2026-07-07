@@ -39,7 +39,7 @@
   <a href="#main-content" class="pop-skip-link">Skip to content</a>
   <div class="pop-header">
     <span class="pop-brand">&#x1F6E1; ModTools</span>
-    <span class="pop-ver" id="ver">v10.6.0</span>
+    <span class="pop-ver" id="ver">&mdash;</span>
     <!-- v10.x: tier badge (purple LEAD / cyan SR-LEAD / hidden for mod) -->
     <span id="tierBadge" class="pop-tier-badge" style="display:none"></span>
     <!-- v9.5.0: maintenance warning chip. Set by the alarms in background.js
@@ -118,7 +118,7 @@
     <div class="pop-stat" data-drill="bans24" data-state="info" title="Mod actions tagged 'ban' in the last 24h (your local log). Click for detail."
          role="button" tabindex="0" aria-label="Bans / 24h: — click for detail">
       <div class="pop-stat-head">
-        <div class="pop-stat-label">Bans / 24h</div>
+        <div class="pop-stat-label">Bans/24h</div>
         <span class="pop-stat-delta" id="d-today" data-dir="none"></span>
       </div>
       <div class="pop-stat-val" id="s-today">&mdash;</div>
@@ -126,7 +126,7 @@
     <div class="pop-stat" data-drill="msgs24" data-state="good" title="Messages and replies sent in the last 24h. Click for detail."
          role="button" tabindex="0" aria-label="Msgs / 24h: — click for detail">
       <div class="pop-stat-head">
-        <div class="pop-stat-label">Msgs / 24h</div>
+        <div class="pop-stat-label">Msgs/24h</div>
         <span class="pop-stat-delta" id="d-msgs" data-dir="none"></span>
       </div>
       <div class="pop-stat-val" id="s-msgs">&mdash;</div>
@@ -134,7 +134,7 @@
     <div class="pop-stat" data-drill="notes24" data-state="warn" title="Mod notes written in the last 24h. Click for detail."
          role="button" tabindex="0" aria-label="Notes / 24h: — click for detail">
       <div class="pop-stat-head">
-        <div class="pop-stat-label">Notes / 24h</div>
+        <div class="pop-stat-label">Notes/24h</div>
         <span class="pop-stat-delta" id="d-notes" data-dir="none"></span>
       </div>
       <div class="pop-stat-val" id="s-notes">&mdash;</div>
@@ -157,7 +157,7 @@
         <div class="pop-stat-label">Auto-UNS</div>
         <span class="pop-stat-delta" id="d-unsticky" data-dir="none"></span>
       </div>
-      <div class="pop-stat-val" id="s-unsticky">--</div>
+      <div class="pop-stat-val" id="s-unsticky">&mdash;</div>
     </div>
   </div>
 
@@ -295,7 +295,7 @@
   <!-- Card 1: System Status (always visible, no collapse) -->
   <div class="gam-card" id="card-maint-status" data-tab="tools">
     <div class="gam-card-header">
-      <span class="gam-card-title">[SYS] System Status</span>
+      <span class="gam-card-title">System Status</span>
       <span class="gam-card-badge" id="card-badge-maint-status" style="display:none"></span>
     </div>
     <div class="gam-card-body" style="padding:0">
@@ -331,7 +331,7 @@
   <!-- Card 2: Probes (read-only diagnostics) -->
   <div class="gam-card" id="card-maint-probes" data-tab="tools">
     <div class="gam-card-header">
-      <span class="gam-card-title">[PRB] Probes</span>
+      <span class="gam-card-title">Probes</span>
       <span class="gam-card-badge" id="card-badge-maint-probes" style="display:none"></span>
     </div>
     <div class="gam-card-body" style="padding:0">
@@ -369,7 +369,7 @@
   <!-- Card 3: Detection — AI-budget routines -->
   <div class="gam-card" id="card-maint-detect" data-tab="tools">
     <div class="gam-card-header">
-      <span class="gam-card-title">[AI] Detection</span>
+      <span class="gam-card-title">AI Detection</span>
       <span class="gam-card-badge" id="card-badge-maint-detect" style="display:none"></span>
     </div>
     <div class="gam-card-body" style="padding:0">
@@ -396,7 +396,7 @@
   <details class="gam-card" id="card-maint-integrity" data-tab="tools">
     <summary class="gam-card-head">
       <span class="gam-card-chevron" aria-hidden="true"></span>
-      <span class="gam-card-title">[INT] Integrity</span>
+      <span class="gam-card-title">Integrity</span>
       <span class="gam-card-badge" id="card-badge-maint-integrity" style="display:none"></span>
     </summary>
     <div class="gam-card-body" style="padding:0">
@@ -509,7 +509,7 @@
        ~200ms flash-of-lead-content for non-leads (P0-07, R-06). -->
   <div class="gam-card" id="card-tokens" data-tab="tokens">
     <div class="gam-card-header">
-      <span class="gam-card-title">&#x1F511; Tokens</span>
+      <span class="gam-card-title">Tokens</span>
       <span class="gam-card-badge" id="card-badge-tokens" style="display:none"></span>
     </div>
     <div class="gam-card-body" style="padding:0">
@@ -1036,7 +1036,7 @@
     <details class="gam-card" id="card-diag" open>
       <summary class="gam-card-head">
         <span class="gam-card-chevron" aria-hidden="true"></span>
-        <span class="gam-card-title">&#x1F4BB; Diagnostics</span>
+        <span class="gam-card-title">Diagnostics</span>
       </summary>
       <div class="gam-card-body" id="diagCardBody">
         <!-- v10.13.0 W1 (P0-25): hardcoded "Loading..." strings stripped from

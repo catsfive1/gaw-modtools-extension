@@ -2,6 +2,14 @@
 
 Versioned summary of recent work. Detailed commit history: `git log --oneline` in this repo.
 
+## v10.38.0 — POPUP CARD REDESIGN: category-coded card system (colored rails/dots, small-caps headers, bracket prefixes removed), action-row hierarchy with destructive red tier, fixed Team Macros grid collision, one-line stat labels + loading skeletons + em-dash empty states, sub-12px contrast lift, footer link cleanup (2026-07-07)
+
+**v10.38.0 ships the approved popup card redesign** (extension manifest 10.37.2 → 10.38.0; no worker change, no JS change). One appended CSS layer ("REDESIGN v10.38 CARD SYSTEM" at the end of popup.css, winning the cascade by source order) plus 11 text-only HTML edits to popup.html; no IDs or classes were removed or renamed — fully revertible.
+
+**What changed:** every card gets a category-coded colored rail and header dot with small-caps headers, replacing the old [SYS]/[PRB]/[AI]/[INT] bracket prefixes and leading emoji; action rows gain a visual hierarchy with a distinct destructive red tier; the Team Macros grid collision is fixed; stat tile labels are one-line at 380px ("Bans/24h" etc.), stat values get loading skeletons and uniform em-dash empty states (including the Auto-UNS tile and the version fallback, which JS overwrites live); sub-12px text gets a contrast lift; footer links cleaned up.
+
+**Verified from my side (§8):** `node --check` PARSE OK on popup.js and modtools.js (both unchanged); popup.css brace-balanced (601/601) with all 5 `--rd-*` variables used also defined in the appended layer; no chrome-stub script present in shipped popup.html; full smoke suite 28/28 files green with zero test adjustments; built popup headless-rendered post-build and visually matched against the approved design.
+
 ## v10.37.2 — UX P0: truthful quick-action feedback, honest consent defaults, visible keyboard targets, keyboard-reachable Safe Mode + Intel Drawer (2026-07-07)
 
 **v10.37.2 ships the five P0 items from the 2026-07-07 four-specialist UX audit** (extension manifest 10.37.1 → 10.37.2; no worker change). The theme is trust and targeting: every quick action now tells the truth about whether it worked, the consent modal's defaults now match its own header, and the keyboard-driven surfaces a mod uses most now have visible targets and reachable controls.
