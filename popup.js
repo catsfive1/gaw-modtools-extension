@@ -1374,6 +1374,10 @@ $('exportBtn').addEventListener('click', async () => {
           }
           keysRestored.push(k);
         });
+        // v10.40.0 WS-3: if the import touched gam_settings, bump the
+        // write-stamp so the content-script hydrate overwrites the stale
+        // page-localStorage copy on next page load.
+        if ('gam_settings' in toWrite) toWrite.gam_settings_writeStamp = Date.now();
         await chrome.storage.local.set(toWrite);
         showPopupBanner('Import OK: ' + keysRestored.length + ' key(s) restored. Tokens not overwritten. Reload GAW tabs.', 'success');
         setTimeout(function() { try { loadStats(); } catch(_){} }, 500);
@@ -6257,7 +6261,10 @@ async function maintRepairSettings() {
     broken.forEach(function(k) {
       if (k in REPAIR_DEFAULT_VALUES) patch[k] = REPAIR_DEFAULT_VALUES[k];
     });
-    await chrome.storage.local.set({ gam_settings: patch });
+    // v10.40.0 WS-3: bump the write-stamp so the content-script hydrate
+    // overwrites any stale page-localStorage copy on next page load
+    // (hardening-OFF installs; pre-fix Repair silently no-oped there).
+    await chrome.storage.local.set({ gam_settings: patch, gam_settings_writeStamp: Date.now() });
     __maintLog('repairSettings', 'repaired', { missing: report.missing, mistyped: report.mistyped, keys: broken });
     __maintSetStatus('maintRepairStatus',
       '✓ Repaired ' + broken.length + ' key(s): ' + broken.join(', ') + '. Reload GAW tabs.', 'ok');
@@ -6333,7 +6340,9 @@ async function maintResetDefaults() {
     // v10.7.0 UIUX-06 B.1: also remove gam_welcomed so re-onboarding welcome toast fires correctly
     const keysToRemove = OWNED_KEYS.filter(k => k !== K.SETTINGS).concat(['gam_learned_selectors', 'gam_welcomed']);
     await chrome.storage.local.remove(keysToRemove);
-    await chrome.storage.local.set({ gam_settings: { ...preserved, ...MAINT_DEFAULT_SETTINGS } });
+    // v10.40.0 WS-3: write-stamp bump -> content-script hydrate replaces the
+    // stale page-localStorage settings copy on next page load.
+    await chrome.storage.local.set({ gam_settings: { ...preserved, ...MAINT_DEFAULT_SETTINGS }, gam_settings_writeStamp: Date.now() });
     __maintLog('resetDefaults', 'ok', { preserved: Object.keys(preserved) });
     __maintSetStatus('maintResetStatus',
       '✓ reset complete. Tokens + UX prefs preserved. Reload GAW tabs.', 'ok');

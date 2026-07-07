@@ -3107,6 +3107,175 @@
     });
   }
 
+  // v10.40.0 WS-5 (UX P1 item 4): shared shell for the ONE-modal title-grant /
+  // flag-user pickers. Same backdrop/panel classes as askTextModal so the
+  // existing ESC-deferral (mod console checks .gam-v72-asktext) and the
+  // closeAllPanels backdrop sweep both cover it. Resolves null on Cancel /
+  // ESC / backdrop click -- callers keep no-action-on-cancel semantics.
+  function _gamPickerModalShell(titleText){
+    const backdrop = el('div', {
+      cls: 'gam-modal-backdrop gam-v72-asktext-backdrop',
+      style: { position:'fixed', left:'0', top:'0', right:'0', bottom:'0',
+        background:GAM_TOK.scrim, zIndex:'9999994',
+        display:'flex', alignItems:'center', justifyContent:'center' }
+    });
+    const _titleId = 'gam-picker-title-' + Date.now() + '-' + Math.floor(Math.random()*1e6);
+    const panel = el('div', {
+      cls: 'gam-modal gam-v72-asktext',
+      style: { background:GAM_TOK.surfaceRaised, color:GAM_TOK.ink, borderRadius:'8px',
+        padding:'16px 18px', minWidth:'340px', maxWidth:'520px',
+        border:'1px solid '+GAM_TOK.borderStrong,
+        boxShadow:'0 8px 24px '+GAM_TOK.scrim,
+        fontFamily:'ui-sans-serif, system-ui, sans-serif' },
+      tabindex: '-1', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': _titleId
+    });
+    panel.appendChild(el('div', {
+      id: _titleId,
+      style: { fontSize:'15px', fontWeight:'600', marginBottom:'10px', color:GAM_TOK.ink }
+    }, String(titleText)));
+    backdrop.appendChild(panel);
+    return { backdrop: backdrop, panel: panel };
+  }
+  function _gamPickerBtn(label, opts){
+    const o = opts || {};
+    return el('button', {
+      type: 'button',
+      style: { background: o.danger ? GAM_TOK.danger : (o.ghost ? 'transparent' : GAM_TOK.accent),
+        color: o.ghost ? GAM_TOK.inkMuted : (o.danger ? '#fff' : GAM_TOK.onAccentDark),
+        border: o.ghost ? '1px solid '+GAM_TOK.border : '0',
+        borderRadius:'6px', padding:'6px 12px', cursor:'pointer',
+        fontSize:'13px', fontWeight: o.ghost ? '400' : '600', minHeight:'32px' }
+    }, label);
+  }
+
+  // v10.40.0 WS-5: ONE modal replaces the 3-chained type-a-word title-grant
+  // prompts ("type mvp/top10/sauce/custom" -> "type custom text" -> "type
+  // expiry days"). Preset choices are BUTTONS; custom title + expiry are
+  // inline fields. Resolves { kind, label, days } or null on cancel.
+  // The caller's RPC payload (modTitlesWrite) is byte-identical to the
+  // old chain for every preset.
+  function _gamTitleGrantModal(username){
+    return new Promise(function(resolve){
+      try {
+        const shell = _gamPickerModalShell('Grant title to ' + username);
+        const panel = shell.panel, backdrop = shell.backdrop;
+        const lblStyle = { display:'block', fontSize:'11px', fontWeight:'600', letterSpacing:'.04em', textTransform:'uppercase', color:GAM_TOK.inkMuted, margin:'10px 0 6px' };
+        const inpStyle = { width:'100%', background:GAM_TOK.surfaceSunken, color:GAM_TOK.ink,
+          border:'1px solid '+GAM_TOK.border, borderRadius:'6px', padding:'8px',
+          fontSize:'13px', fontFamily:'inherit', boxSizing:'border-box' };
+        // Expiry (shared by presets + custom). Old chain's default: blank/0 = never.
+        panel.appendChild(el('label', { style: lblStyle }, 'Expires in N days (0 = never)'));
+        const daysInput = el('input', { type:'number', min:'0', max:'365', value:'0', style: { ...inpStyle, width:'90px' } });
+        panel.appendChild(daysInput);
+        panel.appendChild(el('label', { style: lblStyle }, 'Preset title'));
+        const presetRow = el('div', { style: { display:'flex', gap:'8px', flexWrap:'wrap' } });
+        const err = el('div', { style: { color:GAM_TOK.danger, fontSize:'12px', marginTop:'6px', minHeight:'16px' }, role:'alert', 'aria-live':'polite' });
+        let done = false;
+        function finish(val){
+          if (done) return;
+          done = true;
+          try { document.removeEventListener('keydown', onKey, true); } catch(e){}
+          try { backdrop.remove(); } catch(e){}
+          resolve(val);
+        }
+        function days(){
+          const d = parseInt(String(daysInput.value || '0'), 10);
+          return (isNaN(d) || d < 0) ? 0 : d;
+        }
+        // Presets: kind + label mapping identical to the old chain.
+        [['mvp','MVP'], ['top10','TOP 10 POSTER'], ['sauce','SAUCED IT']].forEach(function(pair){
+          const b = _gamPickerBtn(pair[1]);
+          b.addEventListener('click', function(){ finish({ kind: pair[0], label: pair[1], days: days() }); });
+          presetRow.appendChild(b);
+        });
+        panel.appendChild(presetRow);
+        panel.appendChild(el('label', { style: lblStyle }, 'Or custom title (uppercase, <12 chars)'));
+        const customRow = el('div', { style: { display:'flex', gap:'8px' } });
+        const customInput = el('input', { type:'text', placeholder:'TITLE', maxlength:'12', style: { ...inpStyle, flex:'1' } });
+        const customBtn = _gamPickerBtn('Grant custom');
+        customBtn.addEventListener('click', function(){
+          const v = String(customInput.value || '').trim();
+          if (!v){ err.textContent = 'Required.'; return; }
+          if (v.length > 12){ err.textContent = 'Must be <12 chars.'; return; }
+          finish({ kind: 'custom', label: v, days: days() });
+        });
+        customRow.appendChild(customInput);
+        customRow.appendChild(customBtn);
+        panel.appendChild(customRow);
+        panel.appendChild(err);
+        const btnRow = el('div', { style: { display:'flex', justifyContent:'flex-end', marginTop:'12px' } });
+        const cancelBtn = _gamPickerBtn('Cancel', { ghost: true });
+        cancelBtn.addEventListener('click', function(){ finish(null); });
+        btnRow.appendChild(cancelBtn);
+        panel.appendChild(btnRow);
+        function onKey(e){
+          if (e.key === 'Escape' || e.key === 'Esc'){ e.stopPropagation(); finish(null); }
+        }
+        document.addEventListener('keydown', onKey, true);
+        backdrop.addEventListener('click', function(ev){ if (ev.target === backdrop) finish(null); });
+        document.body.appendChild(backdrop);
+        try { if (typeof installFocusTrap === 'function') installFocusTrap(panel); } catch(e){}
+        try { presetRow.querySelector('button').focus(); } catch(e){}
+      } catch(e){ resolve(null); }
+    });
+  }
+
+  // v10.40.0 WS-5: ONE modal replaces the 2-chained flag-user prompts
+  // ("type watch/danger/critical" -> "type reason"). Severity choices are
+  // BUTTONS; reason is an inline textarea (required, matches the old chain's
+  // validation). Resolves { sev, reason } or null on cancel. Caller's
+  // modFlagsWrite payload is byte-identical.
+  function _gamFlagUserModal(username){
+    return new Promise(function(resolve){
+      try {
+        const shell = _gamPickerModalShell('Flag ' + username);
+        const panel = shell.panel, backdrop = shell.backdrop;
+        const lblStyle = { display:'block', fontSize:'11px', fontWeight:'600', letterSpacing:'.04em', textTransform:'uppercase', color:GAM_TOK.inkMuted, margin:'10px 0 6px' };
+        panel.appendChild(el('label', { style: lblStyle }, 'Reason (visible to other mods)'));
+        const reasonInput = el('textarea', { placeholder:'Why flag this user?', maxlength:'500',
+          style: { width:'100%', background:GAM_TOK.surfaceSunken, color:GAM_TOK.ink,
+            border:'1px solid '+GAM_TOK.border, borderRadius:'6px', padding:'8px',
+            fontSize:'13px', fontFamily:'inherit', minHeight:'70px', boxSizing:'border-box' } });
+        panel.appendChild(reasonInput);
+        const err = el('div', { style: { color:GAM_TOK.danger, fontSize:'12px', marginTop:'6px', minHeight:'16px' }, role:'alert', 'aria-live':'polite' });
+        panel.appendChild(el('label', { style: lblStyle }, 'Severity'));
+        const sevRow = el('div', { style: { display:'flex', gap:'8px', flexWrap:'wrap' } });
+        let done = false;
+        function finish(val){
+          if (done) return;
+          done = true;
+          try { document.removeEventListener('keydown', onKey, true); } catch(e){}
+          try { backdrop.remove(); } catch(e){}
+          resolve(val);
+        }
+        [['watch','\u{1F440} Watch', {}], ['danger','⚠ Danger', {}], ['critical','\u{1F6A8} Critical', { danger:true }]].forEach(function(t){
+          const b = _gamPickerBtn(t[1], t[2]);
+          b.addEventListener('click', function(){
+            const reason = String(reasonInput.value || '').trim();
+            if (!reason){ err.textContent = 'Reason required.'; try { reasonInput.focus(); } catch(_){} return; }
+            finish({ sev: t[0], reason: reason });
+          });
+          sevRow.appendChild(b);
+        });
+        panel.appendChild(sevRow);
+        panel.appendChild(err);
+        const btnRow = el('div', { style: { display:'flex', justifyContent:'flex-end', marginTop:'12px' } });
+        const cancelBtn = _gamPickerBtn('Cancel', { ghost: true });
+        cancelBtn.addEventListener('click', function(){ finish(null); });
+        btnRow.appendChild(cancelBtn);
+        panel.appendChild(btnRow);
+        function onKey(e){
+          if (e.key === 'Escape' || e.key === 'Esc'){ e.stopPropagation(); finish(null); }
+        }
+        document.addEventListener('keydown', onKey, true);
+        backdrop.addEventListener('click', function(ev){ if (ev.target === backdrop) finish(null); });
+        document.body.appendChild(backdrop);
+        try { if (typeof installFocusTrap === 'function') installFocusTrap(panel); } catch(e){}
+        try { reasonInput.focus(); } catch(e){}
+      } catch(e){ resolve(null); }
+    });
+  }
+
   // v10.39.0 WS-A (dialog sweep): Brave can silently suppress native
   // confirm()/prompt() in content scripts (see the settings note near the
   // browser-dialog comment) -- a suppressed confirm() returns false
@@ -5119,7 +5288,18 @@
           for (const dk of draftKeys){ __memStore.set(dk, all[dk]); }
         } catch(e){}
       }
-      const stored = await chrome.storage.local.get(keys);
+      // v10.40.0 WS-3 (UX P1 item 7): also pull the popup write-stamp. The
+      // popup's Repair/Reset/Import routines bump gam_settings_writeStamp
+      // (a plain Date.now(), stored as its OWN chrome.storage key -- never
+      // inside the settings object, so the lsSet merge path can never
+      // regress it). When chrome.storage's stamp is NEWER than the page-
+      // localStorage copy's stamp (missing = 0), the popup wrote settings
+      // this page has never seen -> overwrite the stale localStorage copy
+      // (scrubbed, exactly like the null-fill path). Pre-fix, hydrate only
+      // filled NULL localStorage keys, so on hardening-OFF installs popup
+      // Repair/Reset/Import silently no-oped forever (split-brain store).
+      const K_WRITE_STAMP = 'gam_settings_writeStamp';
+      const stored = await chrome.storage.local.get(keys.concat([K_WRITE_STAMP]));
       keys.forEach(k=>{
         // v7.2: under the flag-on path, seed the in-memory adapter for
         // sensitive keys AND scrub any stale page-localStorage copy left by
@@ -5128,6 +5308,19 @@
           if (stored[k] != null) __memStore.set(k, stored[k]);
           try { localStorage.removeItem(k); } catch(e){}
           return;
+        }
+        if (k === 'gam_settings' && stored[k] != null){
+          // v10.40.0 WS-3: stamp comparison BEFORE the null-only fill.
+          let chromeStamp = 0, lsStamp = 0;
+          try { chromeStamp = Number(stored[K_WRITE_STAMP]) || 0; } catch(e){}
+          try { lsStamp = Number(JSON.parse(localStorage.getItem(K_WRITE_STAMP) || '0')) || 0; } catch(e){}
+          if (chromeStamp > lsStamp){
+            // Secrets handling unchanged: page localStorage NEVER sees
+            // secret keys (_scrubSecrets, same as the null-fill path).
+            try { localStorage.setItem(k, JSON.stringify(_scrubSecrets(stored[k]))); } catch(e){}
+            try { localStorage.setItem(K_WRITE_STAMP, JSON.stringify(chromeStamp)); } catch(e){}
+            return;
+          }
         }
         const lsRaw = localStorage.getItem(k);
         if (lsRaw == null && stored[k] != null){
@@ -7903,24 +8096,36 @@
   }
 
   // V11 #5: Universal Undo Middleware (client-side pilot -- ban only)
-  let _undoSlot = null;
-  let _undoTimer = null;
+  // v10.40.0 WS-6 (UX P1 item 9): single slot -> STACK of 3 (LIFO). Pre-fix,
+  // a remove followed by a ban within 20s orphaned the remove's undo (the
+  // second _setUndoSlot clobbered the first). Now up to 3 pending undos
+  // coexist; each keeps its OWN expiry timer (Tier-A 20s / Tier-B 5s
+  // unchanged) and each toast's Undo button targets its own clientOpId.
+  // The U key operates on the MOST RECENT entry (newest -> older as you
+  // pop). What any individual undo DOES is untouched.
+  const _UNDO_STACK_MAX = 3;
+  let _undoStack = [];
 
   function _setUndoSlot(slot) {
-    if (_undoTimer) clearTimeout(_undoTimer);
-    _undoSlot = slot;
-    _undoTimer = setTimeout(function() {
-      _undoSlot = null;
-      _undoTimer = null;
+    slot._expireTimer = setTimeout(function() {
+      const idx = _undoStack.indexOf(slot);
+      if (idx === -1) return;
+      _undoStack.splice(idx, 1);
+      slot._expireTimer = null;
       _gamUndoAnnounce('Undo window closed.');
       // v10.14.2 R2: visible snack on expiry (vs SR-only). Mods with sound off
       // and no screen reader had no signal the window had closed. Brief 2.2s
       // info snack tells them the U-key chord is no longer armed.
-      try { snack('Undo expired', 'info'); } catch(_){}
+      try { snack('Undo expired' + (slot.label ? ': ' + slot.label : ''), 'info'); } catch(_){}
     }, slot.ttlMs);
+    _undoStack.push(slot);
+    if (_undoStack.length > _UNDO_STACK_MAX) {
+      const dropped = _undoStack.shift();
+      if (dropped && dropped._expireTimer) { clearTimeout(dropped._expireTimer); dropped._expireTimer = null; }
+    }
   }
 
-  function _getUndoSlot() { return _undoSlot; }
+  function _getUndoSlot() { return _undoStack.length ? _undoStack[_undoStack.length - 1] : null; }
 
   function _gamUndoAnnounce(msg) {
     try {
@@ -7994,9 +8199,12 @@
   }
 
   function _executeUndo(clientOpId, inverseFn, label) {
-    if (!_undoSlot || _undoSlot.clientOpId !== clientOpId) return;
-    _undoSlot = null;
-    if (_undoTimer) { clearTimeout(_undoTimer); _undoTimer = null; }
+    // v10.40.0 WS-6: locate the entry ANYWHERE in the stack (older toasts'
+    // Undo buttons remain live), remove it, clear its own timer.
+    const _idx = _undoStack.findIndex(function(s){ return s.clientOpId === clientOpId; });
+    if (_idx === -1) return;
+    const _entry = _undoStack.splice(_idx, 1)[0];
+    if (_entry && _entry._expireTimer) { clearTimeout(_entry._expireTimer); _entry._expireTimer = null; }
     Promise.resolve().then(inverseFn).then(function() {
       _gamUndoAnnounce(label + ' reversed.');
       snack('Undone: ' + label, 'success');
@@ -12073,67 +12281,15 @@ Analyze this comment against the community rules. Then write a brief, profession
           return;
         }
         if (q==='title'){
-          // v7.2 CHUNK 13: askTextModal (flag-on) replaces raw prompt(). Two
-          // sequential modals; first returns null -> bail.
-          const __hOn = __hardeningOn();
-          let preset;
-          if (__hOn){
-            const raw = await askTextModal({
-              title: 'Grant title to ' + username,
-              label: 'Choose: mvp / top10 / sauce / custom',
-              placeholder: 'mvp',
-              initial: 'mvp',
-              max: 16
-            });
-            if (raw == null) return;
-            preset = String(raw).trim().toLowerCase();
-          } else {
-            preset = (prompt(`Grant title to ${username}\nChoose: mvp / top10 / sauce / custom`, 'mvp') || '').trim().toLowerCase();
-          }
-          if (!preset) return;
-          const kind = ['mvp','top10','sauce','custom'].includes(preset) ? preset : 'custom';
-          let label;
-          if (kind === 'custom'){
-            if (__hOn){
-              const raw2 = await askTextModal({
-                title: 'Custom title text',
-                label: 'Uppercase, < 12 chars',
-                placeholder: 'TITLE',
-                max: 12,
-                validate: function(v){
-                  if (!v) return 'Required.';
-                  if (v.length > 12) return 'Must be <12 chars.';
-                  return '';
-                }
-              });
-              if (raw2 == null) return;
-              label = String(raw2).trim();
-            } else {
-              label = (prompt('Custom title text (uppercase, <12 chars):', '') || '').trim();
-            }
-            if (!label) return;
-          } else {
-            label = { mvp:'MVP', top10:'TOP 10 POSTER', sauce:'SAUCED IT' }[kind];
-          }
-          let daysRaw;
-          if (__hOn){
-            const raw3 = await askTextModal({
-              title: 'Title expiry',
-              label: 'Expires in N days (blank = never)',
-              placeholder: '0',
-              max: 6,
-              validate: function(v){
-                if (v === '') return '';
-                if (!/^\d+$/.test(v)) return 'Must be digits (or blank).';
-                return '';
-              }
-            });
-            if (raw3 == null) return;
-            daysRaw = raw3;
-          } else {
-            daysRaw = prompt('Expires in N days (blank = never):', '') || '0';
-          }
-          const days = parseInt(daysRaw || '0', 10);
+          // v10.40.0 WS-5 (UX P1 item 4): ONE modal (preset BUTTONS + inline
+          // custom-title field + inline expiry field) replaces the 3-chained
+          // type-a-word modals. Cancel anywhere = no action. The
+          // modTitlesWrite payload below is byte-identical to the old chain.
+          const _pick = await _gamTitleGrantModal(username);
+          if (!_pick) return;
+          const kind = _pick.kind;
+          const label = _pick.label;
+          const days = _pick.days;
           const expiresAt = days > 0 ? new Date(Date.now() + days*24*3600*1000).toISOString() : null;
           btn.disabled = true;
           const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
@@ -12165,44 +12321,15 @@ Analyze this comment against the community rules. Then write a brief, profession
           return;
         }
         if (q==='flag'){
-          // v7.2 CHUNK 13: askTextModal under flag-on. Two-step pattern.
-          const __hOn = __hardeningOn();
-          let sev;
-          if (__hOn){
-            const raw = await askTextModal({
-              title: 'Flag ' + username,
-              label: 'Severity (watch / danger / critical)',
-              placeholder: 'watch',
-              initial: 'watch',
-              max: 16,
-              validate: function(v){
-                if (!v) return 'Required.';
-                if (!['watch','danger','critical'].includes(String(v).toLowerCase())) return 'Must be watch, danger, or critical.';
-                return '';
-              }
-            });
-            if (raw == null) return;
-            sev = String(raw).trim().toLowerCase();
-          } else {
-            sev = (prompt(`Flag ${username} — severity? (watch / danger / critical)`, 'watch') || '').trim().toLowerCase();
-          }
-          if (!sev) return;
+          // v10.40.0 WS-5 (UX P1 item 4): ONE modal (severity BUTTONS +
+          // inline reason textarea) replaces the 2-chained type-a-word
+          // modals. Cancel anywhere = no action. The modFlagsWrite payload
+          // below is byte-identical to the old chain.
+          const _fpick = await _gamFlagUserModal(username);
+          if (!_fpick) return;
+          const sev = _fpick.sev;
+          const reason = _fpick.reason;
           if (!['watch','danger','critical'].includes(sev)){ snack('Invalid severity', 'error'); return; }
-          let reason;
-          if (__hOn){
-            const raw2 = await askTextModal({
-              title: 'Reason',
-              label: 'Visible to other mods',
-              placeholder: 'Why flag this user?',
-              max: 500,
-              multiline: true,
-              validate: function(v){ return v ? '' : 'Required.'; }
-            });
-            if (raw2 == null) return;
-            reason = String(raw2).trim();
-          } else {
-            reason = (prompt(`Reason (visible to other mods):`, '') || '').trim();
-          }
           if (!reason) return;
           btn.disabled = true;
           statusEl.innerHTML = `<div class="gam-mc-banner gam-mc-banner-info">Posting flag...</div>`;
@@ -13567,6 +13694,12 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     addToggle('Compact status bar (icon-only)', 'statusBarCompact', 'Hide the status-bar text labels (icons only). v10.19.1: decoupled from the modmail action bar -- this is now purely cosmetic.');
+    // v10.40.0 WS-4 (UX P1 item 8): autoRefreshEnabled defaulted true and
+    // reloaded the operator's pages hourly with ZERO UI surface. Toggle it
+    // here; the tick re-reads the setting every minute so the change applies
+    // live (no reload needed). Default stays true.
+    addToggle('Auto-refresh pages hourly', 'autoRefreshEnabled',
+      'Reload GAW pages that have been unfocused or idle for 60 minutes (skipped while you are typing or a mod panel is open). Applies immediately — no reload needed.');
 
     closeCard(); openCard('moderation', '\u26A1 Daily Moderation', 0, 1, false, { primary:true, sub:'Console dock, DR duration, tards, mod chat' });
     addSelect('Console Position', 'modConsoleDock',
@@ -13646,6 +13779,38 @@ Analyze this comment against the community rules. Then write a brief, profession
       'Run Workers AI username scoring daily on new /users arrivals.');
     addFeatureToggle('Passive Crawler', 'features.crawler', false,
       'Upload /users usernames to the team cloud on each visit.');
+    // v10.40.0 WS-1 (UX P1 item 5): features.modmail resurrected -- it gated
+    // the Inbox Intel poller but had NO toggle anywhere. Honest copy.
+    addFeatureToggle('Inbox Intel (modmail upload)', 'features.modmail', false,
+      'Upload modmail threads (message body + metadata) to the team worker for Inbox Intel analysis: risk chips, AI reply drafts, thread status. Cloud upload of modmail content.');
+    // v10.40.0 WS-2 (UX P1 item 6): presence/evidence/bugReport previously had
+    // NO settings rows -- once the one-shot consent modal passed, they were
+    // unreachable (error copy even pointed at rows that did not exist).
+    addFeatureToggle('Presence Pings', 'features.presence', false,
+      'Every 30s, upload your current page category to the worker so the lead mod can see who is online where.');
+    addFeatureToggle('Evidence Capture', 'features.evidence', false,
+      'Before every Remove/Ban, upload the offending item HTML (up to 50KB) to team storage for later review.');
+    addFeatureToggle('Bug Reports', 'features.bugReport', false,
+      'When you press Ctrl+Shift+I, upload a redacted debug snapshot so a public GitHub issue can be filed.');
+    // v10.40.0 WS-2b: re-consent path. consentShown was one-shot and popup
+    // Reset deliberately preserves it, so re-reviewing cloud permissions was
+    // impossible without wiping ALL extension data. This clears the flag and
+    // re-opens the consent modal immediately (prefilled with current grants).
+    {
+      const _rcRow = el('div', { cls:'gam-settings-row' });
+      _rcRow.innerHTML =
+        '<div class="gam-settings-info">' +
+          '<label class="gam-settings-lbl">Cloud permissions review</label>' +
+          '<div class="gam-settings-desc">Re-open the one-time cloud-consent dialog to review every cloud opt-in in one place. Your current choices are prefilled; nothing changes until you save.</div>' +
+        '</div>' +
+        '<button class="pop-btn pop-btn-ghost" id="gam-review-consent-btn" style="min-height:32px;padding:6px 14px;font:600 11px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase;flex-shrink:0">Review cloud permissions…</button>';
+      _rcRow.querySelector('#gam-review-consent-btn').addEventListener('click', function(){
+        setSetting('consentShown', false);
+        try { closeAllPanels(); } catch(_){}
+        try { showConsentModal(); } catch(_){}
+      });
+      _currentCardBody.appendChild(_rcRow);
+    }
 
     // v10.10.0 M2: Auto-Unsticky Monitoring section (lead-only).
     // Worker cron monitors GAW; dispatches queued actions to any open GAW
@@ -29439,7 +29604,12 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       { key:'features.presence',  label:'Presence pings',  desc:'Every 30s, upload your current page path to the worker so the lead mod can see who is online where.' },
       { key:'features.evidence',  label:'Evidence capture',desc:'Before every Remove/Ban, upload the offending item HTML (<=50KB) to R2 for later review.' },
       { key:'features.ai',        label:'AI scoring',      desc:'Send suspicious usernames to Workers AI (Llama, free) for risk scoring.' },
-      { key:'features.bugReport', label:'Bug reports',     desc:'When you press Ctrl+Shift+I, upload a redacted debug snapshot so I can file a GitHub issue.' }
+      { key:'features.bugReport', label:'Bug reports',     desc:'When you press Ctrl+Shift+I, upload a redacted debug snapshot so I can file a GitHub issue.' },
+      // v10.40.0 WS-1 (UX P1 item 5): features.modmail existed in DEFAULT_SETTINGS
+      // and gated the Inbox Intel poller but appeared in NO UI surface -- the
+      // feature was permanently dead for every install. Honest copy: this
+      // uploads modmail content.
+      { key:'features.modmail',   label:'Inbox Intel (modmail)', desc:'Upload modmail threads (message body + metadata) to the team worker for Inbox Intel analysis: risk chips, AI reply drafts, thread status tracking.' }
     ];
     overlay.innerHTML = `
       <div style="background:#121418;color:#eee;border:1px solid #333;border-radius:8px;padding:22px 26px;max-width:560px;width:92%;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.6)">
@@ -29462,6 +29632,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           <div style="font-weight:600;color:#eee">${f.label}</div>
           <div style="color:#888;font-size:12px">${f.desc}</div>
         </div>`;
+      // v10.40.0 WS-2: prefill from the CURRENT setting so the re-consent
+      // path (Review cloud permissions) shows what is actually granted.
+      // First-run installs: every feature is null -> unchecked, unchanged.
+      try { row.querySelector('input').checked = getSetting(f.key, false) === true; } catch(_){}
       list.appendChild(row);
     });
     const close = (approveAll) => {
@@ -29914,7 +30088,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   async function reportBug(){
     if (!consentEnabled('features.bugReport')){
       // AF-16 (Rule 47): replace alert() with non-blocking snack
-      try { snack('Bug reporting is disabled. Enable "Bug reports" in settings or the consent modal.', 'warn', 6000); } catch(_){}
+      // v10.40.0 WS-2: copy previously pointed at a settings row that did not
+      // exist. The row now ships (Settings -> Features -> "Bug Reports"), and
+      // "Review cloud permissions…" in the same card re-opens the consent modal.
+      try { snack('Bug reporting is disabled. Enable "Bug Reports" under Settings → Features, or click "Review cloud permissions…" there.', 'warn', 6000); } catch(_){}
       return;
     }
     // v7.2 CHUNK 13: askTextModal replaces prompt() under flag-on.
