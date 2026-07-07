@@ -15974,7 +15974,14 @@ Analyze this comment against the community rules. Then write a brief, profession
   // Parse GAW's relative age text into an ISO timestamp. Best-effort; returns '' on miss.
   function parseRelativeAge(text){
     if (!text) return '';
-    const m = /(\d+)\s*(minute|hour|day|week|month|year)s?\s*ago/i.exec(text);
+    // v10.38.1: "ago" made OPTIONAL. GAW's markup dropped the "ago" suffix
+    // (live /users shows "1 day", "23 hours" -- confirmed 2026-07-07, zero
+    // "ago" occurrences on the whole page), which made this regex return ''
+    // for EVERY user, joinedAt never populated, and the v10.36.7 newest-first
+    // sort silently collapsed to raw DOM order (oldest-first). The sort was
+    // never wrong -- its input died. Keep accepting the old "N units ago"
+    // form too in case GAW flips back.
+    const m = /(\d+)\s*(minute|hour|day|week|month|year)s?(?:\s*ago)?/i.exec(text);
     if (!m) return '';
     const n = parseInt(m[1], 10);
     const unit = m[2].toLowerCase();

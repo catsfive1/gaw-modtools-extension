@@ -1,4 +1,8 @@
 # GAW ModTools — CHANGELOG
+## v10.38.1 -- FIX: /users chronological order (the REAL root cause, live-verified)
+
+Commander has asked repeatedly for /users to list new accounts newest-first. The v10.36.7 sort was correct all along -- but GAW's markup dropped the "ago" suffix from join ages ("23 hours" instead of "23 hours ago"), so parseRelativeAge returned empty for EVERY user, joinedAt never populated, and the sort silently collapsed to raw DOM order (oldest-first). Confirmed live on the operator's real /users page 2026-07-07: zero "ago" occurrences page-wide, list rendering oldest-first. Fix: "ago" is now optional in the parser; old format still accepted. Regression test scripts/_p15_users_chrono_ago_optional_smoke_test.mjs 12/12 (includes proof the old regex fails on the new format); full suite 29/29.
+
 
 Versioned summary of recent work. Detailed commit history: `git log --oneline` in this repo.
 
