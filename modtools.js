@@ -14648,6 +14648,27 @@ Analyze this comment against the community rules. Then write a brief, profession
   // profile page).
   document.addEventListener('click', (e)=>{
     const al = e.target.closest(SELECTORS.authorLink);
+    // v10.41.0: restore SHIFT-click = open the user's profile in a NEW TAB.
+    // Regressed because GAW's SPA router intercepts the anchor and navigates
+    // in-place; the old pin handler bailed on shiftKey and let that happen.
+    // Now we explicitly open /u/<name>/ in a background tab and stop the
+    // event so neither the pin logic NOR GAW's router runs. (Ctrl/Cmd-click
+    // is left to the browser's native new-tab handling.)
+    if (al && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey){
+      // Prefer the anchor's own /u/<name> href (survives display-name != username);
+      // fall back to the visible text with any u// or @ prefix stripped.
+      let uname = '';
+      const href = al.getAttribute && al.getAttribute('href');
+      const hm = href && /\/u\/([^/?#]+)/i.exec(href);
+      if (hm) uname = decodeURIComponent(hm[1]);
+      else uname = al.textContent.trim().replace(/^\/?u\//i,'').replace(/^@/,'');
+      if (uname){
+        e.preventDefault();
+        e.stopPropagation();
+        try { window.open(`/u/${encodeURIComponent(uname)}/`, '_blank', 'noopener'); } catch(_){}
+        return;
+      }
+    }
     if (al && !e.shiftKey && !FallbackMode){
       const u = al.textContent.trim();
       if (!u) return;
