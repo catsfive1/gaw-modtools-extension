@@ -1,5 +1,5 @@
 // _p17_settings_integrity_smoke_test.mjs
-// v10.40.2 UX P1 (Settings Integrity): six workstreams from the
+// v10.40.0 UX P1 (Settings Integrity): six workstreams from the
 // UXUI-AUDIT-2026-07-07 P1 section, items 4-9.
 //   WS-1 features.modmail resurrection -- consent-modal row + Features
 //                                         settings row (was in NO UI surface).
@@ -33,9 +33,12 @@ function ck(label, cond) {
   else { fail++; console.log('  FAIL  ' + label); }
 }
 
-console.log('=== P17: settings integrity (v10.40.2) ===');
+console.log('=== P17: settings integrity (v10.40.0) ===');
 
-ck('manifest version bumped to 10.40.2', MANIFEST.version === '10.40.2');
+// Robust version gate (was hardcoded === '10.40.0', which broke on every bump).
+// The settings-integrity work shipped in 10.40.0, so any version >= 10.40.0 is fine.
+const _vGte = (v, min) => { const a = String(v).split('.').map(Number), b = min.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((a[i]||0) > (b[i]||0)) return true; if ((a[i]||0) < (b[i]||0)) return false; } return true; };
+ck('manifest version >= 10.40.0 (settings integrity shipped)', _vGte(MANIFEST.version, '10.40.0'));
 
 // ---------------------------------------------------------------------------
 // WS-1: features.modmail surfaces (consent modal + settings panel).
