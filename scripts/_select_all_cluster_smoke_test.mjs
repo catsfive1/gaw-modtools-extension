@@ -45,8 +45,9 @@ ck('user with no ipHash excluded', !Object.values(clusters).some(arr => arr.incl
 ck('private IP excluded', !Object.keys(clusters).some(p => p.startsWith('PRIV')) && !Object.values(clusters).some(arr => arr.includes('privguy')));
 
 // --- wiring (static) ---
+// v10.43.0: prefix is escapeHtml-wrapped in the attribute (WS-9 defense-in-depth)
 ck('burst alert has a "Select all" link (data-cluster-select)',
-  /data-cluster-select="\$\{prefix\}"/.test(SRC) && /gam-t-alert-selectall/.test(SRC));
+  /data-cluster-select="\$\{escapeHtml\(prefix\)\}"/.test(SRC) && /gam-t-alert-selectall/.test(SRC));
 ck('filter handler is guarded so the new link does not break "Filter this cluster"',
   /if\(!a\.dataset\.cluster\) return;/.test(SRC));
 
