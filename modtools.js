@@ -5574,7 +5574,15 @@
   function getUserHistory(u){ return getModLog().filter(e=>e.user && e.user.toLowerCase()===u.toLowerCase()); }
 
   function getWatchlist(){ return lsGet(K.WATCH, {}); }
-  function saveWatchlist(wl){ lsSet(K.WATCH, wl); }
+  function saveWatchlist(wl){
+    lsSet(K.WATCH, wl);
+    // v10.45.0: the watchlist is shared team intelligence -- ride the same
+    // proven __gaw_team_patterns__ blob the DR/Tard rules sync through, so a
+    // user one mod watches becomes visible to every mod. Suppressed during the
+    // pull-merge so a remote-applied watch doesn't echo back. HI-1: watch is
+    // display/triage-only (never a ban path), so this adds no execution risk.
+    if (!_suppressPatternPush){ try { pushPatternsToCloud(); } catch(_){} }
+  }
   function isWatched(u){ return !!getWatchlist()[u.toLowerCase()]; }
 
   // v10.36.8: "pick up where I left off" -- a personal, local-only
@@ -9153,6 +9161,17 @@
       try {
         setSetting('autoDeathRowRules', mergeByPattern(localDr, remoteDr));
         setSetting('autoTardRules',     mergeByPattern(localTd, remoteTd));
+        // v10.45.0: merge the shared watchlist from the same blob. Union by
+        // username (a watch another mod added appears here); cloud additions
+        // win. Removal is best-effort/non-propagating -- identical semantics to
+        // the rule union above (un-watch is rare + low-stakes intel).
+        const remoteWl = (payload.watchlist && typeof payload.watchlist === 'object') ? payload.watchlist : null;
+        if (remoteWl){
+          const localWl = getWatchlist();
+          let wlChanged = false;
+          for (const k in remoteWl){ if (!localWl[k]){ localWl[k] = remoteWl[k]; wlChanged = true; } }
+          if (wlChanged) saveWatchlist(localWl); // suppressed: no echo push
+        }
       } finally {
         _suppressPatternPush = false;
       }
@@ -9170,6 +9189,7 @@
     const profile = {
       autoDeathRowRules: getSetting('autoDeathRowRules', []) || [],
       autoTardRules:     getSetting('autoTardRules',     []) || [],
+      watchlist:         getWatchlist(),   // v10.45.0: shared team watchlist
       updatedAt: new Date().toISOString(),
       updatedBy: me,
     };

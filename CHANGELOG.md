@@ -1,4 +1,15 @@
 # GAW ModTools — CHANGELOG
+## v10.45.0 -- FEATURE: shared team WATCHLIST (sync gap closed)
+
+The watchlist was the last purely-local shared-intelligence silo -- a user one
+mod watched was invisible to the rest of the team. It now rides the same proven
+__gaw_team_patterns__ blob the auto-DR/Tard rules sync through (modProfilesWrite
++ getCloudProfiles), so watches propagate to every mod (push on change, 5-min
+pull, union merge, cloud-add wins, local never clobbered). No new worker
+endpoint, no deploy. HI-1: watch is display/triage-only, never a ban path
+(asserted in test). Regression scripts/_p22_watchlist_team_sync_smoke_test.mjs
+13/13; full suite green. Part of the team-sync audit (docs/TEAM-INTELLIGENCE-VISION-5MO.md).
+
 ## v10.44.0 -- UX: /users keyboard-focus continuity -- triage becomes a conveyor belt (WS-8 safe half)
 
 Every one of the ~44 `refreshTriageConsole` call sites (row actions, filter clicks, batch ops, cluster links, the 60s autorefresh) rebuilds the console via `innerHTML`, which destroyed the focused element and dumped keyboard focus to `<body>` — silently breaking the keyboard-triage flow v10.37.2 shipped (visible kb targets + Intel-Drawer-from-row) and making the autorefresh a focus thief. Now: before the rebuild, if focus is inside the console, the focused row's user and the pre-rebuild row order are captured; after the render, focus is restored to the same row — or, when that row was just actioned away, ADVANCED to the next user from the old order (nearest previous as fallback). Act → land on the next user → act: the grind is a conveyor belt instead of act → scroll → hunt → re-click. Pure focus management via a new pure helper `_pickTriageRefocusTarget` (null when nothing maps — never steals focus from outside the console; `document.body` is never treated as in-console focus); restore is try-wrapped so it can never break the render. Rows are `tabindex=0` so row-focus keeps the drawer-open keybind live. No ban paths touched (HI-1).
