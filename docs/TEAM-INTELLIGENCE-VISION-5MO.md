@@ -23,9 +23,21 @@ syncs to all mods via the worker → D1:
 | Team settings/flags | /mod/settings | 5min poll |
 | Raid intelligence | /raid/* | on raid events |
 
+Also SYNCED (confirmed by the 22-input forensic audit): DR Sniper (armed
+ban-on-next-post), user flags + titles, team macros, per-user cloud profiles,
+team "seen" ledger, raid dispositions, lookalike/ban-evasion confirmations, AI
+scores, cadence, queue snapshot.
+
 Correctly PRIVATE (not a gap — personal workflow, not shared intelligence):
 - `gam_reviewed_seen` review-progress bookmark (which /users rows *I* cleared).
   Sharing it would corrupt every other mod's review queue. Stays local by design.
+- `gam_undo_stack` (my last-N reversible actions) — personal.
+- UI feature toggles (per-mod preference; server-enforced team keys DO sync via
+  /mod/settings).
+
+### CLOSED THIS SESSION
+- **Watchlist** — was the last purely-local shared-intel silo. v10.45.0 rides
+  it on the proven `__gaw_team_patterns__` blob → now syncs to all mods. DONE.
 
 The architecture pattern is sound: **optimistic local write → worker → D1 →
 other mods pull (push-on-change where it matters, 60s poll everywhere, instant
@@ -52,6 +64,31 @@ Sync ≠ intelligence. The data flows; the INSIGHT isn't always surfaced. The
 4. **Sync-health indicator.** A small, honest "team sync: live · last pull 12s
    ago" signal so the operator can TRUST the hive mind is connected, and
    instantly see if the worker link drops. Trust is a feature.
+
+### REMAINING SYNC GAPS (authoritative audit) — all deploy-gated, need Commander's "deploy"
+- **Death Row QUEUE manual placements — #1 priority, and a RELIABILITY bug, not
+  just a sync gap.** `saveDeathRow` is pure local `lsSet` (verified modtools.js
+  ~5595); the reaper executes ONLY in the queuing mod's browser — close that tab
+  and the 72h ban never fires, and no peer ever sees the pending placement. The
+  CORRECT fix is worker-side: a durable D1 DR queue executed by worker CRON (not
+  a fragile browser reaper). Deploy-gated + HI-1-sensitive (ban machinery) — do
+  NOT rush a client-side reroute; changing DR→sniper semantics risks wrong-time
+  bans. This is the top item for the next worker-deploy session.
+- **Roster dispositions `cleared`/`watching` — #7.** Cause duplicate review (mod
+  B re-triages what mod A cleared). `banned` is already authoritative via GAW.
+  Clean fix wants a worker `disposition` field. Deploy-gated.
+- **Raid disposition-feedback durability — #15.** If `/raid/disposition-feedback`
+  is still 404 in prod, the learning signal is silently dropped. Fix = deploy the
+  worker route (no client change).
+- Low-value / skip: `banMessageTemplate` team default (macros already cover it).
+
+### Staleness (synced but can lag — acceptable for a small team, tighten only if asked)
+- SUS: ≤60s poll, visibility-gated (backgrounded tabs don't refresh). Actor sees
+  instant; peers ≤60s or on tab-focus.
+- Tard rules: 5-min pull (no fast channel like DR rules' 60s). Peer-authored DR
+  rules also 5-min; lead-authored 60s.
+- Notes/flags/macros/lookalike: load-only (refresh on surface open) — fine at
+  point-of-decision, not live.
 
 ### Tier 2 — needs a NEW worker endpoint + D1 (deploy-gated; next worker session)
 5. **Alt-account / ban-evasion graph — the crown jewel.** When a user is
