@@ -31245,9 +31245,19 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     if (!getSetting('autoRefreshEnabled', true)) return;
     const intervalMs = (getSetting('autoRefreshIntervalMin', 60)) * 60 * 1000;
     const now = Date.now();
-    const hidden = document.hidden || !document.hasFocus();
+    // v10.40.2 FIX (the "everything broke" bug): reload ONLY after a full idle
+    // interval of no user activity. The old `hidden = document.hidden ||
+    // !document.hasFocus()` short-circuit reloaded ANY unfocused/background GAW
+    // tab on EVERY 60s tick -- there was NO time gate on the hidden case. So the
+    // instant the operator alt-tabbed away (e.g. to the chat), every GAW tab
+    // (incl. /users) reloaded once a minute -- triage never finished mounting,
+    // page state was lost, "everything broke," and automated inspection tabs died
+    // on sight. `idle` already encodes the N-minute gate, and an unfocused tab
+    // accrues idle time (no activity events fire), so this still "refreshes
+    // idle/backgrounded pages every N min" -- correctly -- and self-limits because
+    // a reload resets lastActivity.
     const idle = (now - lastActivity) >= intervalMs;
-    if (!hidden && !idle) return;
+    if (!idle) return;
     if (hasDirtyInput()){
       console.log('[ModTools] auto-refresh skipped: dirty input detected');
       return;
