@@ -7256,6 +7256,40 @@
       }
       body.appendChild(el('p', {style: 'color:'+GAM_TOK.inkMuted+';font-size:12px;'}, bits.length ? bits.join(' \u00B7 ') : 'No profile metadata.'));
 
+      // v10.42.0 SUS-COMPLETE: if another mod flagged this user SUS, surface it
+      // prominently in the drawer header (WHO + WHY [+ WHEN + velocity]). This is
+      // key intelligence; the drawer previously showed profile/cadence but never
+      // the cross-mod SUS flag. Read-only from _susState -- HI-1: no ban path.
+      try {
+        var _susRow = (typeof _susState === 'object' && _susState && _susState.rows)
+          ? _susState.rows.get(String(id).toLowerCase()) : null;
+        if (_susRow) {
+          var _susHot = (_susRow.comment_count_24h || 0) > 8;
+          var _susTone = _susHot ? GAM_TOK.danger : GAM_TOK.warn;
+          var _susReason = _susRow.reason || '(no reason)';
+          var _susBy = _susRow.marked_by || '?';
+          var _susWhenRaw = _susRow.marked_at != null ? _susRow.marked_at
+                          : _susRow.created_at != null ? _susRow.created_at
+                          : _susRow.ts != null ? _susRow.ts
+                          : _susRow.updated_at != null ? _susRow.updated_at : null;
+          var _susWhen = '';
+          if (_susWhenRaw != null) {
+            var _wMs2 = (typeof _susWhenRaw === 'number') ? (_susWhenRaw < 1e12 ? _susWhenRaw * 1000 : _susWhenRaw) : Date.parse(String(_susWhenRaw));
+            if (_wMs2 && !isNaN(_wMs2)) { try { _susWhen = ' \u00B7 ' + timeAgo(new Date(_wMs2).toISOString()); } catch(_e3){} }
+          }
+          var _susBanner = el('div', {
+            style: 'margin-top:6px;padding:6px 9px;border-radius:6px;background:'+(_susHot?'rgba(240,64,64,.10)':'rgba(240,160,64,.10)')+';border-left:3px solid '+_susTone+';color:'+_susTone+';font:600 12px -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif'
+          },
+            el('span', {style:'font-weight:700'}, '\u{1F6A9} SUS'),
+            el('span', {style:'color:'+GAM_TOK.inkMuted+';font-weight:500'}, ' by '),
+            el('span', null, _susBy),
+            el('span', {style:'color:'+GAM_TOK.inkMuted+';font-weight:500'}, _susWhen + ' \u2014 '),
+            el('span', {style:'font-weight:500'}, _susReason + (_susHot ? ' (' + _susRow.comment_count_24h + '/24h \u26A0\uFE0F)' : ''))
+          );
+          body.appendChild(_susBanner);
+        }
+      } catch(_susErr){}
+
       // v10.8.0 M9 (TARD-1): cadence chip \u2014 fetch async, render inline
       const cadenceSlot = el('div', {style: 'margin-top:4px;min-height:18px'});
       body.appendChild(cadenceSlot);
@@ -14517,6 +14551,27 @@ Analyze this comment against the community rules. Then write a brief, profession
   // _susApplyDecorations walks every author link on the page and applies
   // 🚩 prefix + orange color (BOLD RED if comment_count_24h > 8).
   const _susState = { rows: new Map(), lastFetchedAt: 0 };
+  // v10.42.0 SUS-COMPLETE: extract a "when flagged" timestamp from a SUS row.
+  // The worker row shape has drifted over versions; accept any of the common
+  // timestamp fields (ms epoch, s epoch, or ISO). Returns '' when absent so the
+  // hover/badge intel degrades gracefully (WHO+WHY always render; WHEN is a
+  // bonus when the server provides it).
+  function _susWhenTs(row){
+    if (!row) return 0;
+    var raw = row.marked_at != null ? row.marked_at
+            : row.created_at != null ? row.created_at
+            : row.ts != null ? row.ts
+            : row.updated_at != null ? row.updated_at : null;
+    if (raw == null) return 0;
+    if (typeof raw === 'number') return raw < 1e12 ? raw * 1000 : raw; // s -> ms
+    var p = Date.parse(String(raw));
+    return isNaN(p) ? 0 : p;
+  }
+  function _susWhenLabel(row){
+    var t = _susWhenTs(row);
+    if (!t) return '';
+    try { return ' · ' + timeAgo(new Date(t).toISOString()); } catch(_){ return ''; }
+  }
   async function _susRefresh(){
     try {
       const r = await chrome.runtime.sendMessage({ type:'rpc', name:'modSusList' });
@@ -14610,7 +14665,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       a.style.fontWeight = isHot ? '700' : '600';
       const reason = row.reason || '(no reason)';
       const extra = isHot ? ' — ' + row.comment_count_24h + '/24h ⚠️' : '';
-      a.title = '\u{1F6A9} SUS by ' + (row.marked_by || '?') + ': ' + reason + extra;
+      // v10.42.0 SUS-COMPLETE: hover intel = WHO + WHY + WHEN (when available).
+      a.title = '\u{1F6A9} SUS by ' + (row.marked_by || '?') + ': ' + reason + _susWhenLabel(row) + extra;
       // Prefix '🚩 ' once (may follow ⓝ prefix if both conditions)
       const txt = a.textContent || '';
       if (!/^\u{1F6A9}\s/u.test(txt)) a.textContent = '\u{1F6A9} ' + txt;
@@ -15737,7 +15793,21 @@ Analyze this comment against the community rules. Then write a brief, profession
       a.style.fontWeight = isHot ? '700' : '600';
       var reason = row.reason || '(no reason)';
       var extra = isHot ? ' — ' + row.comment_count_24h + '/24h ⚠️' : '';
-      a.title = '\u{1F6A9} SUS by ' + (row.marked_by || '?') + ': ' + reason + extra;
+      // v10.42.0 SUS-COMPLETE: WHO + WHY + WHEN (self-contained -- the _p13
+      // slice runs this fn in isolation, so no external helper call here).
+      var _wRaw = row.marked_at != null ? row.marked_at
+                : row.created_at != null ? row.created_at
+                : row.ts != null ? row.ts
+                : row.updated_at != null ? row.updated_at : null;
+      var _when = '';
+      if (_wRaw != null) {
+        var _wMs = (typeof _wRaw === 'number') ? (_wRaw < 1e12 ? _wRaw * 1000 : _wRaw) : Date.parse(String(_wRaw));
+        if (_wMs && !isNaN(_wMs)) {
+          var _dd = Math.floor((Date.now() - _wMs) / 86400000);
+          _when = ' · ' + (_dd <= 0 ? 'today' : _dd === 1 ? '1d ago' : _dd + 'd ago');
+        }
+      }
+      a.title = '\u{1F6A9} SUS by ' + (row.marked_by || '?') + ': ' + reason + _when + extra;
       var txt = a.textContent || '';
       if (!/^\u{1F6A9}\s/u.test(txt)) a.textContent = '\u{1F6A9} ' + txt;
       // v10.37.0 SUS-RATING WS-A: stamp the container background wash.
@@ -16268,6 +16338,11 @@ Analyze this comment against the community rules. Then write a brief, profession
     // registration timestamp so we can sort the Unreviewed list chronologically.
     // v5.2.2: prefer the persisted joinedAt on the roster entry (first-seen win).
     const joinedAt = (rs && rs.joinedAt) || parseRelativeAge(joinText);
+    // v10.42.0 SUS-COMPLETE: surface the cross-mod SUS flag on triage rows.
+    // A user another mod flagged is key intelligence -- previously invisible
+    // here (row showed only "New"). Read-only from _susState; never a ban path.
+    const susRow = (typeof _susState === 'object' && _susState && _susState.rows)
+      ? _susState.rows.get(k) : null;
     return {
       username, joinText, joinedAt, ipHash, status, risk,
       drEntry, priorBans,
@@ -16275,6 +16350,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       verified: isVerified(username),
       lastSeen: rs ? (rs.lastSeen || rs.firstSeen) : new Date().toISOString(),
       reviewed: !!(reviewedSet && reviewedSet[k]),
+      sus: susRow || null,
       onCurrentPage, domRow, inCluster
     };
   }
@@ -17427,6 +17503,17 @@ Analyze this comment against the community rules. Then write a brief, profession
       statusHTML=`<span class="gam-t-badge gam-t-badge-banned">Banned</span>`;
       if(u.verified === true) statusHTML+=`<span class="gam-t-verified" title="Ban verified against /ban page">\u2713\u2713 verified</span>`;
       else if(u.verified === false) statusHTML+=`<span class="gam-t-unverified" title="Ban POST returned OK but not found on /ban page">? unconfirmed</span>`;
+    }
+
+    // v10.42.0 SUS-COMPLETE: cross-mod SUS badge on triage rows. Shows WHO
+    // flagged + WHY (+ velocity if hot) on hover -- the "intelligence on that
+    // user" the requirement asks for, surfaced in the triage console.
+    if (u.sus) {
+      const _sHot = (u.sus.comment_count_24h || 0) > 8;
+      const _sReason = u.sus.reason || '(no reason)';
+      const _sBy = u.sus.marked_by || '?';
+      const _sTip = escapeHtml('\u{1F6A9} SUS by ' + _sBy + ': ' + _sReason + (_sHot ? ' \u2014 ' + u.sus.comment_count_24h + '/24h' : ''));
+      statusHTML += `<span class="gam-t-badge gam-t-badge-sus${_sHot?' gam-t-badge-sus-hot':''}" title="${_sTip}">\u{1F6A9} SUS</span>`;
     }
 
     let riskDot='';
@@ -26369,6 +26456,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-badge-watching{background:var(--gam-tok-warn-soft,rgba(255,214,10,.12));color:var(--gam-tok-warn,#f0a040)}
 .gam-t-badge-deathrow{background:var(--gam-tok-special-soft,rgba(167,139,250,.12));color:var(--gam-tok-special,#a78bfa)}
 .gam-t-badge-banned{background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));color:var(--gam-tok-danger,#f04040)}
+/* v10.42.0 SUS-COMPLETE: cross-mod SUS badge on triage rows. Amber by default,
+   danger when hot (>8 comments/24h). Left keyline echoes the on-page tint rail. */
+.gam-t-badge-sus{background:rgba(240,160,64,.14);color:var(--gam-tok-warn,#f0a040);border-left:3px solid rgba(240,160,64,.6)}
+.gam-t-badge-sus-hot{background:rgba(240,64,64,.15);color:var(--gam-tok-danger,#f04040);border-left-color:rgba(240,64,64,.7)}
 /* WP-12 #6: death-row countdown — danger-soft bg + danger ink + tabular digits + danger keyline
    so it reads as time-pressure and is visually distinct from the status badges. */
 .gam-t-countdown{font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-variant-numeric:tabular-nums;font-size:9px;color:var(--gam-tok-danger,#f04040);background:var(--gam-tok-danger-soft,rgba(240,64,64,.12));padding:1px 5px;border-radius:3px;border:1px solid var(--gam-tok-danger,#f04040);border-left-width:3px}
