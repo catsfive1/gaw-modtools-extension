@@ -16455,9 +16455,41 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
   }
 
+  // v10.44.0 WS-8: pick where keyboard focus should land after a triage
+  // rebuild. Same user if their row survived; otherwise the NEXT user from
+  // the pre-rebuild order (the conveyor-belt case: you just actioned the row
+  // you were on), falling back to the previous one; null when nothing maps.
+  // Pure -- covered by _p22.
+  function _pickTriageRefocusTarget(oldOrder, focusedUser, newSet){
+    if (!focusedUser) return null;
+    if (newSet.has(focusedUser)) return focusedUser;
+    const i = oldOrder.indexOf(focusedUser);
+    if (i === -1) return null;
+    for (let j = i + 1; j < oldOrder.length; j++){ if (newSet.has(oldOrder[j])) return oldOrder[j]; }
+    for (let j = i - 1; j >= 0; j--){ if (newSet.has(oldOrder[j])) return oldOrder[j]; }
+    return null;
+  }
+
   function refreshTriageConsole(){
     const container=document.getElementById('gam-triage');
     if(!container) return;
+    // v10.44.0 WS-8: focus continuity. The innerHTML rebuild below destroys
+    // the focused element on every one of the ~44 call sites (row actions,
+    // filters, the 60s autorefresh), dumping keyboard focus to <body> and
+    // breaking the keyboard-triage flow v10.37.2 built. Capture the focused
+    // row's user (only when focus is actually inside the console) so it can
+    // be restored -- or advanced to the next row -- after the render.
+    let _refocusUser = null, _oldRowOrder = [];
+    try {
+      const _ae = document.activeElement;
+      if (_ae && _ae !== document.body && container.contains(_ae)){
+        _oldRowOrder = Array.from(container.querySelectorAll('.gam-t-row'))
+          .map(r => { const n = r.querySelector('[data-user]'); return n ? n.getAttribute('data-user') : null; })
+          .filter(Boolean);
+        const _row = _ae.closest ? _ae.closest('.gam-t-row') : null;
+        if (_row){ const n = _row.querySelector('[data-user]'); if (n) _refocusUser = n.getAttribute('data-user'); }
+      }
+    } catch(_){}
     // v10.36.5 P2 FIX: the v10.36.2 P0 fix only wrapped the INITIAL mount call.
     // This render path is hit by ~44 other call sites (toolbar filters, batch
     // actions, cluster alert links, per-row buttons) -- a throw here used to
@@ -16470,6 +16502,21 @@ Analyze this comment against the community rules. Then write a brief, profession
       renderTriageToolbar(container, users);
       renderTriageBatchBar(container);
       renderTriageList(container, users);
+      // v10.44.0 WS-8: restore (or advance) keyboard focus captured above.
+      // Rows are tabindex=0 (v10.37.2), so focusing the row itself keeps the
+      // Intel-Drawer keyboard-open flow working. Failure here must never
+      // break the render -- best-effort only.
+      if (_refocusUser){
+        try {
+          const _newMap = new Map();
+          container.querySelectorAll('.gam-t-row').forEach(r => {
+            const n = r.querySelector('[data-user]');
+            if (n) _newMap.set(n.getAttribute('data-user'), r);
+          });
+          const _target = _pickTriageRefocusTarget(_oldRowOrder, _refocusUser, new Set(_newMap.keys()));
+          if (_target && _newMap.get(_target)) _newMap.get(_target).focus();
+        } catch(_){}
+      }
     } catch(e){
       console.error('[modtools] refreshTriageConsole render failed:', e);
       _showTriageMountFailBanner(e);
