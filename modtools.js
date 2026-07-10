@@ -16878,14 +16878,14 @@ Analyze this comment against the community rules. Then write a brief, profession
     aEl.innerHTML='';
     const drReady=getDeathRowReady();
     if(drReady.length>0){
-      aEl.innerHTML+=`<div class="gam-t-alert gam-t-alert-red">\u{1F480} ${drReady.length} Death Row inmate${drReady.length>1?'s':''} READY. Will execute automatically.</div>`;
+      aEl.innerHTML+=`<div class="gam-t-alert gam-t-alert-red">\u{1F480} ${drReady.length} Death Row inmate${drReady.length>1?'s':''} READY. Will execute automatically — or press \u{1F525} Flush Death Row now below.</div>`;
     }
     // v10.36.12 P0 FIX: use the UNRESOLVED cluster map so a burst banner
     // retires once every member has been actioned -- see getUnresolvedIPClusters.
     const clusters=getUnresolvedIPClusters(users);
     const raidClusters=Object.entries(clusters).filter(([,names])=>names.length>=3);
     raidClusters.forEach(([prefix,names])=>{
-      aEl.innerHTML+=`<div class="gam-t-alert gam-t-alert-warn">\u{26A0}\u{FE0F} <b>Burst detected:</b> ${names.length} users from IP range ${prefix}.x.x &mdash; <a href="#" class="gam-t-alert-link" data-cluster="${prefix}">Filter this cluster</a> &middot; <a href="#" class="gam-t-alert-link gam-t-alert-selectall" data-cluster-select="${prefix}">☑ Select all ${names.length}</a> &middot; <a href="#" class="gam-t-alert-link gam-t-alert-bulkdr" data-cluster-dr="${prefix}">\u{1F480} Death Row all ${names.length}</a></div>`;
+      aEl.innerHTML+=`<div class="gam-t-alert gam-t-alert-warn">\u{26A0}\u{FE0F} <b>Burst detected:</b> ${names.length} users from IP range ${escapeHtml(prefix)}.x.x &mdash; <a href="#" class="gam-t-alert-link" data-cluster="${escapeHtml(prefix)}">Filter this cluster</a> &middot; <a href="#" class="gam-t-alert-link gam-t-alert-selectall" data-cluster-select="${escapeHtml(prefix)}">☑ Select all ${names.length}</a> &middot; <a href="#" class="gam-t-alert-link gam-t-alert-bulkdr" data-cluster-dr="${escapeHtml(prefix)}">\u{1F480} Death Row all ${names.length}</a></div>`;
     });
     // v10.36.16 WS-6: announce burst DELTAS keyed by cluster prefix, not the
     // full alerts container (which rebuilds via innerHTML on every render --
@@ -16916,6 +16916,12 @@ Analyze this comment against the community rules. Then write a brief, profession
         \u{23F3} ${drPending.length} on Death Row (auto-executes on page visit after timer)
         <button class="gam-t-flush-btn" data-flush="dr">\u{1F525} Flush Death Row now</button>
       </div>`;
+    }
+    // v10.43.0 WS-9: calm all-clear state. An empty alerts region is
+    // indistinguishable from a broken one -- when nothing above rendered,
+    // say so explicitly instead of leaving a blank void.
+    if(!aEl.childElementCount){
+      aEl.innerHTML='<div class="gam-t-alert gam-t-alert-ok">✅ All clear — no active bursts, Death Row queue empty</div>';
     }
     aEl.querySelectorAll('.gam-t-alert-link').forEach(a=>{
       a.addEventListener('click', e=>{
@@ -16954,6 +16960,11 @@ Analyze this comment against the community rules. Then write a brief, profession
         const prefix=a.dataset.clusterDr;
         const names=(getUnresolvedIPClusters(users)||{})[prefix]||[];
         if(!names.length){ snack('No cluster users found', 'warn'); return; }
+        // v10.43.0 WS-9: instant in-place acknowledgement -- the rebuild that
+        // batchDeathRow triggers replaces this banner, but until it lands the
+        // link must visibly respond to the click (no dead-button feel) and
+        // resist double-fires.
+        try { a.textContent='\u{1F480} Queuing '+names.length+'…'; a.style.pointerEvents='none'; } catch(_){}
         batchDeathRow(names);
       });
     });
@@ -26372,6 +26383,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-alert:last-child{margin-bottom:0}
 .gam-t-alert b{font-weight:700}
 .gam-t-alert-warn{background:var(--gam-tok-warn-soft,rgba(240,160,64,.09));color:var(--gam-tok-warn,#f0a040);border:1px solid var(--gam-tok-warn-soft,rgba(240,160,64,.2));border-left-color:var(--gam-tok-warn,#f0a040)}
+.gam-t-alert-ok{background:rgba(61,214,140,.07);color:var(--gam-tok-success,#3dd68c);border:1px solid rgba(61,214,140,.18);border-left-color:var(--gam-tok-success,#3dd68c)}
 .gam-t-alert-red{background:var(--gam-tok-danger-soft,rgba(240,64,64,.09));color:var(--gam-tok-danger,#f04040);border:1px solid var(--gam-tok-danger-soft,rgba(240,64,64,.2));border-left-color:var(--gam-tok-danger,#f04040)}
 .gam-t-alert-info{background:var(--gam-tok-info-soft,rgba(74,158,255,.06));color:var(--gam-tok-ink-muted,#b0b5bc);border:1px solid var(--gam-tok-info-soft,rgba(74,158,255,.12));border-left-color:var(--gam-tok-info,#7cb8ff)}
 .gam-t-alert-link{color:inherit;text-decoration:underline;cursor:pointer;font-weight:600}
