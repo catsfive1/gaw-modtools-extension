@@ -5613,7 +5613,46 @@
   }
 
   function getDeathRow(){ return lsGet(K.DR, []); }
-  function saveDeathRow(dr){ lsSet(K.DR, dr); }
+  // v10.46.0: team Death-Row VISIBILITY. Peers' pending DR placements, keyed by
+  // the placing mod, synced through the same proven __gaw_team_patterns__ blob.
+  // DISPLAY-ONLY: never merged into K.DR, so no peer's reaper ever executes
+  // another mod's queue. On-time execution regardless of who's online is the
+  // deploy-gated auto_action_queue path (see docs) -- this closes only the
+  // "peers can't SEE pending placements" half, with zero ban-path risk (HI-1).
+  let _teamDrByMod = {};
+  function _stripDrForSync(list){
+    return (list || [])
+      .filter(d => d && d.status === 'waiting')
+      .map(d => ({ username: d.username, reason: d.reason, executeAt: d.executeAt, queuedAt: d.queuedAt }));
+  }
+  function _deathRowByModForPush(me){
+    // Preserve every OTHER mod's key; replace only my own slot (so my removals
+    // propagate -- keyed replacement, not item union).
+    const out = {};
+    for (const k in _teamDrByMod){ if (k !== me) out[k] = _teamDrByMod[k]; }
+    const mine = _stripDrForSync(getDeathRow());
+    if (mine.length) out[me] = mine; else delete out[me];
+    return out;
+  }
+  function getTeamDeathRow(excludeMe){
+    // Flatten _teamDrByMod into a display list: [{mod, username, reason, executeAt}].
+    let me = '';
+    try { me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim(); } catch(_){}
+    const out = [];
+    for (const mod in _teamDrByMod){
+      if (excludeMe && mod === me) continue;
+      for (const d of (_teamDrByMod[mod] || [])){
+        if (d && d.username) out.push({ mod, username: d.username, reason: d.reason, executeAt: d.executeAt });
+      }
+    }
+    return out.sort((a,b)=> (a.executeAt||0) - (b.executeAt||0));
+  }
+  function saveDeathRow(dr){
+    lsSet(K.DR, dr);
+    // Push my DR queue to the team blob so peers SEE it (display-only sync).
+    // Suppressed during pull-merge; debounced inside pushPatternsToCloud.
+    if (!_suppressPatternPush){ try { pushPatternsToCloud(); } catch(_){} }
+  }
   function addToDeathRow(username, delayMs, reason, opts){
     const dr=getDeathRow();
     if(dr.find(d=>d.username.toLowerCase()===username.toLowerCase())) return false;
@@ -9172,6 +9211,13 @@
           for (const k in remoteWl){ if (!localWl[k]){ localWl[k] = remoteWl[k]; wlChanged = true; } }
           if (wlChanged) saveWatchlist(localWl); // suppressed: no echo push
         }
+        // v10.46.0: absorb the team Death-Row map (keyed by mod). DISPLAY-ONLY
+        // -- stored in _teamDrByMod, never merged into K.DR, so no peer reaper
+        // fires another mod's queue. Whole-map replace is safe: each mod's push
+        // preserves other mods' keys, so the blob is always the union-by-mod.
+        if (payload.deathRowByMod && typeof payload.deathRowByMod === 'object'){
+          _teamDrByMod = payload.deathRowByMod;
+        }
       } finally {
         _suppressPatternPush = false;
       }
@@ -9190,6 +9236,7 @@
       autoDeathRowRules: getSetting('autoDeathRowRules', []) || [],
       autoTardRules:     getSetting('autoTardRules',     []) || [],
       watchlist:         getWatchlist(),   // v10.45.0: shared team watchlist
+      deathRowByMod:     _deathRowByModForPush(me), // v10.46.0: DR visibility (display-only)
       updatedAt: new Date().toISOString(),
       updatedBy: me,
     };
@@ -16947,6 +16994,26 @@ Analyze this comment against the community rules. Then write a brief, profession
     if(drReady.length>0){
       aEl.innerHTML+=`<div class="gam-t-alert gam-t-alert-red">\u{1F480} ${drReady.length} Death Row inmate${drReady.length>1?'s':''} READY. Will execute automatically — or press \u{1F525} Flush Death Row now below.</div>`;
     }
+    // v10.46.0: team Death-Row awareness. Show users OTHER mods have queued so
+    // you don't re-action them (prevents duplicate work). Read-only, display of
+    // the synced _teamDrByMod; execution stays the placing mod's job.
+    try {
+      const teamDr = getTeamDeathRow(true); // exclude my own placements
+      if (teamDr.length){
+        const items = teamDr.slice(0, 8).map(d => {
+          let when = '';
+          if (d.executeAt){
+            const remMs = d.executeAt - Date.now();
+            if (remMs <= 0) when = ' (ready)';
+            else if (remMs < 3600e3) when = ` (fires in ${Math.max(1, Math.round(remMs/60e3))}m)`;
+            else when = ` (fires in ${Math.round(remMs/3600e3)}h)`;
+          }
+          return `${escapeHtml(d.username)} <span class="gam-t-teamdr-by">by ${escapeHtml(d.mod || '?')}</span>${escapeHtml(when)}`;
+        }).join(' &middot; ');
+        const more = teamDr.length > 8 ? ` &middot; +${teamDr.length - 8} more` : '';
+        aEl.innerHTML += `<div class="gam-t-alert gam-t-alert-info">\u{1F465} <b>${teamDr.length}</b> queued for Death Row by teammates: ${items}${more}</div>`;
+      }
+    } catch(_){}
     // v10.36.12 P0 FIX: use the UNRESOLVED cluster map so a burst banner
     // retires once every member has been actioned -- see getUnresolvedIPClusters.
     const clusters=getUnresolvedIPClusters(users);

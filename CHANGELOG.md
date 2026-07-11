@@ -1,4 +1,19 @@
 # GAW ModTools — CHANGELOG
+## v10.46.0 -- FEATURE: team Death-Row VISIBILITY (safe half of the durability fix)
+
+Manual Death-Row placements were browser-local: peers never saw who a teammate
+queued, causing duplicate review. Now each mod pushes their pending DR queue
+(keyed by mod, clobber-safe, removals propagate) through the proven
+__gaw_team_patterns__ blob, and the /users triage shows a read-only banner:
+"N queued for Death Row by teammates: X by Alice (fires in 68h)…". DISPLAY-ONLY
+by design -- peers never merge into K.DR, so no peer reaper executes another
+mods queue (HI-1: asserted, no ban-exec path). This closes the VISIBILITY half
+of the DR reliability gap with zero ban-path risk. The EXECUTION-durability half
+(fire on time regardless of who is online) is the deploy-gated auto_action_queue
+path, written + staged in docs/BUILD-BRIEF-DR-DURABLE-QUEUE.md (needs one worker
+deploy). Regression scripts/_p23_team_deathrow_visibility_smoke_test.mjs 14/14;
+full suite 39 files green.
+
 ## v10.45.0 -- FEATURE: shared team WATCHLIST (sync gap closed)
 
 The watchlist was the last purely-local shared-intelligence silo -- a user one
