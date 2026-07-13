@@ -18785,27 +18785,33 @@ Analyze this comment against the community rules. Then write a brief, profession
     return wrap;
   }
 
-  // v10.36.11: keep the /u/<name> POSTS view in strict newest-first order.
-  // ROOT CAUSE of the recurring "profile eats my posts" report (confirmed LIVE
-  // 2026-07-05 via Claude-in-Chrome on catsfive's real page): nothing hides or
-  // removes the posts. The profile river (and GAW's own paginated scroll) append
-  // fetched pages OUT OF chronological order, so the operator's most-recent posts
-  // (#2 .. ~3 days old) get stranded BELOW older 4-6-day posts and LOOK eaten,
-  // while the single newest + the old posts stay on top. The server returns them
-  // correctly ordered (verified: raw fetch = 19h,19h,20h,21h,1d... ; live DOM =
-  // 19h,4d,4d,4d...). Only the client DOM is scrambled. Proven fix (verified live
-  // in his browser BEFORE shipping): re-sort every .post[data-id] by its <time>
-  // descending and consolidate into the first .post-list. Idempotent + debounced.
+  // v10.36.11 / v10.47.0: keep the /u/<name> POSTS *and* COMMENTS views in strict
+  // newest-first order.
+  // ROOT CAUSE of the recurring "profile eats my content" report (confirmed LIVE
+  // 2026-07-05 via Claude-in-Chrome on catsfive's real page, then AGAIN for
+  // comments 2026-07-13): nothing hides or removes the items. The profile river
+  // (and GAW's own paginated scroll) append fetched pages OUT OF chronological
+  // order, so the operator's most-recent items (#2 .. ~3-4 days old) get stranded
+  // BELOW older 4-6-day items and LOOK eaten, while the single newest + the old
+  // items stay on top. The server returns them correctly ordered (verified: raw
+  // fetch = 19h,19h,20h,21h,1d... ; live DOM = 19h,4d,4d,4d...). Only the client
+  // DOM is scrambled. Proven fix (posts verified live 2026-07-05; comments
+  // covered 2026-07-13): re-sort every item by its <time> descending, POSTS into
+  // their .post-list and COMMENTS into their own .comment-list (the two lists are
+  // never mixed -- they have different parents and native styles). Idempotent +
+  // debounced.
+  //
+  // NOTE: the original v10.36.11 fix only handled posts -- its selector was
+  // `.post[data-id]:not([data-type="comment"])`, so COMMENT cards were never
+  // reordered and stayed scrambled on /u/me (overview) and /u/<name>/comments.
+  // That gap reproduced the "eater" symptom for comments across ~12 sessions and
+  // is the very bug this block closes for good.
   let _profileReorderObs = null;
   let _profileReorderScheduled = false;
   function _reorderProfilePostsChronological(){
-    // Posts view only; _isProfileViewNow is the v10.31 broad detector (any
+    // Profile views only; _isProfileViewNow is the v10.31 broad detector (any
     // /u/<name>, excludes /u/c:) so this never touches community feeds.
     if (typeof _isProfileViewNow === 'function' && !_isProfileViewNow()) return;
-    const posts = [...document.querySelectorAll('.post[data-id]:not([data-type="comment"])')];
-    if (posts.length < 2) return;
-    const primary = posts[0].parentElement;
-    if (!primary) return;
     const getT = (p) => {
       const t = p.querySelector('time');
       if (!t) return 0;
@@ -18813,15 +18819,52 @@ Analyze this comment against the community rules. Then write a brief, profession
       const ms = Date.parse(raw);
       return isNaN(ms) ? 0 : ms;
     };
-    const sorted = posts.slice().sort((a, b) => getT(b) - getT(a));
-    // Already correctly ordered? Skip the reflow -- also stops the observer from
-    // ping-ponging on our own DOM moves.
-    let ordered = true;
-    for (let i = 0; i < posts.length; i++){ if (posts[i] !== sorted[i]){ ordered = false; break; } }
-    if (ordered) return;
+    // Sort a homogeneous group of items newest-first inside their shared parent.
+    // Returns true if it actually moved anything (so the caller can manage the
+    // observer disconnect/reconnect once for the whole pass). Items with no
+    // <time> get ts 0 and sink to the end -- they were never reliably ordered
+    // anyway, and this keeps them stable at the bottom instead of dropped.
+    const sortGroup = (items) => {
+      if (!items || items.length < 2) return false;
+      const primary = items[0].parentElement;
+      if (!primary) return false;
+      const sorted = items.slice().sort((a, b) => getT(b) - getT(a));
+      let ordered = true;
+      for (let i = 0; i < items.length; i++){ if (items[i] !== sorted[i]){ ordered = false; break; } }
+      if (ordered) return false;
+      sorted.forEach(p => primary.appendChild(p));
+      return true;
+    };
+    // Collect POSTS and COMMENTS separately so we never mix the two lists. GAW
+    // renders comment cards as .post[data-type="comment"] OR .comment[data-type=
+    // "comment"]; both carry data-id and a <time>, so one selector set covers it.
+    const posts    = [...document.querySelectorAll('.post[data-id]:not([data-type="comment"])')];
+    const comments = [...document.querySelectorAll(
+      '.post[data-id][data-type="comment"], .comment[data-id][data-type="comment"]'
+    )];
+    // Figure out whether ANY group needs moving before we touch the observer.
+    // Grouping by parentElement keeps each list's sort independent even when the
+    // overview page interleaves several .post-list / .comment-list containers.
+    const byParent = (list) => {
+      const map = new Map();
+      for (const it of list){
+        const par = it.parentElement;
+        if (!par) continue;
+        if (!map.has(par)) map.set(par, []);
+        map.get(par).push(it);
+      }
+      return map;
+    };
+    const groups = [...byParent(posts).values(), ...byParent(comments).values()];
+    const needsMove = groups.some(g => {
+      if (!g || g.length < 2) return false;
+      const sorted = g.slice().sort((a, b) => getT(b) - getT(a));
+      return g.some((it, i) => it !== sorted[i]);
+    });
+    if (!needsMove) return;
     // Pause our own observer so the reflow can't retrigger us mid-move.
     try { if (_profileReorderObs) _profileReorderObs.disconnect(); } catch(_){}
-    sorted.forEach(p => primary.appendChild(p));
+    for (const g of groups) { try { sortGroup(g); } catch(_){} }
     try {
       if (_profileReorderObs){
         const root = document.querySelector('.main-content') || document.body;

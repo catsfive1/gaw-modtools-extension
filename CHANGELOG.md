@@ -1,4 +1,24 @@
 # GAW ModTools — CHANGELOG
+## v10.47.0 -- FIX: profile "eater" now also covers COMMENT cards (was posts-only)
+
+The v10.36.11 reorder fix (`_reorderProfilePostsChronological`) only sorted POSTS
+-- its selector was `.post[data-id]:not([data-type="comment"])`, so COMMENT cards
+on `/u/me` (overview) and `/u/<name>/comments` were never reordered. The profile
+river appends fetched pages out of chronological order, so the operator's most-
+recent comments (#2 .. ~3-4 days old) got stranded BELOW older comments and
+LOOKED eaten, while the single newest stayed on top -- the exact symptom reported
+across ~12 sessions on `/u/me` and `/u/catsfive`. Server order is correct; only
+the client DOM was scrambled. Root cause confirmed live 2026-07-05 (posts) and
+again 2026-07-13 (comments gap). Fix: generalize the reorder to ALSO sort comment
+cards newest-first within their own `.comment-list`, grouping every item by its
+`parentElement` so posts and comments each sort independently and the two lists
+NEVER mix (different parents, different native styles). `_isProfileViewNow()` gate,
+idempotency, and observer-disconnect-during-move all preserved. Regression
+scripts/_profile_river_comment_reorder_smoke_test.mjs 10/10 (both lists sorted,
+no cross-contamination, eater shape gone, idempotent); existing
+_profile_river_reorder_smoke_test.mjs (posts) stays 5/5; full suite 40/40 green.
+Client-only -- no worker deploy.
+
 ## v10.46.0 -- FEATURE: team Death-Row VISIBILITY (safe half of the durability fix)
 
 Manual Death-Row placements were browser-local: peers never saw who a teammate
