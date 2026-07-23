@@ -12523,9 +12523,22 @@ Analyze this comment against the community rules. Then write a brief, profession
         if (r.ok){
           logAction({ type: action === 'approve' ? 'approve' : 'ignore', user:author, contentId:id, contentType:type, source:'queue-intercept' });
           snack(`\u2713 ${action === 'approve' ? 'Approved' : 'Reports ignored'}: ${author}`, 'success');
-          item.style.transition = 'opacity .3s, transform .3s';
-          item.style.opacity = '0.4';
-          item.style.textDecoration = action === 'approve' ? 'none' : 'line-through';
+          // v10.49.0 UX FIX: distinguish "ignore reports" (post stays LIVE) from
+          // "remove" (post is GONE). Previously both applied identical opacity 0.4
+          // + line-through, which made a senior mod think a still-live post had
+          // been removed. Now: approve = clear all marks (post is fine); ignore =
+          // subtle dim only (you cleared reports, post stays up). Strikethrough is
+          // reserved exclusively for actual removal (see Quick-Remove path below).
+          item.style.transition = 'opacity .3s';
+          if (action === 'approve') {
+            item.style.opacity = '';
+            item.style.textDecoration = '';
+          } else {
+            // ignore-reports: dim to signal "handled," but NO strikethrough —
+            // the post is still live, just cleared of reports.
+            item.style.opacity = '0.55';
+            item.style.textDecoration = '';
+          }
         } else {
           const hint = r.loginRedirect ? ' (session expired)' : '';
           snack(`${action} failed (${r.status}${hint})`, 'error');
@@ -12598,8 +12611,16 @@ Analyze this comment against the community rules. Then write a brief, profession
           });
           logAction({ type:'remove', user:author, violation:v.id, reason:v.label, contentId:id, contentType:type, evidenceKey, source:'strip' });
           snack(`Removed ${type} (${v.label})`, 'success');
+          // v10.49.0 UX FIX: strikethrough is now RESERVED for actual removal
+          // (post is gone from the public feed). ignore-reports no longer uses
+          // it, so a struck-through post unambiguously means "removed." Add a
+          // title so hovering explains the state instead of leaving the mod
+          // guessing (this was the source of the "why is this crossed out?"
+          // confusion).
+          item.style.transition = 'opacity .3s';
           item.style.opacity = '0.4';
           item.style.textDecoration = 'line-through';
+          item.title = `Removed by Modtools (${v.label}). Undo via the snack or approve in the queue.`;
         } catch(e) {
           // v10.13.2 W5 (UIUX2-30): include e.message + remediation hint
           snack('Remove failed: ' + (e && e.message || 'unknown') + ' — retry, or check Diag tab', 'error');
