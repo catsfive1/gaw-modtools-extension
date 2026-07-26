@@ -19206,6 +19206,19 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (!m) return false;                                  // not a /u/<name> path (e.g. /users, /p/<id>, /)
     return !(m[1] || '').toLowerCase().startsWith('c:');   // /u/c:<community> is not a user profile
   }
+  // v10.47.1: parallel to _isProfileViewNow() for SINGLE-POST pages (/p/<uuid>).
+  // Same bug class as the /u/ case this file already fixed: applyUpvoteAgeFilter
+  // is a feed/listing convenience, but on /p/<uuid> the ONLY .post on the page
+  // is the one you navigated there to read -- and it's almost always older than
+  // the cutoff and almost always score>0, so the filter hides it within seconds
+  // of render ("page eats itself" symptom). Ported from GAW Awesomizer v0.2.2.
+  // Read location.pathname LIVE here, never the load-time IS_POST_PAGE const
+  // (line ~6393, captured once at IIFE startup) -- scored.co is an SPA, so a
+  // client-side title click (/ -> /p/uuid) leaves that const stale and a
+  // cached-flag guard would fail open right when it matters most.
+  function _isSinglePostViewNow(){
+    return window.location.pathname.includes('/p/');
+  }
   // v9.2.1: one-shot proof in DevTools console when the gate fires. Lets
   // the operator confirm the patch is actually loaded without typing
   // anything. Logs once per page load.
@@ -19224,7 +19237,13 @@ Analyze this comment against the community rules. Then write a brief, profession
     // the community already validated). On a /u/<name> page (yours or
     // anyone's) mods want to see ALL the content -- recent and old --
     // because that's the audit surface.
-    if (_isProfileViewNow()) {
+    // v10.47.1: also bail on single-post pages (/p/<uuid>) -- the same
+    // reasoning inverts: the only .post on a /p/ page is the one the user
+    // came to READ, and it is virtually always older than the cutoff with
+    // score>0, so the filter would hide it within seconds of render.
+    // Live-read helper (not the stale IS_POST_PAGE const) so SPA title
+    // navigation can't re-arm the filter mid-session.
+    if (_isProfileViewNow() || _isSinglePostViewNow()) {
       _logFilterGateOnce();
       // Defensive un-hide: if the filter previously ran here (pre-fix, or
       // before SPA nav landed us on the profile) the posts are still
