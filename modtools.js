@@ -31,6 +31,80 @@
   }
   window.__GAM_MT_LOADED = true;
 
+  // ╔══════════════════════════════════════════════════════════════════════╗
+  // ║  v10.49 RACE-PROOF PROFILE/POST EATER KILL (the "dozens of fixes" end) ║
+  // ╚══════════════════════════════════════════════════════════════════════╝
+  // The /u/ "page eats itself" bug survived 12+ sessions of JS-layer fixes
+  // (guards, observers, sweeps, vetoes) because EVERY one of them races the
+  // hider: posts stream in -> hider fires -> un-hider tries to undo, and
+  // sometimes the hider wins. This is the structural end of that race.
+  //
+  // We inject a <style> block HERE — at the very top of the IIFE, before ANY
+  // other code runs — and set the gating body class SYNCHRONOUSLY (not by a
+  // late _arm() observer). That means the CSS rule forcing posts visible is
+  // active in the DOM before any hide code can possibly execute. CSS cannot
+  // race. This beats inline style.display='none', every gam-* hide class/attr,
+  // [hidden], max-height:0, and parent-collapse hide vectors, on /u/ and /p/.
+  //
+  // Scoped to body.gam-protect-posts (set below + re-asserted on SPA nav) so
+  // it never leaks to community feeds where age-hide is intentional.
+  (function _installPostEaterKill(){
+    try {
+      // Synchronous body-class set: this is the race-proofing. The class
+      // exists from the first tick, so the CSS below is live immediately.
+      const apply = () => {
+        const onProfile = /^\/u\/[^/]/i.test(location.pathname) && !/^\/u\/c:/i.test(location.pathname);
+        const onPost = location.pathname.includes('/p/');
+        const should = onProfile || onPost;
+        document.body && document.body.classList.toggle('gam-protect-posts', should);
+      };
+      // The style itself. !important on every declaration; covers every hide
+      // vector observed across the prior 12 fixes + the structural ones.
+      const css = [
+        '/* v10.49 race-proof profile/post eater kill */',
+        'body.gam-protect-posts .post,',
+        'body.gam-protect-posts .post[data-gam-age-hidden],',
+        'body.gam-protect-posts .post[data-gam-hidden],',
+        'body.gam-protect-posts .post[data-gam-eaten],',
+        'body.gam-protect-posts .post[data-gam-filtered],',
+        'body.gam-protect-posts .post[data-gam-collapsed],',
+        'body.gam-protect-posts .post.gam-age-hidden,',
+        'body.gam-protect-posts .post.gam-hidden,',
+        'body.gam-protect-posts .post.gam-eaten,',
+        'body.gam-protect-posts .post.gam-collapsed,',
+        'body.gam-protect-posts .post[hidden]{',
+        '  display:flex !important;',
+        '  visibility:visible !important;',
+        '  opacity:1 !important;',
+        '  max-height:none !important;',
+        '  height:auto !important;',
+        '}'
+      ].join('\n');
+      const style = document.createElement('style');
+      style.id = 'gam-eater-kill-style';
+      style.textContent = css;
+      (document.head || document.documentElement).appendChild(style);
+      // Set the gating class now (document.body may be null at document_end on
+      // some skins; re-assert below). Re-run on every DOMContentLoaded + SPA nav.
+      apply();
+      const reassert = () => apply();
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', reassert, { once: true });
+      }
+      // SPA nav: scored.co client-side navigates without reloading the script.
+      // Re-evaluate the body class on pushState/replaceState/popstate so the
+      // veto engages the instant you land on /u/ or /p/ and disengages on feed.
+      const _hook = (orig) => function(...a){ const r = orig.apply(history, a); setTimeout(reassert, 50); setTimeout(reassert, 200); return r; };
+      try { history.pushState = _hook(history.pushState.bind(history)); } catch(_){}
+      try { history.replaceState = _hook(history.replaceState.bind(history)); } catch(_){}
+      window.addEventListener('popstate', () => { setTimeout(reassert, 50); setTimeout(reassert, 200); }, true);
+      // Safety poll for the first 6s in case the SPA nav hook misses a render.
+      let _polls = 0;
+      const _iv = setInterval(() => { reassert(); if (++_polls > 20) clearInterval(_iv); }, 300);
+    } catch (_) {}
+  })();
+
+
   // v10.11.3: read live from manifest so update banner and diag tags stay
   // in sync after hotfix bumps that touch only manifest.json. Hardcoded
   // fallback only fires if chrome.runtime is unavailable for any reason
@@ -681,7 +755,13 @@
         // stay display:none until the next mutation. The MutationObserver
         // root may also have been detached. So we call applyUpvoteAgeFilter
         // directly in _handleNav, which triggers its built-in defensive un-hide.
-        user:        /^\/u\/[^/]+(?:\/(?:posts|comments|saved|upvoted|downvoted))?\/?$/.test(path),
+        // v10.48.1: was a whitelisted-subroute regex (posts|comments|saved|...) --
+        // the same stale-pattern trap that bit the filter repeatedly. Any /u/<name>
+        // on an UNLISTED sub-tab (owner default, future tab) returned false, so the
+        // SPA-nav profile branch (filter un-hide AND now the reorder attach) never
+        // ran -> the "/u/ eats my posts" bug. Replaced with the SAME structural
+        // rule _isProfileViewNow uses: ANY /u/<name> is a profile except /u/c:<comm>.
+        user:        /^\/u\/[^/]+/.test(path) && !/^\/u\/c:/i.test(path),
       };
     }
 
@@ -759,6 +839,34 @@
                 try { _diagLog('profile-defense', `swept ${stuck.length} stuck-hidden posts on ${location.pathname}`); } catch(_){} // intentional: _diagLog defensive wrap; benign no-op
               }
             }, 500);
+            // v10.48.1 ROOT-CAUSE FIX for the recurring "/u/ eats my posts" bug.
+            // The chronological-reorder observer (_profileReorderObs) had exactly
+            // ONE attach site: inside enhanceUserProfilePage(), which is gated on
+            // the load-time const IS_USER_PROFILE_PAGE. GAW is an SPA, so a
+            // username click from a feed (SPA nav, NO hard reload) leaves that
+            // const stale-false -> enhanceUserProfilePage returns early -> the
+            // observer never attaches -> GAW's scrambled page-append order shows
+            // -> "first post, then eaten until 5 days later." Every prior "fix"
+            // patched a selector/whitelist (symptom) and held only under
+            // hard-reload testing. Structural fix (mirrors how the upvote/age
+            // filter observer is already handled in this same branch): on SPA
+            // nav to a profile, attach/re-attach the reorder observer against the
+            // current main content and fire one reorder now. The observer's own
+            // callback uses the DYNAMIC _isProfileViewNow() gate, so it is
+            // correct regardless of which sub-tab loaded.
+            try {
+              if (typeof _isProfileViewNow === 'function' && _isProfileViewNow()) {
+                const mc = document.querySelector('.main-content') || document.body;
+                try { if (_profileReorderObs) _profileReorderObs.disconnect(); } catch(_){}
+                if (!_profileReorderObs && typeof MutationObserver !== 'undefined') {
+                  _profileReorderObs = new MutationObserver(() => _scheduleReorderProfilePosts());
+                }
+                if (_profileReorderObs) {
+                  _profileReorderObs.observe(mc, { childList:true, subtree:true });
+                }
+                try { _scheduleReorderProfilePosts(); } catch(_){}
+              }
+            } catch(_){}
           } catch(e){ _logError('poll-mm', ERR_SEV.LOW, e, { op: 'profile-defense-sweep' }); } // v10.11 C2: Cat D
         }, 350);
       }
@@ -18607,6 +18715,16 @@ Analyze this comment against the community rules. Then write a brief, profession
   // Opt-in: getSetting('autoRemoveSusDr', false). Never fires when flag is off.
   const _m2AutoRemovedIds = new Set();
   function _autoRemoveQueueSusDrItems() {
+    // v10.49: the profile/post guard MUST run BEFORE the stale IS_QUEUE_PAGE
+    // check. The old order (IS_QUEUE_PAGE first) left a hole: SPA-nav from
+    // /queue to /u/<name> keeps IS_QUEUE_PAGE stale-true, and if the second
+    // guard ever missed (function-not-yet-defined on first call, or a path it
+    // didn't match), apiRemove() silently server-deleted profile posts. The
+    // live read here is non-negotiable and first. /u/ and /p/ are content
+    // pages — NEVER auto-remove anything there, period.
+    const _pn = window.location.pathname;
+    const _onProfile = /^\/u\/[^/]/i.test(_pn) && !/^\/u\/c:/i.test(_pn);
+    if (_onProfile || _pn.includes('/p/')) return;
     if (!IS_QUEUE_PAGE) return;
     // v10.16.37 KILL-1 (Commander "kill the eater"): the IS_QUEUE_PAGE check
     // above uses a STALE const captured at IIFE startup. If GAW SPA-navigates
