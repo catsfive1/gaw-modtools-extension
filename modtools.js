@@ -15965,6 +15965,59 @@ Analyze this comment against the community rules. Then write a brief, profession
 
   function closeTriagePopover(){ if(triagePopover){ triagePopover.remove(); triagePopover=null; } }
 
+  // v10.48.0: registration-burst detection. When the /users roster grows by
+  // >=3 NEW accounts that share a username root (trailing digits stripped) --
+  // e.g. SpamBot001..050 -- surface a clickable toast: "DR all by pattern?".
+  // OPT-IN: the operator clicks; nothing is ever auto-DR'd. A 5-min per-root
+  // suppress window prevents re-pinging on page refresh. Pure-alpha names
+  // (no trailing digits) are excluded -- there is no iterating pattern to
+  // exploit, and they would over-fire on legitimate organic signups. HI-1
+  // intact: the only queue path is batchDeathRow(), opened via the popover
+  // the toast reveals (confirm-gated, 72h, idempotent). No new ban path.
+  const _burstSuppress = new Map(); // root -> suppress-until timestamp
+  const BURST_SUPPRESS_MS = 5 * 60 * 1000;
+  const BURST_THRESHOLD = 3;
+
+  function detectRegistrationBursts(newUsernames){
+    try {
+      if (!newUsernames || newUsernames.length < BURST_THRESHOLD) return;
+      // Group new names by their alphabetic root (trailing digits stripped).
+      // A name only counts if it HAD trailing digits -- pure-alpha names have
+      // no iterating pattern and are excluded from the burst signal entirely.
+      const groups = Object.create(null);
+      for (const raw of newUsernames){
+        const name = String(raw || '');
+        const m = name.match(/^(.*?)(\d+)$/);
+        if (!m || !m[1]) continue;          // no trailing digits -> skip
+        const root = m[1];
+        (groups[root] = groups[root] || []).push(name);
+      }
+      const now = Date.now();
+      for (const root in groups){
+        const names = groups[root];
+        if (names.length < BURST_THRESHOLD) continue;
+        // Suppress window: don't re-ping the same root within 5 minutes (page
+        // refresh / autorefresh would otherwise spam the toast).
+        const until = _burstSuppress.get(root) || 0;
+        if (now < until) continue;
+        _burstSuppress.set(root, now + BURST_SUPPRESS_MS);
+        const sample = names[0];
+        const pattern = '^' + root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\d+$';
+        snack(
+          '\u26A1 Burst: ' + names.length + ' new "' + root + '..." accounts \u2014 DR all by pattern?',
+          'warn',
+          {
+            actionLabel: '\u26A1 DR all by pattern',
+            actionDurationMs: 6000,
+            onAction: function(){
+              try { showDrPatternPopover(null, sample, pattern); } catch(e){}
+            }
+          }
+        );
+      }
+    } catch(e) { /* burst detection must never break scraping */ }
+  }
+
   function scrapeCurrentPage(){
     const logs=trySelectAll('userLogRow');
     let added=0;
@@ -15993,6 +16046,8 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (newUsernames.length > 0 && getSetting('autoRunRulesOnLoad', true)) {
       applyAutoDeathRowRules(newUsernames);
     }
+    // v10.48.0: registration-burst detection (opt-in toast, never auto-DRs).
+    if (newUsernames.length > 0) detectRegistrationBursts(newUsernames);
     return added;
   }
 
@@ -16536,6 +16591,8 @@ Analyze this comment against the community rules. Then write a brief, profession
       if (newUsernames.length > 0 && getSetting('autoRunRulesOnLoad', true)) {
         try { applyAutoDeathRowRules(newUsernames); } catch(e){}
       }
+      // v10.48.0: registration-burst detection (opt-in toast, never auto-DRs).
+      if (newUsernames.length > 0) { try { detectRegistrationBursts(newUsernames); } catch(e){} }
       return added;
     } catch (e) {
       console.warn('[users-autorefresh] fetch failed:', e && e.message || e);
@@ -17854,12 +17911,17 @@ Analyze this comment against the community rules. Then write a brief, profession
   // (e.g. "Username123" → "^Username\d+$"), lets the mod edit it, then
   // persists it to autoDeathRowRules so every future /users visit auto-queues
   // matching new accounts without any manual intervention.
-  function showDrPatternPopover(anchorBtn, username){
+  // v10.48.0: nullable anchorBtn (burst-toast caller has no row button) +
+  // optional prefillPattern (burst detection passes '^Root\d+$' verbatim).
+  // NEW: live match count against the roster + '\u26A1 DR all matching' button
+  // that queues every current match via the proven batchDeathRow() chokepoint
+  // (72h, idempotent, confirm-gated). HI-1 intact: no new ban path.
+  function showDrPatternPopover(anchorBtn, username, prefillPattern){
     closeTriagePopover();
     const root = username.replace(/\d+$/, '');
     const hasDigits = root.length < username.length;
     const escapedRoot = root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = hasDigits ? `^${escapedRoot}\\d+$` : `^${escapedRoot}$`;
+    const pattern = prefillPattern || (hasDigits ? `^${escapedRoot}\\d+$` : `^${escapedRoot}$`);
 
     const pop = document.createElement('div');
     pop.className = 'gam-t-popover';
@@ -17868,30 +17930,85 @@ Analyze this comment against the community rules. Then write a brief, profession
       <div class="gam-t-pop-sub">Pattern to auto-queue matching accounts on /users:</div>
       <input class="gam-t-pat-input" type="text" value="${escapeHtml(pattern)}" spellcheck="false">
       <div class="gam-t-pat-hint" id="gam-pat-hint"></div>
+      <div class="gam-t-pat-count" id="gam-pat-count"></div>
       <div class="gam-t-pop-actions">
         <button class="gam-t-pop-btn gam-t-pop-cancel" data-pop="cancel">Cancel</button>
+        <button class="gam-t-pop-btn gam-t-pop-drall" data-pop="drall" disabled>\u26A1 DR all matching</button>
         <button class="gam-t-pop-btn gam-t-pop-submit" data-pop="add">\u26A1 Add Rule</button>
       </div>`;
 
-    const actionsCell = anchorBtn.closest('.gam-t-actions');
+    // v10.48.0: anchorBtn may be null when invoked from the burst toast (no
+    // triage row). Fall back to document.body and center near the triage area.
+    const actionsCell = anchorBtn ? anchorBtn.closest('.gam-t-actions') : null;
     if (actionsCell){ actionsCell.style.position = 'relative'; actionsCell.appendChild(pop); }
-    else { document.body.appendChild(pop); }
+    else { pop.style.right = 'auto'; pop.style.left = '50%'; pop.style.transform = 'translateX(-50%)'; pop.style.top = '120px'; document.body.appendChild(pop); }
     triagePopover = pop;
 
-    const input = pop.querySelector('.gam-t-pat-input');
-    const hint  = pop.querySelector('#gam-pat-hint');
+    const input  = pop.querySelector('.gam-t-pat-input');
+    const hint   = pop.querySelector('#gam-pat-hint');
+    const countEl= pop.querySelector('#gam-pat-count');
+    const drAllBtn = pop.querySelector('[data-pop="drall"]');
     input.focus(); input.select();
+
+    // v10.48.0: gather the in-memory roster names once for the live count +
+    // the DR-all action. Re-read fresh on each DR-all press so newly-arrived
+    // accounts (page refresh between open and click) are not missed.
+    function _rosterNames(){
+      try { return Object.values(getRoster()).filter(r=>r && r.name).map(r=>({ name:r.name, status:r.status })); }
+      catch(_) { return []; }
+    }
+
+    function _matchingNames(v){
+      const re = compilePatternCached(v);
+      if (!re) return [];
+      return _rosterNames().filter(e => re.test(e.name));
+    }
 
     function validate(){
       const v = input.value.trim();
-      if (!v){ hint.textContent = 'Pattern required'; hint.style.color = C.RED; return false; }
-      try { new RegExp(v); hint.textContent = '\u2713 valid regex'; hint.style.color = C.GREEN; return true; }
-      catch(err){ hint.textContent = `\u26A0 ${err.message}`; hint.style.color = C.RED; return false; }
+      if (!v){ hint.textContent = 'Pattern required'; hint.style.color = C.RED; countEl.textContent = ''; drAllBtn.disabled = true; return false; }
+      try { new RegExp(v); }
+      catch(err){ hint.textContent = `\u26A0 ${err.message}`; hint.style.color = C.RED; countEl.textContent = ''; drAllBtn.disabled = true; return false; }
+      hint.textContent = '\u2713 valid regex'; hint.style.color = C.GREEN;
+      // v10.48.0: live match count. compilePatternCached is ReDoS-guarded and
+      // cached, so this is cheap on every keystroke. Pure UX, no network.
+      const matches = _matchingNames(v);
+      countEl.textContent = `${matches.length} account${matches.length===1?'':'s'} match now`;
+      countEl.style.color = matches.length > 0 ? C.PURPLE : C.TEXT2;
+      drAllBtn.disabled = matches.length === 0;
+      return true;
     }
     input.addEventListener('input', validate);
     validate();
 
     pop.querySelector('[data-pop="cancel"]').addEventListener('click', closeTriagePopover);
+
+    // v10.48.0: '\u26A1 DR all matching' -- one press queues every current
+    // match to Death Row (72h default). Pre-filters out already-actioned
+    // accounts (banned/deathrow) so the count shown == accounts queued, and
+    // we never re-queue. Confirm-gated. Routes through batchDeathRow only.
+    drAllBtn.addEventListener('click', async ()=>{
+      if (drAllBtn.disabled) return;
+      if (!validate()) return;
+      const v = input.value.trim();
+      const matches = _matchingNames(v).filter(e => e.status !== 'banned' && e.status !== 'deathrow');
+      if (matches.length === 0){
+        snack('No actionable matches (all already banned / on Death Row).', 'info');
+        return;
+      }
+      const ok = await gamConfirm(
+        `DR all ${matches.length} matching accounts (72h)?\n\nPattern: ${v}\nThis queues a ban for each. You can undo within 20s via the status bar.`,
+        { okLabel:'Queue Death Row', danger:true }
+      );
+      if (!ok) return;
+      const names = matches.map(e=>e.name);
+      logAction({ type:'pattern-dr-batch', pattern:v, count:names.length, users:names, source:'dr-pattern-popover' });
+      const res = await batchDeathRow(names);
+      closeTriagePopover();
+      // batchDeathRow already snacks the three-way result; nothing to add.
+      void res;
+    });
+
     pop.querySelector('[data-pop="add"]').addEventListener('click', ()=>{
       if (!validate()) return;
       const finalPattern = input.value.trim();
@@ -27028,6 +27145,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 .gam-t-pat-input{width:100%;box-sizing:border-box;background:${C.BG2};border:1px solid ${C.BORDER2};border-radius:4px;color:${C.TEXT};padding:6px 8px;font-family:'SF Mono','Cascadia Code','JetBrains Mono',Consolas,monospace;font-size:11px;outline:none;transition:border-color .15s;margin-bottom:4px}
 .gam-t-pat-input:focus{border-color:${C.ACCENT}}
 .gam-t-pat-hint{font-size:10px;min-height:14px;margin-bottom:4px}
+.gam-t-pat-count{font-size:10px;font-weight:600;min-height:14px;margin-bottom:4px}
+.gam-t-pop-drall{background:${C.BG3};color:${C.TEXT};border-color:${C.BORDER2}}
+.gam-t-pop-drall:hover:not(:disabled){border-color:${C.PURPLE};color:${C.PURPLE}}
+.gam-t-pop-drall:disabled{opacity:.45;cursor:not-allowed}
 
 /* Death Row popover - radio list + submit */
 .gam-t-delay-list{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}

@@ -1,4 +1,51 @@
 # GAW ModTools — CHANGELOG
+## v10.48.0 -- FEATURE: registration-burst detection + pattern DR-all
+
+Two operator-requested features for handling coordinated registration bursts --
+many accounts iterating on the same username pattern (e.g. `SpamBot001`..`050`).
+Both are client-only (no worker deploy) and HI-1 intact: the only queue path is
+the existing `batchDeathRow()` -> `addToDeathRow()` choke-point (72h default,
+idempotent, confirm-gated). Nothing is ever auto-banned.
+
+**(1) Auto-recognize the pattern + DR all matching, without typing regex.** The
+existing `\u26a1 Auto-DR Pattern` popover (`showDrPatternPopover`) previously did
+only one thing: derive a regex from a username and append it to the Auto-DR
+rules. It now also shows a **LIVE match count** ("N accounts match now") against
+the in-memory roster, updated on every keystroke, and a **`\u26a1 DR all
+matching`** button that queues every current match to Death Row in one press.
+The match count uses the proven, ReDoS-guarded `compilePatternCached`, so it is
+cheap on every keystroke and safe against hostile patterns. The DR-all button
+pre-filters out accounts already `banned`/`deathrow` (so the count shown ==
+accounts queued; no re-queue), is disabled at 0 matches, and is confirm-gated
+("DR all N matching accounts (72h)?"). The function signature gained a nullable
+`anchorBtn` (the burst-toast caller has no row button -- falls back to a centered
+overlay) and an optional `prefillPattern` (burst detection passes `^Root\d+$`
+verbatim). The original "Add Rule" path is unchanged.
+
+**(2) Burst auto-detection** (`detectRegistrationBursts`). When `scrapeCurrentPage`
+or the background `fetchAndIngestUsersPage` adds >=3 new accounts sharing a
+username root (trailing digits stripped), a clickable toast surfaces:
+"`\u26a1 Burst: N new "Root..." accounts -- DR all by pattern?`". One click opens
+the pattern popover pre-filled with `^<root>\d+$` and the live count. OPT-IN --
+the operator clicks; nothing is ever auto-DR'd. A 5-min per-root suppress window
+prevents re-pinging on page refresh / the 60s autorefresh. Pure-alpha names (no
+trailing digits) are excluded: there is no iterating pattern to exploit, and they
+would over-fire on legitimate organic signups. Hooked into both ingest paths
+(DOM scrape + background fetch).
+
+The third part of the operator request -- "tick many accounts -> DR all with one
+button" -- was verified ALREADY SHIPPED (`batchDeathRow` / `renderTriageBatchBar`:
+the batch bar appears once >=1 triage row is ticked, with a `\U0001F480 Death Row
+(72h)` button). No change needed; documented here for completeness.
+
+**Verified:** `node --check` PARSE OK; new `scripts/_p24_username_burst_and_dr_pattern_smoke_test.mjs`
+N/N (burst grouping: >=3 same-root-with-digits fires, pure-alpha excluded, <3 no
+fire, 5-min suppress respected; popover carries live-match-count element + DR-all
+button; HI-1 static guards -- no `executeBan`/raw ban path in the new code, only
+`batchDeathRow` is the queue path, DR-all is confirm-gated); existing
+`_p22_triage_refocus_smoke_test.mjs` and `_p23_team_deathrow_visibility_smoke_test.mjs`
+stay green. manifest version bumped 10.47.1 -> 10.48.0. Client-only -- no worker deploy.
+
 ## v10.47.0 -- FIX: profile "eater" now also covers COMMENT cards (was posts-only)
 
 The v10.36.11 reorder fix (`_reorderProfilePostsChronological`) only sorted POSTS
