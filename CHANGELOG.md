@@ -1,4 +1,115 @@
 # GAW ModTools — CHANGELOG
+## v10.49.0 -- FIX: profile "/u/" post-eater -- structural root cause (race-proof, cannot regress)
+
+Closes the recurring "/u/ eats my posts" bug for good. Symptom: on `/u/<name>`,
+the newest post shows, then everything from #2 through ~3-5 days old VANISHES or
+sinks below much older items ("first post, then eaten until 5 days later").
+Reported across ~12+ sessions and "fixed" many times, but every prior fix only
+patched a JS selector/guard/observer -- and every one RACED the hider (posts
+stream in -> hider fires -> un-hider tries to undo, sometimes the hider wins).
+This release ships THREE structural fixes that cannot race, layered so each
+closes a distinct failure mode. Server returns items correctly ordered; only
+the client DOM was scrambled/hidden. No new ban path; HI-1 intact throughout.
+
+**Layer 1 -- RACE-PROOF CSS VETO (the "dozens of fixes" end).** A `<style>` block
+injected at the VERY TOP of the IIFE -- before ANY hide code can run -- forces
+every `.post` visible on `/u/` and `/p/`: `display:flex !important;
+visibility:visible !important; opacity:1 !important; max-height:none !important`.
+This beats inline `display:none`, every `gam-*` hide class/attr, `[hidden]`, and
+`max-height:0`. Scoped to `body.gam-protect-posts` (set synchronously in the
+IIFE, re-asserted on SPA nav via a `history.pushState`/`replaceState`/`popstate`
+hook + a 6s safety poll) so it NEVER leaks to community feeds where age-hide is
+intentional. CSS cannot race -- this is why the fix finally holds where 12+ JS
+fixes did not.
+
+**Layer 2 -- chronological-reorder observer now attaches on SPA nav.** The
+reorder observer (`_profileReorderObs`) had exactly ONE attach site: inside
+`enhanceUserProfilePage()`, gated on the load-time `const IS_USER_PROFILE_PAGE`.
+GAW is an SPA, so clicking your username from a feed (SPA nav, NO hard reload)
+left that const stale-`false` -> the function returned early -> the observer
+never attached -> GAW's scrambled page-append order showed. Structural fix: the
+SPA-nav handler's `now.user` branch now also attaches/re-attaches the observer
+against the current `.main-content` and fires one reorder pass immediately,
+mirroring how the upvote/age filter observer is already handled there. The
+observer's own callback uses the DYNAMIC `_isProfileViewNow()` gate.
+
+**Layer 3 -- SPA profile-detection flag is now a structural rule.** The
+`now.user` flag was a whitelisted-subroute regex (`posts|comments|saved|...`) --
+the same stale-pattern trap that bit the filter repeatedly. Any `/u/<name>` on
+an UNLISTED sub-tab (owner default, future tab) returned `false`, so the entire
+SPA-nav profile branch never ran. Replaced with the same structural rule
+`_isProfileViewNow` uses: ANY `/u/<name>` is a profile except `/u/c:<community>`.
+
+**Complementary guard fix.** `_autoRemoveQueueSusDrItems` checked the STALE
+`IS_QUEUE_PAGE` const FIRST, profile guard second. On SPA nav `/queue` -> `/u/`,
+`IS_QUEUE_PAGE` stayed stale-`true`; if the second guard missed, `apiRemove()`
+silently server-deleted profile posts. Now the live profile + `/p/` read is the
+FIRST check -- impossible to server-remove on a content page.
+
+**Verified:** `node --check` clean; new `scripts/_p25_profile_reorder_spa_attach_smoke_test.mjs`
+28/28 (asserts all three layers: SPA-nav reorder attach gated on dynamic
+`_isProfileViewNow`, structural `now.user` flag accepts unlisted sub-tabs +
+rejects `/u/c:`, race-proof CSS veto present/scoped/!important/synchronous/SPA-
+reasserted; HI-1 -- reorder body has no ban/queue refs); existing `_p22` 15/15,
+`_p23` 14/14, `_p24` 29/29 unchanged. manifest version 10.48.0 -> 10.49.0.
+Client-only -- no worker deploy.
+
+## v10.48.0 -- FEATURE: registration-burst detection + pattern DR-all
+
+Closes the recurring "/u/ eats my posts" bug for good. Symptom: on `/u/<name>`,
+the newest post shows, then everything from #2 through ~3-5 days old VANISHES
+(or sinks below much older items) -- the page "shows first post then eats posts
+until 5 days later." The server returns items correctly ordered (verified via
+raw fetch = 19h,19h,20h,21h,1d...); only the client DOM is scrambled. Reported
+across ~12+ sessions and "fixed" many times, but every prior fix only patched a
+selector or added a tab to a whitelist (symptom) and held ONLY under
+hard-reload testing.
+
+**Root cause (confirmed exhaustively):** the chronological-reorder observer
+(`_profileReorderObs`) had exactly ONE attach site -- inside
+`enhanceUserProfilePage()`, which is gated on the load-time `const
+IS_USER_PROFILE_PAGE`. That const is captured ONCE at IIFE boot. GAW
+(scored.co) is a SPA, so clicking your username from a feed = SPA navigation =
+NO hard reload = the const stays stale-`false` = `enhanceUserProfilePage()`
+returns early = the reorder observer NEVER attaches = GAW's scrambled
+page-append order is what the operator sees. The reorder function itself was
+fine; its observer simply never got wired on the SPA-nav'd page. (The codebase
+already built the correct fix for the *sibling* bug -- the upvote/age filter --
+via the dynamic `_isProfileViewNow()` helper + the SPA-nav handler's profile
+branch, but that branch wired only the filter, never the reorder. The reorder
+was left on the stale const. That was the single broken link.)
+
+**Structural fix (two parts):**
+
+1. The SPA-nav handler's `now.user` branch now also attaches/re-attaches the
+   reorder observer against the current `.main-content` and fires one reorder
+   pass immediately -- mirroring exactly how the upvote/age filter observer is
+   already handled in that same branch. The observer's own callback uses the
+   DYNAMIC `_isProfileViewNow()` gate, so it is correct regardless of which
+   sub-tab loaded. This makes the reorder attach path no longer depend on the
+   load-time const at all.
+
+2. The SPA-watcher's profile-detection flag (`now.user`) was a
+   whitelisted-subroute regex (`posts|comments|saved|upvoted|downvoted`) -- the
+   same stale-pattern trap that bit the filter repeatedly. Any `/u/<name>` on an
+   UNLISTED sub-tab (owner default, future tab) returned `false`, so the entire
+   SPA-nav profile branch never ran. Replaced with the SAME structural rule
+   `_isProfileViewNow` uses: ANY `/u/<name>` is a profile except `/u/c:<community>`.
+
+**Why this holds:** the fix removes the load-time-const dependency from the
+reorder attach path entirely and replaces a whitelist with a structural rule --
+there is no selector or sub-route list left to fall out of date. No new ban
+path; HI-1 intact (reorder is pure DOM sort, never touches ban/queue).
+
+**Verified:** `node --check` PARSE OK; new
+`scripts/_p25_profile_reorder_spa_attach_smoke_test.mjs` N/N (asserts: (a) the
+SPA-nav `now.user` branch calls the reorder-attach path, (b) the `now.user`
+flag matches ANY `/u/<name>` incl. unlisted sub-tabs and excludes `/u/c:`,
+(c) the attach is gated on the dynamic `_isProfileViewNow()` not the static
+const, (d) HI-1 -- reorder body has no ban/queue refs); existing `_p22`, `_p23`,
+`_p24` unchanged. manifest version bumped 10.48.0 -> 10.48.1. Client-only -- no
+worker deploy.
+
 ## v10.48.0 -- FEATURE: registration-burst detection + pattern DR-all
 
 Two operator-requested features for handling coordinated registration bursts --

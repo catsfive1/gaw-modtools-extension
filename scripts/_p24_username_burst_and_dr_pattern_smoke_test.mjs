@@ -121,7 +121,11 @@ check('fetchAndIngestUsersPage calls detectRegistrationBursts', fetchBody.includ
 
 // ── (4) version bump landed in the manifest ─────────────────────────────
 const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
-check('manifest version bumped to 10.48.0', manifest.version === '10.48.0');
+// Version gate uses >= (not ===) so this test doesn't break on every future
+// bump -- same robustness fix _p17 already adopted. The feature shipped in
+// 10.48.0; any version at or above is correct.
+function _vGte(v, min){ const a=v.split('.').map(Number), b=min.split('.').map(Number); for(let i=0;i<3;i++){ if((a[i]||0)>(b[i]||0)) return true; if((a[i]||0)<(b[i]||0)) return false; } return true; }
+check('manifest version >= 10.48.0 (feature shipped)', _vGte(manifest.version, '10.48.0'));
 
 // ── report ──────────────────────────────────────────────────────────────
 console.log(`\n${pass} passed, ${fail} failed`);
