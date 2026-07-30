@@ -19021,6 +19021,29 @@ Analyze this comment against the community rules. Then write a brief, profession
     const guildName = String(p.guild_name || p.community || 'GreatAwakening');
     const createdTxt = created ? timeAgo(created) : '';
     const safeAuthor = author;
+    // v10.49.1: normalize created into an ISO datetime string and render it in a
+    // real <time datetime="..."> element. Previously the timestamp was inlined as
+    // plain text, so _reorderProfilePostsChronological()'s getT() (querySelector
+    // ('time')) returned null -> ts 0 -> every JSON-fallback post sank to the
+    // bottom of the list regardless of true age. That was the concrete cause of
+    // the "1 post then jump to ~6 days" symptom: JSON-mode posts (the river
+    // switches to JSON after ~50 HTML posts) were all pinned beneath the older
+    // HTML posts. A proper <time> element lets the reorder place them correctly.
+    const iso = (() => {
+      const n = Number(created);
+      if (!isNaN(n) && n > 0) {
+        // scored.co uses unix seconds; ms if absurdly large.
+        return new Date(n > 1e12 ? n : n * 1000).toISOString();
+      }
+      if (typeof created === 'string' && created) {
+        const d = new Date(created);
+        if (!isNaN(d.getTime())) return d.toISOString();
+      }
+      return '';
+    })();
+    const timeTag = iso
+      ? `<time datetime="${_esc(iso)}" title="${_esc(iso)}">${_esc(createdTxt)}</time>`
+      : _esc(createdTxt);
     // Keep structure simple - classes match what injectBadges / strips walk.
     const wrap = document.createElement('div');
     wrap.className = 'post card';
@@ -19032,7 +19055,7 @@ Analyze this comment against the community rules. Then write a brief, profession
       <div class="details" style="padding:6px 12px;border-bottom:1px solid rgba(255,255,255,.05)">
         <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
           <a class="title" href="${_esc(url)}" style="font-weight:600">${_esc(title)}</a>
-          <span style="color:#888;font-size:11px">\u25B2 ${score} \u00B7 \u{1F4AC} ${comments} \u00B7 ${_esc(createdTxt)} \u00B7 /c/${_esc(guildName)}</span>
+          <span style="color:#888;font-size:11px">\u25B2 ${score} \u00B7 \u{1F4AC} ${comments} \u00B7 ${timeTag} \u00B7 /c/${_esc(guildName)}</span>
         </div>
         <div style="color:#999;font-size:11px;margin-top:1px">
           <a class="author" href="/u/${encodeURIComponent(safeAuthor)}/">${_esc(safeAuthor)}</a>
@@ -19070,10 +19093,26 @@ Analyze this comment against the community rules. Then write a brief, profession
     if (typeof _isProfileViewNow === 'function' && !_isProfileViewNow()) return;
     const getT = (p) => {
       const t = p.querySelector('time');
-      if (!t) return 0;
-      const raw = t.getAttribute('datetime') || t.getAttribute('title') || t.textContent || '';
-      const ms = Date.parse(raw);
-      return isNaN(ms) ? 0 : ms;
+      if (t) {
+        const raw = t.getAttribute('datetime') || t.getAttribute('title') || t.textContent || '';
+        const ms = Date.parse(raw);
+        if (!isNaN(ms)) return ms;
+      }
+      // v10.49.1: FALLBACK when no parseable <time> (HTML posts whose <time>
+      // hasn't populated yet during a fast stream, or older render paths).
+      // scored.co numeric data-id values are monotonically increasing with
+      // creation order, so they're a reliable newest-first tiebreaker. Without
+      // this, every no-<time> post got ts 0 and ALL sank to the bottom
+      // together, producing the "recent-middle band vanishes below old posts"
+      // gap even when the reorder ran. Parsing data-id keeps them in real order.
+      const did = p.getAttribute('data-id');
+      if (did && /^\d+$/.test(did)) {
+        // Scale numeric id into a plausible ms-ish magnitude so it sorts
+        // alongside real timestamps (ids ~5e5-5e7; *1000 puts them in a
+        // comparable range to epoch-ms without colliding meaningfully).
+        return Number(did) * 1000;
+      }
+      return 0;
     };
     // Sort a homogeneous group of items newest-first inside their shared parent.
     // Returns true if it actually moved anything (so the caller can manage the
