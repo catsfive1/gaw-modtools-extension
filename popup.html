@@ -677,6 +677,31 @@
           </div>
         </div>
 
+        <!-- v10.49.2: Lead-only prominent "Rotate sub-mod keys" control. The
+             per-mod rotation roster (openRotationRoster) and its single/bulk
+             issue paths already existed and worked, but were buried 4
+             accordions deep (Deep Dive -> "Discord DM Rotation"), so leads
+             could not find the ability to re-key a sub-mod. This banner
+             surfaces it at the top of the Tokens tab, gated to tier==='lead'
+             in __applyTierGate. Clicking opens the roster INLINE here. -->
+        <div id="leadRotateKeysBanner" class="tok-banner" role="region" aria-label="Rotate sub-mod keys"
+             style="display:none;background:rgba(74,158,255,0.08);border:1px solid var(--bb-blue,#4A9EFF);color:#bcd9ff;margin-top:8px;padding:10px 12px;border-radius:4px">
+          <div style="font-weight:700;font-size:12px;margin-bottom:4px;letter-spacing:0.04em">&#x1F504; ROTATE SUB-MOD KEYS</div>
+          <div style="font-size:11px;line-height:1.4;color:#9bc4f0;margin-bottom:8px">
+            <span id="leadRotateHint">Manage team tokens &mdash; re-key any sub-mod or the whole team.</span>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button id="leadRotateKeysBtn" type="button" class="pop-btn pop-btn-ghost"
+                    style="background:var(--bb-blue,#4A9EFF);color:#0a0a0b;border:none;font-weight:700"
+                    aria-haspopup="true" aria-expanded="false" aria-controls="leadRotateRosterPanel">&#x1F504; Rotate sub-mod keys</button>
+          </div>
+        </div>
+        <!-- Inline roster mount for the banner above. openRotationRoster
+             retargets here via its panelId param; keeps #rotateRosterPanel
+             (the legacy nested one) intact for backward compat. -->
+        <div id="leadRotateRosterPanel" style="display:none"></div>
+        <div id="leadRotateResult" class="pop-token-status" aria-live="polite"></div>
+
         <!-- Token management accordion (collapsed post-auth) -->
         <details class="tok-mgmt-details" id="tokManagementDetails">
           <summary>Token management (rotate, re-enter)</summary>

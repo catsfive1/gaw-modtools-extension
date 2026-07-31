@@ -2138,6 +2138,16 @@ async function __applyTierGate() {
     const _leadSec = document.getElementById('leadSection');
     if (_leadSec) _leadSec.style.display = (_gamTier === 'lead' || _gamTier === 'senior_lead') ? '' : 'none';
 
+    // v10.49.2: surface the prominent "Rotate sub-mod keys" banner. Full-lead
+    // only -- the roster's per-row tier-change action is already lead-gated
+    // (popup.js __buildRosterRow), so the banner must match that privilege to
+    // avoid advertising an action a senior_lead cannot complete. Hidden for
+    // every non-lead tier, so no client flag can spoof it into view.
+    const _rotBanner = document.getElementById('leadRotateKeysBanner');
+    if (_rotBanner) _rotBanner.style.display = (_gamTier === 'lead') ? '' : 'none';
+    // Live "N unrotated" hint: best-effort prefetch, degrades to static text.
+    if (_gamTier === 'lead') { try { __prefetchRotateHint(); } catch (_) {} }
+
     // Auto-collapse tokens card on auth success (kept for legacy badge path)
     await _cardAutoCollapseTokens(true);
     // Show lead KPI row + quick actions for full leads
@@ -2864,9 +2874,16 @@ function __buildRosterRow(m, tokens) {
   return row;
 }
 
-async function openRotationRoster() {
-  const panel = $('rotateRosterPanel');
-  const result = $('rotateInviteResult');
+async function openRotationRoster(opts) {
+  // v10.49.2: opts lets the prominent lead banner retarget the roster into a
+  // top-level inline panel (#leadRotateRosterPanel) instead of the legacy
+  // deeply-nested #rotateRosterPanel. Defaults preserve byte-for-byte behavior
+  // for the existing #rotateRosterBtn caller.
+  const o = opts || {};
+  const panelId = o.panelId || 'rotateRosterPanel';
+  const resultId = o.resultId || 'rotateInviteResult';
+  const panel = $(panelId);
+  const result = $(resultId);
   if (!panel) return;
 
   // Toggle: clicking again closes
@@ -2989,6 +3006,46 @@ async function openRotationRoster() {
   const b = $('rotateRosterBtn');
   if (b) b.addEventListener('click', function () { withLoading(b, 'loading…', openRotationRoster); });
 })();
+
+// v10.49.2: prominent lead banner -> opens the roster INLINE at the top of the
+// Tokens tab (no accordion digging). Retargets openRotationRoster into the
+// banner's own #leadRotateRosterPanel + #leadRotateResult. Toggles aria-expanded
+// so screen readers announce the panel state change. The roster body, per-row
+// single-issue, bulk-issue, DM-all, and copy buttons are the SAME functions the
+// nested path uses -- zero duplication, zero divergence.
+function wireLeadRotateKeys() {
+  const btn = $('leadRotateKeysBtn');
+  if (!btn) return;
+  btn.addEventListener('click', function () {
+    const expanded = btn.getAttribute('aria-expanded') === 'true';
+    btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    withLoading(btn, 'loading…', function () {
+      return openRotationRoster({ panelId: 'leadRotateRosterPanel', resultId: 'leadRotateResult' });
+    });
+  });
+}
+wireLeadRotateKeys();
+
+// v10.49.2: best-effort "N mods never rotated" hint on the banner. Driven by
+// the same adminListMods RPC the roster uses; a stale/expired count is harmless
+// (the banner's action still works). Degrades silently to the static default
+// text on any failure -- never blocks the button or the auth path.
+async function __prefetchRotateHint() {
+  try {
+    const rList = await popupRpc('adminListMods', {});
+    if (!rList || !rList.ok) return;
+    const mods = (rList.data && rList.data.mods) || [];
+    const unrotated = mods.filter(function (m) { return !m.is_lead && !m.rotated_at; }).length;
+    const hintEl = $('leadRotateHint');
+    if (!hintEl) return;
+    if (unrotated > 0) {
+      hintEl.textContent = unrotated + (unrotated === 1 ? ' mod has ' : ' mods have ')
+        + 'never self-rotated — you can still impersonate them. Re-key any sub-mod or the whole team.';
+    } else {
+      hintEl.textContent = 'All mods have self-rotated. You can still re-key any sub-mod at any time.';
+    }
+  } catch (_) { /* keep static default text */ }
+}
 
 // =========================================================================
 // v8.5.0: Per-mod token sovereignty.

@@ -1,4 +1,30 @@
 # GAW ModTools — CHANGELOG
+## v10.49.2 -- FIX: "Rotate sub-mod keys" control restored to the Tokens tab
+
+Commander reported the ability to rotate a sub-mod's key from the UI was gone.
+It was NOT missing -- the roster (openRotationRoster), single-mod issue path
+(__issueSingleFromRoster -> adminIssueInvite), and bulk issue path
+(__issueBulkFromRoster -> adminBulkInvite) all existed and worked. The defect was
+purely information architecture: the control was buried 4 collapsed accordions
+deep (Tokens tab -> Lead section -> Deep Dive -> "Discord DM Rotation"), under a
+label that says nothing about key rotation. A lead could not find it.
+
+Fix: a prominent lead-only amber/blue banner at the TOP of the Tokens tab
+(#leadRotateKeysBanner), surfaced only when tier==='lead' (full-lead only,
+matching the roster's per-row tier-change privilege). One click opens the full
+roster INLINE at the top -- see every mod, their rotation status, issue a single
+rotation invite, or issue invites for all unrotated mods in one shot. The banner
+also shows a live "N mods never rotated" hint so the urgency is obvious.
+
+Zero new RPCs, zero worker changes, zero duplication: the banner retargets the
+existing openRotationRoster into a top-level inline panel via a new opts param
+({panelId, resultId}), defaulting to the legacy nested IDs so the old
+#rotateRosterBtn path is byte-for-byte unchanged (backward compat).
+
+Non-goal: the worker /mod/token/claim-rotation endpoint was never broken -- it
+deliberately returns 404 for invalid/used/expired codes (anti-enumeration). The
+real ops gap (stale invite inventory) is addressed separately.
+
 ## v10.49.0 -- FIX: profile "/u/" post-eater -- structural root cause (race-proof, cannot regress)
 
 Closes the recurring "/u/ eats my posts" bug for good. Symptom: on `/u/<name>`,
