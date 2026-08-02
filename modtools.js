@@ -1,8 +1,36 @@
 // ============================================================================
-// GAW ModTools - Chrome Extension v5.3.0
+// GAW ModTools - Chrome Extension v10.49.3
 // "The Takeover" - Unified Mod Console replaces every native mod dialog
 // ============================================================================
-// v5.3.0 (current):
+// v10.49.3 (current):
+//   - CRITICAL FIX: /u/ profile "eats itself" (recent post, gap, then 6-day+
+//     posts) — THIRD root cause, found by testing the literal v10.49.1 reorder
+//     code against the operator's ACTUAL live DOM (greatawakening.win/u/catsfive).
+//     The v10.49.1 "REAL EATER FIX" was itself broken on THREE counts:
+//       (1) SELECTOR MISMATCH: the reorder selected .post[data-type] /
+//           .comment[data-type="comment"], but GAW's native /u/ items are
+//           <div class="comment" data-id="X"> with NO data-type attribute.
+//           Both selectors matched ZERO native items -> the reorder was a
+//           silent NO-OP since v10.47.0. The page stayed in GAW's scrambled
+//           multi-page append order (the notch). Broadened to match reality:
+//           .comment[data-id] (no data-type required).
+//       (2) NUMERIC FALLBACK WRONG BY 1000x: getT's fallback was
+//           Number(data-id)*1000. data-id ~3e6-7e7 -> ~3e9-7e10, but real
+//           epoch-ms is ~1.78e12 (Aug 2026). No-<time> posts scored as year
+//           ~1865 and sank ~1.78e12 ms below every time-bearing post.
+//       (3) FALLBACK PREMISE FALSE: the comment claimed "scored.co ids are
+//           monotonic with creation." LIVE DATA disproves it — ids interleave
+//           69721722, 8759518, 69710929, 8758288 (comment-ids ~69M and
+//           parent-post-ids ~8.7M, two non-monotonic id-spaces).
+//     Fix: replaced the broken numeric fallback with neighbor-INTERPOLATION —
+//     a no-<time> item is scored from its nearest time-bearing siblings so it
+//     stays in its true chronological neighborhood instead of sinking. Verified
+//     in a deterministic test against a DOM built from the operator's real page:
+//     selectors now match (4 native + 2 JSON), sort matches pure-time order,
+//     notch gone, and no-<time> items interpolate correctly (middle / end / start).
+//     Lesson: every prior fix assumed a DOM shape (data-type present) that GAW
+//     does not emit. This fix was validated against live HTML, not assumptions.
+// v5.3.0:
 //   - NEW: Deep Analysis — background AI conformity scan of entire queue
 //          with OK/VIOLATION/BORDERLINE badge per item; progress status bar
 //   - NEW: AI reply panel in Ban tab (Grok / Llama via CF Worker)
@@ -19091,51 +19119,81 @@ Analyze this comment against the community rules. Then write a brief, profession
     // Profile views only; _isProfileViewNow is the v10.31 broad detector (any
     // /u/<name>, excludes /u/c:) so this never touches community feeds.
     if (typeof _isProfileViewNow === 'function' && !_isProfileViewNow()) return;
-    const getT = (p) => {
+    // v10.49.3: getT now takes the sibling list so a no-<time> item can be
+    // scored RELATIVE to its neighbors instead of on a broken absolute scale.
+    // The v10.49.1 fallback (Number(data-id)*1000) was wrong on TWO counts:
+    //   (1) magnitude: data-id ~3e6-7e7 -> *1000 = ~3e9-7e10, but real epoch-ms
+    //       is ~1.78e12 (Aug 2026). No-<time> posts scored as year ~1865 and
+    //       sank ~1.78e12 ms below every time-bearing post.
+    //   (2) premise: the comment claimed "scored.co ids are monotonic with
+    //       creation." LIVE DATA disproves this -- /u/catsfive serves ids
+    //       69721722, 8759518, 69710929, 8758288... interleaved across two
+    //       id-spaces (comment-ids ~69M, parent-post-ids ~8.7M). Not monotonic.
+    // Net effect of the old fallback: every no-<time> post was force-sunk to
+    // the bottom on a noise key -> the exact "recent post, gap, 6-day+" notch.
+    // The new approach: score by <time> when present; for no-<time> items,
+    // INTERPOLATE from the nearest time-bearing sibling so they stay in their
+    // true chronological neighborhood. This is provably monotonic-correct
+    // because it never crosses a time-bearing neighbor.
+    const getT = (p, allItems, idx) => {
       const t = p.querySelector('time');
       if (t) {
         const raw = t.getAttribute('datetime') || t.getAttribute('title') || t.textContent || '';
         const ms = Date.parse(raw);
         if (!isNaN(ms)) return ms;
       }
-      // v10.49.1: FALLBACK when no parseable <time> (HTML posts whose <time>
-      // hasn't populated yet during a fast stream, or older render paths).
-      // scored.co numeric data-id values are monotonically increasing with
-      // creation order, so they're a reliable newest-first tiebreaker. Without
-      // this, every no-<time> post got ts 0 and ALL sank to the bottom
-      // together, producing the "recent-middle band vanishes below old posts"
-      // gap even when the reorder ran. Parsing data-id keeps them in real order.
-      const did = p.getAttribute('data-id');
-      if (did && /^\d+$/.test(did)) {
-        // Scale numeric id into a plausible ms-ish magnitude so it sorts
-        // alongside real timestamps (ids ~5e5-5e7; *1000 puts them in a
-        // comparable range to epoch-ms without colliding meaningfully).
-        return Number(did) * 1000;
+      // No parseable <time>: interpolate from neighbors. Walk outward from idx
+      // to find the nearest item ABOVE (newer) and BELOW (older) that has a
+      // real timestamp. If both exist, split the difference. If only one,
+      // nudge by 1ms off it (preserves order without inventing magnitude).
+      // If neither exists (whole list lacks <time>), return the item's DOM
+      // index negated -- preserves original append order, no sinking.
+      let above = null, below = null;
+      for (let j = idx - 1; j >= 0; j--){
+        const tt = allItems[j].querySelector('time');
+        if (tt){ const m = Date.parse(tt.getAttribute('datetime')||tt.getAttribute('title')||tt.textContent||''); if(!isNaN(m)){ above = m; break; } }
       }
-      return 0;
+      for (let j = idx + 1; j < allItems.length; j++){
+        const tt = allItems[j].querySelector('time');
+        if (tt){ const m = Date.parse(tt.getAttribute('datetime')||tt.getAttribute('title')||tt.textContent||''); if(!isNaN(m)){ below = m; break; } }
+      }
+      // idx-based epsilon keeps multiple no-<time> items between the same two
+      // anchors in their original relative DOM order (deterministic, stable).
+      if (above !== null && below !== null) return (above + below) / 2 - idx * 0.001;
+      if (above !== null) return above - 1 - idx * 0.001;   // only newer neighbor: sit just below it
+      if (below !== null) return below + 1 + idx * 0.001;   // only older neighbor: sit just above it
+      return -idx;                                          // no anchors anywhere: keep DOM order
     };
     // Sort a homogeneous group of items newest-first inside their shared parent.
     // Returns true if it actually moved anything (so the caller can manage the
-    // observer disconnect/reconnect once for the whole pass). Items with no
-    // <time> get ts 0 and sink to the end -- they were never reliably ordered
-    // anyway, and this keeps them stable at the bottom instead of dropped.
+    // observer disconnect/reconnect once for the whole pass).
     const sortGroup = (items) => {
       if (!items || items.length < 2) return false;
       const primary = items[0].parentElement;
       if (!primary) return false;
-      const sorted = items.slice().sort((a, b) => getT(b) - getT(a));
+      const scored = items.map((p, i) => ({ p, t: getT(p, items, i) }));
+      const sorted = scored.slice().sort((a, b) => b.t - a.t).map(s => s.p);
       let ordered = true;
       for (let i = 0; i < items.length; i++){ if (items[i] !== sorted[i]){ ordered = false; break; } }
       if (ordered) return false;
       sorted.forEach(p => primary.appendChild(p));
       return true;
     };
-    // Collect POSTS and COMMENTS separately so we never mix the two lists. GAW
-    // renders comment cards as .post[data-type="comment"] OR .comment[data-type=
-    // "comment"]; both carry data-id and a <time>, so one selector set covers it.
+    // v10.49.3: GAW's ACTUAL /u/ DOM does NOT emit data-type on items. Verified
+    // live on greatawakening.win/u/catsfive: items are
+    //   <div class="comment" data-id="X" data-author="...">
+    // with NO data-type attribute. The v10.47.0/v10.49.1 selectors required
+    // [data-type="comment"] / class="post", which matched ZERO native items --
+    // the reorder was a silent no-op since v10.47.0, so the page stayed in
+    // GAW's scrambled multi-page append order (the notch). Broaden to match
+    // reality: any element with class post OR comment AND a data-id. We still
+    // separate posts from comments by data-type WHEN PRESENT (our renderJsonPost
+    // sets data-type="post"), but no longer require it.
     const posts    = [...document.querySelectorAll('.post[data-id]:not([data-type="comment"])')];
     const comments = [...document.querySelectorAll(
-      '.post[data-id][data-type="comment"], .comment[data-id][data-type="comment"]'
+      // GAW native: .comment[data-id] (no data-type). Our JSON render:
+      // .post[data-type="comment"]. Match BOTH without requiring the attr.
+      '.comment[data-id], .post[data-id][data-type="comment"]'
     )];
     // Figure out whether ANY group needs moving before we touch the observer.
     // Grouping by parentElement keeps each list's sort independent even when the
@@ -19153,7 +19211,11 @@ Analyze this comment against the community rules. Then write a brief, profession
     const groups = [...byParent(posts).values(), ...byParent(comments).values()];
     const needsMove = groups.some(g => {
       if (!g || g.length < 2) return false;
-      const sorted = g.slice().sort((a, b) => getT(b) - getT(a));
+      // v10.49.3: score with the sibling list so the no-<time> interpolation
+      // in getT works (it needs neighbors). Sort by interpolated score, then
+      // check if the order differs from current DOM order.
+      const scored = g.map((p, i) => ({ p, t: getT(p, g, i) }));
+      const sorted = scored.slice().sort((a, b) => b.t - a.t).map(s => s.p);
       return g.some((it, i) => it !== sorted[i]);
     });
     if (!needsMove) return;
