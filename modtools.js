@@ -8457,7 +8457,17 @@
     if (_idx === -1) return;
     const _entry = _undoStack.splice(_idx, 1)[0];
     if (_entry && _entry._expireTimer) { clearTimeout(_entry._expireTimer); _entry._expireTimer = null; }
-    Promise.resolve().then(inverseFn).then(function() {
+    Promise.resolve().then(inverseFn).then(function(res) {
+      // v10.49.5 P2 FIX: inverse functions that fail via modPost resolve {ok:false}
+      // instead of throwing — the old code toasted green success on a failed undo.
+      // Treat ONLY an explicit {ok:false} payload as failure; undefined/true/{ok:true}
+      // stay success so existing inverseFns that return nothing keep working.
+      if (res && res.ok === false) {
+        var why = res.error || res.text || (res.loginRedirect ? 'session expired' : 'undo failed');
+        _gamUndoAnnounce('Undo failed. Check mod log.');
+        snack('Undo failed: ' + label + ' — ' + why + ' (Ctrl+Shift+L for mod log)', 'error');
+        return;
+      }
       _gamUndoAnnounce(label + ' reversed.');
       snack('Undone: ' + label, 'success');
     }).catch(function(err) {
