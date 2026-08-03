@@ -535,10 +535,18 @@ async function _settingsCoalescedSet(patch) {
       // Yield once via microtask + macrotask so subsequent same-tick patches coalesce.
       await new Promise(function(resolve) { Promise.resolve().then(resolve); });
       var toWrite = _settingsWriteBuffer;
-      _settingsWriteBuffer = null;
-      _settingsWriteInflight = null;
       try { await chrome.storage.local.set({ gam_settings: toWrite }); } catch (e) {
         try { console.warn('[ModTools PA.4] settings-coalesce write failed:', e && e.message || e); } catch (_) {}
+      } finally {
+        // v10.49.5 P5 FIX: clear the inflight flag + buffer ONLY after the storage
+        // write settles. The old code nulled _settingsWriteInflight BEFORE the await
+        // on chrome.storage.local.set(), so a concurrent setSetting() in that window
+        // saw !inflight, started a second write, and the two raced on gam_settings —
+        // the later-settling write clobbered the other's not-yet-read patches.
+        // Note: any patches added to _settingsWriteBuffer DURING the await by a
+        // concurrent caller survive, because we only null it here at the end.
+        _settingsWriteBuffer = null;
+        _settingsWriteInflight = null;
       }
     })();
   }
