@@ -304,11 +304,13 @@ function __tokUpdateBanner(opts) {
     secondary.appendChild(document.createTextNode(p));
   });
 
-  // ENC chip — encryption is always-on since v10.11
+  // ENC chip — v10.49.5: the chip previously claimed "stored encrypted", but the
+  // background SW deliberately keeps a plaintext fallback (token loss on SW
+  // eviction was a real lockout). The chip now reflects the actual model.
   const encChip = document.createElement('span');
   encChip.className = 'tok-enc-chip';
-  encChip.title = 'Token stored encrypted (v10.11+)';
-  encChip.textContent = 'ENC';
+  encChip.title = 'Token encrypted opportunistically; plaintext fallback kept to survive SW eviction (prevents lockout). Local storage only.';
+  encChip.textContent = 'ENC*';
   secondary.appendChild(document.createTextNode(' · '));
   secondary.appendChild(encChip);
 
