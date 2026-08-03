@@ -2048,6 +2048,45 @@
         } catch(_) {}
       }
     });
+    // v10.49.6 PHASE-2: durable local no longer holds plaintext (encryption is
+    // canonical). The SW mirrors decrypted plaintext into SESSION storage so the
+    // content script can use it this lifecycle. Listen to session changes here so
+    // token rotations/re-pastes still reach the content script live.
+    chrome.storage.onChanged.addListener(function(changes, area) {
+      if (area !== 'session') return;
+      if (!changes.gam_settings) return;
+      var newVal = changes.gam_settings.newValue;
+      if (!newVal || typeof newVal !== 'object') return;
+      var updated = false;
+      if (typeof newVal.workerModToken === 'string' &&
+          newVal.workerModToken !== _secretsCache.workerModToken) {
+        _secretsCache.workerModToken = newVal.workerModToken;
+        updated = true;
+      }
+      if (typeof newVal.leadModToken === 'string' &&
+          newVal.leadModToken !== _secretsCache.leadModToken) {
+        _secretsCache.leadModToken = newVal.leadModToken;
+        updated = true;
+      }
+      if (updated) {
+        try {
+          _diagLog('auth', 'session.onChanged: _secretsCache re-hydrated from session gam_settings', {
+            hasWorkerToken: !!_secretsCache.workerModToken,
+            hasLeadToken: !!_secretsCache.leadModToken
+          });
+        } catch(_) {}
+        try {
+          if (typeof __validateModAuth === 'function') {
+            __validateModAuth().then(function(rv) {
+              if (rv && rv.ok) {
+                var banner = document.getElementById('gam-auth-fail-banner');
+                if (banner) { try { banner.remove(); } catch(_){} }
+              }
+            }).catch(function(){});
+          }
+        } catch(_) {}
+      }
+    });
   })();
 
   // v9.23.0 SECURITY HOTFIX (Opus audit CRIT NEW-1): IDB auth backup MOVED
@@ -2104,13 +2143,21 @@
   async function preloadSecrets(){
     try {
       let stored = null;
-      if (chrome?.storage?.local) {
-        const localOut = await chrome.storage.local.get(K_SETTINGS);
-        stored = localOut && localOut[K_SETTINGS];
+      // v10.49.6 PHASE-2: the content script reads tokens from SESSION storage
+      // (volatile, SW-lifecycle) ONLY — never from durable chrome.storage.local.
+      // The SW decrypts the durable ciphertext and mirrors plaintext into session.
+      // This keeps plaintext out of durable storage (encryption is canonical) while
+      // still letting the content script make worker RPC calls this page-lifecycle.
+      // If session is empty (cold start before SW loads), the SW's loadSecrets will
+      // populate it on first RPC; we also fall back to the SW vault via setTokens sync.
+      if (chrome?.storage?.session) {
+        const sessionOut = await chrome.storage.session.get(K_SETTINGS);
+        stored = sessionOut && sessionOut[K_SETTINGS];
       }
-      // v9.19.0 redundancy: if storage has no team token, try IDB backup.
-      // Restore to chrome.storage.local on hit so future reads are fast and
-      // the SW vault sync also picks it up.
+      // v9.19.0 redundancy: IDB backup restore. v10.49.6: restore into SESSION
+      // storage only (volatile), NOT durable local — writing plaintext back to
+      // durable storage defeated encryption. The SW's migration will handle
+      // durable persistence encrypted.
       if ((!stored || !stored.workerModToken) && typeof indexedDB !== 'undefined') {
         const backupTeam = await _authBackupGet('workerModToken');
         const backupLead = await _authBackupGet('leadModToken');
@@ -2118,33 +2165,21 @@
           stored = stored || {};
           stored.workerModToken = backupTeam;
           if (backupLead) stored.leadModToken = backupLead;
-          if (chrome?.storage?.local) {
+          if (chrome?.storage?.session) {
             try {
-              const cur = await chrome.storage.local.get(K_SETTINGS);
+              const cur = await chrome.storage.session.get(K_SETTINGS);
               const merged = { ...(cur[K_SETTINGS] || {}), workerModToken: backupTeam };
               if (backupLead) merged.leadModToken = backupLead;
-              await chrome.storage.local.set({ [K_SETTINGS]: merged });
-              console.log('[modtools v9.19.0] auth restored from IDB backup');
+              await chrome.storage.session.set({ [K_SETTINGS]: merged });
+              console.log('[modtools v10.49.6] auth restored from IDB backup to SESSION (volatile)');
             } catch (_) {}
           }
         }
       }
 
-      // Recovery path: older hardening builds could stash tokens only in
-      // chrome.storage.session. If local settings lost those keys, hydrate
-      // from session and immediately re-persist to local so refresh/restart
-      // no longer re-prompts for token.
-      if ((!stored || !stored.workerModToken) && chrome?.storage?.session) {
-        try {
-          const sessionOut = await chrome.storage.session.get(K_SETTINGS);
-          const sessionStored = sessionOut && sessionOut[K_SETTINGS];
-          if (sessionStored && typeof sessionStored === 'object' && sessionStored.workerModToken) {
-            stored = { ...(stored || {}), ...sessionStored };
-            if (chrome?.storage?.local) {
-              await chrome.storage.local.set({ [K_SETTINGS]: stored });
-            }
-          }
-        } catch (e) {}
+      // Sync the hydrated tokens to the SW vault so worker RPCs work this lifecycle.
+      if (stored && (stored.workerModToken || stored.leadModToken)) {
+        try { await syncSecretsToBackgroundVault(); } catch(_){}
       }
 
       if (stored && typeof stored === 'object') {
@@ -2237,37 +2272,45 @@
       // mod locked out, must re-claim. Now: write storage, read-back, only
       // then promote to RAM. IDB backup happens AFTER successful primary
       // write so a corrupt write doesn't poison the backup.
+      // v10.49.6 PHASE-2: token writes no longer touch durable chrome.storage.local
+      // directly (that wrote PLAINTEXT, defeating encryption). Instead route through
+      // the SW's authValidateToken/authValidateLeadToken RPCs, which validate the
+      // token server-side AND persist it encrypted. The content script updates its
+      // RAM cache + session storage for this lifecycle only.
       if (key === 'workerModToken' || key === 'leadModToken') {
-        if (chrome?.storage?.local){
-          return chrome.storage.local.get(K_SETTINGS)
-            .then(res => {
-              const merged = { ...(res[K_SETTINGS] || {}), [key]: value };
-              return chrome.storage.local.set({ [K_SETTINGS]: merged });
-            })
-            .then(async () => {
-              // Verify with read-back. If read returns wrong value, throw
-              // -- caller should NOT think the save succeeded.
-              try {
-                const rb = await chrome.storage.local.get(K_SETTINGS);
-                const stored = rb && rb[K_SETTINGS] && rb[K_SETTINGS][key];
-                if (stored !== value) {
-                  console.warn('[modtools v9.23.0] storage write-then-read mismatch for', key);
-                }
-              } catch(_) {}
-              // Only NOW promote to RAM cache (write-then-promote ordering)
-              _secretsCache[key] = value;
-              // IDB backup (fire-and-forget; no longer the source of truth)
-              // AF-19 (Rule 56): log IDB backup failure -- bare catch replaced
-              try { _authBackupPut(key, value).catch(function(e){ try { _diagLog('auth-backup', 'IDB backup write failed', { key: key, err: String(e) }); } catch(_){} }); } catch(_){}
-            })
-            .catch((e) => {
-              console.error('[modtools v9.23.0] secret save FAILED for', key, e);
-              // Do NOT promote to RAM if storage failed -- caller can retry
-              throw e;
-            });
-        }
-        // No chrome.storage available -- last resort RAM only
+        // Promote to RAM immediately so this lifecycle works regardless of RPC result.
         _secretsCache[key] = value;
+        // Mirror into SESSION storage (volatile) so other page contexts this session
+        // see it. NOT durable local. Uses .then() because setSetting is non-async.
+        if (chrome?.storage?.session) {
+          try {
+            chrome.storage.session.get(K_SETTINGS).then(function(sOut) {
+              const sMerged = { ...((sOut && sOut[K_SETTINGS]) || {}), [key]: value };
+              return chrome.storage.session.set({ [K_SETTINGS]: sMerged });
+            }).catch(function(){});
+          } catch(_) {}
+        }
+        // Route durable persistence through the SW (encrypts + validates).
+        // If the value is empty (explicit clear), skip the RPC — just cleared RAM.
+        if (value) {
+          try {
+            const rpcName = (key === 'workerModToken') ? 'authValidateToken' : 'authValidateLeadToken';
+            chrome.runtime.sendMessage({ type: 'rpc', name: rpcName, args: { token: value } })
+              .then(function(resp) {
+                if (!resp || !resp.ok) {
+                  try { _diagLog('auth', 'token validate-and-persist RPC failed', { key: key, status: resp && resp.status, error: resp && resp.error }); } catch(_){}
+                }
+              })
+              .catch(function(e) {
+                try { _diagLog('auth', 'token save RPC threw', { key: key, err: String(e && e.message || e) }); } catch(_){}
+              });
+          } catch (e) {
+            try { _diagLog('auth', 'token save RPC sync-threw', { key: key, err: String(e && e.message || e) }); } catch(_){}
+          }
+        }
+        // IDB backup (fire-and-forget; the SW also backs up, but keep the content-
+        // script IDB for redundancy). AF-19 (Rule 56): log failure, no bare catch.
+        try { _authBackupPut(key, value).catch(function(e){ try { _diagLog('auth-backup', 'IDB backup write failed', { key: key, err: String(e) }); } catch(_){} }); } catch(_){}
         return Promise.resolve();
       }
       // Non-token secret keys keep legacy ordering (less critical)

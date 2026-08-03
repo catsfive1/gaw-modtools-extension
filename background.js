@@ -250,54 +250,90 @@ function _cryptIsEncrypted(value) {
 }
 
 // -- _cryptMigrateSettings: encrypts any plaintext token fields in gam_settings --
-// Safe to call multiple times; skips if already encrypted or already migrated.
+// v10.49.6 PHASE-2: this is the deferred "v10.12+" work. After encrypting, we
+// do a CONFIRMED round-trip decrypt. Only if decrypt succeeds do we delete the
+// plaintext field. This was the safety property v10.11.1 couldn't guarantee
+// (it kept plaintext because it couldn't prove decrypt would work). The Phase-1
+// key-mint guard now makes that safe. If decrypt fails, we keep plaintext and
+// do NOT set the v2 flag, so this retries on the next boot (the Phase-1 guard
+// will have engaged recovery if the key is truly gone).
 async function _cryptMigrateSettings() {
   try {
-    // Check migration flag
-    var flagR = await chrome.storage.local.get('gam_crypt_migrated_v1');
-    if (flagR && flagR.gam_crypt_migrated_v1) return; // already migrated
+    // v2 flag: the v1 flag was set even when plaintext was kept (v10.11.1), so
+    // existing installs need to re-run under the v2 logic to actually delete plaintext.
+    var flagR = await chrome.storage.local.get('gam_crypt_migrated_v2');
+    if (flagR && flagR.gam_crypt_migrated_v2) return; // already migrated to encrypted-only
 
     var r = await chrome.storage.local.get('gam_settings');
     var s = (r && r.gam_settings) || {};
-    var changed = false;
     var patch = Object.assign({}, s);
+    var migratedWorker = false;
+    var migratedLead = false;
 
-    // Migrate workerModToken
-    // v10.11.1 HOTFIX: do NOT delete plaintext after encrypting. If decrypt later
-    // fails (CryptoKey-from-IDB clone state issue, key rotation, etc.) the
-    // token would be lost forever. Keep plaintext as safety net; loadSecrets
-    // prefers plaintext anyway. Plaintext deletion deferred to v10.12+ once
-    // round-trip decrypt is verified across SW restarts.
+    // Migrate workerModToken: encrypt, then PROVE we can decrypt before deleting plaintext.
     if (typeof s.workerModToken === 'string' && s.workerModToken.length > 0 && !_cryptIsEncrypted(s.workerModToken_encrypted)) {
       try {
-        patch.workerModToken_encrypted = await _cryptEncrypt(s.workerModToken);
-        // (intentionally NOT deleting patch.workerModToken — keep plaintext as fallback)
-        changed = true;
+        var wEnc = await _cryptEncrypt(s.workerModToken);
+        // Round-trip proof: decrypt must return the original plaintext.
+        var wRoundTrip = await _cryptDecrypt(wEnc);
+        if (wRoundTrip === s.workerModToken) {
+          patch.workerModToken_encrypted = wEnc;
+          delete patch.workerModToken; // plaintext removed — encryption proven
+          migratedWorker = true;
+        } else {
+          try { console.error('[ModTools v10.49.6 CRYPT] workerModToken round-trip MISMATCH — keeping plaintext, not migrating'); } catch (_) {}
+        }
       } catch (e) {
-        try { console.warn('[ModTools v10.11 CRYPT] workerModToken encrypt failed:', e.message); } catch (_) {}
+        try { console.warn('[ModTools v10.49.6 CRYPT] workerModToken migration failed (encryption or decrypt unavailable):', e.message); } catch (_) {}
+        // Don't delete plaintext. The Phase-1 guard handles the key-orphan case.
       }
+    } else if (_cryptIsEncrypted(s.workerModToken_encrypted) && typeof s.workerModToken === 'string' && s.workerModToken.length > 0) {
+      // Already encrypted but plaintext still lingering (v10.11.1 model). Remove it.
+      delete patch.workerModToken;
+      migratedWorker = true;
     }
 
-    // Migrate leadModToken — v10.11.1 HOTFIX: keep plaintext as safety net (see workerModToken comment)
+    // Migrate leadModToken (same round-trip proof).
     if (typeof s.leadModToken === 'string' && s.leadModToken.length > 0 && !_cryptIsEncrypted(s.leadModToken_encrypted)) {
       try {
-        patch.leadModToken_encrypted = await _cryptEncrypt(s.leadModToken);
-        // (intentionally NOT deleting patch.leadModToken — keep plaintext as fallback)
-        changed = true;
+        var lEnc = await _cryptEncrypt(s.leadModToken);
+        var lRoundTrip = await _cryptDecrypt(lEnc);
+        if (lRoundTrip === s.leadModToken) {
+          patch.leadModToken_encrypted = lEnc;
+          delete patch.leadModToken;
+          migratedLead = true;
+        } else {
+          try { console.error('[ModTools v10.49.6 CRYPT] leadModToken round-trip MISMATCH — keeping plaintext, not migrating'); } catch (_) {}
+        }
       } catch (e) {
-        try { console.warn('[ModTools v10.11 CRYPT] leadModToken encrypt failed:', e.message); } catch (_) {}
+        try { console.warn('[ModTools v10.49.6 CRYPT] leadModToken migration failed:', e.message); } catch (_) {}
       }
+    } else if (_cryptIsEncrypted(s.leadModToken_encrypted) && typeof s.leadModToken === 'string' && s.leadModToken.length > 0) {
+      delete patch.leadModToken;
+      migratedLead = true;
     }
 
-    if (changed) {
+    if (migratedWorker || migratedLead) {
       await chrome.storage.local.set({ gam_settings: patch });
-      try { console.log('[ModTools v10.11 CRYPT] token migration complete'); } catch (_) {}
+      try { console.log('[ModTools v10.49.6 CRYPT] migration complete: plaintext removed, encryption canonical'); } catch (_) {}
     }
 
-    // Set migration flag regardless so we don't re-scan on every boot
-    await chrome.storage.local.set({ gam_crypt_migrated_v1: Date.now() });
+    // Only set the v2 flag if there's no remaining plaintext to migrate. If a
+    // token failed to encrypt, we leave the flag unset so next boot retries.
+    var stillHasPlaintext = false;
+    try {
+      var recheck = await chrome.storage.local.get('gam_settings');
+      var rs = (recheck && recheck.gam_settings) || {};
+      if ((typeof rs.workerModToken === 'string' && rs.workerModToken.length > 0) ||
+          (typeof rs.leadModToken === 'string' && rs.leadModToken.length > 0)) {
+        stillHasPlaintext = true;
+      }
+    } catch (_) {}
+    if (!stillHasPlaintext) {
+      await chrome.storage.local.set({ gam_crypt_migrated_v2: Date.now() });
+    }
   } catch (e) {
-    try { console.warn('[ModTools v10.11 CRYPT] migration error:', e.message); } catch (_) {}
+    try { console.warn('[ModTools v10.49.6 CRYPT] migration error:', e.message); } catch (_) {}
   }
 }
 
@@ -444,53 +480,53 @@ async function loadSecrets() {
         const localOut = await chrome.storage.local.get('gam_settings');
         const ls = (localOut && localOut.gam_settings) || {};
 
-        // Attempt decrypt for each token; fall through to plaintext if decrypt fails.
         let workerPlain = '';
         let leadPlain = '';
-
-        // v10.11.1 HOTFIX: prefer plaintext FIRST. The v10.11.0 release tried
-        // encrypted first and zeroed the token on decrypt failure -- which
-        // happens when CryptoKey-from-IDB structured-clone state is lost
-        // across SW restarts. Result: forced re-auth on every load. Now:
-        // try plaintext first (always reliable); fall back to decrypt only
-        // when plaintext is missing. The migration patch in v10.11.1 also
-        // STOPS deleting plaintext after encryption, so plaintext is always
-        // the safety net.
-        // v10.49.6 PHASE-1: the decrypt path may now throw _KeyOrphanError if the
-        // device key is gone but ciphertext exists. We catch that OUTSIDE the
-        // per-token try/catch and engage recovery (gam_auth_failed) so the popup
-        // surfaces the re-paste UI instead of silently locking the operator out.
         let _keyOrphaned = false;
-        if (typeof ls.workerModToken === 'string' && ls.workerModToken.length > 0) {
-          workerPlain = ls.workerModToken;
-        } else if (_cryptIsEncrypted(ls.workerModToken_encrypted)) {
+
+        // v10.49.6 PHASE-2: encryption is canonical. Try DECRYPT first.
+        // Only fall back to plaintext if (a) no ciphertext exists, or (b) decrypt
+        // threw a key-orphan AND plaintext still lingers (legacy un-migrated install).
+        // The Phase-1 guard means a key-orphan engages recovery — but if there's
+        // still plaintext around (pre-migration), we use it rather than forcing
+        // a re-paste, since the migration will encrypt+delete it on the next boot.
+        if (_cryptIsEncrypted(ls.workerModToken_encrypted)) {
           try {
             workerPlain = await _cryptDecrypt(ls.workerModToken_encrypted);
           } catch (e) {
             if (e && e.isKeyOrphan) _keyOrphaned = true;
             try { console.warn('[ModTools v10.49.6 CRYPT] workerModToken decrypt failed:', e && e.message || e); } catch (_) {}
-            workerPlain = '';
+            // Legacy fallback: if plaintext still present (pre-migration), use it.
+            if (typeof ls.workerModToken === 'string' && ls.workerModToken.length > 0) {
+              workerPlain = ls.workerModToken;
+            } else {
+              workerPlain = '';
+            }
           }
+        } else if (typeof ls.workerModToken === 'string' && ls.workerModToken.length > 0) {
+          // No ciphertext, plaintext only (very old install pre-migration).
+          workerPlain = ls.workerModToken;
         }
 
-        if (typeof ls.leadModToken === 'string' && ls.leadModToken.length > 0) {
-          leadPlain = ls.leadModToken;
-        } else if (_cryptIsEncrypted(ls.leadModToken_encrypted)) {
+        if (_cryptIsEncrypted(ls.leadModToken_encrypted)) {
           try {
             leadPlain = await _cryptDecrypt(ls.leadModToken_encrypted);
           } catch (e) {
             if (e && e.isKeyOrphan) _keyOrphaned = true;
             try { console.warn('[ModTools v10.49.6 CRYPT] leadModToken decrypt failed:', e && e.message || e); } catch (_) {}
-            leadPlain = '';
+            if (typeof ls.leadModToken === 'string' && ls.leadModToken.length > 0) {
+              leadPlain = ls.leadModToken;
+            } else {
+              leadPlain = '';
+            }
           }
+        } else if (typeof ls.leadModToken === 'string' && ls.leadModToken.length > 0) {
+          leadPlain = ls.leadModToken;
         }
 
-        // v10.49.6 PHASE-1: if the device key is orphaned, engage recovery so the
-        // operator sees the re-paste banner. The backup self-heal below may still
-        // recover the token (backup will be converted to encrypted-only in Phase 2,
-        // but for now plaintext backup can still save us). If backup also fails,
-        // gam_auth_failed ensures the popup doesn't dump into bare NEW-MOD onboarding.
-        if (_keyOrphaned) {
+        // v10.49.6: if the device key is orphaned AND we couldn't recover from
+        // plaintext/backup, engage recovery so the operator sees the re-paste banner.
+        if (_keyOrphaned && !workerPlain && !leadPlain) {
           try { await chrome.storage.local.set({ gam_auth_failed: Date.now() }); } catch (_) {}
           try { console.error('[ModTools v10.49.6 CRYPT] device key orphaned — recovery UI engaged (gam_auth_failed set). Operator must re-paste token.'); } catch (_) {}
         }
@@ -504,29 +540,38 @@ async function loadSecrets() {
     };
     // v10.23.0 (lockout-proof L5): SELF-HEAL. If the vault came up empty (SW
     // eviction emptied session + gam_settings missing/undecryptable -- the exact
-    // wiped-vault lockout), restore the team token from the decrypt-independent
-    // backup so the operator is never dumped into NEW-MOD onboarding for a token
-    // they already have. Best-effort + silent if no backup exists.
+    // wiped-vault lockout), restore the token from the backup so the operator
+    // is never dumped into NEW-MOD onboarding for a token they already have.
+    // v10.49.6 PHASE-2: restores BOTH team + lead (lead was missing before).
+    // Restored tokens go into secretCache + session storage ONLY — NOT back into
+    // durable gam_settings as plaintext (that defeated encryption). The next
+    // authenticated RPC will re-persist them encrypted via authValidateToken.
     if (!secretCache.workerModToken) {
       try {
         const _bak = await _readTokenBackup();
         if (_bak) {
           secretCache.workerModToken = _bak;
-          // Mirror back into gam_settings (plaintext, per the v10.11.1 model) so the
-          // popup + content script see the restored token immediately.
-          try {
-            const _cur = await chrome.storage.local.get('gam_settings');
-            const _m = Object.assign({}, (_cur && _cur.gam_settings) || {});
-            _m.workerModToken = _bak;
-            await chrome.storage.local.set({ gam_settings: _m });
-          } catch (_) {}
-          try { console.warn('[ModTools v10.23.0] team token AUTO-RESTORED from backup (vault was empty)'); } catch (_) {}
+          try { console.warn('[ModTools v10.49.6] team token AUTO-RESTORED from backup (vault was empty)'); } catch (_) {}
         }
       } catch (_) {}
     }
+    if (!secretCache.leadModToken) {
+      try {
+        const _bak = await _readLeadTokenBackup();
+        if (_bak) {
+          secretCache.leadModToken = _bak;
+          try { console.warn('[ModTools v10.49.6] lead token AUTO-RESTORED from backup (vault was empty)'); } catch (_) {}
+        }
+      } catch (_) {}
+    }
+    // Mirror restored tokens into SESSION storage (volatile, SW-lifecycle) so the
+    // popup + content script see them immediately without a durable plaintext write.
+    if (chrome.storage && chrome.storage.session && (secretCache.workerModToken || secretCache.leadModToken)) {
+      try { await chrome.storage.session.set({ gam_settings: secretCache }); } catch (_) {}
+    }
     // v10.23.0 (lockout-proof L4): keep the backup fresh whenever we hold a valid
     // token (covers normal load + a just-restored token). Fire-and-forget.
-    if (secretCache.workerModToken) { _writeTokenBackup(); }
+    if (secretCache.workerModToken || secretCache.leadModToken) { _writeTokenBackup(); }
     // AF-01 P1 fix: restore _UPDATE_FLAG_LAST_SET from durable storage so the
     // update banner survives SW termination. Without this, verifyUpdateFlag
     // returns ok:false after every SW restart until the next alarm fires (~30m).
@@ -1130,6 +1175,39 @@ try {
         console.log('[ModTools v9.2.2] SW vault re-synced from storage change',
           { hasTeam: !!nextWorker, hasLead: !!nextLead });
       } catch (_) {}
+    }
+    // v10.49.6 PHASE-2: encrypted-only writes. If the change carried ciphertext
+    // (no plaintext), the plaintext-sync block above didn't detect a change and
+    // the cache would go stale. Handle it here via async decrypt. This fires for
+    // writes from authValidateToken, _persistRotatedToken, and _cryptMigrateSettings.
+    var encWorker = _cryptIsEncrypted(nv.workerModToken_encrypted);
+    var encLead   = _cryptIsEncrypted(nv.leadModToken_encrypted);
+    if (encWorker || encLead) {
+      (async function() {
+        try {
+          var newCache = { workerModToken: secretCache.workerModToken || '', leadModToken: secretCache.leadModToken || '' };
+          if (encWorker) {
+            try { newCache.workerModToken = await _cryptDecrypt(nv.workerModToken_encrypted); }
+            catch (e) { try { console.warn('[ModTools v10.49.6] storage.onChanged worker decrypt failed:', e && e.message); } catch(_) {} }
+          }
+          if (encLead) {
+            try { newCache.leadModToken = await _cryptDecrypt(nv.leadModToken_encrypted); }
+            catch (e) { try { console.warn('[ModTools v10.49.6] storage.onChanged lead decrypt failed:', e && e.message); } catch(_) {} }
+          }
+          if (newCache.workerModToken !== (secretCache.workerModToken||'') ||
+              newCache.leadModToken !== (secretCache.leadModToken||'')) {
+            secretCache = newCache;
+            try {
+              if (chrome.storage && chrome.storage.session) {
+                var sOut = await chrome.storage.session.get('gam_settings');
+                var sCur = (sOut && sOut.gam_settings) || {};
+                await chrome.storage.session.set({ gam_settings: Object.assign({}, sCur, newCache) });
+              }
+            } catch(_) {}
+            try { console.log('[ModTools v10.49.6] SW vault re-synced from ENCRYPTED storage change'); } catch(_) {}
+          }
+        } catch (_) {}
+      })();
     }
   });
 } catch (e) {}
@@ -2417,13 +2495,26 @@ function _classifyCaller(sender) {
 // AF-04 Rule 10: retry loop now routed through withBackoff (true exponential
 // backoff with jitter: 100ms base, 800ms cap, 3 attempts).
 // v10.11 T1 (REDTEAM-1): persists encrypted blob, not plaintext.
+// v10.49.6 PHASE-2: encryption is MANDATORY. No plaintext fallback. If encryption
+// fails, the rotation surfaces as saved:false with a critical lastError — the
+// caller MUST tell the operator (the old token is already dead server-side, so
+// this is a genuine lockout risk that needs lead recovery, not silent plaintext).
 async function _persistRotatedToken(newTokenPlaintext) {
   // Update in-memory SW vault immediately so this SW lifecycle still works.
   secretCache.workerModToken = newTokenPlaintext;
 
   // Pre-encrypt once outside the retry loop; IV is random-per-call so this is fine.
+  // v10.49.6: encryption failure is now FATAL to the rotation — no plaintext fallback.
   var encBlob = null;
-  try { encBlob = await _cryptEncrypt(newTokenPlaintext); } catch (_) {}
+  var encError = null;
+  try { encBlob = await _cryptEncrypt(newTokenPlaintext); }
+  catch (e) { encError = e; }
+
+  if (!encBlob) {
+    // Cannot persist safely. Tell the caller — the old token is dead server-side,
+    // so this is the critical "rotation_save_failed" path that needs lead recovery.
+    return { saved: false, lastError: 'rotation encryption failed: ' + (encError && encError.message || encError) };
+  }
 
   var saved = false;
   var lastError = null;
@@ -2431,26 +2522,14 @@ async function _persistRotatedToken(newTokenPlaintext) {
     await withBackoff(async function(attempt) {
       var cur = await chrome.storage.local.get('gam_settings');
       var merged = Object.assign({}, (cur && cur.gam_settings) || {});
-      delete merged.workerModToken; // remove any residual plaintext
-      if (encBlob) {
-        merged.workerModToken_encrypted = encBlob;
-      } else {
-        // IDB unavailable -- fall back to plaintext (best-effort)
-        merged.workerModToken = newTokenPlaintext;
-      }
+      delete merged.workerModToken; // plaintext removed — encryption is canonical
+      merged.workerModToken_encrypted = encBlob;
       await chrome.storage.local.set({ gam_settings: merged });
-      // Read back to confirm.
+      // Read back to confirm the encrypted blob landed.
       var verify = await chrome.storage.local.get('gam_settings');
       var vs = (verify && verify.gam_settings) || {};
-      // Verify via encrypted field if we wrote one, else via plaintext field.
-      if (encBlob) {
-        if (!vs.workerModToken_encrypted || vs.workerModToken_encrypted.ct !== encBlob.ct) {
-          throw new Error('encrypted verify mismatch on attempt ' + attempt);
-        }
-      } else {
-        if (vs.workerModToken !== newTokenPlaintext) {
-          throw new Error('verify mismatch on attempt ' + attempt);
-        }
+      if (!vs.workerModToken_encrypted || vs.workerModToken_encrypted.ct !== encBlob.ct) {
+        throw new Error('encrypted verify mismatch on attempt ' + attempt);
       }
     }, { base: 100, cap: 800, maxAttempts: 3 });
     saved = true;
@@ -2469,30 +2548,51 @@ async function _persistRotatedToken(newTokenPlaintext) {
   return { saved: saved, lastError: lastError };
 }
 
-// v10.23.0 lockout-proof L4/L5 -- team-token backup + restore. The team token is
-// already stored plaintext in gam_settings (the v10.11.1 "plaintext is the safety
-// net" model), so the plaintext backup field is NO NEW exposure -- but it lives in
-// a SEPARATE storage key, so it survives the exact failures that cause the lockout:
-// gam_settings cleared/corrupted, OR its encrypted blob undecryptable after SW
-// eviction (the v10.11.1 crypto-key-loss case the main vault does NOT survive).
-// Scope: TEAM token only (its loss is what dumps the operator into NEW-MOD
-// onboarding). Lead-token backup + a storage.sync cross-device mirror are deferred.
+// v10.49.6 PHASE-2: backup is now ENCRYPTED-ONLY (no plaintext worker_pt).
+// Both team AND lead tokens are backed up (lead was previously missing — an
+// asymmetry that made lead lockouts unrecoverable). The backup survives
+// gam_settings corruption because it lives under a separate storage key, and
+// it survives crypto-key-loss scenarios the same way the primary store does
+// (the Phase-1 guard engages recovery if the key is gone). The plaintext
+// fields are gone because keeping them defeated the entire point of encrypting.
+// Legacy backups with worker_pt are still READ (migration: re-encrypt + drop
+// plaintext on next write) so existing installs aren't left without a backup.
 async function _writeTokenBackup() {
   try {
     const w = (secretCache && secretCache.workerModToken) || '';
-    if (!w) return; // never overwrite a good backup with empty
-    const payload = { ver: 1, savedAt: Date.now(), worker_pt: w };
-    try { payload.worker_enc = await _cryptEncrypt(w); } catch (_) {}
+    const l = (secretCache && secretCache.leadModToken) || '';
+    // Never overwrite a good backup with empty for a token we still hold elsewhere.
+    const payload = { ver: 2, savedAt: Date.now() };
+    if (w) { try { payload.worker_enc = await _cryptEncrypt(w); } catch (_) {} }
+    if (l) { try { payload.lead_enc = await _cryptEncrypt(l); } catch (_) {} }
+    // Only persist if we actually have something to back up.
+    if (!payload.worker_enc && !payload.lead_enc) return;
     await chrome.storage.local.set({ gam_token_backup_v1: payload });
   } catch (_) {}
 }
+// _readTokenBackup returns the TEAM token from the backup (used by the self-heal).
+// _readLeadTokenBackup returns the lead token. Both decrypt-only now.
 async function _readTokenBackup() {
   try {
     const r = await chrome.storage.local.get('gam_token_backup_v1');
     const b = r && r.gam_token_backup_v1;
     if (!b) return '';
-    if (typeof b.worker_pt === 'string' && b.worker_pt) return b.worker_pt; // plaintext: always restorable
+    // v10.49.6: encrypted is now canonical.
     if (_cryptIsEncrypted(b.worker_enc)) { try { return await _cryptDecrypt(b.worker_enc); } catch (_) {} }
+    // Legacy migration: an old v1 backup may still have worker_pt. Read it so
+    // existing installs aren't left without recovery, but note it will be
+    // replaced with worker_enc on the next _writeTokenBackup call.
+    if (typeof b.worker_pt === 'string' && b.worker_pt) return b.worker_pt;
+    return '';
+  } catch (_) { return ''; }
+}
+async function _readLeadTokenBackup() {
+  try {
+    const r = await chrome.storage.local.get('gam_token_backup_v1');
+    const b = r && r.gam_token_backup_v1;
+    if (!b) return '';
+    if (_cryptIsEncrypted(b.lead_enc)) { try { return await _cryptDecrypt(b.lead_enc); } catch (_) {} }
+    if (typeof b.lead_pt === 'string' && b.lead_pt) return b.lead_pt; // legacy
     return '';
   } catch (_) { return ''; }
 }
@@ -2691,8 +2791,13 @@ const RPC_HANDLERS = {
           return { ok: false, status: r.status, error: 'malformed worker version response' };
         }
         // Token validated -- promote it into secretCache and persist.
-        // v10.11 T1 (REDTEAM-1): encrypt before writing to chrome.storage.local.
-        // v10.11 T3 (REDTEAM-1): record issued_at timestamp.
+        // v10.49.6 PHASE-2: encryption is now CANONICAL. We write ONLY the
+        // encrypted blob to durable storage and DELETE the plaintext field.
+        // Plaintext lives in secretCache (SW RAM) + session storage (volatile)
+        // only — never durable. If encryption fails, we REFUSE to persist and
+        // surface the error so the caller knows (rather than silently leaving
+        // no token, or silently leaving plaintext). The Phase-1 key-mint guard
+        // makes this safe: a key orphan engages recovery instead of lockout.
         secretCache.workerModToken = candidate;
         try {
           if (chrome.storage && chrome.storage.session) {
@@ -2701,16 +2806,18 @@ const RPC_HANDLERS = {
           if (chrome.storage && chrome.storage.local) {
             const cur = await chrome.storage.local.get('gam_settings');
             const base = { ...((cur && cur.gam_settings) || {}) };
-            // v10.11.1 HOTFIX: write BOTH plaintext AND encrypted. Plaintext
-            // is the reliable safety net; encrypted is opportunistic. Don't
-            // delete plaintext (was causing token loss when decrypt failed
-            // on next SW restart).
-            base.workerModToken = candidate;
+            // Encrypt — mandatory, not opportunistic.
+            let encBlob;
             try {
-              base.workerModToken_encrypted = await _cryptEncrypt(candidate);
-            } catch (_) {
-              // Encryption failed -- plaintext is sufficient.
+              encBlob = await _cryptEncrypt(candidate);
+            } catch (encErr) {
+              // Encryption failed. Do NOT fall back to plaintext (that was the
+              // v10.11.1 band-aid we're removing). Surface the error so the
+              // caller/popup can tell the operator something is wrong.
+              return { ok: false, status: 0, error: 'token encryption failed: ' + (encErr && encErr.message || encErr) };
             }
+            base.workerModToken_encrypted = encBlob;
+            delete base.workerModToken; // plaintext removed — encryption is canonical
             const nowMs = Date.now();
             base.workerModToken_issued_at = nowMs;
             base.workerModToken_expires_at = nowMs + (30 * 24 * 60 * 60 * 1000); // 30-day default
@@ -2721,6 +2828,7 @@ const RPC_HANDLERS = {
         try { await _writeTokenBackup(); } catch (_) {}
         // v10.24.0 (lockout-proof L1): a successful (re)auth clears the recovery flag.
         try { await chrome.storage.local.remove('gam_auth_failed'); } catch (_) {}
+        try { await chrome.storage.local.remove('gam_key_orphaned'); } catch (_) {}
         return { ok: true, status: r.status, data: { version: parsed.version } };
       } catch (e) {
         return { ok: false, status: 0, error: String(e && e.message || e), timeout: !!(e && e.name === 'AbortError') };
@@ -3303,8 +3411,11 @@ const RPC_HANDLERS = {
         if (r.status === 403) return { ok: false, status: 403, error: 'not a lead-mod token' };
         if (!r.ok) return { ok: false, status: r.status, error: 'worker error (HTTP ' + r.status + ')' };
         // Valid -- store it.
-        // v10.11 T1 (REDTEAM-1): encrypt before writing to chrome.storage.local.
-        // v10.11 T3 (REDTEAM-1): record issued_at timestamp.
+        // v10.49.6 PHASE-2: encryption is canonical. The lead token already
+        // deleted plaintext (the asymmetry vs team); we now also remove the
+        // plaintext-on-encrypt-fail fallback (it was the last plaintext write
+        // path for lead tokens). Encryption failure surfaces as an error.
+        // The lead token now ALSO gets a backup (added in _writeTokenBackup v2).
         secretCache.leadModToken = candidate;
         try {
           if (chrome.storage && chrome.storage.session) {
@@ -3313,11 +3424,12 @@ const RPC_HANDLERS = {
           if (chrome.storage && chrome.storage.local) {
             const cur = await chrome.storage.local.get('gam_settings');
             const base = { ...((cur && cur.gam_settings) || {}), isLeadMod: true };
-            delete base.leadModToken; // remove plaintext field
+            delete base.leadModToken; // plaintext removed — encryption is canonical
             try {
               base.leadModToken_encrypted = await _cryptEncrypt(candidate);
-            } catch (_) {
-              base.leadModToken = candidate; // IDB unavailable: fall back to plaintext
+            } catch (encErr) {
+              // No plaintext fallback — surface the error so the caller knows.
+              return { ok: false, status: 0, error: 'lead token encryption failed: ' + (encErr && encErr.message || encErr) };
             }
             const nowMs = Date.now();
             base.leadModToken_issued_at = nowMs;
@@ -3325,6 +3437,8 @@ const RPC_HANDLERS = {
             await chrome.storage.local.set({ gam_settings: base });
           }
         } catch (e) {}
+        // v10.49.6: lead token now backed up too (was team-only before).
+        try { await _writeTokenBackup(); } catch (_) {}
         return { ok: true, status: r.status, data: { verified: true } };
       } catch (e) {
         return { ok: false, status: 0, error: String(e && e.message || e), timeout: !!(e && e.name === 'AbortError') };

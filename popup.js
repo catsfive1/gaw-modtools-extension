@@ -4192,14 +4192,15 @@ loadLead();
       status.textContent = '⌛ saving + verifying via /mod/whoami...';
       status.style.color = '#ff9933';
       try {
-        const sr = await popupRpc('setTokens', { workerModToken: input });
-        // Note: setTokens RPC may not exist; fall back to saveTokensSecurely
-        // v10.11 T1 (REDTEAM-1): do NOT write plaintext token to chrome.storage.local here.
-        // If the RPC fails, use authValidateToken which handles encryption in the SW.
-        if (!sr || !sr.ok) {
-          // Fallback: use authValidateToken RPC which validates AND persists encrypted.
-          // Direct chrome.storage.local writes of plaintext tokens are no longer safe.
-          try { await popupRpc('authValidateToken', { token: input }); } catch (_) {}
+        // v10.49.6 PHASE-2: persist via authValidateToken (validates server-side +
+        // encrypts durably). The old code called setTokens (volatile-only) first and
+        // only fell through to authValidateToken on FAILURE — since setTokens succeeds,
+        // the durable+encrypted write was skipped and the token vanished on SW eviction.
+        const vr = await popupRpc('authValidateToken', { token: input });
+        if (!vr || !vr.ok) {
+          status.textContent = 'token rejected or save failed: ' + (vr && vr.error || 'unknown') + ' (HTTP ' + (vr && vr.status || '?') + ')';
+          status.style.color = '#ff3b3b';
+          return;
         }
         const who = await popupRpc('modWhoami');
         if (who && who.ok && who.data && who.data.username) {
