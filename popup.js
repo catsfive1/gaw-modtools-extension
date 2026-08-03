@@ -212,6 +212,11 @@ function __tokSetState(state, opts) {
   const returning = document.getElementById('tokStateReturning');
   if (firstRun)  firstRun.style.display  = (state === 'first-run')  ? '' : 'none';
   if (returning) returning.style.display = (state !== 'first-run')  ? '' : 'none';
+  // v10.49.6 PHASE-3: the always-visible rotate row shows for any returning
+  // (authenticated) mod. Not gated on gam_self_rotated_at — every mod can
+  // rotate any time, and the button must be visible.
+  const alwaysRotateRow = document.getElementById('alwaysRotateRow');
+  if (alwaysRotateRow) alwaysRotateRow.style.display = (state === 'returning' || state === 'expired') ? '' : 'none';
   if (state === 'returning' || state === 'expired') {
     __tokUpdateBanner(opts || {});
   }
@@ -304,13 +309,13 @@ function __tokUpdateBanner(opts) {
     secondary.appendChild(document.createTextNode(p));
   });
 
-  // ENC chip — v10.49.5: the chip previously claimed "stored encrypted", but the
-  // background SW deliberately keeps a plaintext fallback (token loss on SW
-  // eviction was a real lockout). The chip now reflects the actual model.
+  // ENC chip — v10.49.6: encryption is now CANONICAL (plaintext deleted from
+  // durable storage). The chip is honest again. The fallback if the device key
+  // is ever lost is re-authentication (re-paste), not a plaintext copy.
   const encChip = document.createElement('span');
   encChip.className = 'tok-enc-chip';
-  encChip.title = 'Token encrypted opportunistically; plaintext fallback kept to survive SW eviction (prevents lockout). Local storage only.';
-  encChip.textContent = 'ENC*';
+  encChip.title = 'Token encrypted at rest (AES-GCM-256). If the device key is ever lost, you re-paste your token — no plaintext is stored.';
+  encChip.textContent = 'ENC';
   secondary.appendChild(document.createTextNode(' · '));
   secondary.appendChild(encChip);
 
@@ -3054,8 +3059,11 @@ async function __prefetchRotateHint() {
 // =========================================================================
 // Rotate: swap current token for a fresh random one only this mod knows.
 // Claim: redeem a lead-issued rotation invite for a fresh random token.
-async function rotateToken() {
-  const status = $('rotateStatus');
+async function rotateToken(statusElOverride) {
+  // v10.49.6: accept an optional status-element override so the always-visible
+  // rotate button can write to its own status area instead of the one buried
+  // in the collapsed <details>.
+  const status = statusElOverride || $('rotateStatus');
   if (!status) return;
   status.className = 'pop-token-status';
   try {
@@ -3348,6 +3356,14 @@ function _showVerifyTokenBtn() {
   if (r) r.addEventListener('click', function () { withLoading(r, 'rotating…', rotateToken); });
   const c = $('claimRotateBtn');
   if (c) c.addEventListener('click', function () { withLoading(c, 'claiming…', claimRotationInvite); });
+  // v10.49.6 PHASE-3: the always-visible rotate button. Wired to rotateToken
+  // with its own status element. Always present for any returning mod — not
+  // gated on gam_self_rotated_at, not buried in a collapsed accordion.
+  const ar = $('alwaysRotateBtn');
+  if (ar) ar.addEventListener('click', function () {
+    const arStatus = $('alwaysRotateStatus');
+    withLoading(ar, 'rotating…', function () { return rotateToken(arStatus); });
+  });
   // v10.16.20: prominent self-rotate CTA. Wires the banner button + manages
   // visibility based on `gam_self_rotated_at` flag. Banner shows when the
   // mod has an authenticated token (workerModToken length>=32) AND has

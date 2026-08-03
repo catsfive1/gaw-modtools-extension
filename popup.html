@@ -612,7 +612,7 @@
             <div class="tok-banner-body">
               <div class="tok-banner-primary" id="firstRunSuccessName">Authenticated</div>
               <div class="tok-banner-secondary">
-                Token stored locally (encrypted with plaintext fallback). Refresh greatawakening.win to activate the status bar.
+                Token stored encrypted at rest. Refresh greatawakening.win to activate the status bar.
               </div>
             </div>
           </div>
@@ -656,6 +656,24 @@
               <!-- popup.js __tokUpdateBanner injects: u/name * tier * verified Xs ago * ENC * age -->
             </div>
           </div>
+        </div>
+
+        <!-- v10.49.6 PHASE-3: ALWAYS-VISIBLE rotate control for any authenticated
+             mod. The old rotate button was buried inside a collapsed <details>
+             accordion whose auto-open was gated on gam_self_rotated_at — so once
+             a mod rotated (or dismissed), the button became undiscoverable. This
+             row sits directly below the verified-status banner and is always
+             present for returning mods. Wired to the existing rotateToken(). -->
+        <div id="alwaysRotateRow" style="display:none;margin-top:8px;padding:8px 10px;border:1px solid var(--bb-line,#2a2825);border-radius:4px;background:rgba(255,255,255,0.02)">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div>
+              <div style="font-weight:600;font-size:11px;color:#e8e6e1">Rotate my token</div>
+              <div style="font-size:10px;color:#9b9892;margin-top:2px">Generate a new token only you know. The lead loses impersonation access.</div>
+            </div>
+            <button id="alwaysRotateBtn" type="button" class="pop-btn pop-btn-ghost"
+                    style="white-space:nowrap;font-size:11px;font-weight:600">&#x1F504; Rotate</button>
+          </div>
+          <div id="alwaysRotateStatus" class="pop-token-status" aria-live="polite" style="margin-top:4px"></div>
         </div>
 
         <!-- v10.16.20: Self-rotation CTA — visible by default for any mod
