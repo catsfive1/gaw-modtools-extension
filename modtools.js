@@ -1,5 +1,5 @@
 // ============================================================================
-// GAW ModTools - Chrome Extension v10.49.3
+// GAW ModTools - Chrome Extension v10.49.4
 // "The Takeover" - Unified Mod Console replaces every native mod dialog
 // ============================================================================
 // v10.49.3 (current):
@@ -150,7 +150,19 @@
     HOT_NOW_PANEL:   true,
     MODMAIL_3COL:    true,
     AI_HOLD_QUEUE:   true,
-    UNIVERSAL_UNDO:  true
+    UNIVERSAL_UNDO:  true,
+    // v10.49.4 KILL-SWITCH for the "/u/ profile eats my posts" bug.
+    // Verified root cause (code-review 2026-08-03): the custom profile river
+    // (enhanceUserProfilePage) fetches ?type=overview (a MIXED posts+comments
+    // feed) and injects it into the native Posts listing, then a chronological
+    // reorderer re-sorts the already-scrambled DOM. v10.49.1->v10.49.3 each
+    // "fixed" the prior fix. NO_TOUCH means: on /u/* routes, do not run the
+    // custom river or the reorder observer at all — let GAW's native
+    // pagination/ordering stand untouched. The defensive un-hide sweep (lines
+    // ~857-869) is INTENTIONALLY LEFT ACTIVE — it restores posts stuck hidden
+    // by the age filter and is a defender, not an eater. To re-enable the river
+    // for testing, flip to false.
+    PROFILE_NO_TOUCH: true
   });
 
   // v10.36.1 HOTFIX: MSG_QUEUE_KEY must be declared BEFORE any synchronous IIFE
@@ -882,8 +894,15 @@
             // current main content and fire one reorder now. The observer's own
             // callback uses the DYNAMIC _isProfileViewNow() gate, so it is
             // correct regardless of which sub-tab loaded.
+            //
+            // v10.49.4 KILL-SWITCH: PROFILE_NO_TOUCH disables this reorder
+            // observer attach too. The reorderer operates on DOM the river
+            // scrambled; with the river off, GAW's native order is already
+            // correct and reordering would only risk scrambling native order.
+            // The defensive un-hide sweep ABOVE this block stays active — it is a
+            // defender, not an eater.
             try {
-              if (typeof _isProfileViewNow === 'function' && _isProfileViewNow()) {
+              if (!FEATURE_FLAGS.PROFILE_NO_TOUCH && typeof _isProfileViewNow === 'function' && _isProfileViewNow()) {
                 const mc = document.querySelector('.main-content') || document.body;
                 try { if (_profileReorderObs) _profileReorderObs.disconnect(); } catch(_){}
                 if (!_profileReorderObs && typeof MutationObserver !== 'undefined') {
@@ -32779,7 +32798,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     // IntelDrawer.open(); fallback preserves v6.3.0 behavior when flag is off.
     try { wireV7EntryPoints(); } catch(e){ console.error('[v7] wireV7EntryPoints', e); }
     // v5.2.3: infinite river of posts on /u/<name> profile page
-    if (IS_USER_PROFILE_PAGE){
+    // v10.49.4 KILL-SWITCH: PROFILE_NO_TOUCH disables the custom profile river
+    // (the verified root cause of the "/u/ eats posts" bug). Native GAW
+    // pagination stands untouched when this flag is true.
+    if (IS_USER_PROFILE_PAGE && !FEATURE_FLAGS.PROFILE_NO_TOUCH){
       setTimeout(enhanceUserProfilePage, 400);
     }
     // v5.1.9: inject homepage mini-HQ strip (counts + jump-to-urgent)
