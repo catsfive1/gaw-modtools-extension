@@ -152,6 +152,16 @@ let _deviceKey = null;
 // Track IDB availability for _cryptHealth
 let _idbAvailable = null;
 
+// v10.49.6 PHASE-1 GUARD: signal for "we have ciphertext but the device key is
+// gone" — the exact v10.11.1 lockout root cause. Set by _cryptInit when it
+// detects an orphan, consumed by loadSecrets to engage the recovery UI instead
+// of silently minting a fresh key that would make all existing ciphertext
+// permanently undecryptable. Typed so callers can distinguish it from ordinary
+// crypto errors.
+class _KeyOrphanError extends Error {
+  constructor(msg) { super(msg); this.name = 'KeyOrphanError'; this.isKeyOrphan = true; }
+}
+
 // -- _cryptInit: get-or-create device key persisted in IDB --
 async function _cryptInit() {
   if (_deviceKey) return _deviceKey;
@@ -163,7 +173,37 @@ async function _cryptInit() {
       _deviceKey = stored;
       return _deviceKey;
     }
-    // Generate new non-extractable AES-GCM-256 key
+    // v10.49.6 PHASE-1 GUARD: before minting a NEW key, check whether ciphertext
+    // already exists. If it does, the device key was lost (browser data cleanup,
+    // IDB corruption, structured-clone loss across SW restart — the v10.11.1 cause).
+    // Minting here would orphan all existing ciphertext permanently. Instead, refuse
+    // and surface recovery so the operator re-pastes their token (the honest fallback).
+    // Only mint a fresh key on a genuine first run (no ciphertext anywhere).
+    var _hasCiphertext = false;
+    try {
+      if (chrome.storage && chrome.storage.local) {
+        var _gs = await chrome.storage.local.get('gam_settings');
+        var _s = (_gs && _gs.gam_settings) || {};
+        if (_cryptIsEncrypted(_s.workerModToken_encrypted) || _cryptIsEncrypted(_s.leadModToken_encrypted)) {
+          _hasCiphertext = true;
+        }
+        // Also check the backup key — its worker_enc/lead_enc blobs would be orphaned too.
+        var _bk = await chrome.storage.local.get('gam_token_backup_v1');
+        var _b = _bk && _bk.gam_token_backup_v1;
+        if (_b && (_cryptIsEncrypted(_b.worker_enc) || _cryptIsEncrypted(_b.lead_enc))) {
+          _hasCiphertext = true;
+        }
+      }
+    } catch (_) { /* storage read failure below falls through to mint — can't orphan what we can't see */ }
+    if (_hasCiphertext) {
+      _idbAvailable = true; // IDB itself works; the key is just gone
+      _deviceKey = null;
+      // Persist the flag so the popup's recovery banner + any future boot knows.
+      try { await chrome.storage.local.set({ gam_key_orphaned: Date.now() }); } catch (_) {}
+      try { console.error('[ModTools v10.49.6 CRYPT] KEY ORPHAN: ciphertext exists but device key is missing. Refusing to mint a new key — operator must re-paste token (recovery UI will engage).'); } catch (_) {}
+      throw new _KeyOrphanError('device key missing while ciphertext exists — refusing to orphan existing tokens');
+    }
+    // Genuine first run (no ciphertext anywhere): safe to mint a new key.
     var key = await crypto.subtle.generateKey(
       { name: 'AES-GCM', length: 256 },
       false,          // extractable: false -- key cannot be exported, ever
@@ -173,6 +213,8 @@ async function _cryptInit() {
     _deviceKey = key;
     return _deviceKey;
   } catch (e) {
+    // Don't clobber the typed error — callers need to detect KeyOrphanError.
+    if (e && e.isKeyOrphan) throw e;
     _idbAvailable = false;
     _deviceKey = null;
     throw new Error('_cryptInit failed: ' + (e && e.message || String(e)));
@@ -414,13 +456,19 @@ async function loadSecrets() {
         // when plaintext is missing. The migration patch in v10.11.1 also
         // STOPS deleting plaintext after encryption, so plaintext is always
         // the safety net.
+        // v10.49.6 PHASE-1: the decrypt path may now throw _KeyOrphanError if the
+        // device key is gone but ciphertext exists. We catch that OUTSIDE the
+        // per-token try/catch and engage recovery (gam_auth_failed) so the popup
+        // surfaces the re-paste UI instead of silently locking the operator out.
+        let _keyOrphaned = false;
         if (typeof ls.workerModToken === 'string' && ls.workerModToken.length > 0) {
           workerPlain = ls.workerModToken;
         } else if (_cryptIsEncrypted(ls.workerModToken_encrypted)) {
           try {
             workerPlain = await _cryptDecrypt(ls.workerModToken_encrypted);
           } catch (e) {
-            try { console.warn('[ModTools v10.11.1 CRYPT] workerModToken decrypt failed, no plaintext fallback:', e.message); } catch (_) {}
+            if (e && e.isKeyOrphan) _keyOrphaned = true;
+            try { console.warn('[ModTools v10.49.6 CRYPT] workerModToken decrypt failed:', e && e.message || e); } catch (_) {}
             workerPlain = '';
           }
         }
@@ -431,9 +479,20 @@ async function loadSecrets() {
           try {
             leadPlain = await _cryptDecrypt(ls.leadModToken_encrypted);
           } catch (e) {
-            try { console.warn('[ModTools v10.11.1 CRYPT] leadModToken decrypt failed, no plaintext fallback:', e.message); } catch (_) {}
+            if (e && e.isKeyOrphan) _keyOrphaned = true;
+            try { console.warn('[ModTools v10.49.6 CRYPT] leadModToken decrypt failed:', e && e.message || e); } catch (_) {}
             leadPlain = '';
           }
+        }
+
+        // v10.49.6 PHASE-1: if the device key is orphaned, engage recovery so the
+        // operator sees the re-paste banner. The backup self-heal below may still
+        // recover the token (backup will be converted to encrypted-only in Phase 2,
+        // but for now plaintext backup can still save us). If backup also fails,
+        // gam_auth_failed ensures the popup doesn't dump into bare NEW-MOD onboarding.
+        if (_keyOrphaned) {
+          try { await chrome.storage.local.set({ gam_auth_failed: Date.now() }); } catch (_) {}
+          try { console.error('[ModTools v10.49.6 CRYPT] device key orphaned — recovery UI engaged (gam_auth_failed set). Operator must re-paste token.'); } catch (_) {}
         }
 
         s = { workerModToken: workerPlain, leadModToken: leadPlain };
