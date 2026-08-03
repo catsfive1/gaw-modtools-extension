@@ -23634,8 +23634,15 @@ Analyze this comment against the community rules. Then write a brief, profession
       ]
     });
     if (!ok) return;
+    // v10.49.5 P1 FIX (operator-confirmed: "modtools is not actually banning people"):
+    // (a) Do NOT removeFromDeathRow before preflight/ban — a preflight fail or ban fail
+    //     used to permanently lose the queue entry. Snapshot it so we can restore on failure.
+    // (b) apiBan() (via modPost) never throws on failure — it resolves {ok:false}. The old
+    //     code toasted green success on a failed ban. Gate the success toast + DOM removal
+    //     on banResult.ok, and REJECT so the caller's .catch() keeps the row visible and
+    //     restores the FIRE button (single caller at the popover, line ~24024).
+    const drEntry = getDeathRow().find(d => d.username.toLowerCase() === username.toLowerCase()) || null;
     try {
-      removeFromDeathRow(username);
       const pf = await rpcCall('modBanPreflight', {
         target: username,
         duration_hours: 43800,
@@ -23643,8 +23650,9 @@ Analyze this comment against the community rules. Then write a brief, profession
         permanent: true
       });
       if (!pf || !pf.ok) {
-        try { snack('Preflight failed: ' + (pf && pf.error || 'unknown'), 'error'); } catch(_){}
-        return;
+        const why = (pf && pf.error) || 'preflight failed';
+        try { snack('Preflight failed: ' + why, 'error'); } catch(_){}
+        throw new Error(why); // REJECT so caller keeps the row + restores FIRE button
       }
       const banResult = await apiBan(username, 0, reason || 'Death Row execution');
       rpcCall('modBanConfirm', {
@@ -23652,9 +23660,32 @@ Analyze this comment against the community rules. Then write a brief, profession
         gaw_response_status: (banResult && banResult.status) || 0,
         gaw_response_ok: !!(banResult && banResult.ok)
       }).catch(() => {});
+      if (!banResult || !banResult.ok) {
+        // Ban failed but did not throw — surface the real failure and REJECT so the
+        // caller keeps the row + restores the FIRE button instead of false success.
+        let why = 'ban failed';
+        if (banResult && banResult.loginRedirect) why = 'session expired';
+        else if (banResult && banResult.timeout) why = 'request timed out';
+        else if (banResult && banResult.status) why = 'HTTP ' + banResult.status;
+        try { snack('✗ DR ban FAILED: ' + username + ' — ' + why, 'error'); } catch(_){}
+        throw new Error(why);
+      }
+      // Only NOW is the ban confirmed — safe to drop from Death Row.
+      removeFromDeathRow(username);
       try { snack('✓ DR ban fired: ' + username, 'success'); } catch(_){}
     } catch (e) {
+      // Restore the DR entry if we snapshotted one and it's no longer present
+      // (only relevant if the throw happened after a successful removeFromDeathRow,
+      // which can't happen in the current flow, but defensive against future edits).
+      if (drEntry && !getDeathRow().some(d => d.username.toLowerCase() === username.toLowerCase())) {
+        try {
+          const dr = getDeathRow();
+          dr.push(drEntry);
+          saveDeathRow(dr);
+        } catch(_){}
+      }
       try { snack('Fire failed: ' + (e && e.message || e), 'error'); } catch(_){}
+      throw e; // propagate to caller's .catch so the FIRE button + row are restored
     }
   }
 
