@@ -22828,18 +22828,33 @@ Analyze this comment against the community rules. Then write a brief, profession
                         a.status === 'failed' ? (a.http_status || '0') + '/' + (a.error || 'err') : '--';
         var tr = document.createElement('tr');
         tr.style.cssText = 'border-bottom:1px solid #1e1c1a';
-        tr.innerHTML =
-          '<td style="padding:4px 6px;color:' + statusColor + '">' + (a.status || '?') + '</td>' +
-          '<td style="padding:4px 6px;font-family:ui-monospace,monospace">' + (a.target_thing_id || '--') + '</td>' +
-          '<td style="padding:4px 6px;color:#9b9892">' + queuedAt + '</td>' +
-          '<td style="padding:4px 6px;color:#9b9892">' + executor + '</td>' +
-          '<td style="padding:4px 6px;color:#9b9892">' + resultTxt + '</td>';
+        // v10.49.5 P4 FIX (stored DOM injection): build cells via DOM construction
+        // with textContent, NOT string concatenation into innerHTML. Fields a.status,
+        // a.target_thing_id, a.executed_by, resultTxt (embeds a.error) and the
+        // catch-path e.message all come from the worker / server response and were
+        // concatenated raw — any attacker-controlled string executed as DOM.
+        function _auTd(text, extraCss) {
+          var td = document.createElement('td');
+          td.style.cssText = 'padding:4px 6px' + (extraCss ? ';' + extraCss : '');
+          td.textContent = (text == null || text === '') ? '--' : String(text);
+          return td;
+        }
+        tr.appendChild(_auTd(a.status || '?', 'color:' + statusColor));
+        tr.appendChild(_auTd(a.target_thing_id, 'font-family:ui-monospace,monospace'));
+        tr.appendChild(_auTd(queuedAt, 'color:#9b9892'));
+        tr.appendChild(_auTd(executor, 'color:#9b9892'));
+        tr.appendChild(_auTd(resultTxt, 'color:#9b9892'));
         tbody.appendChild(tr);
       });
       tbl.appendChild(tbody);
       body.appendChild(tbl);
     }).catch(function(e) {
-      body.innerHTML = '<div style="color:#f87171;padding:12px 0;font-size:10px">Failed to load: ' + String(e && e.message || e) + '</div>';
+      // v10.49.5 P4 FIX: error message via textContent, not innerHTML concat.
+      body.innerHTML = '';
+      var errDiv = document.createElement('div');
+      errDiv.style.cssText = 'color:#f87171;padding:12px 0;font-size:10px';
+      errDiv.textContent = 'Failed to load: ' + (e && e.message || e);
+      body.appendChild(errDiv);
     });
   }
 
