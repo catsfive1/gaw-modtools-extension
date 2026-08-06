@@ -2451,11 +2451,10 @@ async function _handleInviteClick(target) {
   }
   try {
     if (!isQa) {
-      const { gam_settings } = await chrome.storage.local.get('gam_settings');
-      const s = gam_settings || {};
-      const tok = s.workerModToken || '';
-      const lead = s.leadModToken || '';
-      if (!tok || !lead){
+      // v10.49.6 fix: gate on the background vault, not deleted plaintext fields.
+      // Phase-2 deleted workerModToken/leadModToken; reads here always returned ''.
+      const _invStat = await __tokensStatus();
+      if (!_invStat.hasTeamToken || !_invStat.hasLeadToken){
         resultEl.className = 'pop-token-status err';
         resultEl.textContent = 'need both team + lead token first';
         return;
@@ -2907,18 +2906,20 @@ async function openRotationRoster(opts) {
   }
 
   try {
-    const { gam_settings } = await chrome.storage.local.get('gam_settings');
-    const s = gam_settings || {};
-    const team = s.workerModToken || '';
-    const lead = s.leadModToken || '';
-    if (!team || !lead) {
+    // v10.49.6 fix: gate on the background vault, not deleted plaintext fields.
+    const _rosStat = await __tokensStatus();
+    if (!_rosStat.hasTeamToken || !_rosStat.hasLeadToken) {
       if (result) {
         result.className = 'pop-token-status err';
         result.textContent = 'need both team + lead token first';
       }
       return;
     }
-    const tokens = { team: team, lead: lead };
+    // `tokens` is vestigial: __issueBulkFromRoster ignores it (routes via
+    // popupRpc), and __dmAllUnrotated wants the mods array (pre-existing bug,
+    // not in scope here). Kept as a placeholder so downstream signatures are
+    // unchanged; only the gate above was broken by phase-2.
+    const tokens = null;
 
     // v5.0-Phase-1: route through RPC vault; background attaches tokens.
     const rList = await popupRpc('adminListMods', {});
@@ -3081,9 +3082,12 @@ async function rotateToken(statusElOverride) {
     if (!ok) { status.textContent = 'cancelled'; return; }
 
     status.textContent = 'rotating...';
-    const { gam_settings } = await chrome.storage.local.get('gam_settings');
-    const tok = (gam_settings || {}).workerModToken || '';
-    if (!tok) {
+    // v10.49.6 fix: gate on the background vault, not gam_settings.workerModToken.
+    // Phase-2 made encryption canonical and deleted the plaintext field, so the
+    // old read always returned '' and Rotate dead-ended with "no current token".
+    // __tokensStatus() asks the SW whether secretCache holds a decrypted token.
+    const _rotStat = await __tokensStatus();
+    if (!_rotStat.hasTeamToken) {
       status.className = 'pop-token-status err';
       status.textContent = 'no current token -- nothing to rotate';
       return;
