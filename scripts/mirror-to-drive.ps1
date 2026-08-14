@@ -1,4 +1,4 @@
-param([string]$Version = '10.18.2', [switch]$NoPause)
+param([string]$Version = '10.18.2', [switch]$NoPause, [switch]$CopyLog)
 $ErrorActionPreference = 'Stop'
 $src = "D:\AI\_PROJECTS\dist\gaw-modtools-chrome-store-v$Version.zip"
 $dstDir = 'E:\My Drive\_PROJECTS\modtools-ext'
@@ -33,13 +33,14 @@ try {
 }
 catch {
   Log ("FAIL: " + $_.Exception.Message) 'Red'
-  ($log -join "`r`n") | Set-Clipboard
-  Log '[log copied to clipboard]' 'Yellow'
+  $logRoot = 'D:\AI\_PROJECTS\logs'
+  if (Test-Path $logRoot) { ($log -join "`r`n") | Out-File (Join-Path $logRoot ('mirror-to-drive-FAIL-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')) -Encoding UTF8 }
+  if ($CopyLog) { ($log -join "`r`n") | Set-Clipboard; Log '[log copied to clipboard (opt-in)]' 'Yellow' }
   if (-not $NoPause) { Read-Host 'Press Enter to exit' | Out-Null }
   exit 2
 }
-($log -join "`r`n") | Set-Clipboard
-Log '[log copied to clipboard]' 'Green'
+# Clipboard only on explicit request (AGENTS.md §9 — the clipboard is Commander's)
+if ($CopyLog) { ($log -join "`r`n") | Set-Clipboard; Log '[log copied to clipboard (opt-in)]' 'Green' }
 try {
   [Console]::Beep(659, 160); Start-Sleep -Milliseconds 100
   [Console]::Beep(523, 160); Start-Sleep -Milliseconds 100

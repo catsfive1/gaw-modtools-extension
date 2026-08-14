@@ -7,7 +7,7 @@
   reports size + SHA256 + parse-clean status.
 #>
 [CmdletBinding()]
-param([switch]$NoPause)
+param([switch]$NoPause, [switch]$CopyLog)
 
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
@@ -114,9 +114,9 @@ try {
   $logPath = Join-Path $logRoot ("build-zip-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + ".log")
   $log | Set-Content -Path $logPath -Encoding UTF8
 
-  # Clipboard the full debug log (per Commander rule)
-  ($log -join "`r`n") | Set-Clipboard
-  Log '[full debug log copied to clipboard]' 'Green'
+  # Clipboard only on explicit request (AGENTS.md §9, revoked 2026-07-29:
+  # the clipboard is Commander's; the full log is already on file above)
+  if ($CopyLog) { ($log -join "`r`n") | Set-Clipboard; Log '[log copied to clipboard (opt-in)]' 'Green' }
 
   # E-C-G beep
   try {
@@ -131,8 +131,9 @@ try {
 catch {
   Log ("FAIL: " + $_.Exception.Message) 'Red'
   Log ("  at: " + $_.InvocationInfo.PositionMessage) 'DarkGray'
-  ($log -join "`r`n") | Set-Clipboard
-  Log '[full debug log copied to clipboard]' 'Yellow'
+  $logRoot = 'D:\AI\_PROJECTS\logs'
+  if (Test-Path $logRoot) { ($log -join "`r`n") | Out-File (Join-Path $logRoot ('build-zip-FAIL-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')) -Encoding UTF8 }
+  if ($CopyLog) { ($log -join "`r`n") | Set-Clipboard; Log '[log copied to clipboard (opt-in)]' 'Yellow' }
   try {
     [Console]::Beep(440, 160); Start-Sleep -Milliseconds 100
     [Console]::Beep(330, 600)
