@@ -39,3 +39,10 @@ Every fix + retest counts as one iteration. Target: 150 iterations.
 - **Full smoke suite: 850 passed / 0 failed** (session opened with 3 permanently-red suites).
 - D1 burn: ~21M reads/day + ~1.75M writes/day → projected <300K reads + <40K writes/day under the 5M/100K free caps (enforced 2026-09-01).
 - Deferred to v.next (documented, not forgotten): modmail urgency enrich pipeline + bulk-resolve endpoint, evidence retrieval RPC/UI (evidence is currently write-only), audit-log viewer panel, watchlist attribution, brigade notify per-incident dedupe, burst-detect on-alarm, profile-river SPA init + wrong-container append, gamConfirm focus trap, invite #fragment delivery, plaintext IDB backup encryption, LEAD_MOD_TOKEN env-secret retirement, verifiedAgo/token-age unification, hidden-tab poll gating.
+
+## Post-session addendum (2026-08-31): D1 HARVEST
+
+- Read-only harvest executed per Commander prompt -> `D:\AI_\PROJECTS\cloudflare-worker\D1_HARVEST_REPORT.md`
+- NEW account-wide finding: cc-ledger (CAT CHOIR worker) burns ~508K reads/day (10% of read cap) from 13-second stat polls - small indexed tables, pure frequency cost; fix = cadence/cache in CAT CHOIR worker.
+- Production EQP battery proves zero unbounded scans remain on gaw-audit; one designed scan documented (keyword picker, 673 rows/tick) with micro-cache fix.
+- Batching plan (7 ranked items) in report section 6 - top two: per-ban audit batch endpoint + modmail bulk resolve. Framing: D1 bills ROWS not statements; batch() saves round-trips, row elimination saves quota.
