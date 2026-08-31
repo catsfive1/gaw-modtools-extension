@@ -4,8 +4,9 @@
 // Slices the REAL _writeTokenBackup/_readTokenBackup out of background.js and
 // drives them against a mock chrome.storage.local + stub crypt, then simulates
 // the loadSecrets restore-on-empty block to prove the self-heal end to end.
-// The headline property: the backup is DECRYPT-INDEPENDENT (plaintext fallback),
-// so it survives the v10.11.1 crypto-key-loss case the main vault does not.
+// v10.49.6 PHASE-2 contract: the backup is ENCRYPTED-ONLY (no plaintext
+// worker_pt field is ever written); legacy v1 worker_pt rows still migrate
+// on read. Key-loss recovery is handled by the Phase-1 guard, not plaintext.
 
 import { readFileSync } from 'node:fs';
 const SRC = readFileSync(new URL('../background.js', import.meta.url), 'utf8');
@@ -40,13 +41,14 @@ function check(name, cond, extra) { if (cond) { pass++; log.push('  PASS  ' + na
 
 log.push('=== v10.23.0 lockout-proof L4/L5 backup+restore smoke ===\n');
 
-// [1] round-trip: save a token -> backup has plaintext + encrypted -> read returns it
+// [1] round-trip: save a token -> backup is ENCRYPTED-ONLY -> read returns it
 {
   M.clearStore(); M.setCache('TEAMTOKEN_abc123', '');
   await M._writeTokenBackup();
   const b = M.store.gam_token_backup_v1;
   check('backup written', !!b, 'b=' + JSON.stringify(b && {pt: b.worker_pt, enc: !!b.worker_enc, ver: b.ver}));
-  check('backup has plaintext fallback', b && b.worker_pt === 'TEAMTOKEN_abc123');
+  // v10.49.6 PHASE-2: plaintext fallback is GONE -- encrypted-only backup.
+  check('backup does NOT write a plaintext worker_pt field (encrypted-only)', b && b.worker_pt === undefined);
   check('backup has encrypted blob', !!(b && b.worker_enc && b.worker_enc.alg === 'AES-GCM-256-v1'));
   const r = await M._readTokenBackup();
   check('read returns the token', r === 'TEAMTOKEN_abc123', 'r=' + r);
@@ -68,14 +70,22 @@ log.push('=== v10.23.0 lockout-proof L4/L5 backup+restore smoke ===\n');
   check('encrypted-only backup decrypts on read', r === 'ENCONLY', 'r=' + r);
 }
 
-// [4] crypto-loss case: write with encryption FAILING -> plaintext fallback still saved + readable
+// [4] crypto-loss: write with encryption FAILING -> NO plaintext fallback is
+// written (v10.49.6 PHASE-2: encrypted-only; key-loss recovery is the Phase-1
+// guard's job, so the write is skipped rather than downgraded to plaintext)
 {
   M.clearStore(); M.setCache('CRYPTLESS', ''); M.setEncFail(true);
   await M._writeTokenBackup(); M.setEncFail(false);
   const b = M.store.gam_token_backup_v1;
-  check('crypto-loss: plaintext still written (no worker_enc)', b && b.worker_pt === 'CRYPTLESS' && !b.worker_enc);
+  check('crypto-loss: NO backup written (no plaintext fallback, encrypted-only)', !b);
+}
+// [4b] legacy migration: an old v1 backup with worker_pt still restores on read
+// (re-encrypted + plaintext dropped on the next _writeTokenBackup call)
+{
+  M.clearStore();
+  M.store.gam_token_backup_v1 = { ver: 1, savedAt: 1, worker_pt: 'LEGACY_PT_TOKEN' };
   const r = await M._readTokenBackup();
-  check('crypto-loss: still restorable via plaintext (the v10.11.1 fix)', r === 'CRYPTLESS', 'r=' + r);
+  check('legacy worker_pt row still migrates on read', r === 'LEGACY_PT_TOKEN', 'r=' + r);
 }
 
 // [5] self-heal flow: vault empty + backup present -> restore (mirrors the loadSecrets L5 block)

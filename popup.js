@@ -275,6 +275,75 @@ function __tokShowRecovery() {
   } catch (_) {}
 }
 
+// v10.50.1 (persona-sim audit FIX 1): worker-down is NOT "new mod". A whoami
+// transport failure (fetch threw / aborted / timed out / RPC bridge dead --
+// anything with no HTTP status) used to render State A (new-mod onboarding)
+// and auto-route the popup to Tokens, lying to authenticated mods whenever
+// the worker was briefly down. Now transport failure keeps the mod's known
+// identity (State B when a token/backup exists) and shows a plain-English
+// can't-reach note with a Retry that re-runs the probe. ONLY a real 401/403
+// may enter the onboarding / recovery paths (handled in __applyTierGate).
+function __whoamiTransportFailed(r) {
+  // No HTTP status at all == the request never got an answer (background
+  // _rpcWorkerCall catch returns status:0; popupRpc bridge failures carry no
+  // status). Any real status (401/403 auth, 5xx, 429) is NOT transport.
+  return !r || !r.status;
+}
+
+async function __tokShowUnreachable() {
+  // Known identity = SW vault holds a token, or a local token backup exists.
+  let hasKnown = false;
+  try {
+    const st = await __tokensStatus();
+    let backup = false;
+    try {
+      const f = await chrome.storage.local.get('gam_token_backup_v1');
+      backup = !!(f && f.gam_token_backup_v1);
+    } catch (_) {}
+    hasKnown = !!(st && (st.hasTeamToken || st.hasLeadToken)) || backup;
+  } catch (_) {}
+  try {
+    if (hasKnown) {
+      // Keep the returning-mod UI with the last known identity. The banner
+      // reads "Token active" from local knowledge -- the note below says why
+      // the live probe could not confirm it right now.
+      __tokSetState('returning', { username: _gamWhoamiUsername || '', tier: _gamTier, ageDays: -1 });
+    } else {
+      // No token anywhere: genuinely not an authenticated mod. Onboarding is
+      // the honest state; the can't-reach note still explains the probe fail.
+      __tokSetState('first-run');
+    }
+  } catch (_) {}
+  // Reuses #whoamiStatus so a late whoami success (the __applyTierGate
+  // timeout path) removes the whole note when State B renders for real.
+  try {
+    var statusEl = document.getElementById('whoamiStatus');
+    if (!statusEl) {
+      statusEl = document.createElement('div');
+      statusEl.id = 'whoamiStatus';
+      statusEl.className = 'pop-token-status';
+      statusEl.style.cssText = 'color:var(--bb-warn);margin-top:4px;font-size:11px';
+      var card = document.getElementById('card-tokens');
+      if (!card) return;
+      card.appendChild(statusEl);
+    }
+    while (statusEl.firstChild) statusEl.removeChild(statusEl.firstChild);
+    statusEl.appendChild(document.createTextNode(
+      "Can't reach the ModTools server \u2014 your token is still saved. Retry in a moment."));
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pop-btn pop-btn-ghost';
+    btn.style.cssText = 'margin-left:8px;font-size:10px;padding:2px 8px;vertical-align:middle';
+    btn.textContent = 'Retry';
+    btn.addEventListener('click', function () {
+      try { if (statusEl.parentNode) statusEl.parentNode.removeChild(statusEl); } catch (_) {}
+      try { __applyTierGate(); } catch (_) {}
+    });
+    statusEl.appendChild(btn);
+    statusEl.style.display = '';
+  } catch (_) {}
+}
+
 // Populate the verified-status banner with live data.
 // opts: { username, tier, verifiedAgo, ageDays, encrypted }
 function __tokUpdateBanner(opts) {
@@ -2057,30 +2126,34 @@ async function __applyTierGate() {
   // was discarded entirely. Now: timeout shows a "Reconnecting..." snack,
   // routes to first-run (still gives user an actionable path), but does NOT
   // discard a late resolve -- if whoami eventually returns, re-apply state B.
+  // v10.50.1 FIX 1 supersedes the routing above: timeout = transport failure,
+  // so it shows the can't-reach state (__tokShowUnreachable), NOT first-run.
   let _whoamiTimedOut = false;
+  let _probeResolved = false; // v10.50.1 FIX 1: probe-transport throw vs render throw
   const _whoamiTimer = setTimeout(function() {
     _whoamiTimedOut = true;
-    try { __tokSetState('first-run'); } catch(_){}
-    try { _cardAuthFailed(); } catch(_){}
-    // v10.14.0 V14-T5: visible reconnecting state so user knows it's in flight.
-    try {
-      var statusEl = document.getElementById('whoamiStatus') || document.getElementById('tokRecoveryStatus');
-      if (!statusEl) {
-        statusEl = document.createElement('div');
-        statusEl.id = 'whoamiStatus';
-        statusEl.className = 'pop-token-status';
-        statusEl.style.cssText = 'color:var(--bb-warn);margin-top:4px;font-size:11px';
-        var card = document.getElementById('card-tokens');
-        if (card) card.appendChild(statusEl);
-      }
-      statusEl.textContent = 'Reconnecting...';
-    } catch(_){}
+    // v10.50.1 FIX 1: whoami timeout is a TRANSPORT failure, not auth. Pre-fix
+    // this rendered State A (new-mod onboarding) + _cardAuthFailed -- lying to
+    // any authenticated mod whenever the worker was slow. Now: can't-reach
+    // state (known identity kept) + Retry. A late resolve still re-applies
+    // State B below; the note reuses #whoamiStatus so the late-resolve
+    // cleanup removes it.
+    try { __tokShowUnreachable(); } catch(_){}
   }, 5000);
 
   try {
     const r = await popupRpc('modWhoami');
+    _probeResolved = true;
     clearTimeout(_whoamiTimer);
     if (!r || !r.ok || !r.data) {
+      // v10.50.1 FIX 1: transport failure (no HTTP status) or any non-401/403
+      // HTTP status (5xx/429 -- server-side problem) is NOT an auth rejection.
+      // Show the can't-reach state and keep the mod's known identity. ONLY a
+      // real 401/403 may enter the onboarding / recovery paths below.
+      if (__whoamiTransportFailed(r) || (r.status !== 401 && r.status !== 403)) {
+        try { await __tokShowUnreachable(); } catch (_) {}
+        return;
+      }
       // v10.24.0 (lockout-proof L2): a returning operator whose token was REJECTED
       // (L1 flags gam_auth_failed) -- or who has a token backup -- is NOT a new mod.
       // Show RECOVERY (reframe + pre-open token paste + point to the .bat), never the
@@ -2162,9 +2235,11 @@ async function __applyTierGate() {
   } catch (_) {
     if (_whoamiTimedOut) return;
     clearTimeout(_whoamiTimer);
-    // Network/auth failure - explicit State A, fail-closed
-    try { __tokSetState('first-run'); } catch(_){}
-    _cardAuthFailed();
+    // v10.50.1 FIX 1: an exception from the probe is a transport/popup
+    // failure, not an auth rejection -- never State A. If the probe itself
+    // had already resolved (a later render step threw), leave the partially
+    // rendered State B alone rather than flashing onboarding.
+    if (!_probeResolved) { try { await __tokShowUnreachable(); } catch (__) {} }
   }
 }
 
@@ -2876,8 +2951,153 @@ function __buildRosterRow(m, tokens) {
     actionsHaveContent = true;
   }
 
+  // v10.50.2: lead-only "Remove access". POST /admin/mod/revoke nulls the
+  // mod's token_hash + token server-side, so a departed mod's token stops
+  // working immediately. Worker refuses self-revoke + last-active-lead; the
+  // error mapping below surfaces those as plain sentences.
+  if (_gamTier === 'lead') {
+    const rmBtn = document.createElement('button');
+    rmBtn.type = 'button';
+    rmBtn.style.cssText = 'font-size:11px;padding:3px 10px;color:#b91c1c;background:none;border:none;cursor:pointer';
+    rmBtn.textContent = 'Remove access';
+    rmBtn.addEventListener('click', async function () {
+      const confirmed = await __popupConfirm({
+        title: "Remove " + m.mod_username + "'s access?",
+        body: 'Their token stops working immediately.',
+        okLabel: 'Remove access',
+        cancelLabel: 'Cancel'
+      });
+      if (!confirmed) return;
+      rmBtn.disabled = true;
+      rmBtn.textContent = 'removing...';
+      let r = null;
+      try { r = await popupRpc('modAdminRevoke', { username: m.mod_username }); } catch (e) { r = null; }
+      rmBtn.disabled = false;
+      rmBtn.textContent = 'Remove access';
+      const prevNote = row.querySelector('.gam-roster-revoke-note');
+      if (prevNote) prevNote.remove();
+      const note = document.createElement('div');
+      note.className = 'gam-roster-revoke-note';
+      note.style.cssText = 'font-size:11px;line-height:1.4;word-break:break-word';
+      if (r && r.ok && r.data && r.data.ok) {
+        note.style.color = '#3dd68c';
+        note.textContent = 'Access removed \u2014 ' + m.mod_username + "'s token no longer works.";
+        row.appendChild(note);
+        // Refresh so the roster reflects the cleared token. Brief delay so
+        // the confirmation sentence is readable before the rebuild.
+        setTimeout(function () { __refreshRosterPanel(row.parentElement); }, 1200);
+      } else {
+        note.style.color = '#b91c1c';
+        const workerErr = (r && r.data && r.data.error) || (r && r.error) || '';
+        if (workerErr.indexOf('cannot revoke your own token') !== -1) {
+          note.textContent = 'cannot revoke your own token';
+        } else if (workerErr.indexOf('cannot revoke the last active lead') !== -1) {
+          note.textContent = 'cannot revoke the last active lead';
+        } else {
+          note.textContent = 'Removal failed \u2014 try again.';
+        }
+        row.appendChild(note);
+      }
+    });
+    actions.appendChild(rmBtn);
+    actionsHaveContent = true;
+  }
+
   if (actionsHaveContent) row.appendChild(actions);
   return row;
+}
+
+// v10.50.2: rebuild an open roster panel in place (after a revoke, the row's
+// token state is stale). openRotationRoster is a TOGGLE -- display 'block'
+// means "close" -- so hide first, then reopen with the panel/result ids
+// recorded at build time.
+function __refreshRosterPanel(panel) {
+  if (!panel || !panel.id) return;
+  const resultId = panel.dataset.rosterResultId ||
+    (panel.id === 'leadRotateRosterPanel' ? 'leadRotateResult' : 'rotateInviteResult');
+  panel.style.display = 'none';
+  try { openRotationRoster({ panelId: panel.id, resultId: resultId }); } catch (_) {}
+}
+
+// v10.50.2: lead-only "Add new mod" affordance at the top of the roster.
+// One field + one button -> provisions a DISABLED mod_tokens row (token NULL,
+// nothing can authenticate until the invite is claimed) and mints the
+// rotation invite in a single RPC (modRotationInvite, provision_if_missing).
+// The invite code is shown exactly once, in plain text, with a copy button.
+function __buildRosterAddMod() {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'padding:8px 0;border-bottom:1px solid #1a1c20';
+
+  const label = document.createElement('div');
+  label.style.cssText = 'font-size:11px;color:#9b9892;font-weight:600;margin-bottom:4px';
+  label.textContent = 'Add new mod';
+  wrap.appendChild(label);
+
+  const line = document.createElement('div');
+  line.style.cssText = 'display:flex;gap:6px;align-items:center';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'GAW username';
+  input.maxLength = 32;
+  input.setAttribute('aria-label', 'GAW username');
+  input.style.cssText = 'flex:1;min-width:0;font-size:11px;padding:4px 6px;background:#0a0a0b;color:#e4e4e4;border:1px solid #2a2a2a;border-radius:3px';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'pop-btn pop-btn-primary';
+  btn.style.cssText = 'font-size:11px;padding:4px 10px;flex-shrink:0';
+  btn.textContent = 'Provision + invite';
+  line.appendChild(input);
+  line.appendChild(btn);
+  wrap.appendChild(line);
+
+  const err = document.createElement('div');
+  err.style.cssText = 'display:none;font-size:11px;color:#b91c1c;margin-top:3px';
+  wrap.appendChild(err);
+
+  const result = document.createElement('div');
+  wrap.appendChild(result);
+
+  btn.addEventListener('click', async function () {
+    const username = input.value.trim();
+    err.style.display = 'none';
+    result.replaceChildren();
+    // Client-side shape gate (same regex the worker enforces).
+    if (!/^[A-Za-z0-9_-]{2,32}$/.test(username)) {
+      err.textContent = 'Username must be 2-32 characters: letters, numbers, - or _ only.';
+      err.style.display = 'block';
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'provisioning...';
+    let r = null;
+    try { r = await popupRpc('modRotationInvite', { username: username, provision_if_missing: true }); } catch (e) { r = null; }
+    btn.disabled = false;
+    btn.textContent = 'Provision + invite';
+    if (r && r.ok && r.data && r.data.ok && r.data.code) {
+      const sent = document.createElement('div');
+      sent.style.cssText = 'font-size:11px;color:#e4e4e4;margin-top:6px;line-height:1.5';
+      sent.textContent = 'Send this code to ' + username + ' \u2014 it works once and expires in ' + (r.data.ttl_hours || 72) + ' hours.';
+      result.appendChild(sent);
+      const codeRow = document.createElement('div');
+      codeRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:4px';
+      const codeEl = document.createElement('span');
+      codeEl.style.cssText = 'font:11px ui-monospace,monospace;color:#4A9EFF;word-break:break-all;flex:1';
+      codeEl.textContent = r.data.code;
+      codeRow.appendChild(codeEl);
+      codeRow.appendChild(__makeCopyBtn('Copy code', r.data.code, null, true));
+      result.appendChild(codeRow);
+      input.value = '';
+      return;
+    }
+    const workerErr = (r && r.data && r.data.error) || (r && r.error) || '';
+    err.textContent = workerErr ? ('Invite failed \u2014 ' + workerErr) : 'Invite failed \u2014 try again.';
+    err.style.display = 'block';
+  });
+  // Enter in the input submits the provision.
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); btn.click(); }
+  });
+  return wrap;
 }
 
 async function openRotationRoster(opts) {
@@ -2937,6 +3157,9 @@ async function openRotationRoster(opts) {
     // Build panel
     panel.replaceChildren();
     panel.style.cssText = 'display:block;max-height:380px;overflow-y:auto;background:#0f1114;border:1px solid #2a2a2a;border-radius:6px;padding:8px;margin-top:8px';
+    // v10.50.2: record the result element id so __refreshRosterPanel can
+    // reopen this exact panel after an in-row revoke.
+    panel.dataset.rosterResultId = resultId;
 
     const header = document.createElement('div');
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #2a2a2a';
@@ -2996,6 +3219,12 @@ async function openRotationRoster(opts) {
     header.appendChild(closeBtn);
 
     panel.appendChild(header);
+
+    // v10.50.2: lead-only "Add new mod" affordance -- provision a disabled
+    // token row + mint the invite in one call, code shown once below it.
+    if (_gamTier === 'lead') {
+      panel.appendChild(__buildRosterAddMod());
+    }
 
     for (const m of mods) {
       panel.appendChild(__buildRosterRow(m, tokens));
@@ -3224,6 +3453,26 @@ async function claimRotationInvite() {
           'Contact lead mod for a fresh rotation invite to recover. Detail: ' + (rClaim.detail || '');
         return;
       }
+      // v10.50.1 FIX 3: same plain-English mapping as the first-run wizard
+      // claim (worker v10.50.1: 429 too_many_attempts; 404 invalid no longer
+      // burns the invite on a wrong username).
+      const _rst = rClaim && rClaim.status;
+      const _rerr = (rClaim && rClaim.data && rClaim.data.error) || (rClaim && rClaim.error) || '';
+      if (_rst === 429 && _rerr === 'too_many_attempts') {
+        status.className = 'pop-token-status err';
+        status.textContent = 'Too many attempts \u2014 wait one minute, then try again.';
+        return;
+      }
+      if (_rst === 404 && _rerr === 'invalid') {
+        status.className = 'pop-token-status err';
+        status.textContent = "That invite didn't work \u2014 check the exact spelling of your GAW username (it's now safe to retry), or ask your lead for a fresh link.";
+        return;
+      }
+      if (!_rst) {
+        status.className = 'pop-token-status err';
+        status.textContent = "Can't reach the ModTools server \u2014 wait a minute and retry.";
+        return;
+      }
       status.className = 'pop-token-status err';
       let msg = 'claim rejected (HTTP ' + (rClaim && rClaim.status || '?') + ')';
       if (rClaim && rClaim.data && rClaim.data.error) msg += ' -- ' + rClaim.data.error;
@@ -3259,6 +3508,10 @@ async function verifyTokenRoundTrip() {
       status.className = 'pop-token-status ok';
       status.textContent = '✓ verified -- token works as ' + r.data.username;
       try { await __noteWhoami(r.data.username); } catch(_){}
+    } else if (__whoamiTransportFailed(r)) {
+      // v10.50.1 FIX 2/3: worker-down is NOT "you may be locked out".
+      status.className = 'pop-token-status err';
+      status.textContent = "Can't reach the ModTools server \u2014 this is NOT a token problem. Wait a minute and retry.";
     } else {
       status.className = 'pop-token-status err';
       status.textContent = '✗ token verification FAILED -- you may be locked out. Use lead-issued rotation invite to recover.';
@@ -3980,6 +4233,26 @@ async function __claimInviteClick() {
   } catch (_) {}
 })();
 
+// v10.50.1 FIX 4: update-ready chip. The background /version check writes
+// gam_update_available to chrome.storage.local when a newer build exists --
+// the popup never surfaced it. Render a small amber chip next to the version
+// on popup open. Plain text only.
+(function() {
+  try {
+    chrome.storage.local.get('gam_update_available').then(function(f) {
+      if (!f || !f.gam_update_available) return;
+      var verEl = document.getElementById('ver');
+      if (!verEl || document.getElementById('gamUpdateChip')) return;
+      var chip = document.createElement('span');
+      chip.id = 'gamUpdateChip';
+      chip.setAttribute('role', 'status');
+      chip.textContent = 'Update ready \u2014 reload extension';
+      chip.style.cssText = 'display:inline-block;margin:4px;padding:2px 6px;background:#92400e;color:#ffffff;font-size:11px;border-radius:4px;vertical-align:middle';
+      verEl.insertAdjacentElement('afterend', chip);
+    }).catch(function() {});
+  } catch (_) {}
+})();
+
 // E.2.5 (AF-09 Rule 26): set '--' placeholder in stat cells before loadStats() runs
 // Prevents blank-to-zero flash on cold start or after storage clear.
 // ASK-086 / WAVE-B-AUX A.3: s-ai-today added to placeholder list.
@@ -4173,12 +4446,25 @@ loadLead();
       }
       const username = $('firstRunUsername').value.trim();
       if (!username) { status.textContent = 'enter your GAW username'; status.style.color = '#ff3b3b'; return; }
-      status.textContent = '⌛ minting your team token via /mod/token/claim-rotation...';
+      status.textContent = '⌛ Setting up your access…';
       status.style.color = '#ff9933';
       try {
         const r = await popupRpc('authClaimInvite', { code, username });
         if (!r || !r.ok) {
-          status.textContent = 'claim failed: ' + ((r && r.data && r.data.error) || (r && r.error) || 'unknown');
+          // v10.50.1 FIX 3: plain-English claim errors (worker v10.50.1:
+          // 429 too_many_attempts rate limit; 404 invalid no longer burns
+          // the invite on a wrong username).
+          const _cst = r && r.status;
+          const _cerr = (r && r.data && r.data.error) || (r && r.error) || '';
+          if (_cst === 429 && _cerr === 'too_many_attempts') {
+            status.textContent = 'Too many attempts \u2014 wait one minute, then try again.';
+          } else if (_cst === 404 && _cerr === 'invalid') {
+            status.textContent = "That invite didn't work \u2014 check the exact spelling of your GAW username (it's now safe to retry), or ask your lead for a fresh link.";
+          } else if (!_cst) {
+            status.textContent = "Can't reach the ModTools server \u2014 wait a minute and retry.";
+          } else {
+            status.textContent = 'claim failed: ' + (_cerr || 'unknown');
+          }
           status.style.color = '#ff3b3b';
           return;
         }
@@ -4192,6 +4478,11 @@ loadLead();
           // input now lives inside #tokManagementDetails (State B), not next to
           // the wizard. State transition handles visibility.
           setTimeout(() => { _cardWizardComplete(); try { loadToken(); loadLead(); loadStats(); } catch(_){} }, 5000);
+        } else if (__whoamiTransportFailed(who)) {
+          // v10.50.1 FIX 3: the claim itself succeeded -- a transport failure
+          // on the confirmation probe is not a claim problem.
+          status.textContent = "Can't reach the ModTools server \u2014 wait a minute and retry.";
+          status.style.color = '#ffd84d';
         } else {
           status.textContent = 'token minted but whoami probe failed -- try refreshing';
           status.style.color = '#ffd84d';
@@ -4209,7 +4500,7 @@ loadLead();
         status.style.color = '#ff3b3b';
         return;
       }
-      status.textContent = '⌛ saving + verifying via /mod/whoami...';
+      status.textContent = '⌛ Checking with your team server…';
       status.style.color = '#ff9933';
       try {
         // v10.49.6 PHASE-2: persist via authValidateToken (validates server-side +
@@ -4218,7 +4509,13 @@ loadLead();
         // the durable+encrypted write was skipped and the token vanished on SW eviction.
         const vr = await popupRpc('authValidateToken', { token: input });
         if (!vr || !vr.ok) {
-          status.textContent = 'token rejected or save failed: ' + (vr && vr.error || 'unknown') + ' (HTTP ' + (vr && vr.status || '?') + ')';
+          // v10.50.1 FIX 3: transport vs rejection split before raw text.
+          const _vst = vr && vr.status;
+          if (!_vst) {
+            status.textContent = "Can't reach the ModTools server \u2014 wait a minute and retry.";
+          } else {
+            status.textContent = 'token rejected or save failed: ' + (vr && vr.error || 'unknown') + ' (HTTP ' + _vst + ')';
+          }
           status.style.color = '#ff3b3b';
           return;
         }
@@ -4231,6 +4528,10 @@ loadLead();
           // input now lives inside #tokManagementDetails (State B), not next to
           // the wizard. State transition handles visibility.
           setTimeout(() => { _cardWizardComplete(); try { loadToken(); loadLead(); loadStats(); } catch(_){} }, 5000);
+        } else if (__whoamiTransportFailed(who)) {
+          // v10.50.1 FIX 3: don't claim "worker rejected" when unreachable.
+          status.textContent = "Can't reach the ModTools server \u2014 wait a minute and retry.";
+          status.style.color = '#ffd84d';
         } else {
           // Likely the user pasted an invite code instead of a token
           status.innerHTML = 'worker rejected as token (HTTP ' + (who && who.status || '?') + '). It looks like you may have pasted an INVITE CODE instead. Click Back and try the "invite CODE" path.';
@@ -6072,9 +6373,17 @@ async function maintTokenProbe() {
     const r = await popupRpc('modWhoami');
     const latency = Date.now() - t0;
     if (!r || !r.ok || !r.data) {
-      __maintLog('tokenProbe', 'err', { status: r && r.status, error: r && r.error });
-      __maintSetStatus('maintTokenStatus',
-        'whoami failed (HTTP ' + (r && r.status || '?') + ') -- token may be invalid', 'err');
+      // v10.50.1 FIX 2: transport failure is NOT a token problem. Don't tell
+      // the mod their token may be invalid when the worker is simply down.
+      const _pstat = r && r.status;
+      __maintLog('tokenProbe', 'err', { status: _pstat, error: r && r.error });
+      if (!_pstat || (_pstat !== 401 && _pstat !== 403)) {
+        __maintSetStatus('maintTokenStatus',
+          'Worker unreachable \u2014 this is NOT a token problem. Try the Ping worker probe in Diag.', 'err');
+      } else {
+        __maintSetStatus('maintTokenStatus',
+          'whoami failed (HTTP ' + _pstat + ') -- token may be invalid', 'err');
+      }
       return;
     }
     const username = r.data.username || '?';

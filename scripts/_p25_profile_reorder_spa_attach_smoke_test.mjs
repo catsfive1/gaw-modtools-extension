@@ -73,7 +73,10 @@ const reorderBody = src.slice(reorderStart, reorderEnd);
 check('reorder fn found', reorderStart !== -1);
 check('HI-1: reorder fn has NO ban/queue/execute refs (pure DOM sort)',
   !/executeBan|apiBan|addToDeathRow|batchDeathRow|instantPermaBan|processDeathRow/.test(reorderBody));
-check('reorder fn sorts newest-first by <time> descending', reorderBody.includes('getT(b) - getT(a)'));
+// v10.49.3: comparator refactored from `getT(b) - getT(a)` to scored objects
+// sorted by `(a, b) => b.t - a.t` (t = getT(...) with sibling interpolation).
+// Behavior is unchanged: newest-first by <time> descending.
+check('reorder fn sorts newest-first by <time> descending', /\(a,\s*b\)\s*=>\s*b\.t\s*-\s*a\.t/.test(reorderBody));
 check('reorder fn separates posts from comments (never mixed)', reorderBody.includes(':not([data-type="comment"])'));
 
 // ── (4) v10.49.0 race-proof CSS veto (complementary layer) ──────────────

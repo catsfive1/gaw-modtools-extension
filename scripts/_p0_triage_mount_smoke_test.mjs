@@ -44,10 +44,15 @@ function run(logs) {
   // getSetting('autoRunRulesOnLoad', true) -- stub returns the passed
   // fallback (true) to preserve this test's pre-existing behavior.
   const stubGetSetting = (key, fallback) => fallback;
+  // v10.48.0 added a detectRegistrationBursts(newUsernames) call inside
+  // scrapeCurrentPage (opt-in toast; own coverage lives in
+  // _p24_username_burst_and_dr_pattern_smoke_test.mjs). Stub it here so this
+  // harness keeps exercising extraction + mount, not burst detection.
+  const stubDetectRegistrationBursts = () => [];
   const scrapeCurrentPage = new Function(
-    'trySelectAll', 'rosterAdd', 'applyAutoDeathRowRules', 'getSetting',
+    'trySelectAll', 'rosterAdd', 'applyAutoDeathRowRules', 'getSetting', 'detectRegistrationBursts',
     fnSrc + '\n return scrapeCurrentPage;'
-  )(stubTrySelectAll, stubRosterAdd, stubApplyAutoDR, stubGetSetting);
+  )(stubTrySelectAll, stubRosterAdd, stubApplyAutoDR, stubGetSetting, stubDetectRegistrationBursts);
   const count = scrapeCurrentPage();
   return { count, added };
 }

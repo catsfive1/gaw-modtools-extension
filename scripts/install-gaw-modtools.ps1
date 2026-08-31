@@ -11,14 +11,18 @@
   Defaults to the latest GitHub Releases URL if omitted.
 .PARAMETER InstallPath
   Where to extract the unpacked extension.
-  Defaults to D:\AI\_PROJECTS\dist\mod-tools dist (the path already in Chrome).
+  Defaults to %LOCALAPPDATA%\GAWModTools (created if missing; works on any PC).
+  Pass -InstallPath "D:\AI\_PROJECTS\dist\mod-tools dist" to reuse the
+  developer path already loaded in Chrome.
 .PARAMETER ExpectedVersion
   If provided, the script checks that manifest.json inside the ZIP reports
   this version. Leave blank to skip the version check.
 .PARAMETER InviteCode
   Optional invite code (e.g. mt_invite_xxx) received in the Discord DM.
-  If provided, it is written to the clipboard so you can paste it into the
-  extension popup on first run. The script also tells you exactly where to paste it.
+  If provided, the code is printed to the console and written to the install
+  log so you can paste it into the extension popup on first run. The script
+  also tells you exactly where to paste it. (Nothing is auto-copied to the
+  clipboard.)
 .PARAMETER NoPause
   Skip the "Press Enter to exit" pause. Useful for scripted/automated runs.
 .EXAMPLE
@@ -36,7 +40,7 @@
 [CmdletBinding()]
 param(
     [string]$ZipUrl = '',
-    [string]$InstallPath = 'D:\AI\_PROJECTS\dist\mod-tools dist',
+    [string]$InstallPath = (Join-Path $env:LOCALAPPDATA 'GAWModTools'),
     [string]$ExpectedVersion = '',
     [string]$InviteCode = '',
     [switch]$NoPause
@@ -362,16 +366,27 @@ try {
     Log ('  Elapsed           : ' + $elapsed + 's') 'Green'
     Log '=======================================' 'Green'
     Log '' 'Gray'
+    # Fresh vs update: $backupPath is only set when a previous install was found.
+    # ('(backup failed)' also counts as an update -- the extension is already
+    # loaded in Chrome either way.) Print ONLY the sequence that matches.
+    $isUpdate = ($backupPath -ne '')
     Log 'NEXT STEPS:' 'Cyan'
-    Log '  1. In Chrome/Brave/Edge, go to chrome://extensions (tab should be open).' 'Cyan'
-    Log '  2. Make sure Developer mode toggle (top-right) is ON.' 'Cyan'
-    Log '  3. Find GAW ModTools in the list.' 'Cyan'
-    Log '  4. Click the circular reload arrow on the card.' 'Cyan'
-    Log '  5. Refresh greatawakening.win and verify the toolbar shows v' + $installedVersion + '.' 'Cyan'
-    Log '' 'Gray'
-    Log '  If GAW ModTools is not in the list yet:' 'Yellow'
-    Log '  - Click Load unpacked and select this folder:' 'Yellow'
-    Log ('    ' + $InstallPath) 'Yellow'
+    if ($isUpdate) {
+        Log '  Previous install found (backed up above) -- the extension is already' 'Cyan'
+        Log '  loaded in your browser. Just reload it:' 'Cyan'
+        Log '  1. In Chrome/Brave/Edge, go to chrome://extensions (tab should be open).' 'Cyan'
+        Log '  2. Make sure Developer mode toggle (top-right) is ON.' 'Cyan'
+        Log '  3. Find GAW ModTools in the list.' 'Cyan'
+        Log '  4. Click the circular reload arrow on the card.' 'Cyan'
+        Log ('  5. Refresh greatawakening.win and verify the toolbar shows v' + $installedVersion + '.') 'Cyan'
+    } else {
+        Log '  Fresh install -- load the extension into your browser once:' 'Cyan'
+        Log '  1. In Chrome/Brave/Edge, go to chrome://extensions (tab should be open).' 'Cyan'
+        Log '  2. Turn ON "Developer mode" (toggle at the top-right).' 'Cyan'
+        Log '  3. Click "Load unpacked" and select this folder:' 'Cyan'
+        Log ('     ' + $InstallPath) 'Yellow'
+        Log ('  4. Refresh greatawakening.win and verify the toolbar shows v' + $installedVersion + '.') 'Cyan'
+    }
     if ($InviteCode) {
         Log '' 'Gray'
         Log '  Then paste your invite code in the extension popup -> Tokens tab.' 'Yellow'
@@ -402,8 +417,9 @@ try {
 
 # Step 1 already complete -- all output went through Log(); $log buffer is full.
 
-# Step 2: Persist log to file, then copy FULL debug log to clipboard.
-$logRoot = 'D:\AI\_PROJECTS\logs'
+# Step 2: Persist log to file. NEVER auto-copy the log to the clipboard --
+# the clipboard holds the invite link the mod just copied from Discord.
+$logRoot = try { if (Test-Path 'D:\AI\_PROJECTS\logs') { $logRoot = 'D:\AI\_PROJECTS\logs' } else { $logRoot = Join-Path $env:LOCALAPPDATA 'GAWModTools\logs' } } catch { $logRoot = Join-Path $env:LOCALAPPDATA 'GAWModTools\logs' }
 $logFile  = ''
 try {
     if (-not (Test-Path $logRoot)) { New-Item -ItemType Directory -Path $logRoot -Force | Out-Null }
@@ -413,9 +429,6 @@ try {
 } catch {
     Write-Host ('[WARN: could not save log file: ' + $_.Exception.Message + ']') -ForegroundColor Yellow
 }
-
-($log -join "`r`n") | Set-Clipboard
-Write-Host '[FULL DEBUG LOG COPIED TO CLIPBOARD]' -ForegroundColor Green
 
 # Step 3: E-C-G beep
 try {

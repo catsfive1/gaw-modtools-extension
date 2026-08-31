@@ -1093,21 +1093,29 @@
   // post-send (Commander #4). Best-effort: never blocks the actual send,
   // never throws to the caller. Used by /modmail/ai-reply-for-thread to
   // surface past replies as in-prompt examples.
+  // PHANTOM-TRACK FIX (P0): the RPC fires ONLY when opts.thread_id is present
+  // (a real modmail thread reply). Non-thread sends (warnings, notices,
+  // mod-console messages) never track.
   const apiSendModMessage = async (u, subject, message, opts) => {
     const r = await modPost('/submit_modmessage', {
       referrer: `https://greatawakening.win/u/${encodeURIComponent(u)}/`,
       target: u, subject: subject||'', community: COMMUNITY, message: message||''
     });
     try {
-      if (r && r.ok) {
+      if (r && r.ok && opts && opts.thread_id) {
+        // PHANTOM-TRACK FIX (P0): thread tracking fires ONLY on a real send
+        // (this success path, once per send) and ONLY for modmail replies --
+        // callers must pass opts.thread_id. Warning/notice/mod-console sends
+        // have no thread to attribute and must never create phantom
+        // 'replied' + claimed_by rows. Click-time tracks were removed.
         // AF-14 (Rule 40): queued:true -- if SW is down, enqueue for replay
         const _mmTrackArgs = {
-          thread_id:     (opts && opts.thread_id) || '',
+          thread_id:     opts.thread_id,
           sender:        u,
           subject:       subject || '',
           response_body: message || '',
-          ai_used:       (opts && opts.ai_used) ? 1 : 0,
-          ai_tone:       (opts && opts.ai_tone) || null,
+          ai_used:       opts.ai_used ? 1 : 0,
+          ai_tone:       opts.ai_tone || null,
           sent_at:       Date.now()
         };
         rpcCall('modmailTrackResponse', _mmTrackArgs).catch(function(e) {
@@ -4776,6 +4784,51 @@
     return _cleanup;
   }
 
+  // v10.50.0 A11Y (a11y + night-shift audit): keyboard contract for the SUS
+  // reason menus (the pinned-tooltip Mark-SUS picker and the action-strip
+  // Flag-SUS dropdown share this wiring). Gives a .gam-strip-menu:
+  //   - role="menu" on the container / role="menuitem" on each .gam-strip-item
+  //     (set-if-absent only), so screen readers announce it as a menu;
+  //   - ArrowUp/ArrowDown roving focus across items with wrap-around, Enter
+  //     activates natively (items are <a href> anchors), Space synthesizes a
+  //     click (anchors don't fire click on Space natively);
+  //   - _installPopoverTrap on every open: Tab-cycle + Escape dismiss +
+  //     focus-first-item-on-open + focus-restore-to-opener on close.
+  // The close path MUST invoke menu._gamPopTrapCleanup (all SUS close fns do)
+  // and is stashed as menu._gamStripMenuClose so the document-level handlers
+  // (outside click, global Escape) can trigger the real close path instead of
+  // just stripping the open class and orphaning the trap listeners.
+  function _gamWireStripMenuKeys(menu, closeFn) {
+    if (!menu || typeof closeFn !== 'function') return;
+    try {
+      if (!menu.hasAttribute('role')) menu.setAttribute('role', 'menu');
+      if (!menu._gamStripMenuWired) {
+        menu._gamStripMenuWired = true;
+        menu.addEventListener('keydown', function(e){
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const items = Array.prototype.slice.call(menu.querySelectorAll('.gam-strip-item'));
+            if (!items.length) return;
+            const idx = items.indexOf(document.activeElement);
+            const next = e.key === 'ArrowDown'
+              ? (idx < 0 ? 0 : (idx + 1) % items.length)
+              : (idx < 0 ? items.length - 1 : (idx - 1 + items.length) % items.length);
+            try { items[next].focus(); } catch(_){}
+          } else if (e.key === ' ') {
+            // menuitem anchors: Enter is native, Space is not -> synthesize.
+            const it = e.target && e.target.closest ? e.target.closest('.gam-strip-item') : null;
+            if (it && menu.contains(it)) { e.preventDefault(); it.click(); }
+          }
+        });
+        Array.prototype.forEach.call(menu.querySelectorAll('.gam-strip-item'), function(it){
+          try { if (!it.hasAttribute('role')) it.setAttribute('role', 'menuitem'); } catch(_){}
+        });
+      }
+      try { menu._gamStripMenuClose = closeFn; } catch(_){}
+      _installPopoverTrap(menu, closeFn);
+    } catch(_){}
+  }
+
   // --- v8.1 ux: aria-live ---
   // Two screen-reader live regions mounted on boot when flag on. snack() pipes
   // messages here; existing visual snack DOM is byte-identical to v8.0.
@@ -5935,6 +5988,24 @@
       return;
     }
     if (last.type === 'dr-add') {
+      // v10.50.1 (sim wave-1, NightOwl P0): if the entry already EXECUTED, the
+      // platform ban stands -- the old code toasted "Restored" while the user
+      // stayed permanently banned. Undo now unbans for real, or tells the truth.
+      const _drEntry = getDeathRow().find(d => String(d.username).toLowerCase() === String(last.target).toLowerCase());
+      if (_drEntry && _drEntry.status === 'executed') {
+        let _unbanned = false;
+        try { const _ur = await apiUnban(last.target); _unbanned = !!_ur; } catch (_) {}
+        if (!_unbanned) {
+          try { snack('⚠ Ban already executed and unban FAILED — ' + last.target + ' is still banned. Use Mod Console → Unban.', 'error'); } catch(_){}
+          return;
+        }
+        removeFromDeathRow(last.target);
+        try { rosterSetStatus(last.target, 'new'); } catch(_){}
+        try { snack('↩ Ban had already executed — ' + last.target + ' UNBANNED and cleared from Death Row', 'success'); } catch(_){}
+        try { logAction({ type: 'undo-dr-add-executed-unban', user: last.target, source: 'undo' }); } catch(_){}
+        try { if (typeof refreshTriageConsole === 'function') refreshTriageConsole(); } catch(_){}
+        return;
+      }
       removeFromDeathRow(last.target);
       try { rosterSetStatus(last.target, 'new'); } catch(_){}
       try {
@@ -9153,10 +9224,39 @@
       p.setAttribute('role', 'status');
       p.setAttribute('aria-live', 'polite');
       p.style.bottom = '210px';
+      p.style.display = 'flex';
+      p.style.alignItems = 'center';
+      p.style.gap = '10px';
+      // .gam-snack has pointer-events:none -- the Stop button needs clicks.
+      p.style.pointerEvents = 'auto';
       document.body.appendChild(p);
       requestAnimationFrame(()=>{ try { p.classList.add('gam-snack-show'); } catch(_){} });
     }
-    p.textContent = String(text);
+    // v10.43.1 P0 STOP: the progress text lives in a span so the injected
+    // Stop button survives per-inmate text updates (a bare textContent=
+    // assignment would wipe it every tick).
+    let t = p.querySelector('#gam-batch-progress-text');
+    if (!t) {
+      t = el('span', { id:'gam-batch-progress-text' });
+      p.appendChild(t);
+      const stopBtn = el('button', {
+        id: 'gam-batch-stop',
+        type: 'button',
+        title: 'Stop this batch: the ban already in flight finishes, no new bans start, everyone not yet processed stays queued on Death Row.',
+        'aria-label': 'Stop batch bans'
+      }, '\u270B Stop');
+      // Styled like the triage batch-bar buttons (.gam-t-batch-btn).
+      stopBtn.className = 'gam-t-batch-btn';
+      stopBtn.style.cssText = 'flex-shrink:0;white-space:nowrap;padding:3px 10px;font-weight:700';
+      stopBtn.addEventListener('click', ()=>{
+        globalThis._drCancelRequested = true; // checked between inmates by processDeathRow()
+        stopBtn.disabled = true;
+        stopBtn.textContent = 'Stopping\u2026';
+        try { t.textContent = 'Stopping after the current ban\u2026'; } catch(_){}
+      });
+      p.appendChild(stopBtn);
+    }
+    t.textContent = String(text);
     return p;
   }
   function _gamBatchProgressDone(){
@@ -9632,6 +9732,17 @@
   // ║  DEATH ROW PROCESSOR - runs on EVERY page load silently        ║
   // ╚══════════════════════════════════════════════════════════════════╝
 
+  // v10.43.1 P0 STOP (persona-sim audit): the batch loop below is ~60s of
+  // unstoppable irreversible bans once started (apiBan + verify + 2s stagger
+  // per inmate). Abort flag: _drCancelRequested, stored on this content
+  // script world's globalThis (NOT a bare closure var, so the verbatim-slice
+  // smoke tests -- P16 WS-C1 -- can execute this function without the
+  // closure binding). It is reset when a batch starts, set by the Stop
+  // button _gamBatchProgress() injects next to the progress text, and
+  // checked at the TOP of each per-inmate iteration. On abort: no NEW bans
+  // start, the in-flight one finishes, everyone not yet processed STAYS
+  // queued on Death Row (the 5-min cron re-arms them), and the sticky
+  // summary says "stopped by mod".
   async function processDeathRow(){
     const ready=getDeathRowReady();
     if(ready.length===0) return;
@@ -9646,7 +9757,10 @@
     const _showBatchProgress = _batchTotal > 3;
     let _batchAttempted = 0;
     const _batchFailed = [];
+    let _batchStopped = false;
+    globalThis._drCancelRequested = false; // P0 STOP: fresh flag per batch
     for(const inmate of ready){
+      if (globalThis._drCancelRequested === true) { _batchStopped = true; break; } // P0 STOP: checked between inmates
       if (_showBatchProgress) {
         try { _gamBatchProgress('Banning ' + (_batchAttempted + 1) + '/' + _batchTotal + '… (' + inmate.username + ')'); } catch(_){}
       }
@@ -9712,13 +9826,24 @@
     if (_showBatchProgress) {
       try { _gamBatchProgressDone(); } catch(_){}
       const _batchOk = _batchAttempted - _batchFailed.length;
-      if (_batchFailed.length === 0) {
+      if (_batchStopped) {
+        // P0 STOP: same partial-completion shape as the failure summary,
+        // plus how many stay queued. Nobody was removed from Death Row.
+        const _names = _batchFailed.length
+          ? _batchFailed.slice(0, 10).join(', ') + (_batchFailed.length > 10 ? ', +' + (_batchFailed.length - 10) + ' more' : '')
+          : '';
+        snack('Batch stopped by mod: ' + _batchOk + '/' + _batchTotal + ' banned — ' +
+              (_batchTotal - _batchAttempted) + ' still queued on Death Row' +
+              (_names ? ' — Failed: ' + _names : ''), 'error', { sticky: true });
+      } else if (_batchFailed.length === 0) {
         snack('Batch complete: ' + _batchOk + '/' + _batchTotal + ' banned', 'success', { sticky: true });
       } else {
         const _names = _batchFailed.slice(0, 10).join(', ') +
           (_batchFailed.length > 10 ? ', +' + (_batchFailed.length - 10) + ' more' : '');
         snack('Batch done: ' + _batchOk + '/' + _batchTotal + ' banned — Failed: ' + _names, 'error', { sticky: true });
       }
+    } else if (_batchStopped) {
+      snack('Death Row run stopped by mod — ' + (_batchTotal - _batchAttempted) + ' still queued', 'info');
     }
     if (IS_USERS_PAGE && typeof refreshTriageConsole === 'function') refreshTriageConsole();
   }
@@ -12937,11 +13062,19 @@ Analyze this comment against the community rules. Then write a brief, profession
           'aria-pressed': 'false'
         }, '\u{1F6A9} Flag SUS ▾');
         const susMenu = el('div', { cls:'gam-strip-menu' });
+        // v10.50.0 A11Y: every dismissal route (item pick, button toggle,
+        // outside click, Escape via the trap AND via the global handler)
+        // funnels through _closeSusMenu so the focus-trap cleanup (listener
+        // teardown + focus restore to this Flag SUS button) always runs.
+        const _closeSusMenu = ()=>{
+          susMenu.classList.remove('gam-strip-menu-open');
+          try { if (susMenu._gamPopTrapCleanup) susMenu._gamPopTrapCleanup(); } catch(_){}
+        };
         SUS_REASONS.forEach(reasonStr=>{
           const it = el('a', { cls:'gam-strip-item', href:'javascript:void(0)' }, reasonStr);
           it.addEventListener('click', async e=>{
             e.preventDefault(); e.stopPropagation();
-            susMenu.classList.remove('gam-strip-menu-open');
+            _closeSusMenu();
             await _gamMarkSusFromStrip(author, reasonStr);
           });
           susMenu.appendChild(it);
@@ -12949,15 +13082,24 @@ Analyze this comment against the community rules. Then write a brief, profession
         const customIt = el('a', { cls:'gam-strip-item', href:'javascript:void(0)' }, 'Custom...');
         customIt.addEventListener('click', async e=>{
           e.preventDefault(); e.stopPropagation();
-          susMenu.classList.remove('gam-strip-menu-open');
-          const reason = prompt('Reason for marking ' + author + ' SUS? (optional)', '') || '';
-          await _gamMarkSusFromStrip(author, reason);
+          _closeSusMenu();
+          const reason = prompt('Reason for marking ' + author + ' SUS? (optional)', '');
+          if (reason === null) return; // v10.43.1 P1: Cancel must abort -- `|| ''` silently marked SUS with a blank reason
+          await _gamMarkSusFromStrip(author, reason.trim());
         });
         susMenu.appendChild(customIt);
         susBtn.addEventListener('click', e=>{
           e.preventDefault(); e.stopPropagation();
           document.querySelectorAll('.gam-strip-menu-open').forEach(m=>{ if (m!==susMenu) m.classList.remove('gam-strip-menu-open'); });
-          susMenu.classList.toggle('gam-strip-menu-open');
+          // v10.50.0 A11Y: on open, route through _gamWireStripMenuKeys --
+          // role=menu/menuitem, arrow-key roving focus, and the shared
+          // _installPopoverTrap (Tab-cycle + Escape + focus restore here).
+          if (!susMenu.classList.contains('gam-strip-menu-open')){
+            susMenu.classList.add('gam-strip-menu-open');
+            _gamWireStripMenuKeys(susMenu, _closeSusMenu);
+          } else {
+            _closeSusMenu();
+          }
         });
         susWrap.appendChild(susBtn);
         susWrap.appendChild(susMenu);
@@ -13106,9 +13248,23 @@ Analyze this comment against the community rules. Then write a brief, profession
   }
 
   // Close any open strip dropdown on outside click
+  // v10.50.0 A11Y: consolidated close. Walks open .gam-strip-menu elements and
+  // triggers each one's REAL close path (_gamStripMenuClose -> focus-trap
+  // cleanup + focus restore to the opener) when wired via
+  // _gamWireStripMenuKeys; falls back to the legacy class-strip for menus that
+  // predate the wiring (Quick-Remove, Flair). Shared by the outside-click
+  // handler and the global Escape handler so neither can orphan a menu.
+  function _gamCloseAllStripMenus(){
+    document.querySelectorAll('.gam-strip-menu-open').forEach(m=>{
+      try {
+        if (typeof m._gamStripMenuClose === 'function') { m._gamStripMenuClose(); return; }
+      } catch(_){}
+      m.classList.remove('gam-strip-menu-open');
+    });
+  }
   document.addEventListener('click', (e)=>{
     if (!e.target.closest('.gam-strip-drop')){
-      document.querySelectorAll('.gam-strip-menu-open').forEach(m=>m.classList.remove('gam-strip-menu-open'));
+      _gamCloseAllStripMenus();
     }
   });
 
@@ -14746,7 +14902,13 @@ Analyze this comment against the community rules. Then write a brief, profession
           const rect = btn.getBoundingClientRect();
           susTipMenu.style.left = (rect.left + window.scrollX) + 'px';
           susTipMenu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
-          const closeSusTipMenu = ()=>{ susTipMenu.remove(); document.removeEventListener('click', onOutsideClick, true); };
+          const closeSusTipMenu = ()=>{
+            susTipMenu.remove();
+            document.removeEventListener('click', onOutsideClick, true);
+            // v10.50.0 A11Y: tear down the popover focus trap (Tab/Escape
+            // listeners) and restore focus to the Mark SUS opener button.
+            try { if (susTipMenu._gamPopTrapCleanup) susTipMenu._gamPopTrapCleanup(); } catch(_){}
+          };
           const onOutsideClick = (ev2)=>{ if (!ev2.target.closest('.gam-strip-menu')) closeSusTipMenu(); };
           SUS_REASONS.forEach(reasonStr=>{
             const mi = el('a', { cls:'gam-strip-item', href:'javascript:void(0)' }, reasonStr);
@@ -14762,12 +14924,18 @@ Analyze this comment against the community rules. Then write a brief, profession
           customMi.addEventListener('click', async e2=>{
             e2.preventDefault(); e2.stopPropagation();
             closeSusTipMenu();
-            const reason = prompt(`Reason for marking ${username} SUS? (optional)`, '') || '';
-            await _gamMarkSusFromStrip(username, reason);
+            const reason = prompt(`Reason for marking ${username} SUS? (optional)`, '');
+            if (reason === null) return; // v10.43.1 P1: Cancel must abort -- `|| ''` silently marked SUS with a blank reason
+            await _gamMarkSusFromStrip(username, reason.trim());
             unpinTooltip();
           });
           susTipMenu.appendChild(customMi);
           document.body.appendChild(susTipMenu);
+          // v10.50.0 A11Y: route through the shared strip-menu keyboard
+          // wiring -- role=menu/menuitem, arrow-key roving focus, and the
+          // _installPopoverTrap (Tab-cycle + Escape closes+unpins via the
+          // global handler + focus restore to this Mark SUS button on close).
+          _gamWireStripMenuKeys(susTipMenu, closeSusTipMenu);
           setTimeout(()=>document.addEventListener('click', onOutsideClick, true), 0);
         }
       }
@@ -15059,6 +15227,14 @@ Analyze this comment against the community rules. Then write a brief, profession
     // ESC handler. Mouse-only dismiss was the only path. Check before the
     // panelOpen branch since tooltip can coexist with closed panels.
     if (k === 'escape' && tooltipPinned) {
+      // v10.50.0 A11Y (orphaned-menu fix): unpinning the tooltip must also
+      // tear down any open .gam-strip-menu (the tooltip-anchored Mark-SUS
+      // reason menu lives on <body>; the strip Flag-SUS dropdown toggles a
+      // class) so Escape never leaves a floating menu orphaned on screen.
+      // Menus close FIRST so trap focus-restore can land on the still-visible
+      // opener button before the tooltip hides. Escape therefore closes AND
+      // unpins in one stroke.
+      try { _gamCloseAllStripMenus(); } catch(_){}
       try { unpinTooltip(); } catch(_){}
       e.preventDefault();
       return;
@@ -17407,49 +17583,38 @@ Analyze this comment against the community rules. Then write a brief, profession
         if (!confirmed) return;
         flushBtn.disabled = true;
         flushBtn.textContent = '\u{1F525} Flushing...';
-        let ok = 0, fail = 0;
-        for (const inmate of pending){
-          // v8.3.3: unconditional same-tab + cross-tab dedup.
-          if (!markDrInFlight(inmate.username)){
-            console.info('[DR flush] same-tab already executing', inmate.username);
-            continue;
+        // v10.43.1 P0 FIX (persona-sim audit): this was a private executeBan
+        // loop -- a frozen button as the ONLY feedback, partial failures
+        // buried in a success-tone snack with a bare fail count, no live
+        // progress, no stop. Now: force-ready every waiting entry
+        // (executeAt=now -- the same chokepoint batchBanUsers uses) and fire
+        // ONE processDeathRow(), which brings the real _gamBatchProgress
+        // element (Stop button included), the per-failure roster, honest
+        // counts and the serial 2s stagger. HI-1 intact: no direct
+        // executeBan/apiBan in this region anymore. Audit-trail note: bans
+        // fired from a flush now log source 'death-row' (the reaper's own
+        // label) instead of 'dr-flush'.
+        try {
+          const dr = getDeathRow();
+          pending.forEach(p=>{
+            const entry = dr.find(d => d.username.toLowerCase() === p.username.toLowerCase());
+            if (entry) entry.executeAt = Date.now();
+          });
+          saveDeathRow(dr);
+          await processDeathRow();
+          // Batches <=3 get no reaper end-summary; keep the flush's old
+          // always-summarize behavior there with HONEST counts (recount
+          // the queue instead of trusting a tone).
+          const stillWaiting = getDeathRowPending()
+            .filter(d => pending.some(p => p.username.toLowerCase() === d.username.toLowerCase())).length;
+          if (pending.length <= 3) {
+            if (stillWaiting === 0) snack(`\u{1F525} Flushed: ${pending.length} banned`, 'success');
+            else snack(`\u{1F525} Flush incomplete: ${pending.length - stillWaiting}/${pending.length} banned \u2014 ${stillWaiting} still queued (will retry)`, 'error', { sticky: true });
           }
-          const _crossTabLockOk = await acquireDrLock(inmate.username);
-          if (!_crossTabLockOk){
-            clearDrInFlight(inmate.username);
-            console.info('[DR flush] cross-tab lock held; skipping', inmate.username);
-            continue;
-          }
-          try {
-            const success = await executeBan(inmate.username, inmate.reason || getUsersBanReason(), 0);
-            if (success){
-              markDeathRowExecuted(inmate.username);
-              rosterSetStatus(inmate.username, 'banned');
-              verifyBan(inmate.username).then(v=>{
-                if (v !== null) markVerified(inmate.username, v);
-              });
-              logAction({type:'ban', user:inmate.username, violation:'username', duration:-1, reason:inmate.reason, source:'dr-flush', delayHours:Math.round((inmate.executeAt-inmate.queuedAt)/3600000)});
-              try {
-                const me = (document.querySelector('.nav-user .inner a[href^="/u/"]')?.textContent || '').trim() || 'unknown';
-                rpcCall('modAuditLog', {
-                  mod: me,
-                  action: 'ban_deathrow',
-                  user: inmate.username,
-                  target_user: inmate.username,
-                  dr_scheduled_at: Number(inmate.executeAt) || Date.now(),
-                  details: { reason: inmate.reason, source: 'dr-flush' }
-                }).catch(function(){});
-              } catch(e){}
-              ok++;
-            } else { fail++; }
-          } catch(e){ fail++; }
-          finally {
-            clearDrInFlight(inmate.username);
-            await releaseDrLock(inmate.username);
-          }
-          await new Promise(r=>setTimeout(r, 1500));
+        } finally {
+          flushBtn.disabled = false;
+          flushBtn.textContent = '\u{1F525} Flush Death Row now';
         }
-        snack(`\u{1F525} Flushed: ${ok} banned${fail>0?', '+fail+' failed':''}`, 'success');
         refreshTriageConsole();
       });
     }
@@ -21466,7 +21631,10 @@ Analyze this comment against the community rules. Then write a brief, profession
       };
       const pillSt = sc[_st] || { fg: '#9b9892', bg: 'rgba(155,152,146,0.14)' };
       status.style.cssText = 'color:' + pillSt.fg + ';background:' + pillSt.bg + ';font-size:9px;letter-spacing:0.06em;text-transform:uppercase;font-weight:700;padding:1px 5px;border-radius:2px;line-height:1.4';
-      status.textContent = _st;
+      // FIX (P1): show WHO answered — claimed_by rides the worker payload.
+      // Appended only for replied/claimed and only when present; textContent
+      // keeps it injection-safe.
+      status.textContent = _st + ((_st === 'replied' || _st === 'claimed') && t.claimed_by ? ' · ' + t.claimed_by : '');
       head.appendChild(who); head.appendChild(status);
       // v10.15.9: risk-chip placeholder, populated async by _applyRiskChips.
       const chips = document.createElement('span');
@@ -21708,12 +21876,16 @@ Analyze this comment against the community rules. Then write a brief, profession
     }
 
     async function renderDetail(t) {
+      // FIX (P1): show WHO answered — append claimed_by (escaped) to the
+      // replied/claimed status text when the worker payload carries it.
+      const _cst = String(t.status || '').toLowerCase();
+      const _claimedSuffix = (_cst === 'replied' || _cst === 'claimed') && t.claimed_by ? ' · ' + t.claimed_by : '';
       detail.innerHTML =
         '<div style="margin-bottom:14px">' +
           '<div style="color:var(--bb-amber);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;font-weight:600;margin-bottom:4px">Thread</div>' +
           '<div style="color:#e8e6e1;font-size:13px;font-weight:600;margin-bottom:6px">' + escapeHtml(t.subject || '(no subject)') + '</div>' +
           '<div style="color:#9b9892;font-size:11px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">' +
-            '<span>From: <span style="color:#66ccff">u/' + escapeHtml(t.first_user) + '</span> · ' + (t.message_count || 1) + ' messages · status: ' + escapeHtml(t.status || 'new') + '</span>' +
+            '<span>From: <span style="color:#66ccff">u/' + escapeHtml(t.first_user) + '</span> · ' + (t.message_count || 1) + ' messages · status: ' + escapeHtml(t.status || 'new') + escapeHtml(_claimedSuffix) + '</span>' +
             '<span data-risk-chips="1" data-risk-user="' + escapeHtml(t.first_user || '') + '" style="display:inline-flex;align-items:center;gap:4px"></span>' +
           '</div>' +
         '</div>' +
@@ -21816,7 +21988,10 @@ Analyze this comment against the community rules. Then write a brief, profession
               if (rowEl) {
                 const statusEl = rowEl.querySelector('.gam-log-type, span'); // best-effort
                 rowEl.querySelectorAll('span').forEach(sp => {
-                  if (/^(new|claimed|replied|resolved|awaiting|archived)$/i.test((sp.textContent || '').trim())) {
+                  // FIX (P1) companion: status pills may now read "replied · <name>"
+                  // (claimed_by suffix) — the optional (\s*·.*)? keeps this
+                  // badge flip matching those rows too.
+                  if (/^(new|claimed|replied|resolved|awaiting|archived)(\s*·.*)?$/i.test((sp.textContent || '').trim())) {
                     sp.textContent = 'resolved';
                     sp.style.color = '#44dd66';
                   }
@@ -22044,18 +22219,22 @@ Analyze this comment against the community rules. Then write a brief, profession
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
           const body = btn.getAttribute('data-use-body');
-          // v9.23.0 - close the AI tracking loop (UAT-3 §D fix)
+          // PHANTOM-TRACK FIX (P0): a click is NOT a send. Do not fire
+          // modmailTrackResponse here -- an abandoned draft must not flip the
+          // thread to 'replied' + claimed_by team-wide. Tracking now fires
+          // only on the real send: apiSendModMessage's success path (direct
+          // send) or the /modmail/thread/<id> native submit hook
+          // (_gamModmailReplySubmitTrack). Stage AI attribution meta (no
+          // body -> the prefill checker skips pasting) so the submit hook
+          // can still pass ai_used/ai_tone for analytics.
           try {
             const tone = (replies[idx] && replies[idx].tone) || null;
-            rpcCall('modmailTrackResponse', {
-              thread_id: t.thread_id, sender: t.first_user,
-              subject: t.subject || '', response_body: body,
-              ai_used: 1, ai_tone: tone, sent_at: Date.now()
-            }).catch(() => {});
+            const _mk = 'gam_modmail_prefill_' + t.thread_id;
+            chrome.storage.session.set({ [_mk]: { ai_used: 1, ai_tone: tone, ts: Date.now() } }).catch(function(){});
           } catch(_){}
           try { await navigator.clipboard.writeText(body); } catch(_){}
           window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
-          try { snack('✓ Reply copied + tracked. Paste on the GAW thread.', 'success'); } catch(_){}
+          try { snack('✓ Reply copied. Paste on the GAW thread + click Send (tracking fires on send).', 'success'); } catch(_){}
         });
       });
       // v10.15.7: ✉ Pre-fill + open -- new send-direct path. Stages the AI body
@@ -22065,14 +22244,16 @@ Analyze this comment against the community rules. Then write a brief, profession
       // _gamModmailPrefillCheck) reads the stage, fills the reply textarea
       // via the same selector chain at L12778, focuses + flashes an "AI
       // pre-filled" badge, and clears the stage. User reviews + clicks the
-      // real Send. Tracked via modmailTrackResponse same as Copy+open path.
+            // real Send. Tracked at real-send time by _gamModmailReplySubmitTrack
+            // (PHANTOM-TRACK FIX: never tracked on this button's click).
       //
       // v10.16.50 A2-Win1: ⚡ Send directly handler — collapses 5 actions to 2.
       // Pre-fix the reply flow was: select thread → click Pre-fill → tab opens
       // → review → Send → close tab. Now: click ⚡ → confirm → done. Uses the
-      // existing apiSendModMessage (which POSTs from the CS using the operator's
-      // GAW session cookie — no worker change required). Tracks via
-      // modmailTrackResponse same as Pre-fill path. Falls back to Pre-fill on
+            // existing apiSendModMessage (which POSTs from the CS using the operator's
+            // GAW session cookie — no worker change required). Tracks via
+            // modmailTrackResponse in apiSendModMessage's success path (the
+            // only click-time-adjacent path that IS a real send). Falls back to Pre-fill on
       // failure so the operator never loses the reply they wanted to send.
       host.querySelectorAll('[data-send-direct]').forEach((btn, idx) => {
         btn.addEventListener('click', async (e) => {
@@ -22133,17 +22314,15 @@ Analyze this comment against the community rules. Then write a brief, profession
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
           const body = btn.getAttribute('data-prefill-body');
+          // PHANTOM-TRACK FIX (P0): no modmailTrackResponse on click. The
+          // track fires from _gamModmailReplySubmitTrack when the operator
+          // actually submits the reply form on the thread page. ai_used/
+          // ai_tone ride the stage so that send-time track still attributes
+          // AI usage.
           try {
             const tone = (replies[idx] && replies[idx].tone) || null;
-            rpcCall('modmailTrackResponse', {
-              thread_id: t.thread_id, sender: t.first_user,
-              subject: t.subject || '', response_body: body,
-              ai_used: 1, ai_tone: tone, sent_at: Date.now()
-            }).catch(() => {});
-          } catch(_){}
-          try {
             const key = 'gam_modmail_prefill_' + t.thread_id;
-            await chrome.storage.session.set({ [key]: { body: body, ts: Date.now() } });
+            await chrome.storage.session.set({ [key]: { body: body, ts: Date.now(), ai_used: 1, ai_tone: tone } });
           } catch(_){}
           window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
           try { snack('✓ Pre-fill queued. Review the AI text on the thread + click Send.', 'success'); } catch(_){}
@@ -22495,20 +22674,18 @@ Analyze this comment against the community rules. Then write a brief, profession
             useBtn.style.cssText = 'background:transparent;border:1px solid #44dd66;color:#44dd66;padding:2px 4px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
             useBtn.addEventListener('click', async (ce) => {
               ce.stopPropagation();
-              // v10.13.4 W4 (P0-23 / R-13): pre-fetched useBtn now fires
-              // modmailTrackResponse so AI usage analytics aren't
-              // under-reported. Mirrors fresh-fetch path L17430.
+              // PHANTOM-TRACK FIX (P0): click is not send -- no
+              // modmailTrackResponse here (an abandoned draft must not flip
+              // the thread to 'replied'). Stage AI attribution meta (no body
+              // -> prefill checker won't paste) so the real-send hook
+              // (_gamModmailReplySubmitTrack) still credits ai_used/ai_tone.
               try {
-                rpcCall('modmailTrackResponse', {
-                  thread_id: t.thread_id, sender: t.first_user,
-                  subject: t.subject || '', response_body: rp.body,
-                  ai_used: 1, ai_tone: rp.tone || null,
-                  sent_at: Date.now()
-                }).catch(() => {});
+                const _mk = 'gam_modmail_prefill_' + t.thread_id;
+                chrome.storage.session.set({ [_mk]: { ai_used: 1, ai_tone: rp.tone || null, ts: Date.now() } }).catch(function(){});
               } catch(_){}
               try { await navigator.clipboard.writeText(rp.body); } catch(_){}
               window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
-              try { snack('✓ Reply copied + tracked. Paste on the GAW thread.', 'success'); } catch(_){}
+              try { snack('✓ Reply copied. Paste on the GAW thread + click Send (tracking fires on send).', 'success'); } catch(_){}
             });
             card.appendChild(tag); card.appendChild(bodyEl); card.appendChild(useBtn);
             cards.appendChild(card);
@@ -22557,19 +22734,18 @@ Analyze this comment against the community rules. Then write a brief, profession
             useBtn.style.cssText = 'background:transparent;border:1px solid #44dd66;color:#44dd66;padding:2px 4px;cursor:pointer;font:600 9px ui-monospace,monospace;letter-spacing:0.04em;text-transform:uppercase';
             useBtn.addEventListener('click', async (ce) => {
               ce.stopPropagation();
-              // v9.23.0 - track even copy-and-open paths so AI tracking loop
-              // closes (UAT-3 §D break-in-the-loop fix). Fire-and-forget.
+              // PHANTOM-TRACK FIX (P0): click is not send -- no
+              // modmailTrackResponse here (an abandoned draft must not flip
+              // the thread to 'replied'). Stage AI attribution meta (no body
+              // -> prefill checker won't paste) so the real-send hook
+              // (_gamModmailReplySubmitTrack) still credits ai_used/ai_tone.
               try {
-                rpcCall('modmailTrackResponse', {
-                  thread_id: t.thread_id, sender: t.first_user,
-                  subject: t.subject || '', response_body: rp.body,
-                  ai_used: 1, ai_tone: rp.tone || null,
-                  sent_at: Date.now()
-                }).catch(() => {});
+                const _mk = 'gam_modmail_prefill_' + t.thread_id;
+                chrome.storage.session.set({ [_mk]: { ai_used: 1, ai_tone: rp.tone || null, ts: Date.now() } }).catch(function(){});
               } catch(_){}
               try { await navigator.clipboard.writeText(rp.body); } catch(_){}
               window.open('https://greatawakening.win/modmail/thread/' + encodeURIComponent(t.thread_id), '_blank');
-              try { snack('✓ Reply copied + tracked (ai_used). Paste on the GAW thread page.', 'success'); } catch(_){}
+              try { snack('✓ Reply copied. Paste on the GAW thread page + click Send (tracking fires on send).', 'success'); } catch(_){}
             });
             card.appendChild(tag); card.appendChild(bodyEl); card.appendChild(useBtn);
             cards.appendChild(card);
@@ -33173,7 +33349,27 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
 
   const FIREHOSE_THROTTLE_DEFAULT = 1500;
   const FIREHOSE_BATCH = 40;
-  let _firehoseState = { active: false, abort: false, pagesCrawled: 0, postsQueued: 0, errors: 0 };
+  let _firehoseState = { active: false, abort: false, pagesCrawled: 0, postsQueued: 0, errors: 0, postsSkipped: 0 };
+  // v10.49.7 D1-free-tier: client-side mirror of the worker quality bar (keep =
+  // sticky OR >=6 comments AND (no score OR score>=21)) + change-signature
+  // dedupe. Low-value/unchanged posts are never pushed, so 10 mods crawling
+  // /new no longer generate hundreds of thousands of no-op D1 ops per day.
+  const _fhSeen = new Map(); // post id -> score|cc|flair signature (this session)
+  function fhPassesQualityBar(p) {
+    if (!p) return false;
+    if (p.is_sticky) return true;
+    const cc = p.comment_count;
+    if (cc == null || cc < 6) return false;
+    return p.score == null || p.score >= 21;
+  }
+  function fhShouldPush(p) {
+    if (!fhPassesQualityBar(p)) return false;
+    const sig = (p.score ?? 'n') + '|' + (p.comment_count ?? 'n') + '|' + (p.flair || '');
+    if (_fhSeen.get(p.id) === sig) return false;
+    if (_fhSeen.size > 5000) _fhSeen.clear();
+    _fhSeen.set(p.id, sig);
+    return true;
+  }
 
   function parseNewListing(doc) {
     const seen = new Set(), posts = [];
@@ -33267,7 +33463,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     // resumes after a refresh.
     await setSetting('firehose.user_stopped', false);
     firehoseRefreshPanel();
-    firehoseLoop().catch(e => {
+    // v10.50.1 (sim wave-1, DataDave): the loop owns THIS state object. A loop
+    // parked in the old 5-min sleep used to wake, read the REPLACED
+    // _firehoseState (fresh, active:true) and resume as a SECOND crawler --
+    // double crawl rate and duplicate /gaw/posts/ingest pushes.
+    firehoseLoop(_firehoseState).catch(e => {
       console.error('[firehose] loop failed', e);
       _firehoseState.active = false; _firehoseState.errors++;
       firehoseRefreshPanel();
@@ -33378,11 +33578,11 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
   }
   try { window._gamFirstPostScreenTick = firstPostScreenTick; } catch (_) {}
 
-  async function firehoseLoop() {
+  async function firehoseLoop(loopState) {
     const throttle = parseInt(await getSetting('firehose.throttleMs') || String(FIREHOSE_THROTTLE_DEFAULT), 10);
     const community = (await getSetting('firehose.community')) || 'GreatAwakening';
     let buffer = [], page = 1;
-    while (!_firehoseState.abort && _firehoseState.active) {
+    while (loopState && !loopState.abort && loopState.active) {
       try {
         const url = page === 1
           ? `/new/?c=${encodeURIComponent(community)}`
@@ -33391,13 +33591,19 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         const parsed = parseNewListing(doc);
         if (!parsed.length) {
           page = 1;
-          await new Promise(r => setTimeout(r, 5 * 60 * 1000));
+          // v10.50.1: abort-checked park (1s ticks) so Pause takes effect
+          // immediately instead of after the full 5-minute sleep.
+          for (let _si = 0; _si < 300; _si++) {
+            if (loopState && (loopState.abort || !loopState.active)) break;
+            await new Promise(r => setTimeout(r, 1000));
+          }
           continue;
         }
         // v10.26.0: first-post screening -- fire-and-forget (new-account + slop -> SUS).
         // Non-blocking: never gates the ingest pipeline below.
         try { firstPostScreenTick(parsed); } catch (_) {}
         for (const p of parsed) {
+          if (!fhShouldPush(p)) { _firehoseState.postsSkipped = (_firehoseState.postsSkipped || 0) + 1; continue; }
           buffer.push(p);
           if (buffer.length >= FIREHOSE_BATCH) {
             try {
@@ -33434,7 +33640,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         <span style="font-size:10px;color:${st.active ? '#4ade80' : '#9ca3af'};">${st.active ? 'ACTIVE' : 'idle'}</span>
       </div>
       <div style="font-size:11px;color:#9ca3af;line-height:1.5;margin-bottom:8px;">
-        Pages: ${st.pagesCrawled} &middot; Posts: ${st.postsQueued}${st.screened ? ' &middot; <span style="color:#a78bfa" title="new-account first-post slop placed in SUS">Flagged: ' + st.screened + '</span>' : ''} &middot; Errors: ${st.errors}
+        Pages: ${st.pagesCrawled} &middot; Posts: ${st.postsQueued}${st.postsSkipped ? ' &middot; <span style="color:#9ca3af" title="Low-value (below team quality bar) or unchanged since last push \u2014 saves team database quota">Skipped: ' + st.postsSkipped + '</span>' : ''}${st.screened ? ' &middot; <span style="color:#a78bfa" title="new-account first-post slop placed in SUS">Flagged: ' + st.screened + '</span>' : ''} &middot; Errors: ${st.errors}
       </div>
       <div style="display:flex;gap:6px;">
         ${st.active
@@ -34919,13 +35125,20 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           chrome.storage.session.get(key, function(rd) {
             try {
               var staged = rd && rd[key];
-              if (!staged || !staged.body) return;
+              if (!staged) return;
               // 15-min TTL on the stage. If stale, just clear it.
               var ageMs = Date.now() - Number(staged.ts || 0);
               if (ageMs > 15 * 60 * 1000) {
                 try { chrome.storage.session.remove(key); } catch (_) {}
                 return;
               }
+              // PHANTOM-TRACK FIX (P0): stash AI attribution meta page-side so
+              // _gamModmailReplySubmitTrack can pass ai_used/ai_tone when the
+              // operator ACTUALLY submits the reply. Applies to body stages
+              // (Pre-fill + open) and meta-only stages (Copy + open -- no
+              // body, so the paste below is skipped).
+              try { window._gamMmReplyMeta = { ai_used: staged.ai_used ? 1 : 0, ai_tone: staged.ai_tone || null }; } catch (_) {}
+              if (!staged.body) return;
               var ta = document.querySelector('form#respond textarea, textarea[name="message"], .reply-form textarea, form textarea');
               if (!ta) {
                 // Form not rendered yet -- retry up to 6 times across 6s.
@@ -34959,6 +35172,60 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         } catch (_) {}
       }
       setTimeout(_doPrefill, 800);
+    } catch (_) {}
+  })();
+
+  // PHANTOM-TRACK FIX (P0) part (c): fire modmailTrackResponse ONLY when the
+  // operator actually submits a reply on the GAW thread page. The panel's
+  // Copy / Pre-fill buttons no longer track on click (a click is not a send);
+  // apiSendModMessage's success path covers the direct-send flow, and THIS
+  // capture-phase submit hook covers the native "review + hit Send" flow on
+  // /modmail/thread/<id> (both the Send button and the Ctrl+Enter helper,
+  // which clicks that same submit button). Never preventDefault -- GAW's
+  // native form handling proceeds untouched. Deduped per form within a 3s
+  // window so a double-fired submit event can't double-track one send.
+  (function _gamModmailReplySubmitTrack() {
+    try {
+      var m = location.pathname.match(/^\/modmail\/thread\/([^/]+)/);
+      if (!m) return;
+      var threadId = m[1];
+      if (window._gamMmSubmitTrackArmed) return;
+      window._gamMmSubmitTrackArmed = true;
+      document.addEventListener('submit', function(e) {
+        try {
+          var form = e.target;
+          if (!form || form.tagName !== 'FORM') return;
+          // Only the modmail reply form: prefer a named message textarea
+          // anywhere in the form; else any textarea inside form#respond (same
+          // selector family as the prefill checker above).
+          var ta = form.querySelector('textarea[name="message"]') ||
+                   (form.id === 'respond' ? form.querySelector('textarea') : null);
+          if (!ta) return;
+          var lastTs = Number(form.getAttribute('data-gam-mm-track-ts') || 0);
+          if (Date.now() - lastTs < 3000) return;
+          form.setAttribute('data-gam-mm-track-ts', String(Date.now()));
+          var body = (ta.value || '').trim();
+          if (!body) return; // empty submit -- nothing to track
+          var meta = window._gamMmReplyMeta || {};
+          var sender = '';
+          try { if (typeof findModmailSender === 'function') sender = findModmailSender() || ''; } catch (_) {}
+          var subject = '';
+          try {
+            var sEl = document.querySelector('h1, .thread-title, .post-title');
+            if (sEl) subject = (sEl.textContent || '').trim();
+          } catch (_) {}
+          // Fire-and-forget: never blocks or breaks the native submit.
+          rpcCall('modmailTrackResponse', {
+            thread_id: threadId, sender: sender,
+            subject: subject, response_body: body,
+            ai_used: meta.ai_used ? 1 : 0, ai_tone: meta.ai_tone || null,
+            sent_at: Date.now()
+          }).catch(function() {});
+          try { console.log('[gam-mm-submit-track] native reply send tracked for thread', threadId); } catch (_) {}
+        } catch (err) {
+          try { console.warn('[gam-mm-submit-track] error', err); } catch (_) {}
+        }
+      }, true); // capture: fires even if GAW's own handler stops propagation
     } catch (_) {}
   })();
 

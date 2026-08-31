@@ -21,17 +21,18 @@
             - Path-A vs Path-B install instructions short form
             - Brave Shields warning if relevant
       8. Write DM text to file: D:\AI\_PROJECTS\logs\invite-{user}-{ts}.txt
-            (per CLAUDE.md Rule 9: clipboard owns debug log, secondary artifact in file)
-      9. Full debug log -> clipboard
+      9. Copy the DM TEXT to the clipboard (the one thing to paste into the DM).
+            The debug log itself NEVER goes to the clipboard -- only its path
+            is printed (2026-08-31 operator-safety rule: clipboard is sacred).
      10. E-C-G beep + Read-Host pause
 
     Workflow for Commander:
       1. pwsh -File D:\AI\_PROJECTS\modtools-ext\scripts\invite-mod.ps1
       2. Type new mod's GAW username
       3. Paste lead token
-      4. Open the invite-{user}-{ts}.txt file the script names
-      5. Copy its contents
-      6. Paste into Discord DM to the new mod
+      4. Script copies the finished DM text to your clipboard (and saves a
+         copy to invite-{user}-{ts}.txt)
+      5. Paste into Discord DM to the new mod
 
     The new mod gets ONE message containing everything they need. Their path:
       - Click the install link -> Drive folder opens -> follow INSTALL.md Path A
@@ -352,7 +353,7 @@ try {
     $dmText = $dmLines -join "`r`n"
 
     # --- Step 6: write DM file ---------------------------------------------
-    $logDir = 'D:\AI\_PROJECTS\logs'
+    $logDir = try { if (Test-Path 'D:\AI\_PROJECTS\logs') { $logRoot = 'D:\AI\_PROJECTS\logs' } else { $logRoot = Join-Path $env:LOCALAPPDATA 'GAWModTools\logs' } } catch { $logRoot = Join-Path $env:LOCALAPPDATA 'GAWModTools\logs' }
     if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $inviteFile = Join-Path $logDir ("invite-$user-$stamp.txt")
@@ -377,11 +378,11 @@ try {
     # --- Step 7: tell Commander what to do --------------------------------
     SayHeader 'Step 7: Next actions for you'
     Say ''
-    Say "  1. Open the DM file:  $inviteFile" Yellow
-    Say "  2. Select all (Ctrl+A) -> Copy (Ctrl+C)" Yellow
-    Say "  3. Paste into Discord/Slack DM to $user" Yellow
+    Say "  1. DM text: copied to your clipboard when this script ends" Yellow
+    Say "     (a copy is also saved at: $inviteFile)" DarkGray
+    Say "  2. Paste into Discord/Slack DM to $user" Yellow
     Say ''
-    Say "  4. ATTACH THE ZIP to the DM:" Yellow
+    Say "  3. ATTACH THE ZIP to the DM:" Yellow
     Say "     $(Join-Path $DrivePath 'gaw-modtools-LATEST.zip')" DarkGray
     Say "     (Drag the file into Discord/Slack alongside the DM text.)" DarkGray
     Say ''
@@ -389,7 +390,7 @@ try {
     Say "     folder instead -- File Explorer: $DrivePath -> Right-click 'mod-tools'" DarkGray
     Say "     -> Share -> add their Gmail -> Viewer permission." DarkGray
     Say ''
-    Say "  5. They click the mt_invite link in the DM after extension is loaded" Yellow
+    Say "  4. They click the mt_invite link in the DM after extension is loaded" Yellow
     Say ''
     Say "  Drive snapshot: $($result.driveZip) ($($result.driveVersion))" DarkGreen
 
@@ -454,25 +455,30 @@ Say "DM file:         $($result.inviteFile)"
 Say "Errors:          $($result.errors.Count)"
 Say "Elapsed:         $((Get-Date) - $started)"
 Say ''
-Say "Open DM file -> select all -> copy -> paste to $($result.username)." Yellow
+Say "DM text is copied to your clipboard below -- paste it into your DM to $($result.username)." Yellow
 
 # Persist log to disk
-$persistDir = 'D:\AI\_PROJECTS\logs'
+$persistDir = try { if (Test-Path 'D:\AI\_PROJECTS\logs') { $logRoot = 'D:\AI\_PROJECTS\logs' } else { $logRoot = Join-Path $env:LOCALAPPDATA 'GAWModTools\logs' } } catch { $logRoot = Join-Path $env:LOCALAPPDATA 'GAWModTools\logs' }
 if (-not (Test-Path $persistDir)) { New-Item -ItemType Directory -Path $persistDir -Force | Out-Null }
 $persistPath = Join-Path $persistDir ("invite-mod-debug-$(Get-Date -Format 'yyyyMMdd-HHmmss').log")
 try { $script:log | Set-Content -Path $persistPath -Encoding UTF8 } catch {}
 
-# Clipboard: full debug log (per CLAUDE.md Rule 9)
-try {
-    $script:log -join "`r`n" | Set-Clipboard
-    Say ''
-    Say '[FULL DEBUG LOG COPIED TO CLIPBOARD]' Green
-    Say "[invite-debug log also at: $persistPath]" DarkGray
-    Say "[INVITE DM TEXT in: $($result.inviteFile) -- open + copy that, NOT the clipboard]" Yellow
-} catch {
-    Say "Clipboard write failed: $($_.Exception.Message)" Red
-    Say "Debug log saved to file: $persistPath" Yellow
+# Clipboard: the DM TEXT only -- the one thing the operator asked to grab, and
+# the LAST clipboard write in this script. The debug log NEVER goes to the
+# clipboard; its file path is printed instead.
+Say ''
+if ($dmText) {
+    try {
+        $dmText | Set-Clipboard
+        Say "[DM TEXT COPIED TO CLIPBOARD -- paste into your DM to $($result.username)]" Green
+    } catch {
+        Say "Clipboard write failed: $($_.Exception.Message)" Red
+        Say "Fallback: open and copy the DM text from $($result.inviteFile)" Yellow
+    }
+} else {
+    Say "No DM text was produced (invite failed) -- clipboard left untouched." Yellow
 }
+Say "[debug log at: $persistPath]" DarkGray
 
 # E-C-G beep
 try {

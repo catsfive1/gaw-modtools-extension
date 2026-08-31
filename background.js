@@ -3975,6 +3975,30 @@ const RPC_HANDLERS = {
     allowed_callers: [RPC_CALLER_POPUP],
     async handler(args) {
       return await _rpcWorkerCall('POST', '/admin/mod/rotation-invite', {
+        username: args && args.username,
+        // v10.50.2: lead-only pass-through. Worker ignores it for
+        // senior_leads and for existing mod rows (404 stays 404).
+        provision_if_missing: args ? args.provision_if_missing === true : false
+      }, { asLead: true });
+    }
+  },
+  // v10.50.2: explicit alias so the popup's "Add new mod" flow reads as it
+  // behaves (provision + invite in one call). Same endpoint/flags as above.
+  modRotationInvite: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/admin/mod/rotation-invite', {
+        username: args && args.username,
+        provision_if_missing: true
+      }, { asLead: true });
+    }
+  },
+  // v10.50.2: lead-tier token revocation -- nulls the target mod's
+  // token_hash + token so their token stops authenticating immediately.
+  modAdminRevoke: {
+    allowed_callers: [RPC_CALLER_POPUP],
+    async handler(args) {
+      return await _rpcWorkerCall('POST', '/admin/mod/revoke', {
         username: args && args.username
       }, { asLead: true });
     }
