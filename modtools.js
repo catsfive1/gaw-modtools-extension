@@ -29774,7 +29774,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         try { _diagLog('auth-modal', 'BAIL: features.suppressTokenModal=true'); } catch(_){}
         return;
       }
-      if (getModToken && getModToken()) {
+      if (reason !== 'rescue' && getModToken && getModToken()) {
         console.log('[modtools] modal suppressed: cache has token');
         try { _diagLog('auth-modal', 'BAIL: cache has token'); } catch(_){}
         return;
@@ -29800,7 +29800,10 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           });
         } catch(_){} // intentional: _diagLog defensive wrap; benign no-op
 
-        if (st && typeof st.workerModToken === 'string' && st.workerModToken.length > 8) {
+        // v10.50.1 FIX 5: 'rescue' mode (banner "Paste rescue token" button)
+        // force-shows even when a stale/dead token still occupies storage --
+        // that stale token is exactly the state being rescued.
+        if (reason !== 'rescue' && st && typeof st.workerModToken === 'string' && st.workerModToken.length > 8) {
           console.log('[modtools] modal suppressed: chrome.storage.local has token, hydrating cache');
           try { _diagLog('auth-modal', 'BAIL: chrome.storage.local has token (len=' + st.workerModToken.length + '), hydrating cache'); } catch(_){}
           try { _secretsCache['workerModToken'] = st.workerModToken; } catch(e){ _logError('auth-modal', ERR_SEV.HIGH, e, { op: 'hydrate-workerModToken' }); } // v10.11 C2: Cat B
@@ -29811,7 +29814,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         // 7-day throttle, durable read.
         const lastPrompt = (st && Number(st.lastTokenPromptAt)) || 0;
         const sevenDaysMs = 7 * 24 * 3600 * 1000;
-        const force = (typeof window !== 'undefined' && window.__GAM_RESET_TOKEN_THROTTLE === true);
+        const force = (reason === 'rescue') || (typeof window !== 'undefined' && window.__GAM_RESET_TOKEN_THROTTLE === true);
         if (!force && lastPrompt && (Date.now() - lastPrompt) < sevenDaysMs) {
           const hoursAgo = Math.round((Date.now() - lastPrompt) / 3600000);
           console.log('[modtools] modal suppressed: throttled (last shown ' + hoursAgo + 'h ago, weekly window via chrome.storage.local)');
@@ -29873,6 +29876,8 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     const desc = modal.querySelector('#gam-tob-desc');
     desc.textContent = (reason === 'rejected')
       ? 'Your mod token was rejected by the worker. Ask the lead mod (Commander Cats) for a fresh token, then paste it below.'
+      : (reason === 'rescue')
+      ? 'Paste the fresh token from GAW LEAD RESCUE (it is already on your clipboard) and click Save token. This restores lead access on this browser.'
       : 'You need a mod token to continue. Ask the lead mod (Commander Cats) for your token, then paste it below.';
     modal.querySelector('#gam-tob-save').textContent = 'Save token';
 
@@ -29919,6 +29924,20 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
         let data = null;
         try { data = await resp.json(); } catch(e){}
         if (resp.ok && data && typeof data.username === 'string' && data.username){
+          // v10.50.1 FIX 6: canonical durable persist. v10.49.6 made the
+          // boot path read tokens from SESSION storage only (the legacy
+          // plaintext durable write below is ignored by preloadSecrets), so
+          // the modal alone evaporated on the next SW cycle -- the "saved,
+          // welcomed, banner back after reload" loop. The SW's authValidate*
+          // RPCs validate server-side and persist encrypted + backed up.
+          try {
+            const rV = await rpcCall('authValidateToken', { token: pasted });
+            if (rV && rV.ok && data.is_lead) {
+              try { await rpcCall('authValidateLeadToken', { token: pasted }); } catch(_) {}
+            }
+          } catch(eRpc) {
+            console.warn('[modtools] modal authValidate RPC failed (falling back to legacy write):', eRpc && eRpc.message || eRpc);
+          }
           // v8.1.5: bulletproof save -- write chrome.storage.local DIRECTLY
           // (bypassing any promise-chain edge cases in the setSetting helper),
           // then also update the in-memory cache + settings object. If either
@@ -29938,12 +29957,23 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
                 tokenOnboardedAt: Date.now(),
                 tokenOnboardedAs: data.username
               };
+              // v10.50.1 FIX 5: a token that authenticates as LEAD fills the
+              // lead slot too -- one paste restores both. Pre-fix the modal
+              // only ever filled the team slot, so a rescued lead stayed
+              // lead-dead even with a valid token in hand.
+              if (data.is_lead) {
+                merged.leadModToken = pasted;
+                merged.isLeadMod = true;
+                merged.gam_was_lead = true;
+              }
               await chrome.storage.local.set({ [K_SETTINGS]: merged });
             }
           } catch(e){ console.error('[modtools] modal-save direct write failed', e); }
           // Belt-and-suspenders: also update the cache + legacy setSetting path.
           try { _secretsCache['workerModToken'] = pasted; } catch(e){}
+          try { if (data.is_lead) { _secretsCache['leadModToken'] = pasted; } } catch(e){}
           try { await setSetting('workerModToken', pasted); } catch(e){}
+          try { if (data.is_lead) { await setSetting('leadModToken', pasted); } } catch(e){}
           try { await setSetting('tokenOnboardedOnce', true); } catch(e){}
           // v8.5.4: clear the weekly throttle DIRECTLY in chrome.storage.local so
           // future legit recovery flows aren't artificially blocked. The earlier
@@ -29960,6 +29990,9 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           // the boot auto-start fires unconditionally on the next page load.
           try { await setSetting('firehose.active', true); } catch(e){}
           try { await setSetting('firehose.user_stopped', false); } catch(e){}
+          // v10.50.1 FIX 5: the auth-fail banner's job is done once a token
+          // saves -- clear it so the operator sees "fixed", not the old error.
+          try { const _afb = document.getElementById('gam-auth-fail-banner'); if (_afb) _afb.remove(); } catch(_){}
           close();
           try { snack(`Welcome, ${data.username}`, 'success'); } catch(e){}
           // Re-run init so token-gated features (presence, crawler, titles) wire up.
@@ -32747,7 +32780,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
     return [
       'You are the LEAD -- your saved token dropped out (Chrome evicted it). You do NOT need an invite from anyone.',
       'Fastest fix: double-click GAW LEAD RESCUE on your desktop. It mints a fresh lead token and copies it to your clipboard (~10s, then a beep).',
-      'Then click "Open ModTools popup" below, choose "I have a token", press Ctrl+V, and Save. The banner closes when you are back in.',
+      'Then click "Paste rescue token" below, press Ctrl+V, and click Save token. That is the whole fix.',
       'On v10.26.0+ this normally self-heals on its own. If you keep seeing it, tell Claude.'
     ];
   }
@@ -32885,6 +32918,26 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
           btnRetry.disabled = false;
         }
       });
+      // v10.50.1 FIX 5 (lead lockout): direct in-page paste path. The popup
+      // cannot be opened programmatically without a real user gesture
+      // (Chrome/Brave enforce activation on chrome.action.openPopup), which
+      // stranded locked-out leads: the ONLY remaining token field lived in
+      // the popup. This button opens the in-page onboarding modal in
+      // 'rescue' mode -- it validates the pasted token against /mod/whoami
+      // BEFORE storing, fills the lead slot too when the token is a lead
+      // token, and needs no popup, no invite, no menus.
+      let btnRescue = null;
+      if (__leadTitle) {
+        btnRescue = document.createElement('button');
+        btnRescue.textContent = 'Paste rescue token';
+        btnRescue.className = 'gam-toast-btn gam-toast-btn--primary';
+        btnRescue.style.cssText = 'padding:4px 10px;border:1px solid '+GAM_TOK.accent+';background:'+GAM_TOK.accent+';color:'+GAM_TOK.onAccentDark+';border-radius:4px;cursor:pointer;font:inherit;font-weight:700';
+        btnRescue.addEventListener('click', () => {
+          try { showTokenOnboardingModal('rescue'); } catch(e) {
+            try { snack('Could not open the paste box: ' + (e && e.message || e), 'error'); } catch(_) {}
+          }
+        });
+      }
       // v10.2: Open-popup direct cross-talk. For auth states where
       // re-hydrate cannot help (no_token / short_token / whoami_status),
       // surface a button that opens the ModTools popup directly. The popup
@@ -32925,6 +32978,7 @@ select.gam-bar-icon{width:auto;min-width:38px;padding:0 4px;appearance:none;text
       btnDismiss.className = 'gam-toast-btn';
       btnDismiss.style.cssText = 'padding:4px 10px;border:1px solid '+GAM_TOK.border+';background:transparent;color:'+GAM_TOK.inkMuted+';border-radius:4px;cursor:pointer;font:inherit';
       btnDismiss.addEventListener('click', () => { try { b.remove(); } catch(_){} });
+      if (btnRescue) row.appendChild(btnRescue);
       if (btnOpen) row.appendChild(btnOpen);
       row.appendChild(btnRetry);
       row.appendChild(btnDismiss);

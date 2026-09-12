@@ -2770,7 +2770,11 @@ const RPC_HANDLERS = {
 
   // ---- authXxx: validate + store a candidate mod token (popup token-save flow) -
   authValidateToken: {
-    allowed_callers: [RPC_CALLER_POPUP],
+    // v10.50.1 FIX 6: content caller allowed -- the onboarding/rescue modal
+    // (content script) needs the canonical durable+encrypted persist; its
+    // legacy plaintext write is ignored by the v10.49.6 session-only boot
+    // path. Handler validates the token server-side before storing.
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
     async handler(args) {
       const candidate = String(args && args.token || '');
       if (!candidate || !/^[A-Za-z0-9_-]{32,256}$/.test(candidate)) {
@@ -3388,7 +3392,8 @@ const RPC_HANDLERS = {
 
   // ---- authXxx: validate + store a candidate lead token ------------------
   authValidateLeadToken: {
-    allowed_callers: [RPC_CALLER_POPUP],
+    // v10.50.1 FIX 6: content caller allowed (see authValidateToken note).
+    allowed_callers: [RPC_CALLER_CONTENT, RPC_CALLER_POPUP],
     async handler(args) {
       const candidate = String(args && args.token || '');
       if (!candidate) return { ok: false, status: 0, error: 'no token provided' };

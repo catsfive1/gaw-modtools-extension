@@ -1,4 +1,46 @@
-# GAW ModTools — CHANGELOG
+﻿# GAW ModTools — CHANGELOG
+## v10.50.1 -- FIX: the recurring lead-lockout loop (rescue "worked" but the banner came back)
+
+Commander hit the LEAD ACCESS DROPPED banner again after running GAW LEAD RESCUE
+(the recovery script minted a token, whoami verified is_lead:true, the banner
+still returned). Root-cause chain, all fixed here:
+
+1. **Rescue script minted tier:'mod' rows** (recover-lead-access.ps1 v1 omitted
+   the tier column; migration 033 defaults it to 'mod'). The extension gates
+   every lead surface on tier, so a rescued token authenticated but could never
+   re-enable lead UI. v2 inserts tier='lead', deletes stale lead rows first
+   (one rescue = one live credential, no more orphaned tokens in D1 + logs),
+   hard-verifies is_lead AND tier, puts the token on the clipboard, opens the
+   site, and never prints the token. The RECOVER-LEAD-ACCESS.bat one-liner is
+   replaced with an explicit if/else -- the old `&&()||()` chain re-ran the
+   script under powershell.exe whenever the pwsh run exited non-zero
+   (double-minting on every failure). A desktop "GAW LEAD RESCUE.bat" now
+   exists so the banner's instructions are actually true.
+2. **popup.js tier mapping kept lead UI hidden.** `_rawTier = r.data.tier ||
+   (is_lead ? 'lead' : 'mod')` never used is_lead: the worker always sends a
+   truthy tier, so the fallback was dead code and #leadSection (the ONLY field
+   that accepts a lead token) stayed invisible to a locked-out lead --
+   a catch-22. Now is_lead=true outranks a default 'mod' tier string.
+3. **The popup is unreachable programmatically.** chrome.action.openPopup
+   requires real user activation; Brave blocks chrome-extension:// URL
+   navigation. The auth-fail banner now has a "Paste rescue token" button
+   (lead-credential failures only) that opens the in-page onboarding modal in
+   'rescue' mode -- rescues past the stale-token and 7-day-throttle bails,
+   validates the pasted token against /mod/whoami BEFORE storing, and fills
+   the LEAD slot too when whoami says is_lead (one paste, both slots). The
+   banner clears itself on successful save.
+4. **The modal's save was not durable.** v10.49.6 made the boot path read
+   tokens from SESSION storage only; the modal's plaintext durable write was
+   ignored on the next SW cycle ("saved, welcomed, banner back after reload").
+   authValidateToken / authValidateLeadToken now also accept the content-script
+   caller and the modal persists through them (server-validated, encrypted,
+   backed up) before the legacy write. The wizard's token path auto-routes a
+   lead-authenticating paste into the lead slot the same way.
+
+Smoke-tested: scripts/_lead_recovery_copy_smoke_test.mjs 20/20. Verified live
+end-to-end (mint -> whoami tier:lead -> banner button -> paste -> mod toolbar
+returns, banner gone).
+
 ## v10.49.2 -- FIX: "Rotate sub-mod keys" control restored to the Tokens tab
 
 Commander reported the ability to rotate a sub-mod's key from the UI was gone.

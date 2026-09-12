@@ -2178,7 +2178,14 @@ async function __applyTierGate() {
     }
     // Backward-compat: tier field or is_lead boolean
     // v10.5.1 INVARIANT: clamp to known enum; unknown server value fails closed to 'mod'
-    const _rawTier = r.data.tier || (r.data.is_lead ? 'lead' : 'mod');
+    // v10.50.1 FIX 4 (lead lockout): is_lead=true outranks a default 'mod' tier
+    // string. Rows minted by recover-lead-access carry tier='mod' + is_lead=1;
+    // the old `r.data.tier ||` kept the is_lead fallback dead, so ALL lead UI
+    // (incl. #leadSection, the only field that accepts a lead token) stayed
+    // hidden from a locked-out lead.
+    const _rawTier = (r.data.is_lead && (!r.data.tier || r.data.tier === 'mod'))
+      ? 'lead'
+      : (r.data.tier || (r.data.is_lead ? 'lead' : 'mod'));
     if (!['mod', 'senior_lead', 'lead'].includes(_rawTier)) {
       console.warn('[ModTools v10.5.1] unexpected tier value from server:', _rawTier, '-- defaulting to mod');
     }
@@ -4521,6 +4528,14 @@ loadLead();
         }
         const who = await popupRpc('modWhoami');
         if (who && who.ok && who.data && who.data.username) {
+          // v10.50.1 FIX 4 (lead lockout): a pasted token that authenticates as
+          // LEAD also belongs in the lead slot. Pre-fix the wizard only filled
+          // the team slot, so lead HUD/features stayed dead after a recovery
+          // paste -- and the lead field was invisible (see tier mapping fix),
+          // leaving nowhere to put it.
+          if (who.data.is_lead) {
+            try { await popupRpc('authValidateLeadToken', { token: input }); } catch (_) {}
+          }
           try { await __noteWhoami(who.data.username); } catch(_){}
           $('firstRunSuccessName').textContent = 'Welcome, u/' + who.data.username + (who.data.is_lead ? ' (lead)' : '');
           showStep(3);
