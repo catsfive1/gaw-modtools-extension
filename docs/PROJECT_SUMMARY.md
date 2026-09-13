@@ -21,7 +21,7 @@ but not published.
 |---|---|
 | Extension | Chrome MV3 (minimum Chrome 116), vanilla JS/CSS/HTML, no build step — the repo IS the artifact |
 | Content scripts | `modtools.js` (~35.6k lines) + `modtools-aux.js` (~3.7k lines) on `*.greatawakening.win` |
-| Service worker | `background.js` (~4.8k lines): secret vault (encrypted), named-RPC dispatcher, 10 alarm schedules |
+| Service worker | `background.js` (~4.8k lines): secret vault (encrypted), named-RPC dispatcher, 12 alarm schedules |
 | Popup | `popup.html/.css/.js` — Tools / Tokens / Lead / Stats / Diag tabs |
 | Backend | Cloudflare Worker `gaw-mod-proxy` (companion repo `D:\AI\_PROJECTS\cloudflare-worker\`, NOT in this repo): D1 `AUDIT_DB`, KV `MOD_KV`, R2 `EVIDENCE`, Workers AI (Llama 3.1-8B), Analytics Engine `MOD_METRICS`, xAI Grok, Anthropic Claude, Discord C5Bot |
 | Tooling | PowerShell 7 build/install/provision scripts + ~40 standalone Node `.mjs` smoke suites |
@@ -114,5 +114,5 @@ Env vars (shell, no `.env` file): `CLOUDFLARE_API_TOKEN` (wrangler/D1 ops),
   re-verified against v10.50.x; treat as historical planning, not current.
 - AGENT_BRIEF version-state block still says v10.4.0/v9.5.0 (historical).
 - CWS publication pending first review (README + `EXTENSION_ID_ALLOWLIST` still empty per backlog TS-8).
-- Worker companion repo still not under git (BACKLOG TIER-1 "worker repo init" — deferred by Commander).
+- Production worker source (`gaw-mod-proxy-v2.js` + `migrations/`) in the companion dir `D:\AI\_PROJECTS\cloudflare-worker\` is not under version control; the GitHub repo `catsfive1/gaw-mod-proxy` currently holds only a blank create-cloudflare scaffold (BACKLOG TIER-1 "worker repo init" — deferred by Commander).
 - No jest/vitest runner; `tests/regressions/` files are plain-Node shims (see `tests/regressions/README.md`).

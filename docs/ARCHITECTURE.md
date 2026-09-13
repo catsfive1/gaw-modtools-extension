@@ -103,6 +103,8 @@ registered through `window._gamCmdkRegister` from `modtools.js`.
 | `gam_maint_weekly_run` | 7 d | Autonomous non-destructive maintenance run + Llama report upload |
 | `gam_health` | 5 min | SW health heartbeat (vault status + storage usage) |
 | `gam_auto_action_poll` | 1 min | Durable cross-mod auto-action queue poll |
+| `gam_inactivity_lock` | 5 min | Opt-in inactivity timeout (v10.11 REDTEAM-1): zeroes secret cache + session storage when `lock_after_minutes` exceeded |
+| `gam_ai_proactive` | 10 min | Proactive AI alerts poll (`gam_ai_proactive_alerts` storage) |
 | `gam_ai_users_scan` | 30 min | Autonomous `/users` AI scan (alarm-driven since v10.19.2) |
 
 ### `popup.html/.css/.js` — toolbar popup
@@ -131,7 +133,7 @@ reads SW vault status via `__tokensStatus()`, never raw storage.
 
 | Binding | Store | Used for |
 |---|---|---|
-| D1 `AUDIT_DB` | migrations 001–033 (`gaw-audit`) | Audit log (HMAC-chained), `mod_tokens` (hashed, tier column), `mod_invites`, `parked_items`, `shadow_triage_decisions`, `ai_suspect_queue`, precedents, proposals, drafts, claims, `bot_mods`, `bot_chat_history`, `gaw_posts`/`gaw_comments` firehose, `bug_reports`, auto-action queue, shared DR rules, team watchlist blob |
+| D1 `AUDIT_DB` | migrations 002–052 (`gaw-audit`, plus `_bootstrap_full_schema_2026-09-12.sql`) | Audit log (HMAC-chained), `mod_tokens` (hashed, tier column), `mod_invites`, `parked_items`, `shadow_triage_decisions`, `ai_suspect_queue`, precedents, proposals, drafts, claims, `bot_mods`, `bot_chat_history`, `gaw_posts`/`gaw_comments` firehose, `bug_reports`, auto-action queue, shared DR rules, team watchlist blob |
 | KV `MOD_KV` | — | Presence, caches, invites, daily AI budgets, feature/team settings |
 | R2 `EVIDENCE` | — | Content snapshots captured at action time |
 | Workers AI | Llama 3.1-8B | Weekly maintenance analysis, shadow triage, SUS assist |
