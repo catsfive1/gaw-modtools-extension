@@ -4,7 +4,9 @@ Professional moderator toolkit for [greatawakening.win](https://www.greatawakeni
 
 Chrome extension + Cloudflare Worker backend providing a unified Mod Console, shared team flags, audit log, Death Row queue, AI-assisted ban drafting, Shadow Queue triage, Park button for senior handoff, Discord bridge with Grok + Claude, and per-mod authentication with cross-mod sync.
 
-**Current version:** v10.36.4 (current shipped version — see `chrome.runtime.getManifest()` for live version)
+**Status:** active · **Current version:** v10.50.1 (`manifest.json`; `chrome.runtime.getManifest()` reports the live version)
+
+> Deep-dive docs: [docs/PROJECT_SUMMARY.md](docs/PROJECT_SUMMARY.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [CHANGELOG.md](CHANGELOG.md) · [SECURITY.md](SECURITY.md)
 
 ---
 
@@ -12,42 +14,53 @@ Chrome extension + Cloudflare Worker backend providing a unified Mod Console, sh
 
 ```
 /
-├── manifest.json              Chrome extension MV3 manifest
-├── modtools.js                Content script (~14k lines) — the main UI + logic
-├── background.js              Extension service worker
-├── popup.html / popup.css / popup.js   Extension popup (settings, token entry)
+├── manifest.json              Chrome extension MV3 manifest (v10.50.1)
+├── modtools.js                Content script (~35.6k lines) — the main UI + logic
+├── modtools-aux.js            Auxiliary content script (Focus Mode, saved queue
+│                              views, smart snooze, Cmd-K palette commands)
+├── background.js              Extension service worker (~4.8k lines): token vault,
+│                              named-RPC dispatcher, alarms/maintenance routines
+├── popup.html / popup.css / popup.js   Extension popup (Tools / Tokens / Lead / Stats / Diag tabs)
 ├── icons/                     Extension icons (16/48/128)
 │
-├── worker/
-│   ├── gaw-mod-proxy-v2.js    Cloudflare Worker (~6k lines) — the backend
-│   ├── wrangler.jsonc         Worker deploy config (bindings; no secrets)
-│   └── migrations/            D1 schema migrations (SQL)
-│
-├── docs/
-│   ├── PERFORMANCE_STANDARDS.md    Performance rules every release respects
-│   ├── COMMANDER_HANDBOOK.md       Lead mod's operations handbook
-│   ├── CWS-SUBMISSION-v8.1.4.md    Chrome Web Store listing bundle
-│   └── gigas/                       Feature spec history (v7.0 → v8.5)
+├── docs/                      ~100 documents: feature matrices, handoffs, runbooks,
+│   ├── PROJECT_SUMMARY.md     Current-state summary (this mission's entry point)
+│   ├── ARCHITECTURE.md        C4-lite architecture + permissions map
+│   ├── FEATURES_MATRIX_v10.5.md  Latest feature-matrix snapshot (v10.5 era)
+│   ├── FEATURES_INDEX.md      feature → code → endpoint → D1-table map
+│   ├── COMMANDER_HANDBOOK.md  Lead mod's operations handbook
+│   ├── INSTALL.md             Full install guide
+│   ├── INCIDENT_RUNBOOK.md / LEAD-LOCKOUT-PLAYBOOK.md / MAINTENANCE_AUTONOMOUS.md
+│   └── gigas/                 Feature spec history (v7.0 → v8.5)
 │
 ├── scripts/
-│   ├── provision-mod-token.ps1     Mint + register a single mod token
-│   ├── provision-all-mods.ps1      Batch-mint tokens from a username list
-│   ├── test-cf-token.ps1           Verify Cloudflare API token + wrangler
-│   ├── publish-and-test-v8.ps1     One-shot deploy + verify pipeline
-│   ├── verify-v8-0.ps1             v8.0 acceptance gate
-│   └── verify-v8-1.ps1             v8.1 acceptance gate
+│   ├── build-zip.ps1          Build: ZIP for CWS + auto-extract to dist\mod-tools dist\
+│   ├── deploy-unpacked.ps1    Source → "Load unpacked" browser bridge
+│   ├── provision-mod-token.ps1 / provision-all-mods.ps1 / invite-mod.ps1
+│   ├── recover-lead-access.ps1 (+ RECOVER-LEAD-ACCESS.bat) — lead lockout rescue
+│   ├── _p*_*_smoke_test.mjs   ~40 self-contained Node smoke suites (regression gates)
+│   └── ...                    installers, publish, verify, HMAC backfill helpers
 │
+├── tests/regressions/         One plain-Node test file per closed bug report
 ├── PRIVACY.md                 Public privacy policy (served at worker /privacy)
+├── SECURITY.md                Security posture + reporting
+├── CHANGELOG.md               Per-version changelog (latest: v10.50.1)
 └── .gitignore                 Tokens, logs, builds, backups — all excluded
 ```
+
+**Note:** the Cloudflare Worker backend is NOT in this repo. It lives in the
+companion directory `D:\AI\_PROJECTS\cloudflare-worker\` (`gaw-mod-proxy-v2.js`,
+`migrations/*.sql`, `wrangler.jsonc`) — see *Architecture* below.
 
 ---
 
 ## Architecture
 
-**Extension** runs as MV3 content script on `*.greatawakening.win` + its own service worker. Overlays the Mod Console on the native site. Reads DOM + native CSRF; submits via the worker API.
+**Extension (this repo)** runs as an MV3 content script on `*.greatawakening.win` + its own service worker. Overlays the Mod Console on the native site. Reads DOM + native CSRF; submits via the worker API through the background service worker's named-RPC relay (tokens never touch content-script storage).
 
-**Worker** at `gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev`:
+Full diagrams, module map, and the manifest permissions table: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+**Worker (companion repo, `D:\AI\_PROJECTS\cloudflare-worker\`)** at `gaw-mod-proxy.gaw-mods-a2f2d0e4.workers.dev`:
 - **D1** (`AUDIT_DB`) — audit log, mod_tokens, parked_items, shadow_triage_decisions, ai_suspect_queue, precedents, proposals, drafts, claims, bot_mods, bot_chat_history
 - **KV** (`MOD_KV`) — presence, cache, invites, daily budgets
 - **R2** (`EVIDENCE`) — snapshots captured at action time
@@ -77,10 +90,13 @@ Pending first review. Link will be added here once published.
 
 ## Deploy (worker)
 
+The worker lives in the companion repo (`D:\AI\_PROJECTS\cloudflare-worker\`, not tracked here).
+
 Requires a `CLOUDFLARE_API_TOKEN` env var with `Workers Scripts:Edit`, `D1:Edit`, `Workers KV:Edit`, `Workers R2:Edit` permissions on the parent account.
 
 ```powershell
-cd worker
+cd D:\AI\_PROJECTS\cloudflare-worker
+node --check gaw-mod-proxy-v2.js   # always parse-check first
 npx wrangler@latest deploy
 ```
 
@@ -93,6 +109,36 @@ powershell -ExecutionPolicy Bypass -File scripts/provision-mod-token.ps1
 ```
 
 Prompts for GAW username + your lead token. Generates a 32-byte random token, registers it in D1 `mod_tokens`, copies to clipboard for DM'ing to the mod.
+
+---
+
+## Build & test (extension)
+
+```powershell
+# Build ZIP + auto-extract to the "Load unpacked" folder + node --check parse gate
+pwsh -File scripts\build-zip.ps1 -NoPause
+
+# Parse-check the three big sources without a build
+node --check modtools.js; node --check background.js; node --check popup.js
+
+# Run one smoke suite (each scripts/_*_smoke_test.mjs is standalone Node)
+node scripts\_p25_profile_reorder_spa_attach_smoke_test.mjs
+```
+
+Smoke suites are the real regression gate (v10.50.0 shipped with **850 passed / 0 failed** across the suites). `tests/regressions/` holds one plain-Node file per closed bug report (see its README for the convention).
+
+---
+
+## Environment variables
+
+Read by `scripts/*.ps1` (no `.env` file is used; set these in your shell):
+
+| Name | Purpose |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token for wrangler deploy / D1 operations (most scripts) |
+| `CF_API_TOKEN` | Alias accepted by a couple of older scripts |
+
+Extension-side secrets (mod/lead tokens) are entered in the popup, stored encrypted in `chrome.storage` (v10.49.6+: encryption mandatory, no plaintext fallback), and validated against the worker — never committed. Worker secrets (`DISCORD_BOT_TOKEN`, `XAI_API_KEY`, `ANTHROPIC_API_KEY`, …) are Cloudflare-dashboard-managed.
 
 ---
 
